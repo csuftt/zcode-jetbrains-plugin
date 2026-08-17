@@ -68,7 +68,14 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         client?.let { if (it.isAlive()) return it }
         return lock.withLock {
             client?.let { if (it.isAlive()) return it }
-            val newClient = ZCodeProtocolClient.start()
+            // 环境三件套（node/zcode.cjs/凭证）由 EnvChecker 解析：配置路径优先 → 自动探测；
+            // 失败抛 EnvCheckException（带 EnvStatus），Panel 层转成前端可识别的环境错误
+            val env = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveForStart()
+            val newClient = ZCodeProtocolClient.start(
+                zcodePath = env.zcodePath,
+                credentials = env.credentials,
+                nodePath = env.nodePath,
+            )
             client = newClient
             newClient
         }
@@ -274,13 +281,18 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         val future = pending.future
 
         // 构建应答 result（格式：interaction/requestUserInput 的 result）
-        // ExitPlanMode 审批的 accept：answer 必须是小写 "approve"（zcode.cjs 常量，严格相等比较），
-        // 大写或其他值都会被判为"反馈式拒绝"。这里强制归一化兜底（批准按钮语义唯一）。
+        // ExitPlanMode 审批的 answer 语义（zcode.cjs 常量，严格相等比较）：
+        // - 小写 "approve" = 批准退出计划模式
+        // - 有值但 ≠ "approve" = 反馈式拒绝：AI 留在计划模式按意见文本继续修改
+        //   （审批弹窗「继续规划」按钮的通道）
+        // - 空 = 兜底按批准处理（保持旧行为，防 undefined 误判）
         val isPlanApproval = pending.contentKey.startsWith("ExitPlanMode|")
-        val normalizedAnswer = if (isPlanApproval && action != "decline" && action != "cancel") {
+        val normalizedAnswer = if (isPlanApproval && action != "decline" && action != "cancel"
+            && answer.isNullOrBlank()
+        ) {
             "approve"
         } else {
-            answer // optionId 或自由文本
+            answer // "approve"、意见文本、optionId 或自由文本，原样透传
         }
 
         val result = if (action == "decline" || action == "cancel") {

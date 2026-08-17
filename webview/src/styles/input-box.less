@@ -115,7 +115,9 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 12px 0; /* 下边距由 topbar 的 padding-top(6px) 提供 */
+  /* 底部 6px：topbar 是带背景色(bg-tertiary)的圆角条，其 padding-top 属于背景内部
+     留白、断不开两者，chips 与 topbar 背景块的空隙须由本元素自己留出 */
+  padding: 8px 12px 6px;
 }
 
 /* ===== contenteditable 编辑区（cc-gui input-area.css .input-editable）===== */

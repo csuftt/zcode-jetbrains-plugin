@@ -5,6 +5,8 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.wm.ToolWindowManager
+import com.zcode.ideaplugin.ZCodeBundle.message
+import com.zcode.ideaplugin.ZCodeIcons
 import com.zcode.ideaplugin.zCodeService
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -18,7 +20,11 @@ import kotlinx.serialization.json.put
  * - 支持多选：`@C:\abs\path @C:\abs\path2`（空格分隔）
  * - 只发送引用，不读文件内容（输入框 chip 显示 basename，发送时 CLI 按引用读文件）
  */
-class SendFileToInputAction : AnAction() {
+class SendFileToInputAction : AnAction(
+    message("action.sendFileToInput.text"),
+    message("action.sendFileToInput.description"),
+    ZCodeIcons.Zai,
+) {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 

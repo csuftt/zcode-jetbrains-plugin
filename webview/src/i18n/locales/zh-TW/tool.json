@@ -73,5 +73,7 @@
     "loading": "正在載入子代理記錄…",
     "noData": "暫無子代理過程資料",
     "loadFull": "載入完整記錄"
-  }
+  },
+  "viewPlan": "查閱計畫詳細內容",
+  "planTitle": "執行計畫"
 }

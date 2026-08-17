@@ -73,5 +73,7 @@
     "loading": "正在加载子代理记录…",
     "noData": "暂无子代理过程数据",
     "loadFull": "加载完整记录"
-  }
+  },
+  "viewPlan": "查阅计划详情",
+  "planTitle": "执行计划"
 }

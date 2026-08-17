@@ -25,6 +25,7 @@ import { SubagentDetailDialog } from '@/components/SubagentDetailDialog'
 import { SubagentReportDialog } from '@/components/SubagentReportDialog'
 import { MarkdownPreviewDialog } from '@/components/MarkdownPreviewDialog'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { EnvBanner } from '@/components/EnvBanner'
 import { sendToJava, isInJcef } from '@/ipc/bridge'
 import './styles/global.less'
 import './styles/buttons.less'
@@ -41,6 +42,7 @@ export default function App() {
     clearError,
     renameSession, setModel,
   } = useStore()
+  const setPendingSettingsSection = useStore((s) => s.setPendingSettingsSection)
 
   // IDE 主题同步
   useTheme()
@@ -143,6 +145,13 @@ export default function App() {
         onSettings={() => setCurrentView('settings')}
         onTitleChange={(t) => {
           if (currentSessionId) renameSession(currentSessionId, t)
+        }}
+      />
+      {/* 环境提醒条：node/zcode.cjs/凭证任一异常时显示（仅异常渲染，正常保持安静）*/}
+      <EnvBanner
+        onGoSettings={() => {
+          setPendingSettingsSection('env')
+          setCurrentView('settings')
         }}
       />
 

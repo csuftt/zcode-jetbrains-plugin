@@ -8,6 +8,8 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.vfs.VirtualFile
+import com.zcode.ideaplugin.ZCodeBundle.message
+import com.zcode.ideaplugin.ZCodeIcons
 
 /**
  * 右键菜单：把选中代码的行号引用发送到 ZCode 输入框（对齐 cc-gui SendSelectionToTerminalAction）
@@ -17,7 +19,11 @@ import com.intellij.openapi.vfs.VirtualFile
  * - 发送的是引用而非代码文本：消息简洁，后端按引用读取最新代码
  * - 无选区时只打开/聚焦 ZCode 输入框
  */
-class SendSelectionToInputAction : AnAction() {
+class SendSelectionToInputAction : AnAction(
+    message("action.sendSelectionToInput.text"),
+    message("action.sendSelectionToInput.description"),
+    ZCodeIcons.Zai,
+) {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 

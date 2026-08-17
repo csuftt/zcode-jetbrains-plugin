@@ -38,6 +38,10 @@
     "resetZoom": "重置为 100%（滚轮可缩放）",
     "close": "关闭 (Esc)"
   },
+  "code": {
+    "copy": "复制代码",
+    "copied": "已复制"
+  },
   "preview": {
     "defaultMeta": "Markdown 预览",
     "close": "关闭"

@@ -7,7 +7,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px;
+  /* 上下 6px：内容行盒收到 12px（line-height:1），图标与文字上下缝隙精确 6px */
+  padding: 6px 8px;
   background: rgba(158, 158, 158, 0.15);
   border: 1px solid rgba(158, 158, 158, 0.35);
   border-radius: 4px;
@@ -17,6 +18,14 @@
   position: relative;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
+
+  /* codicon 基础样式 .codicon[class*='codicon-'] 的 font 简写(16px/1) 优先级 (0,2,0)
+     压过单类 __icon 的 font-size（同 a72f4ba 消息队列按钮图标问题），
+     后代选择器提到同级、源码顺序在后生效 */
+  .codicon {
+    font-size: 12px;
+    line-height: 1;
+  }
 
   &:hover {
     background: rgba(158, 158, 158, 0.25);
@@ -45,7 +54,6 @@
   }
 
   &__icon {
-    font-size: 12px;
     opacity: 0.8;
   }
 
@@ -53,6 +61,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1;
   }
 
   &__remove {

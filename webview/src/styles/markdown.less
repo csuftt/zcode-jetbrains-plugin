@@ -129,6 +129,57 @@
     }
   }
 
+  /* 代码块复制按钮挂载点（按钮不进 pre：pre 横向滚动时 absolute 子元素会跟着滚走）*/
+  .md-code-wrap {
+    position: relative;
+  }
+
+  /* 复制按钮：默认隐藏，hover 代码块时浮现；点击成功由 JS 切 --done 显示 ✓ */
+  .md-code-copy {
+    appearance: none;
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--code-copy-color);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+
+    /* codicon 基础样式 font 简写 16px 会压制单类 font-size，后代选择器提到同级生效 */
+    .codicon {
+      font-size: 14px;
+    }
+
+    &:hover {
+      background: var(--code-copy-hover-bg);
+      color: var(--code-copy-hover-color);
+    }
+
+    &:focus-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .md-code-copy__icon-done { display: none; }
+    &.md-code-copy--done .md-code-copy__icon-done { display: block; }
+    &.md-code-copy--done .md-code-copy__icon-copy { display: none; }
+  }
+
+  .md-code-wrap:hover .md-code-copy {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   /* 表格 */
   table {
     border-collapse: collapse;

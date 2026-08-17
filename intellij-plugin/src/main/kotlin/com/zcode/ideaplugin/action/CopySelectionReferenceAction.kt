@@ -10,6 +10,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
 import com.zcode.ideaplugin.ZCodeBundle.message
+import com.zcode.ideaplugin.ZCodeIcons
 import java.awt.datatransfer.StringSelection
 
 /**
@@ -21,7 +22,11 @@ import java.awt.datatransfer.StringSelection
  * - 可直接粘贴到 ZC GUI 输入框作为 @ 引用，也可粘贴到任意地方分享定位
  * - 无选区时菜单隐藏（没有可复制的行号范围）
  */
-class CopySelectionReferenceAction : AnAction() {
+class CopySelectionReferenceAction : AnAction(
+    message("action.copySelectionReference.text"),
+    message("action.copySelectionReference.description"),
+    ZCodeIcons.Zai,
+) {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 

@@ -7,16 +7,25 @@
     "confirm": "新建"
   },
   "askUser": {
+    "title": "回答 AI 的提问",
     "cancel": "取消",
-    "confirm": "确认"
+    "confirm": "确认",
+    "progress": "第 {{current}}/{{total}} 题",
+    "multiSelect": "可多选",
+    "other": "其他（自定义答案）",
+    "otherPlaceholder": "输入自定义答案…",
+    "back": "上一题",
+    "next": "下一题"
   },
   "planApproval": {
     "title": "计划审批",
     "hint": "批准后将退出规划模式并开始执行",
     "emptyPlan": "_（计划内容为空）_",
-    "tip": "点击遮罩或\"继续规划\"可拒绝并留在规划模式",
+    "tip": "点击弹窗外可直接关闭（视为留在规划模式）",
     "continuePlanning": "继续规划",
-    "approveAndRun": "批准并执行"
+    "approveAndRun": "批准执行",
+    "feedbackPlaceholder": "输入修改意见，AI 将按意见继续完善计划…",
+    "feedbackRequired": "请先输入修改意见"
   },
   "notification": {
     "subagent": "子代理",
@@ -37,5 +46,14 @@
     "openInEditor": "在编辑器打开：{{path}}",
     "viewDiff": "查看编辑前后对比",
     "diffTitle": "编辑对比：{{name}}"
+  },
+  "envBanner": {
+    "title": "运行环境配置异常，插件暂不可用",
+    "nodeMissing": "Node.js 未找到：{{detail}}",
+    "nodeTooLow": "Node.js 版本过低（{{version}}，需要 v{{min}}+）",
+    "cliMissing": "ZCode CLI 未找到：{{detail}}",
+    "credentialsInvalid": "凭证未配置或无效：{{detail}}",
+    "recheck": "重新检测",
+    "goSettings": "去设置"
   }
 }

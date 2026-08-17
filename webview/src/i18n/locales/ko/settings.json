@@ -90,5 +90,31 @@
     "confirmClearLowTitle": "낮은 중요도 기록 삭제",
     "confirmClearAllMsg": "{{count}}개의 기록을 모두 삭제합니다. 복구할 수 없습니다.",
     "confirmClearLowMsg": "한 번만 사용한 기록 {{count}}개를 삭제합니다. 복구할 수 없습니다."
+  },
+  "basicTabs": {
+    "appearance": "외관",
+    "environment": "환경"
+  },
+  "env": {
+    "save": "저장",
+    "recheck": "다시 검사",
+    "node": {
+      "label": "Node.js 경로",
+      "placeholder": "비워 두면 PATH에서 자동 감지",
+      "hint": "ZCode CLI 실행용 Node 런타임(v18+ 필요). 저장 시 경로와 버전을 검증합니다. 비우고 저장하면 자동 감지로 복귀",
+      "versionTooLow": "Node.js 버전이 너무 낮습니다(v{{min}}+ 필요). 더 높은 버전 경로를 설정하세요"
+    },
+    "cli": {
+      "label": "ZCode CLI 경로",
+      "placeholder": "비워 두면 표준 설치 위치 자동 감지",
+      "hint": "zcode.cjs 파일 경로(비표준 위치 설치 시 입력). 저장 시 파일 존재를 검증합니다. 비우고 저장하면 자동 감지로 복귀",
+      "found": "찾음"
+    },
+    "credentials": {
+      "label": "자격 증명",
+      "ok": "유효 · {{model}}",
+      "invalid": "미설정",
+      "hint": "자격 증명은 ZCode 클라이언트 로그인으로 생성됩니다(~/.zcode/v2/config.json). 이 페이지는 상태 표시만 합니다"
+    }
   }
 }

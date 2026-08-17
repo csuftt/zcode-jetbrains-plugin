@@ -637,10 +637,20 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "clearTabSession" -> handleClearTabSession()
                         "appearanceSave" -> handleAppearanceSave(msg)
                         "kvSave" -> handleKvSave(msg)
+                        "checkEnv" -> handleCheckEnv()
+                        "envSave" -> handleEnvSave(msg)
                         else -> errorResponse("未知 op: $op")
                     }
                     log.info("op=$op 处理完成，发送回 JS")
                     sendToJs(result)
+                } catch (e: com.zcode.ideaplugin.env.EnvCheckException) {
+                    // 环境前置检查失败：附带完整 EnvStatus，前端据此渲染环境提醒条
+                    log.warn("op=$op 环境检查失败: ${e.message}")
+                    sendToJs(buildJsonObject {
+                        put("op", "error")
+                        put("message", e.message)
+                        put("envStatus", com.zcode.ideaplugin.env.ZCodeEnvChecker.statusJson(e.status))
+                    })
                 } catch (e: Exception) {
                     log.error("op=$op 处理失败", e)
                     sendToJs(errorResponse("处理失败: ${e.message}"))
@@ -833,6 +843,104 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.warn("webview kv 保存失败: ${e.message}")
         }
         return buildJsonObject { put("op", "kvSave") }
+    }
+
+    // ============ 运行环境检测与配置（参考 cc-gui NodePathHandler）============
+
+    /** 环境三件套状态查询（30s 缓存，spawn node --version 不再重复探测） */
+    private fun handleCheckEnv(): JsonObject {
+        val status = com.zcode.ideaplugin.env.ZCodeEnvChecker.check()
+        return buildJsonObject {
+            put("op", "envStatus")
+            put("status", com.zcode.ideaplugin.env.ZCodeEnvChecker.statusJson(status))
+        }
+    }
+
+    /** 环境校验失败响应：error 消息 + 当前 envStatus（前端刷新提醒条） */
+    private fun envErrorResponse(msg: String): JsonObject = buildJsonObject {
+        put("op", "error")
+        put("message", msg)
+        put("envStatus", com.zcode.ideaplugin.env.ZCodeEnvChecker.statusJson(
+            com.zcode.ideaplugin.env.ZCodeEnvChecker.check()
+        ))
+    }
+
+    /**
+     * 保存环境路径配置（node / zcode.cjs）。
+     * 字段缺席 = 不改该项；空串 = 清除该配置（回退自动探测）。
+     * 保存前验证（node spawn --version + 版本下限；cli 文件存在），
+     * 验证失败不落盘（cc-gui 同策略，防缓存无效路径）。
+     * 保存成功后杀掉旧 app-server（启动参数已变），下次 getClient 按新配置拉起——
+     * 会话在服务端侧存续，前端 subscribe/发送会触发重连恢复。
+     */
+    private fun handleEnvSave(msg: JsonObject): JsonObject {
+        val hasNode = "nodePath" in msg.keys
+        val hasCli = "cliPath" in msg.keys
+        if (!hasNode && !hasCli) return errorResponse("envSave 缺少 nodePath/cliPath")
+        val nodePath = msg["nodePath"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
+        val cliPath = msg["cliPath"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
+
+        // 先全部验证，全通过才落盘（避免半更新）
+        if (hasNode && nodePath.isNotEmpty()) {
+            val probe = com.zcode.ideaplugin.env.ZCodeEnvChecker.verifyNodePath(nodePath)
+            if (!probe.found) {
+                return envErrorResponse("Node.js 路径无效：${probe.error ?: "无法执行"}，未保存")
+            }
+            val major = com.zcode.ideaplugin.env.ZCodeEnvChecker.parseMajorVersion(probe.version)
+            if (major != null && major < com.zcode.ideaplugin.env.ZCodeEnvChecker.MIN_NODE_MAJOR_VERSION) {
+                return envErrorResponse(
+                    "Node.js 版本过低（${probe.version}，需要 v${com.zcode.ideaplugin.env.ZCodeEnvChecker.MIN_NODE_MAJOR_VERSION}+），未保存"
+                )
+            }
+        }
+        if (hasCli && cliPath.isNotEmpty()) {
+            if (!java.nio.file.Path.of(cliPath).toFile().isFile) {
+                return envErrorResponse("zcode.cjs 路径无效：文件不存在（$cliPath），未保存")
+            }
+        }
+
+        if (hasNode) {
+            if (nodePath.isEmpty()) com.zcode.ideaplugin.env.ZCodeEnvChecker.clearNodePath()
+            else com.zcode.ideaplugin.env.ZCodeEnvChecker.saveNodePath(nodePath)
+        }
+        if (hasCli) {
+            if (cliPath.isEmpty()) com.zcode.ideaplugin.env.ZCodeEnvChecker.clearCliPath()
+            else com.zcode.ideaplugin.env.ZCodeEnvChecker.saveCliPath(cliPath)
+        }
+        com.zcode.ideaplugin.env.ZCodeEnvChecker.invalidate()
+
+        try { project.zCodeService().shutdown() } catch (e: Exception) {
+            log.warn("环境配置变更后关闭旧 app-server 失败: ${e.message}")
+        }
+
+        val status = com.zcode.ideaplugin.env.ZCodeEnvChecker.check(force = true)
+        broadcastEnvStatus(status)
+        log.info("环境配置已保存并重新检测: allOk=${status.allOk}, node=${status.node.path}, cli=${status.cli.path}")
+        return buildJsonObject {
+            put("op", "envStatus")
+            put("status", com.zcode.ideaplugin.env.ZCodeEnvChecker.statusJson(status))
+        }
+    }
+
+    /**
+     * 环境状态广播到所有已开标签（envSave 后调用，同 broadcastAppearance 模式）：
+     * 推送 onEnvStatusChanged（前端 store 注册，幂等刷新 envStatus）。
+     */
+    private fun broadcastEnvStatus(status: com.zcode.ideaplugin.env.EnvStatus) {
+        val json = com.zcode.ideaplugin.env.ZCodeEnvChecker.statusJson(status).toString()
+        SwingUtilities.invokeLater {
+            activePanels.forEach { panel ->
+                try {
+                    if (panel.disposed || !panel::jbCefBrowser.isInitialized) return@forEach
+                    panel.jbCefBrowser.cefBrowser.executeJavaScript(
+                        "window.onEnvStatusChanged && window.onEnvStatusChanged($json);",
+                        "zcode-env-sync", 0
+                    )
+                } catch (e: Exception) {
+                    log.warn("环境状态同步推送失败: ${e.message}")
+                }
+            }
+        }
     }
 
     /**

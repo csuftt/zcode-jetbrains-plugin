@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry } from '@/types/messages'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, asSubagentLifecycle } from '@/utils/streamReducer'
 import type { SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/utils/parseStatus'
@@ -42,6 +42,14 @@ interface StoreState {
   connectionStatus: ConnectionStatus
   lastError: string | null
   projectPath: string
+
+  // 运行环境（node / zcode.cjs / 凭证三件套）
+  /** null = 尚未检测完成（init 异步拉取）；allOk=false 时主界面显示环境提醒条 */
+  envStatus: EnvStatus | null
+  /** envSave 请求进行中（设置页环境 tab 保存按钮禁用/转圈）*/
+  envSaving: boolean
+  /** EnvBanner「去设置」的跳转意图：App 切 settings 视图同时置位，BasicSettingsView 消费后清除 */
+  pendingSettingsSection: 'env' | null
 
   // 会话
   sessions: SessionInfo[]
@@ -219,6 +227,15 @@ interface StoreState {
   loadUsageData: () => void
   /** 清除错误（错误栏关闭按钮）*/
   clearError: () => void
+  /** 设置 EnvBanner「去设置」的跳转意图（BasicSettingsView 消费后清除）*/
+  setPendingSettingsSection: (section: 'env' | null) => void
+  /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
+  checkEnv: () => void
+  /**
+   * 保存环境路径配置：undefined=不改该项，''=清除（回退自动探测）。
+   * 后端验证（node spawn --version、cli 文件存在）失败不落盘，回 error（带 envStatus）。
+   */
+  saveEnvConfig: (nodePath?: string, cliPath?: string) => void
   /** 拉取当前会话的子代理列表（session/subagents RPC，权威状态）*/
   loadSubagents: () => void
   /** 打开子代理详情弹窗（key = Agent 工具 callID）*/
@@ -253,6 +270,9 @@ export const useStore = create<StoreState>((set, get) => ({
   connectionStatus: 'connecting',
   lastError: null,
   projectPath: '',
+  envStatus: null,
+  envSaving: false,
+  pendingSettingsSection: null,
 
   sessions: [],
   provisionalTitles: {},
@@ -339,6 +359,10 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ connectionStatus: inJcef ? 'connected' : 'mock', projectPath: ws })
     console.log(`[store] 初始化完成，连接=${inJcef ? 'JCEF' : 'mock'}，workspace=${ws || '(空)'}`)
 
+    // IDE 广播：envSave 保存成功后多标签同步最新环境状态（Panel broadcastEnvStatus）
+    window.onEnvStatusChanged = (status: EnvStatus) => set({ envStatus: status })
+
+    get().checkEnv()
     get().loadSessions()
     get().loadModels()
     // GLM 额度 60s 定时刷新（悬浮栏/用量页「上次刷新」的更新源，见 startQuotaPolling）
@@ -719,6 +743,18 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   clearError: () => set({ lastError: null }),
+
+  setPendingSettingsSection: (section) => set({ pendingSettingsSection: section }),
+
+  checkEnv: () => {
+    sendToJava({ op: 'checkEnv' })
+  },
+
+  saveEnvConfig: (nodePath?: string, cliPath?: string) => {
+    set({ envSaving: true })
+    // undefined 字段 JSON.stringify 自动省略 = 后端"不改该项"约定
+    sendToJava({ op: 'envSave', nodePath, cliPath })
+  },
 
   loadSubagents: () => {
     const sid = get().currentSessionId
@@ -1209,10 +1245,18 @@ function handleResponse(
       get().loadSettings()
       break
 
+    case 'envStatus':
+      // checkEnv 查询 / envSave 保存成功重检的返回
+      set({ envStatus: msg.status, envSaving: false })
+      break
+
     case 'error':
       // 建会话失败（Java 外层 catch 回 error）：复位懒创建标志与暂存消息（防卡死、防误重试）
       set({
         lastError: msg.message,
+        // 环境前置检查失败（EnvCheckException/envSave 验证失败）：附带 envStatus 刷新提醒条
+        ...(msg.envStatus ? { envStatus: msg.envStatus } : {}),
+        envSaving: false,
         loadingMessages: false,
         streaming: false,
         waitingSince: null,

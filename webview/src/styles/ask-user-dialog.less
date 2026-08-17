@@ -133,3 +133,46 @@
     }
   }
 }
+
+/* ============ 逐问题模式新增（进度/导航/其他选项/自定义输入） ============ */
+
+.ask-user-dialog__progress {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-user-dialog__multiselect-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+
+.ask-user-dialog__option--other {
+  border-style: dashed;
+}
+
+.ask-user-dialog__custom-input {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  box-sizing: border-box;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+  }
+}
+
+.ask-user-dialog__btn--back {
+  /* 与取消同视觉层级：次级按钮 */
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}

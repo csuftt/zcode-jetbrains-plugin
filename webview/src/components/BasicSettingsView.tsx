@@ -1,13 +1,13 @@
 /**
- * 基础设置视图（对齐 cc-gui AppearanceTab 的主题必需项）
+ * 基础设置视图（对齐 cc-gui BasicConfigSection 的子 tab 结构）
  *
- * 设置项：
- *   - 界面主题：跟随 IDE / 浅色 / 深色（三卡片，复用 useTheme 的 zcode-theme-pref）
- *   - 字体大小：6 级缩放（--font-scale，#root zoom）
- *   - 语言：跟随 IDE / 简体中文 / English / 日本語 / 한국어（手动值走 kv 通道持久化）
- *   - 聊天背景色 / 顶栏颜色 / 用户气泡色：预设色板 + 取色器 + HEX 输入 + 重置
+ * 子页签：
+ *   - 外观：界面主题三态卡片 / 字体大小 / 语言 / 三组自定义颜色
+ *   - 环境：Node.js 路径（版本徽章+过低警告）/ ZCode CLI 路径 / 凭证状态（只读）
+ *     （参考 cc-gui EnvironmentTab：保存前后端验证，无效路径不落盘；留空=自动探测）
  *
- * 数据流经 utils/appearance.ts；语言经 i18n/language.ts；多标签页同步见各通道注释。
+ * 外观数据流经 utils/appearance.ts；语言经 i18n/language.ts；环境经 store envStatus
+ * （checkEnv/envSave op，IDE 广播 onEnvStatusChanged 多标签同步）。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -26,6 +26,7 @@ import {
 import { getThemePreference, setThemePreference, type IdeTheme } from '@/hooks/useTheme'
 import { setLanguage } from '@/i18n/language'
 import { SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, isSupportedLanguage, type SupportedLanguage } from '@/i18n/config'
+import { useStore } from '@/store/useStore'
 import '../styles/basic-settings.less'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
@@ -245,6 +246,7 @@ function ColorSection({ icon, label, hint, value, defaultColor, presets, onChang
 /* ============ 主视图 ============ */
 
 type ThemeOption = 'system' | 'light' | 'dark'
+type BasicTab = 'appearance' | 'environment'
 
 function readResolvedTheme(): IdeTheme {
   return (document.documentElement.getAttribute('data-theme') as IdeTheme) || 'dark'
@@ -252,6 +254,18 @@ function readResolvedTheme(): IdeTheme {
 
 export function BasicSettingsView() {
   const { t, i18n } = useTranslation()
+  // EnvBanner「去设置」直达环境子 tab（消费后清除；条件挂载组件，初始值即够，effect 兜底常驻场景）
+  const pendingSection = useStore((s) => s.pendingSettingsSection)
+  const setPendingSection = useStore((s) => s.setPendingSettingsSection)
+  const [tab, setTab] = useState<BasicTab>(() => (pendingSection === 'env' ? 'environment' : 'appearance'))
+
+  useEffect(() => {
+    if (pendingSection === 'env') {
+      setTab('environment')
+      setPendingSection(null)
+    }
+  }, [pendingSection, setPendingSection])
+
   const [themePref, setThemePref] = useState<ThemeOption>(() => getThemePreference() ?? 'system')
   const [resolvedTheme, setResolvedTheme] = useState<IdeTheme>(readResolvedTheme)
   const [fontLevel, setFontLevel] = useState<FontScaleLevel>(() => getFontScaleLevel())
@@ -293,8 +307,36 @@ export function BasicSettingsView() {
 
   return (
     <div className="basic-settings">
-      {/* 界面主题 */}
-      <section className="basic-settings__section">
+      {/* 子页签选择器（cc-gui BasicConfigSection 同款外观/环境结构） */}
+      <div className="basic-settings__tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'appearance'}
+          className={cx('basic-settings__tab', tab === 'appearance' && 'active')}
+          onClick={() => setTab('appearance')}
+        >
+          <span className="codicon codicon-symbol-color" />
+          <span>{t('settings.basicTabs.appearance')}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'environment'}
+          className={cx('basic-settings__tab', tab === 'environment' && 'active')}
+          onClick={() => setTab('environment')}
+        >
+          <span className="codicon codicon-terminal" />
+          <span>{t('settings.basicTabs.environment')}</span>
+        </button>
+      </div>
+
+      {tab === 'environment' && <EnvironmentSettings />}
+
+      {tab === 'appearance' && (
+        <>
+          {/* 界面主题 */}
+          <section className="basic-settings__section">
         <div className="basic-settings__field-header">
           <span className="codicon codicon-symbol-color" />
           <span className="basic-settings__field-label">{t('settings.theme.label')}</span>
@@ -428,6 +470,175 @@ export function BasicSettingsView() {
           setUserMsg(c)
         }}
       />
+        </>
+      )}
     </div>
+  )
+}
+
+/* ============ 环境子页签（参考 cc-gui EnvironmentTab） ============ */
+
+function EnvironmentSettings() {
+  const { t } = useTranslation()
+  const envStatus = useStore((s) => s.envStatus)
+  const envSaving = useStore((s) => s.envSaving)
+  const saveEnvConfig = useStore((s) => s.saveEnvConfig)
+  const checkEnv = useStore((s) => s.checkEnv)
+  const [nodeInput, setNodeInput] = useState('')
+  const [cliInput, setCliInput] = useState('')
+  /** 正在保存哪一项（按钮转圈定位；envSaving 复位时清除） */
+  const [savingWhich, setSavingWhich] = useState<'node' | 'cli' | null>(null)
+  const [rechecking, setRechecking] = useState(false)
+  /** 上次同步进输入框的值：仅当输入框仍是上次同步值时才跟随刷新（不覆盖用户编辑） */
+  const lastSyncRef = useRef({ node: '', cli: '' })
+
+  const nodePath = envStatus?.node.path ?? ''
+  const cliPath = envStatus?.cli.path ?? ''
+
+  useEffect(() => {
+    setNodeInput((cur) => (cur === lastSyncRef.current.node ? nodePath : cur))
+    setCliInput((cur) => (cur === lastSyncRef.current.cli ? cliPath : cur))
+    lastSyncRef.current = { node: nodePath, cli: cliPath }
+  }, [nodePath, cliPath])
+
+  useEffect(() => {
+    if (!envSaving) setSavingWhich(null)
+  }, [envSaving])
+
+  const handleSave = (which: 'node' | 'cli') => {
+    setSavingWhich(which)
+    if (which === 'node') saveEnvConfig(nodeInput.trim())
+    else saveEnvConfig(undefined, cliInput.trim())
+  }
+
+  const handleRecheck = () => {
+    if (rechecking) return
+    setRechecking(true)
+    checkEnv()
+    setTimeout(() => setRechecking(false), 3000)
+  }
+
+  return (
+    <>
+      {/* Node.js 路径 */}
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-terminal" />
+          <span className="basic-settings__field-label">{t('settings.env.node.label')}</span>
+          {envStatus?.node.version && (
+            <span
+              className={cx(
+                'basic-settings__version-badge',
+                envStatus.node.versionTooLow ? 'is-error' : 'is-ok'
+              )}
+            >
+              {envStatus.node.version}
+            </span>
+          )}
+        </div>
+        {envStatus?.node.versionTooLow && (
+          <div className="basic-settings__version-warning">
+            <span className="codicon codicon-warning" />
+            <span>{t('settings.env.node.versionTooLow', { min: envStatus.node.minVersion })}</span>
+          </div>
+        )}
+        <div className="basic-settings__path-row">
+          <input
+            type="text"
+            className="basic-settings__path-input"
+            value={nodeInput}
+            onChange={(e) => setNodeInput(e.target.value)}
+            placeholder={t('settings.env.node.placeholder')}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="basic-settings__save-btn"
+            onClick={() => handleSave('node')}
+            disabled={envSaving}
+          >
+            {savingWhich === 'node' && <span className="codicon codicon-loading codicon-modifier-spin" />}
+            {t('settings.env.save')}
+          </button>
+        </div>
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.env.node.hint')}</span>
+        </small>
+      </section>
+
+      {/* ZCode CLI 路径 */}
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-rocket" />
+          <span className="basic-settings__field-label">{t('settings.env.cli.label')}</span>
+          {envStatus?.cli.found && cliPath && (
+            <span className="basic-settings__version-badge is-ok">{t('settings.env.cli.found')}</span>
+          )}
+        </div>
+        <div className="basic-settings__path-row">
+          <input
+            type="text"
+            className="basic-settings__path-input"
+            value={cliInput}
+            onChange={(e) => setCliInput(e.target.value)}
+            placeholder={t('settings.env.cli.placeholder')}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="basic-settings__save-btn"
+            onClick={() => handleSave('cli')}
+            disabled={envSaving}
+          >
+            {savingWhich === 'cli' && <span className="codicon codicon-loading codicon-modifier-spin" />}
+            {t('settings.env.save')}
+          </button>
+        </div>
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.env.cli.hint')}</span>
+        </small>
+      </section>
+
+      {/* 凭证状态（只读：由 ZCode 客户端登录生成，无配置入口） */}
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-key" />
+          <span className="basic-settings__field-label">{t('settings.env.credentials.label')}</span>
+          {envStatus && (
+            <span
+              className={cx(
+                'basic-settings__version-badge',
+                envStatus.credentials.ok ? 'is-ok' : 'is-error'
+              )}
+            >
+              {envStatus.credentials.ok
+                ? t('settings.env.credentials.ok', { model: envStatus.credentials.model ?? '' })
+                : t('settings.env.credentials.invalid')}
+            </span>
+          )}
+        </div>
+        {!envStatus?.credentials.ok && envStatus?.credentials.error && (
+          <div className="basic-settings__version-warning">
+            <span className="codicon codicon-error" />
+            <span>{envStatus.credentials.error}</span>
+          </div>
+        )}
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.env.credentials.hint')}</span>
+        </small>
+      </section>
+
+      {/* 重新检测 */}
+      <section className="basic-settings__section">
+        <button type="button" className="basic-settings__save-btn" onClick={handleRecheck} disabled={rechecking}>
+          {rechecking && <span className="codicon codicon-loading codicon-modifier-spin" />}
+          <span className="codicon codicon-refresh" />
+          {t('settings.env.recheck')}
+        </button>
+      </section>
+    </>
   )
 }

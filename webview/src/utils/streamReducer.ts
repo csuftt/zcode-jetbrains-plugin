@@ -468,7 +468,7 @@ export function applySubagentToolEvent(
   const idx = activities.findIndex((a) => a.key === key)
   const cur: SubagentActivity = idx >= 0
     ? activities[idx]
-    : { key, status: 'running', tools: [], lastUpdate: timestamp }
+    : { key, status: 'running', tools: [], lastUpdate: timestamp, startedAt: timestamp }
 
   // 补齐归属元信息（任意事件都可能首次携带）
   const merged: SubagentActivity = {
@@ -542,7 +542,7 @@ export function markActivityOutcome(
   timestamp: number,
 ): SubagentActivity[] {
   return activities.map((a) => a.key === key && a.status === 'running'
-    ? { ...a, status: failed ? 'failed' : 'completed', lastUpdate: timestamp }
+    ? { ...a, status: failed ? 'failed' : 'completed', lastUpdate: timestamp, endedAt: timestamp }
     : a)
 }
 

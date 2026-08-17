@@ -172,8 +172,11 @@ export function ToolCallCard({ part }: Props) {
   }
 
   // Read 工具不需要展开（只有文件名 + 点击打开，不渲染 output）；
-  // Skill 输入/输出全在头部 📖 弹窗，展开区仅流式原始输入/出错时有内容
-  const expandable = tool !== 'Read' && !(tool === 'Skill' && !rawInput && !state.error)
+  // Skill 输入/输出全在头部 📖 弹窗，展开区仅流式原始输入/出错时有内容；
+  // ExitPlanMode 同款：plan 全文走 📖 弹窗，完成后无展开区（流式中仍可看原始片段）
+  const expandable = tool !== 'Read' &&
+    !(tool === 'Skill' && !rawInput && !state.error) &&
+    !(tool === 'ExitPlanMode' && !rawInput && !state.error)
 
   return (
     <div className={`tool-card tool-card--${badge.cls}`}>
@@ -235,6 +238,23 @@ export function ToolCallCard({ part }: Props) {
                 title: `/${summary || 'skill'}`,
                 meta: t('tool.skillDoc'),
                 markdown: state.output!,
+              })
+            }}
+          >
+            <span className="codicon codicon-book" />
+          </button>
+        )}
+        {/* 计划详情弹窗阅读（ExitPlanMode 的 plan 全文 md 渲染；完成后无展开区，这是唯一查看入口）*/}
+        {tool === 'ExitPlanMode' && typeof input?.plan === 'string' && input.plan.trim() && (
+          <button
+            className="tool-card__action"
+            title={t('tool.viewPlan')}
+            aria-label={t('tool.viewPlan')}
+            onClick={(e) => {
+              e.stopPropagation()
+              openMarkdownPreview({
+                title: t('tool.planTitle'),
+                markdown: String(input.plan),
               })
             }}
           >
@@ -306,8 +326,9 @@ export function ToolCallCard({ part }: Props) {
             </>
           )}
           {/* 其他工具：JSON 输入/输出。Skill 无展开区内容（技能名在头部摘要、
-              技能文档走 📖 弹窗）；Agent 类输出（最终报告）同样只走头部弹窗按钮 */}
-          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && (
+              技能文档走 📖 弹窗）；Agent 类输出（最终报告）同样只走头部弹窗按钮；
+              ExitPlanMode 的 plan 全文走 📖 弹窗，展开区不渲染 input JSON */}
+          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && tool !== 'ExitPlanMode' && (
             <>
               {state.input && Object.keys(state.input).length > 0 && (
                 <div className="tool-card__section">

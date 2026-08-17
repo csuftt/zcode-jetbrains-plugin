@@ -22,6 +22,8 @@ import { ToolCallCard } from './ToolCallCard'
 import { BashCommandGroupCard } from './BashCommandGroupCard'
 import { FileToolGroupCard } from './FileToolGroupCard'
 import { groupParts, type PartRenderUnit } from '@/utils/groupParts'
+import { validSpan } from '@/utils/parseStatus'
+import { formatToolDuration } from '@/utils/time'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
 
@@ -37,16 +39,6 @@ function UnitRenderer({ unit }: { unit: PartRenderUnit }) {
   }
   if (unit.part.type === 'tool') return <ToolCallCard part={unit.part} />
   return null
-}
-
-/** 秒级耗时格式化（子代理 startedAt/endedAt 是 ms 时间戳）*/
-function formatDuration(startedAt?: number, endedAt?: number): string {
-  if (!startedAt) return ''
-  const end = endedAt ?? Date.now()
-  const sec = Math.max(0, Math.round((end - startedAt) / 1000))
-  if (sec < 60) return `${sec}s`
-  const min = Math.floor(sec / 60)
-  return min < 60 ? `${min}m${sec % 60}s` : `${Math.floor(min / 60)}h${min % 60}m`
 }
 
 /** 状态徽标文案 */
@@ -222,7 +214,15 @@ export function SubagentDetailDialog() {
 
   if (!key) return null
 
-  const duration = formatDuration(item?.startedAt ?? info?.startedAt, item?.endedAt ?? info?.endedAt)
+  // 耗时（与工具命令卡同格式："X.X 秒" / "X 分 Y 秒"，i18n）：item（三源合并，
+  // part.time 优先）无有效对再看 RPC 原始 info，跨源不混搭。运行中以当前时刻
+  // 实时累计；已结束但无有效终点则不显示（宁缺勿错——RPC 起止可能相等/倒挂，
+  // 正是历史完成后显示 "0s" 的根源）
+  const span = validSpan(item?.startedAt, item?.endedAt) ?? validSpan(info?.startedAt, info?.endedAt)
+  const liveStart = span ? undefined : (running ? item?.startedAt ?? info?.startedAt : undefined)
+  const duration = span
+    ? formatToolDuration(span.endedAt - span.startedAt)
+    : liveStart ? formatToolDuration(Math.max(0, Date.now() - liveStart)) : ''
   const badge = statusText(item?.status, t)
   const toolCount = activity?.tools.length ?? 0
 

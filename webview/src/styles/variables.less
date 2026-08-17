@@ -77,6 +77,11 @@
   --code-inline-bg: rgba(110, 118, 129, 0.4);
   --code-inline-text: #f0883e;
 
+  /* 代码块复制按钮（浮在深色代码块上）*/
+  --code-copy-color: rgba(255, 255, 255, 0.5);
+  --code-copy-hover-color: rgba(255, 255, 255, 0.9);
+  --code-copy-hover-bg: rgba(255, 255, 255, 0.1);
+
   /* 下拉弹层（input-box selector-dropdown；曾长期未定义走到硬编码深色 fallback，
    * 亮色主题下不跟随——补齐双主题定义，暗色值=原 fallback 保持观感不变）*/
   --dropdown-bg: #252526;
@@ -199,6 +204,11 @@
   --color-code-block-border: #d0d0d0;
   --code-inline-bg: rgba(175, 184, 193, 0.2);
   --code-inline-text: #d6336c;
+
+  /* 代码块复制按钮（亮色代码块底 #f6f8fa，用黑色系保证可见）*/
+  --code-copy-color: rgba(0, 0, 0, 0.45);
+  --code-copy-hover-color: rgba(0, 0, 0, 0.85);
+  --code-copy-hover-bg: rgba(0, 0, 0, 0.08);
 
   /* 下拉弹层（亮色值对齐 VSCode Light 风格）*/
   --dropdown-bg: #ffffff;

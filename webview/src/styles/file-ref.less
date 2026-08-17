@@ -10,7 +10,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px;
+  /* 上下 6px：内容行盒收到 12px（line-height:1），图标与文字上下缝隙精确 6px；
+     内联变体（--inline）覆盖回紧凑值，避免撑高编辑行 */
+  padding: 6px 8px;
   background: rgba(0, 127, 212, 0.15);
   border: 1px solid rgba(0, 127, 212, 0.3);
   border-radius: 4px;
@@ -53,6 +55,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-mono);
+    line-height: 1;
   }
 
   /* 行号引用后缀（@path#L10-20 → :L10-20，IDE 右键发送选中代码） */
@@ -61,6 +64,7 @@
     font-family: var(--font-mono);
     font-size: 11px;
     flex-shrink: 0;
+    line-height: 1;
   }
 
   &__remove {
@@ -80,9 +84,20 @@
   }
 }
 
+/* ===== 顶部 refs 排的 chip 图标统一 12px =====
+   SVG（.file-type-icon 全局 14px）收到 12px，与 codicon 图标同尺寸：
+   三种 chip 同高 26px（12 内容 + 6×2 padding + 2 边框），图标垂直居中。
+   只限定 .input-box__refs——内联 chip 与其他场景的文件图标保持 14px 辨识度 */
+.input-box__refs .file-ref .file-type-icon {
+  width: 12px;
+  height: 12px;
+}
+
 /* ===== 内联变体（contenteditable 文本流中）===== */
 .file-ref--inline {
-  // 文本基线对齐（顶部版在 flex 容器内不需要，内联版必须）
+  /* 覆盖回紧凑尺寸：编辑器行高 19.5px，6px padding 的 chip 会明显撑行 */
+  padding: 3px 8px;
+  /* 文本基线对齐（顶部版在 flex 容器内不需要，内联版必须） */
   vertical-align: middle;
   user-select: none;
   margin: 0 1px;

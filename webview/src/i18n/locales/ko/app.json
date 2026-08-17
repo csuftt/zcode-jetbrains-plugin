@@ -7,16 +7,25 @@
     "confirm": "새로 만들기"
   },
   "askUser": {
+    "title": "AI 질문에 답변",
     "cancel": "취소",
-    "confirm": "확인"
+    "confirm": "확인",
+    "progress": "질문 {{current}}/{{total}}",
+    "multiSelect": "다중 선택 가능",
+    "other": "기타 (직접 입력)",
+    "otherPlaceholder": "직접 답변 입력…",
+    "back": "이전",
+    "next": "다음"
   },
   "planApproval": {
     "title": "계획 승인",
     "hint": "승인하면 계획 모드를 종료하고 실행을 시작합니다",
     "emptyPlan": "_（계획 내용이 비어 있음）_",
-    "tip": "오버레이 또는 \"계획 계속\"을 클릭하면 거절하고 계획 모드에 머뭅니다",
+    "tip": "대화 상자 밖을 클릭하면 닫힙니다(계획 모드 유지)",
     "continuePlanning": "계획 계속",
-    "approveAndRun": "승인 후 실행"
+    "approveAndRun": "승인 후 실행",
+    "feedbackPlaceholder": "수정 의견을 입력하면 계획을 계속 다듬습니다…",
+    "feedbackRequired": "수정 의견을 먼저 입력하세요"
   },
   "notification": {
     "subagent": "서브에이전트",
@@ -37,5 +46,14 @@
     "openInEditor": "에디터에서 열기: {{path}}",
     "viewDiff": "편집 전후 비교 보기",
     "diffTitle": "편집 비교: {{name}}"
+  },
+  "envBanner": {
+    "title": "실행 환경에 문제가 있어 플러그인을 사용할 수 없습니다",
+    "nodeMissing": "Node.js를 찾을 수 없음: {{detail}}",
+    "nodeTooLow": "Node.js 버전이 너무 낮음 ({{version}}, v{{min}}+ 필요)",
+    "cliMissing": "ZCode CLI를 찾을 수 없음: {{detail}}",
+    "credentialsInvalid": "자격 증명이 없거나 유효하지 않음: {{detail}}",
+    "recheck": "다시 검사",
+    "goSettings": "설정 열기"
   }
 }

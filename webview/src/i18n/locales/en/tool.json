@@ -73,5 +73,7 @@
     "loading": "Loading subagent records…",
     "noData": "No subagent process data",
     "loadFull": "Load full history"
-  }
+  },
+  "viewPlan": "View plan details",
+  "planTitle": "Execution Plan"
 }

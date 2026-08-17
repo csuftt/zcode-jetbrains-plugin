@@ -90,5 +90,31 @@
     "confirmClearLowTitle": "低重要度の記録を削除",
     "confirmClearAllMsg": "{{count}} 件の履歴をすべて削除します。元に戻せません。",
     "confirmClearLowMsg": "使用が 1 回のみの記録 {{count}} 件を削除します。元に戻せません。"
+  },
+  "basicTabs": {
+    "appearance": "外観",
+    "environment": "環境"
+  },
+  "env": {
+    "save": "保存",
+    "recheck": "再チェック",
+    "node": {
+      "label": "Node.js パス",
+      "placeholder": "空欄で PATH から自動検出",
+      "hint": "ZCode CLI 起動用の Node ランタイム（v18+ 必須）。保存時にパスとバージョンを検証。空欄で保存すると自動検出に戻ります",
+      "versionTooLow": "Node.js のバージョンが低すぎます（v{{min}}+ 必須）。新しいパスを設定してください"
+    },
+    "cli": {
+      "label": "ZCode CLI パス",
+      "placeholder": "空欄で標準インストール位置を自動検出",
+      "hint": "zcode.cjs のパス（標準以外の位置にインストールした場合に入力）。保存時にファイルの存在を検証。空欄で保存すると自動検出に戻ります",
+      "found": "検出済み"
+    },
+    "credentials": {
+      "label": "認証情報",
+      "ok": "有効 · {{model}}",
+      "invalid": "未設定",
+      "hint": "認証情報は ZCode クライアントのログインで生成されます（~/.zcode/v2/config.json）。ここでは状態表示のみ"
+    }
   }
 }

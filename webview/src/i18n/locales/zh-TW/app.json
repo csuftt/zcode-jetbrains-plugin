@@ -7,16 +7,25 @@
     "confirm": "新建"
   },
   "askUser": {
+    "title": "回答 AI 的提問",
     "cancel": "取消",
-    "confirm": "確認"
+    "confirm": "確認",
+    "progress": "第 {{current}}/{{total}} 題",
+    "multiSelect": "可多選",
+    "other": "其他（自訂答案）",
+    "otherPlaceholder": "輸入自訂答案…",
+    "back": "上一題",
+    "next": "下一題"
   },
   "planApproval": {
     "title": "計劃審批",
     "hint": "批准後將退出規劃模式並開始執行",
     "emptyPlan": "_（計劃內容為空）_",
-    "tip": "點選遮罩或\"繼續規劃\"可拒絕並留在規劃模式",
+    "tip": "點擊彈窗外可直接關閉（視為留在規劃模式）",
     "continuePlanning": "繼續規劃",
-    "approveAndRun": "批准並執行"
+    "approveAndRun": "核准執行",
+    "feedbackPlaceholder": "輸入修改意見，AI 將按意見繼續完善計畫…",
+    "feedbackRequired": "請先輸入修改意見"
   },
   "notification": {
     "subagent": "子代理",
@@ -37,5 +46,14 @@
     "openInEditor": "在編輯器開啟：{{path}}",
     "viewDiff": "檢視編輯前後對比",
     "diffTitle": "編輯對比：{{name}}"
+  },
+  "envBanner": {
+    "title": "執行環境設定異常，外掛暫不可用",
+    "nodeMissing": "Node.js 未找到：{{detail}}",
+    "nodeTooLow": "Node.js 版本過低（{{version}}，需要 v{{min}}+）",
+    "cliMissing": "ZCode CLI 未找到：{{detail}}",
+    "credentialsInvalid": "憑證未設定或無效：{{detail}}",
+    "recheck": "重新檢測",
+    "goSettings": "前往設定"
   }
 }

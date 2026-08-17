@@ -34,29 +34,25 @@
     </extensions>
 
     <actions>
-        <!-- 右键发送文件/选中代码到输入框（对齐 cc-gui SendFilePathToInputAction / SendSelectionToTerminalAction） -->
+        <!-- 右键发送文件/选中代码到输入框（对齐 cc-gui SendFilePathToInputAction / SendSelectionToTerminalAction）
+             text/description 不走 XML %key%（2026.1 实测解析为占位符原文），由 action 类构造器
+             经 ZCodeBundle.message 取值（cc-gui 同款做法） -->
         <action id="ZCode.SendFileToInput"
                 class="com.zcode.ideaplugin.action.SendFileToInputAction"
-                icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
-                text="%action.sendFileToInput.text%"
-                description="%action.sendFileToInput.description%">
+                icon="com.zcode.ideaplugin.ZCodeIcons.Zai">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
             <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
         </action>
         <action id="ZCode.SendSelectionToInput"
                 class="com.zcode.ideaplugin.action.SendSelectionToInputAction"
-                icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
-                text="%action.sendSelectionToInput.text%"
-                description="%action.sendSelectionToInput.description%">
+                icon="com.zcode.ideaplugin.ZCodeIcons.Zai">
             <add-to-group group-id="EditorPopupMenu" anchor="first"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt K"/>
         </action>
         <!-- 右键复制选中代码的路径+行号引用到剪贴板（对齐 cc-gui CopySelectionReferenceAction） -->
         <action id="ZCode.CopySelectionReference"
                 class="com.zcode.ideaplugin.action.CopySelectionReferenceAction"
-                icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
-                text="%action.copySelectionReference.text%"
-                description="%action.copySelectionReference.description%">
+                icon="com.zcode.ideaplugin.ZCodeIcons.Zai">
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendSelectionToInput"/>
         </action>
     </actions>

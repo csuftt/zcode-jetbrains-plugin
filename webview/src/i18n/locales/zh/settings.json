@@ -90,5 +90,31 @@
     "confirmClearLowTitle": "清除低重要度记录",
     "confirmClearAllMsg": "将删除全部 {{count}} 条历史记录，删除后不可恢复。",
     "confirmClearLowMsg": "将删除 {{count}} 条仅使用过一次的记录，删除后不可恢复。"
+  },
+  "basicTabs": {
+    "appearance": "外观",
+    "environment": "环境"
+  },
+  "env": {
+    "save": "保存",
+    "recheck": "重新检测",
+    "node": {
+      "label": "Node.js 路径",
+      "placeholder": "留空自动从系统 PATH 检测",
+      "hint": "启动 ZCode CLI 的 Node 运行时，需要 v18+。保存时验证路径与版本；清空并保存恢复自动检测",
+      "versionTooLow": "Node.js 版本过低（需要 v{{min}}+），请在设置中配置更高版本的路径"
+    },
+    "cli": {
+      "label": "ZCode CLI 路径",
+      "placeholder": "留空自动检测标准安装位置",
+      "hint": "zcode.cjs 文件路径（非标准位置安装时填写）。保存时验证文件存在；清空并保存恢复自动检测",
+      "found": "已找到"
+    },
+    "credentials": {
+      "label": "凭证状态",
+      "ok": "有效 · {{model}}",
+      "invalid": "未配置",
+      "hint": "凭证由 ZCode 客户端登录生成（~/.zcode/v2/config.json），此页仅展示状态"
+    }
   }
 }

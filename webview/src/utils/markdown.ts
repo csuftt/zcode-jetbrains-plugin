@@ -11,6 +11,7 @@
 import { Marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
 import DOMPurify from 'dompurify'
+import i18n from '@/i18n/config'
 import { makeStreamSafe } from './streamSafe'
 
 // ============ 按需注册 highlight.js 语言（减少体积）============
@@ -113,7 +114,16 @@ marked.use({
       const safeLang = escapeHtml((lang || '').trim() || 'plaintext')
       // hljs 内部会转义代码文本，直接传原始 text（与 markedHighlight 行为一致）
       const highlighted = lang ? highlightCode(text, lang) : hljs.highlightAuto(text).value
-      return `<pre><code class="hljs language-${safeLang}">${highlighted}</code></pre>`
+      // 复制按钮挂在外层 wrapper 上（不放进 pre：pre 横向滚动时 absolute 子元素会跟着滚走）。
+      // 按钮文案在渲染期取值，语言切换后新渲染的块跟随新语言；点击由 MarkdownBlock 事件委托处理
+      const copyLabel = escapeHtml(i18n.t('chat.code.copy'))
+      return (
+        `<div class="md-code-wrap"><pre><code class="hljs language-${safeLang}">${highlighted}</code></pre>` +
+        `<button type="button" class="md-code-copy" aria-label="${copyLabel}" title="${copyLabel}">` +
+        '<span class="codicon codicon-copy md-code-copy__icon-copy"></span>' +
+        '<span class="codicon codicon-check md-code-copy__icon-done"></span>' +
+        '</button></div>'
+      )
     },
   },
 })
@@ -131,6 +141,8 @@ const PURIFY_CONFIG = {
   ALLOWED_TAGS: [
     // 文本结构
     'p', 'br', 'hr', 'blockquote', 'pre', 'code', 'span', 'div',
+    // 代码块复制按钮（点击由 MarkdownBlock 事件委托处理）
+    'button',
     // 标题
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     // 列表
@@ -147,6 +159,8 @@ const PURIFY_CONFIG = {
   ALLOWED_ATTR: [
     'href', 'src', 'alt', 'title', 'class', 'target', 'rel',
     'colspan', 'rowspan', 'id', 'data-language',
+    // 代码块复制按钮（button 的 type + 无障碍标签）
+    'type', 'aria-label',
   ],
   ALLOW_DATA_ATTR: true,
   // 链接强制 target=_blank + rel=noopener（安全）

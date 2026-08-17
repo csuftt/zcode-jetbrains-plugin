@@ -224,26 +224,50 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   }, [])
 
   /**
-   * 粘贴处理：
+   * 粘贴处理（一律以纯文本落地，杜绝富文本样式污染）：
    *   超阈值（≥PASTE_COLLAPSE_LINES 行或 ≥PASTE_COLLAPSE_CHARS 字符）→ 阻止默认粘贴，
    *   折叠为顶部 chip（点击预览），避免长文本撑爆输入框；
-   *   未超阈值 → 走默认粘贴，落地后扫描完整路径转内联 chip（末尾路径也算完成）
+   *   未超阈值 → 同样阻止默认粘贴（contenteditable 默认会解析剪贴板 text/html，
+   *   网页/Word 复制的颜色、字号等内联样式会原样落进编辑器），改 execCommand
+   *   以纯文本插入光标处（Chromium 把 \n 落地为 <br>，与 serializeEditor 对齐，
+   *   且保留 undo 撤销栈），落地后扫描完整路径转内联 chip（末尾路径也算完成）
    */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const pasted = e.clipboardData.getData('text/plain')
-    if (pasted) {
-      const lines = pasted.split('\n').length
-      if (lines >= PASTE_COLLAPSE_LINES || pasted.length >= PASTE_COLLAPSE_CHARS) {
-        e.preventDefault()
-        setPastedTexts((prev) => [
-          ...prev,
-          {
-            id: `paste_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            text: pasted,
-            chars: pasted.length,
-          },
-        ])
-        return
+    if (!pasted) return // 无纯文本（如纯图片复制）时不干预默认行为
+    e.preventDefault()
+    const lines = pasted.split('\n').length
+    if (lines >= PASTE_COLLAPSE_LINES || pasted.length >= PASTE_COLLAPSE_CHARS) {
+      setPastedTexts((prev) => [
+        ...prev,
+        {
+          id: `paste_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          text: pasted,
+          chars: pasted.length,
+        },
+      ])
+      return
+    }
+    if (!document.execCommand('insertText', false, pasted)) {
+      // 兜底：execCommand 失效（极罕见）时手动插纯文本节点，宁可绕过 undo 也不丢粘贴
+      const el = editorRef.current
+      const sel = window.getSelection()
+      if (el && sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
+        const range = sel.getRangeAt(0)
+        range.deleteContents()
+        const frag = document.createDocumentFragment()
+        pasted.split('\n').forEach((seg, i) => {
+          if (i > 0) frag.appendChild(document.createElement('br'))
+          if (seg) frag.appendChild(document.createTextNode(seg))
+        })
+        const last = frag.lastChild
+        range.insertNode(frag)
+        if (last) {
+          range.setStartAfter(last)
+          range.collapse(true)
+          sel.removeAllRanges()
+          sel.addRange(range)
+        }
       }
     }
     setTimeout(() => {

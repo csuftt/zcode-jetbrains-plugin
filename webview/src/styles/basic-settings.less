@@ -275,3 +275,144 @@
     flex-shrink: 0;
   }
 }
+
+/* ============ 子页签选择器（外观/环境，cc-gui basicTabSelector 同款凹槽容器） ============ */
+
+.basic-settings__tabs {
+  display: flex;
+  background: var(--bg-secondary);
+  padding: 4px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.basic-settings__tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  &.active {
+    background: var(--accent-primary);
+    color: var(--color-button-text);
+    font-weight: 500;
+
+    .codicon {
+      color: var(--color-button-text);
+    }
+  }
+
+  .codicon {
+    font-size: 14px;
+  }
+}
+
+/* ============ 环境子页签（路径输入/版本徽章/警告，参考 cc-gui EnvironmentTab） ============ */
+
+.basic-settings__path-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.basic-settings__path-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+
+  &::placeholder {
+    color: var(--text-placeholder);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+  }
+}
+
+.basic-settings__save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 50%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  color: var(--accent-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, opacity 0.15s;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .codicon {
+    font-size: 13px;
+  }
+}
+
+.basic-settings__version-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 500;
+
+  &.is-ok {
+    background: color-mix(in srgb, var(--status-success) 18%, transparent);
+    color: var(--status-success);
+  }
+
+  &.is-error {
+    background: color-mix(in srgb, var(--status-error) 18%, transparent);
+    color: var(--status-error);
+  }
+}
+
+.basic-settings__version-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--status-error) 10%, var(--bg-primary));
+  color: var(--status-error);
+  font-size: 12px;
+
+  .codicon {
+    font-size: 13px;
+    flex-shrink: 0;
+    line-height: 1.5;
+  }
+}

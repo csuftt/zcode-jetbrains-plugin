@@ -7,16 +7,25 @@
     "confirm": "新規作成"
   },
   "askUser": {
+    "title": "AI の質問に回答",
     "cancel": "キャンセル",
-    "confirm": "確認"
+    "confirm": "確認",
+    "progress": "質問 {{current}}/{{total}}",
+    "multiSelect": "複数選択可",
+    "other": "その他（自由入力）",
+    "otherPlaceholder": "自由回答を入力…",
+    "back": "前へ",
+    "next": "次へ"
   },
   "planApproval": {
     "title": "プラン承認",
     "hint": "承認するとプランモードを終了し、実行を開始します",
     "emptyPlan": "_（プラン内容が空です）_",
-    "tip": "オーバーレイまたは「プランを続ける」をクリックすると拒否してプランモードに留まります",
+    "tip": "ダイアログ外をクリックすると閉じます（計画モードのまま）",
     "continuePlanning": "プランを続ける",
-    "approveAndRun": "承認して実行"
+    "approveAndRun": "承認して実行",
+    "feedbackPlaceholder": "修正意見を入力すると、計画を続けて修正します…",
+    "feedbackRequired": "修正意見を先に入力してください"
   },
   "notification": {
     "subagent": "サブエージェント",
@@ -37,5 +46,14 @@
     "openInEditor": "エディターで開く：{{path}}",
     "viewDiff": "編集前後の差分を表示",
     "diffTitle": "編集差分：{{name}}"
+  },
+  "envBanner": {
+    "title": "実行環境に問題があり、プラグインを利用できません",
+    "nodeMissing": "Node.js が見つかりません：{{detail}}",
+    "nodeTooLow": "Node.js のバージョンが低すぎます（{{version}}、v{{min}}+ が必要）",
+    "cliMissing": "ZCode CLI が見つかりません：{{detail}}",
+    "credentialsInvalid": "認証情報が無効または未設定です：{{detail}}",
+    "recheck": "再チェック",
+    "goSettings": "設定へ"
   }
 }

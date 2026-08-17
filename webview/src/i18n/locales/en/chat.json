@@ -38,6 +38,10 @@
     "resetZoom": "Reset to 100% (scroll to zoom)",
     "close": "Close (Esc)"
   },
+  "code": {
+    "copy": "Copy code",
+    "copied": "Copied"
+  },
   "preview": {
     "defaultMeta": "Markdown preview",
     "close": "Close"

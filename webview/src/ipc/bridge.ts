@@ -14,7 +14,7 @@
  *   走 mock 响应，方便纯前端调试。
  */
 
-import type { JavaRequest, JavaResponse, StreamEvent } from '@/types/messages'
+import type { JavaRequest, JavaResponse, StreamEvent, EnvStatus } from '@/types/messages'
 
 // ============ 全局类型声明 ============
 
@@ -39,6 +39,8 @@ declare global {
     __ZCODE_WORKSPACE__?: string
     /** Java 注入的多标签初始会话 id（标签恢复绑定；空串表示新标签自动建会话） */
     __ZCODE_INITIAL_SESSION__?: string
+    /** Java 推送环境状态变化的回调（envSave 保存后 IDE 广播多标签同步）*/
+    onEnvStatusChanged?: (status: EnvStatus) => void
   }
 }
 
@@ -1089,6 +1091,21 @@ flowchart LR
       return { op: 'appearanceSave' }
     case 'kvSave':
       return { op: 'kvSave' }
+    case 'askUserResponse':
+      // mock：无服务端可应答，仅回执关闭弹窗
+      return { op: 'askUserAck' }
+    case 'checkEnv':
+    case 'envSave':
+      // mock：环境恒健康（dev 浏览器无 IDE 侧检测；banner UI 验收可临时改 allOk 为 false）
+      return {
+        op: 'envStatus',
+        status: {
+          node: { configured: false, path: '/usr/local/bin/node', found: true, version: 'v20.11.1', versionTooLow: false, minVersion: 18 },
+          cli: { configured: false, path: 'C:\\Users\\mock\\AppData\\Local\\Programs\\ZCode\\resources\\glm\\zcode.cjs', found: true },
+          credentials: { ok: true, model: 'glm-4.7' },
+          allOk: true,
+        } satisfies EnvStatus,
+      }
     case 'listFiles':
       return { op: 'files', files: ['README.md', 'package.json', 'src/main.tsx'] }
     case 'listCommands':

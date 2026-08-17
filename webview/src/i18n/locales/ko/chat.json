@@ -38,6 +38,10 @@
     "resetZoom": "100%로 초기화(휠로 확대/축소)",
     "close": "닫기 (Esc)"
   },
+  "code": {
+    "copy": "코드 복사",
+    "copied": "복사됨"
+  },
   "preview": {
     "defaultMeta": "Markdown 미리보기",
     "close": "닫기"

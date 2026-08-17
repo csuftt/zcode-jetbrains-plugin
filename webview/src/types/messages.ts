@@ -202,6 +202,10 @@ export type JavaRequest =
   | { op: 'appearanceSave'; config: AppearanceConfig }
   /** 通用 kv 增量回存 IDE（entries=改动 key 的 upsert，deletes=要删的 key；权威源重启经 __ZCODE_KVSTORE__ 注入）*/
   | { op: 'kvSave'; entries: Record<string, string>; deletes?: string[] }
+  /** 环境三件套检测（node/zcode.cjs/凭证），启动时与主界面「重新检测」触发 */
+  | { op: 'checkEnv' }
+  /** 保存环境路径配置：字段缺席=不改该项，空串=清除（回退自动探测）；后端验证通过才落盘 */
+  | { op: 'envSave'; nodePath?: string; cliPath?: string }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {
@@ -376,9 +380,44 @@ export interface McpLogEntry {
   durationMs?: number
 }
 
+// ============ 运行环境状态（Kotlin ZCodeEnvChecker 契约，camelCase 对齐）============
+
+export interface EnvNodeStatus {
+  /** 用户是否配置过路径（配置无效不回退自动探测，直接报错）*/
+  configured: boolean
+  /** 实际生效路径（配置值或 PATH 探测值）*/
+  path?: string
+  found: boolean
+  /** 形如 "v20.11.1" */
+  version?: string
+  versionTooLow: boolean
+  minVersion: number
+  error?: string
+}
+
+export interface EnvCliStatus {
+  configured: boolean
+  path?: string
+  found: boolean
+  error?: string
+}
+
+export interface EnvCredentialStatus {
+  ok: boolean
+  /** 生效 provider 的首个 model（展示用）*/
+  model?: string
+  error?: string
+}
+
+export interface EnvStatus {
+  node: EnvNodeStatus
+  cli: EnvCliStatus
+  credentials: EnvCredentialStatus
+  allOk: boolean
+}
+
 export type JavaResponse =
-  | { op: 'listSessions'; sessions: SessionInfo[] }
-  | { op: 'createSession'; sessionId: string }
+  | { op: 'listSessions'; sessions: SessionInfo[] }  | { op: 'createSession'; sessionId: string }
   | { op: 'tabSessionCleared' }
   | { op: 'sessionDeleted'; sessionId: string }
   | { op: 'messages'; sessionId: string; messages: ZCodeMessage[] }
@@ -399,6 +438,8 @@ export type JavaResponse =
   | { op: 'tabTitleSet' }
   | { op: 'appearanceSave' }
   | { op: 'kvSave' }
+  /** 环境状态（checkEnv 查询 / envSave 保存成功后的重检结果 / IDE 广播同构体）*/
+  | { op: 'envStatus'; status: EnvStatus }
   | { op: 'ideTheme'; isDark: boolean }
   | { op: 'files'; files: string[] }
   | { op: 'commands'; commands: SlashCommand[] }
@@ -427,7 +468,8 @@ export type JavaResponse =
   | { op: 'mcpServerTools'; name: string; tools?: McpToolInfo[]; toolCount?: number; error?: string }
   /** MCP 连接日志条目（McpLogReader 读 CLI jsonl，中文摘要已拼好）*/
   | { op: 'mcpLogs'; logs: McpLogEntry[] }
-  | { op: 'error'; message: string }
+  /** envStatus 存在 = 环境前置检查失败（EnvCheckException），前端据此刷新环境提醒条 */
+  | { op: 'error'; message: string; envStatus?: EnvStatus }
 
 // ============ 流式事件（session/event 透传）============
 // 基于抓包确认（scripts/capture-tool-use.json 的事件汇总）
@@ -550,6 +592,8 @@ export interface AgentItem {
   summary?: string
   startedAt?: number
   endedAt?: number
+  /** 是否后台子代理（run_in_background）：part.time 只是调度往返，耗时另有取舍（见 mergeAgentItems）*/
+  background?: boolean
 }
 
 // ============ 子代理（流式聚合 + session/subagents RPC）============
@@ -574,6 +618,10 @@ export interface SubagentActivity {
   tools: ToolPart[]
   /** 最近一次事件时间戳（排序/展示用）*/
   lastUpdate: number
+  /** 首个事件时间戳（子代理启动近似时刻，本地计时起点）*/
+  startedAt?: number
+  /** 收尾事件时间戳（父 Agent 工具 result 时刻，本地计时终点）*/
+  endedAt?: number
 }
 
 /** session/subagents RPC 返回的子代理条目（running + ended.items 同构）*/

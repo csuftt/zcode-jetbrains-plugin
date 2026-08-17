@@ -73,6 +73,9 @@ export function parseAgents(messages: ZCodeMessage[]): AgentItem[] {
       // description 为空也要展示（流式早期 input 还没解析完），回退 prompt → 占位
       const description = String(input.description ?? input.prompt ?? '').slice(0, 200)
         || i18n.t('utils.subagentTask')
+      // 起止时间与工具命令卡同源（state.time），子代理耗时以此为准——
+      // session/subagents RPC 的起止由服务端多级兜底链拼装，完成后可能相等/倒挂
+      const time = part.state?.time
       const item: AgentItem = {
         description,
         status: String(part.state?.status ?? 'pending'),
@@ -80,6 +83,8 @@ export function parseAgents(messages: ZCodeMessage[]): AgentItem[] {
           ? { subagentType: input.subagent_type }
           : {}),
         callID: part.callID,
+        ...(time?.start ? { startedAt: time.start } : {}),
+        ...(time?.end ? { endedAt: time.end } : {}),
       }
       byCall.set(part.callID, item) // 后出现的状态覆盖（流式时 pending → running → completed）
     }
@@ -88,10 +93,21 @@ export function parseAgents(messages: ZCodeMessage[]): AgentItem[] {
 }
 
 /**
+ * 有效耗时对：起止齐且 end > start 才可用。
+ * RPC 的 startedAt/endedAt 实测完成后可能返回相等/倒挂的一对（兜底链取自不同
+ * 层级），直接作差会被钳成 0 —— 子代理耗时显示 "0s" 的根源。
+ */
+export function validSpan(s?: number, e?: number): { startedAt: number; endedAt: number } | undefined {
+  return s && e && e > s ? { startedAt: s, endedAt: e } : undefined
+}
+
+/**
  * 合并三个子代理数据源成 StatusPanel 列表（按 callID/toolCallId/parentToolCallId 关联）：
- * 1. parseAgents（消息历史，兜底——覆盖 RPC/流式都还没看到的早期阶段）
- * 2. subagentActivities（流式实时累积，运行中最准）
- * 3. subagents RPC（权威——turn 结束/会话加载后，含 summary/时间）
+ * 1. parseAgents（消息历史，兜底——覆盖 RPC/流式都还没看到的早期阶段；起止时间
+ *    取 Agent part 的 state.time，与工具命令卡同源，是耗时的首选来源）
+ * 2. subagentActivities（流式实时累积，运行中最准；本地计时兜底 part.time 缺失）
+ * 3. subagents RPC（权威——turn 结束/会话加载后，含 summary/childSessionId；
+ *    起止时间可能相等/倒挂，仅在本地无有效耗时对时采纳，见 validSpan）
  */
 export function mergeAgentItems(
   parsed: AgentItem[],
@@ -101,11 +117,20 @@ export function mergeAgentItems(
   const byCall = new Map<string, AgentItem>()
   // 兜底先入（会被后两个源覆盖）
   for (const p of parsed) byCall.set(p.callID, p)
-  // 流式活动：状态与 childSessionId 更及时
+  // 流式活动：状态与 childSessionId 更及时；本地计时（startedAt/endedAt）作
+  // 消息 part.time 缺失时的耗时兜底
   for (const a of activities) {
     const prev = byCall.get(a.key)
     const status = a.status === 'running' ? 'running'
       : a.status === 'failed' ? 'error' : 'completed'
+    // 后台子代理：Agent 工具立即返回（part.time 只是调度往返），本地收尾时间
+    // 也会被提前触发——起点只认流式首事件，终点留给 RPC 的后台任务 completedAt
+    const bg = a.background || prev?.background
+    const span = bg ? undefined
+      : validSpan(prev?.startedAt, prev?.endedAt) ?? validSpan(a.startedAt, a.endedAt)
+    const startedAt = span?.startedAt
+      ?? (bg ? a.startedAt ?? prev?.startedAt : prev?.startedAt ?? a.startedAt)
+    const endedAt = bg ? undefined : span?.endedAt ?? prev?.endedAt
     byCall.set(a.key, {
       description: a.description || prev?.description || i18n.t('utils.subagentTask'),
       status,
@@ -113,16 +138,25 @@ export function mergeAgentItems(
       ...(a.childSessionId || prev?.childSessionId
         ? { childSessionId: a.childSessionId || prev?.childSessionId }
         : {}),
+      ...(bg ? { background: true } : {}),
       ...(prev?.summary ? { summary: prev.summary } : {}),
-      ...(prev?.startedAt ? { startedAt: prev.startedAt } : {}),
-      ...(prev?.endedAt ? { endedAt: prev.endedAt } : {}),
+      ...(startedAt ? { startedAt } : {}),
+      ...(endedAt ? { endedAt } : {}),
       callID: a.key,
     })
   }
-  // RPC 权威值最后覆盖（status/summary/时间/childSessionId）
+  // RPC 权威值最后覆盖（status/summary/childSessionId）；起止时间例外——
+  // 前台本地（part.time / 流式计时）已有有效耗时对时不采纳 RPC 的（可能相等/倒挂）；
+  // 后台则相反：RPC 的后台任务 completedAt 是唯一可靠终点
   for (const r of rpc) {
     const prev = byCall.get(r.toolCallId)
     const rpcStatus = normalizeRpcStatus(r.status, prev?.status)
+    const bg = prev?.background
+    const span = bg
+      ? validSpan(r.startedAt, r.endedAt)
+      : validSpan(prev?.startedAt, prev?.endedAt) ?? validSpan(r.startedAt, r.endedAt)
+    const startedAt = span?.startedAt ?? prev?.startedAt ?? r.startedAt
+    const endedAt = span?.endedAt ?? prev?.endedAt
     byCall.set(r.toolCallId, {
       description: r.title || prev?.description || i18n.t('utils.subagentTask'),
       status: rpcStatus,
@@ -130,9 +164,10 @@ export function mergeAgentItems(
         ? { subagentType: r.subagentType || prev?.subagentType }
         : {}),
       childSessionId: r.childSessionId,
+      ...(bg ? { background: true } : {}),
       ...(r.summary ? { summary: r.summary } : {}),
-      ...(r.startedAt ? { startedAt: r.startedAt } : {}),
-      ...(r.endedAt ? { endedAt: r.endedAt } : {}),
+      ...(startedAt ? { startedAt } : {}),
+      ...(endedAt ? { endedAt } : {}),
       callID: r.toolCallId,
     })
   }

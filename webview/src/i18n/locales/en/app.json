@@ -7,16 +7,25 @@
     "confirm": "New"
   },
   "askUser": {
+    "title": "Answer the question",
     "cancel": "Cancel",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "progress": "Question {{current}}/{{total}}",
+    "multiSelect": "Multiple selections allowed",
+    "other": "Other (custom answer)",
+    "otherPlaceholder": "Type your answer…",
+    "back": "Back",
+    "next": "Next"
   },
   "planApproval": {
     "title": "Plan Approval",
     "hint": "Once approved, plan mode will be exited and execution will begin",
     "emptyPlan": "_(The plan is empty)_",
-    "tip": "Click the overlay or \"Keep Planning\" to decline and stay in plan mode",
+    "tip": "Click outside the dialog to close (stays in plan mode)",
     "continuePlanning": "Keep Planning",
-    "approveAndRun": "Approve & Run"
+    "approveAndRun": "Approve & Run",
+    "feedbackPlaceholder": "Describe changes; the AI will keep refining the plan…",
+    "feedbackRequired": "Enter your feedback first"
   },
   "notification": {
     "subagent": "Subagent",
@@ -37,5 +46,14 @@
     "openInEditor": "Open in editor: {{path}}",
     "viewDiff": "View diff before and after edits",
     "diffTitle": "Edit diff: {{name}}"
+  },
+  "envBanner": {
+    "title": "Runtime environment issue — plugin unavailable",
+    "nodeMissing": "Node.js not found: {{detail}}",
+    "nodeTooLow": "Node.js version too low ({{version}}, requires v{{min}}+)",
+    "cliMissing": "ZCode CLI not found: {{detail}}",
+    "credentialsInvalid": "Credentials missing or invalid: {{detail}}",
+    "recheck": "Recheck",
+    "goSettings": "Open Settings"
   }
 }
