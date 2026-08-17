@@ -477,6 +477,162 @@
       border-color: var(--accent-primary, #3574f0);
     }
   }
+
+  /* ---- 工具列表面板（卡片展开区顶部，对齐 cc-gui ServerToolsPanel）----
+     ⚠️ 不能叫 __tools——与头部工具数徽章同名会规则合并（align-items:center 污染面板布局）*/
+
+  &__tools-hint {
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  &__tools-load {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s;
+
+    &:hover {
+      color: var(--accent-primary, #3574f0);
+      border-color: var(--accent-primary, #3574f0);
+    }
+  }
+
+  &__tools-error {
+    flex: 1;
+    min-width: 0;
+    color: var(--status-error-text, #ef4444);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__tools-warning {
+    color: var(--color-warning, #cc7a00);
+  }
+
+  &__tools-retry {
+    flex-shrink: 0;
+    align-self: flex-start;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-tertiary, rgba(128, 128, 128, 0.12));
+    }
+  }
+
+  &__tools-panel {
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-self: stretch;
+  }
+
+  &__tools-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__tools-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  &__tools-meta {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: right;
+  }
+
+  &__tool-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 220px;
+    overflow-y: auto;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 3px;
+    }
+  }
+
+  &__tool-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 4px;
+    border-radius: 4px;
+    min-width: 0;
+
+    &:hover {
+      background: var(--bg-tertiary, rgba(128, 128, 128, 0.1));
+    }
+  }
+
+  &__tool-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  &__tool-icon {
+    flex-shrink: 0;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--text-muted);
+  }
+
+  &__tool-name {
+    font-family: var(--font-mono, Consolas, monospace);
+    font-size: 11px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__tool-desc {
+    padding-left: 19px; /* 与名字对齐（icon 13px + gap 6px）*/
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* 至多两行，完整内容 hover title */
+    -webkit-box-orient: vertical;
+  }
 }
 
 @keyframes mcp-pulse {

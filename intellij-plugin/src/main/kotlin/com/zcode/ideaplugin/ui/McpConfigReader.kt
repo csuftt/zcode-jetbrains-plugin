@@ -42,6 +42,8 @@ object McpConfigReader {
         /** 来源配置文件绝对路径（「打开配置文件」跳转用）*/
         val configPath: String,
         val pluginName: String?,
+        /** 配置的 cwd（占位符原样，stdio 进程工作目录用）*/
+        val cwd: String? = null,
         // ---- 以下由 RPC mcp/list 状态合并填充（拿不到为 null）----
         /** connecting|connected|disabled|disconnected|failed|untrusted */
         val status: String?,
@@ -144,6 +146,7 @@ object McpConfigReader {
         }.getOrDefault(emptyList())
         val envValues = parseStringMap(cfg["env"])
         val headerValues = parseStringMap(cfg["headers"])
+        val cwd = str(cfg["cwd"])
         val enabled = runCatching { cfg["enabled"]?.jsonPrimitive?.boolean }.getOrNull() ?: true
 
         return McpServerInfo(
@@ -159,6 +162,7 @@ object McpConfigReader {
             enabled = enabled,
             configPath = configPath,
             pluginName = pluginName,
+            cwd = cwd,
             status = null,
             toolCount = null,
             statusError = null,
@@ -187,23 +191,54 @@ object McpConfigReader {
     private val USER_CONFIG_PLACEHOLDER = Regex("\\$\\{user_config\\.[^}]*}")
 
     /**
-     * 服务器配置 → mcp/list 的 mcpServers 请求条目（zod strict schema：
-     * stdio={name,command,args,env,...} / http={name,type,url,headers,...}，
-     * args/env/headers 必填；cwd 等多余字段会被拒需丢弃）。
-     *
-     * 插件 .mcp.json 占位符替换：${CLAUDE_PLUGIN_ROOT}→.mcp.json 所在目录、
-     * ${CLAUDE_PROJECT_DIR}→项目根、${CLAUDE_PLUGIN_DATA}→插件数据目录、
-     * ${user_config.*}→空串（未配置）。
-     * enabled=false 或结构不完整（stdio 缺 command / 远程缺 url）返回 null。
+     * 占位符替换（toProtocolParam 与 McpToolsClient 进程启动共用）：
+     * ${CLAUDE_PLUGIN_ROOT}→.mcp.json 所在目录、${CLAUDE_PROJECT_DIR}→项目根、
+     * ${CLAUDE_PLUGIN_DATA}→插件数据目录、${user_config.*}→空串（未配置）。
      */
-    fun toProtocolParam(s: McpServerInfo, workspacePath: String): kotlinx.serialization.json.JsonObject? {
-        if (!s.enabled) return null
+    private fun substitute(s: McpServerInfo, workspacePath: String, v: String): String {
         val pluginRoot = File(s.configPath).parentFile?.absolutePath ?: ""
-        fun sub(v: String) = v
+        return v
             .replace("\${CLAUDE_PLUGIN_ROOT}", pluginRoot)
             .replace("\${CLAUDE_PROJECT_DIR}", workspacePath)
             .replace("\${CLAUDE_PLUGIN_DATA}", pluginDataDir(s))
             .replace(USER_CONFIG_PLACEHOLDER, "")
+    }
+
+    /**
+     * stdio 服务器占位符替换后的启动参数（McpToolsClient 起进程用；
+     * command 缺失返回 null）。Windows 的 .cmd 解析兼容在 McpToolsClient 处理。
+     */
+    fun resolvedStdioLaunch(s: McpServerInfo, workspacePath: String): Triple<String, List<String>, Map<String, String>>? {
+        val command = s.command ?: return null
+        fun sub(v: String) = substitute(s, workspacePath, v)
+        return Triple(
+            sub(command),
+            s.args.map { sub(it) },
+            s.envValues.entries.associate { (k, v) -> k to sub(v) },
+        )
+    }
+
+    /** http/sse 服务器替换后的 url 与 headers（McpToolsClient 请求用；url 缺失返回 null） */
+    fun resolvedHttpTarget(s: McpServerInfo, workspacePath: String): Pair<String, Map<String, String>>? {
+        val url = s.url ?: return null
+        fun sub(v: String) = substitute(s, workspacePath, v)
+        return sub(url) to s.headerValues.entries.associate { (k, v) -> k to sub(v) }
+    }
+
+    /** stdio 进程工作目录（配置 cwd 替换后；缺省 null=继承当前进程） */
+    fun resolvedCwd(s: McpServerInfo, workspacePath: String): String? =
+        s.cwd?.let { substitute(s, workspacePath, it) }
+
+    /**
+     * 服务器配置 → mcp/list 的 mcpServers 请求条目（zod strict schema：
+     * stdio={name,command,args,env,...} / http={name,type,url,headers,...}，
+     * args/env/headers 必填；cwd 等多余字段会被拒需丢弃）。
+     * 占位符替换规则见 [substitute]；enabled=false 或结构不完整
+     * （stdio 缺 command / 远程缺 url）返回 null。
+     */
+    fun toProtocolParam(s: McpServerInfo, workspacePath: String): kotlinx.serialization.json.JsonObject? {
+        if (!s.enabled) return null
+        fun sub(v: String) = substitute(s, workspacePath, v)
 
         return if (s.transport == "stdio") {
             val command = s.command ?: return null

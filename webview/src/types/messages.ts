@@ -180,10 +180,14 @@ export type JavaRequest =
   | { op: 'toggleSkill'; path: string; enabled: boolean }
   /** mode：status=状态快照（默认）| connect=真实连接（慢）*/
   | { op: 'listMcpServers'; mode?: 'status' | 'connect' }
+  /** 单台服务器工具清单（force=true 前端绕过缓存强制重拉）*/
+  | { op: 'mcpServerTools'; name: string; force?: boolean }
   /** MCP 连接日志（CLI 落盘的 mcp.* 事件，今天+昨天文件尾部）*/
   | { op: 'getMcpLogs' }
   | { op: 'askUserResponse'; requestId: string; action: 'accept' | 'decline'; answer?: string }
   | { op: 'createTab' }
+  /** 会话内嵌浏览器开关（展示/收起右侧分栏，聊天区宽度恒定）*/
+  | { op: 'toggleBrowserPane' }
   | { op: 'setTabTitle'; title: string; sessionId?: string }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
@@ -325,6 +329,24 @@ export interface McpServerInfo {
 }
 
 /**
+ * MCP 工具条目（McpToolsClient 直连服务器调 tools/list 的结果；
+ * 协议 mcp/list 无工具明细，只有 toolCount）
+ */
+export interface McpToolInfo {
+  name: string
+  /** 工具描述（Kotlin 端已截 400 字符，tooltip 用）*/
+  description?: string
+}
+
+/** 单台服务器的工具列表加载状态（store 按 serverName 存槽）*/
+export interface McpToolsState {
+  tools: McpToolInfo[]
+  loading: boolean
+  error?: string
+  fetchedAt: number
+}
+
+/**
  * MCP 连接日志条目（ZCode CLI 落盘的 mcp.* 事件，McpLogReader 解析）
  * timestamp 为 UTC ISO8601（前端 new Date() 转本地时区展示）。
  */
@@ -360,6 +382,7 @@ export type JavaResponse =
   | { op: 'exitPlanApproval'; requestId: string; plan: string }
   | { op: 'askUserAck' }
   | { op: 'tabCreating' }
+  | { op: 'browserPaneToggled'; visible: boolean }
   | { op: 'tabTitleSet' }
   | { op: 'ideTheme'; isDark: boolean }
   | { op: 'files'; files: string[] }
@@ -385,6 +408,8 @@ export type JavaResponse =
   | { op: 'skillToggled'; path: string; enabled: boolean }
   /** rpcError 存在 = mcp/list RPC 失败，servers 为磁盘配置降级清单 */
   | { op: 'mcpServers'; mode: string; servers: McpServerInfo[]; rpcError?: string }
+  /** 单台服务器的工具清单（McpToolsClient 直连结果；失败只有 error）*/
+  | { op: 'mcpServerTools'; name: string; tools?: McpToolInfo[]; toolCount?: number; error?: string }
   /** MCP 连接日志条目（McpLogReader 读 CLI jsonl，中文摘要已拼好）*/
   | { op: 'mcpLogs'; logs: McpLogEntry[] }
   | { op: 'error'; message: string }

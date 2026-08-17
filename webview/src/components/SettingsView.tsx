@@ -29,8 +29,9 @@ interface Props {
 }
 
 export function SettingsView({ onBack }: Props) {
-  // dev 辅助：浏览器 mock 验收可带 #skills / #mcp 直达页签；JCEF 内 hash 恒空不影响生产
-  const hashTab = window.location.hash.replace('#', '') as SettingsTab
+  // dev 辅助：浏览器 mock 验收可带 #skills / #mcp 直达页签（#mcp/<服务器名> 只取首段）；
+  // JCEF 内 hash 恒空不影响生产
+  const hashTab = window.location.hash.replace('#', '').split('/')[0] as SettingsTab
   const initialTab: SettingsTab = !isInJcef() && ['usage', 'memory', 'skills', 'mcp'].includes(hashTab) ? hashTab : 'usage'
   const [tab, setTab] = useState<SettingsTab>(initialTab)
 

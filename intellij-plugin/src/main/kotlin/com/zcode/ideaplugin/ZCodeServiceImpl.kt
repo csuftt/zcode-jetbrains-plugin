@@ -22,7 +22,7 @@ import kotlin.concurrent.withLock
  * 用 @Service 注解（现代方式），不在 plugin.xml 里声明。
  */
 @Service(Service.Level.PROJECT)
-class ZCodeServiceImpl(private val project: Project) : ZCodeService {
+class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intellij.openapi.Disposable {
 
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance("ZCodePlugin")
 
@@ -37,6 +37,14 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService {
     /** 当前激活面板（标签切换时更新；外部推送与 askUser fallback 的目标）*/
     @Volatile
     private var activePanel: ZCodeToolWindowPanel? = null
+
+    // ============ 全局共享内嵌浏览器（跨会话标签，协议单一 idea-iab）============
+    @Volatile
+    private var sharedBrowserPanel: com.zcode.ideaplugin.ui.ZCodeBrowserPanel? = null
+
+    /** 浏览器当前挂载（分栏展开）的面板；收起时保留 owner（实例与页面常驻）*/
+    @Volatile
+    private var embeddedBrowserOwner: ZCodeToolWindowPanel? = null
 
     // ============ AskUserQuestion / ExitPlanMode 协调（跨标签共享）============
     // 协议客户端的 userInputRequestHandler 是单例，必须全局只注册一次。
@@ -91,6 +99,43 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService {
         activePanel = panel
     }
 
+    override fun getActivePanel(): ZCodeToolWindowPanel? = activePanel
+
+    override fun getSharedBrowserPanel(): com.zcode.ideaplugin.ui.ZCodeBrowserPanel? = sharedBrowserPanel
+
+    override fun getOrCreateSharedBrowserPanel(): com.zcode.ideaplugin.ui.ZCodeBrowserPanel? {
+        sharedBrowserPanel?.let { return it }
+        return synchronized(this) {
+            sharedBrowserPanel?.let { return it }
+            // 收起按钮作用于「当前挂载 owner」——闭包读实时状态，跨标签迁移后仍然正确
+            val panel = com.zcode.ideaplugin.ui.ZCodeBrowserPanel(project, onClose = {
+                embeddedBrowserOwner?.hideEmbeddedBrowser()
+            })
+            sharedBrowserPanel = panel
+            log.info("[browser-use] 全局共享浏览器面板已创建（跨会话标签）")
+            panel
+        }
+    }
+
+    override fun getEmbeddedBrowserOwner(): ZCodeToolWindowPanel? = embeddedBrowserOwner
+
+    override fun setEmbeddedBrowserOwner(panel: ZCodeToolWindowPanel?) {
+        embeddedBrowserOwner = panel
+    }
+
+    override fun dispose() {
+        // 项目级服务销毁：释放共享浏览器实例（所有标签共用这一个）
+        sharedBrowserPanel?.let {
+            try {
+                com.intellij.openapi.util.Disposer.dispose(it)
+            } catch (e: Exception) {
+                log.warn("释放共享浏览器面板失败: ${e.message}")
+            }
+        }
+        sharedBrowserPanel = null
+        embeddedBrowserOwner = null
+    }
+
     override fun findPanelForSession(sessionId: String): ZCodeToolWindowPanel? =
         panels.firstOrNull { it.isSubscribedTo(sessionId) }
 
@@ -114,6 +159,31 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService {
             log.info("[askUser] userInputRequestHandler 已在 Service 层注册（多标签共享）")
         }
     }
+
+    // ============ browser-use 宿主执行器（AI 浏览器工具 → JCEF 面板）============
+
+    @Volatile
+    private var browserExecutor: com.zcode.ideaplugin.ui.ZCodeBrowserExecutor? = null
+
+    @Volatile
+    private var browserHandlerRegistered = false
+    private val browserHandlerLock = Any()
+
+    override fun ensureBrowserExecutor() {
+        if (browserHandlerRegistered) return
+        synchronized(browserHandlerLock) {
+            if (browserHandlerRegistered) return
+            val executor = com.zcode.ideaplugin.ui.ZCodeBrowserExecutor(project)
+            browserExecutor = executor
+            val c = getClient()
+            c.browserListHandler = { executor.listBrowsers() }
+            c.browserExecuteHandler = { params -> executor.execute(params) }
+            browserHandlerRegistered = true
+            log.info("[browser-use] 宿主 handler 已注册（interaction/browserList + browserExecute）")
+        }
+    }
+
+    override fun getBrowserExecutor(): com.zcode.ideaplugin.ui.ZCodeBrowserExecutor? = browserExecutor
 
     /**
      * 收到 interaction/requestUserInput：解析问题、推弹窗到目标面板、阻塞等用户应答。

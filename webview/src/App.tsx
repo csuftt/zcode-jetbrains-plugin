@@ -43,10 +43,14 @@ export default function App() {
   // IDE 主题同步
   useTheme()
 
-  // 视图切换（dev 辅助：浏览器 mock 验收可带 #settings/#skills/#mcp/#usage 直达；JCEF 内 hash 恒空不影响生产）
+  // 视图切换（dev 辅助：浏览器 mock 验收可带 #settings/#skills/#mcp/#usage 直达；
+  // #mcp/<服务器名> 形式直达并自动展开该卡片；JCEF 内 hash 恒空不影响生产）
   const settingsHashes = ['#settings', '#skills', '#mcp', '#usage']
+  const isSettingsHash = settingsHashes.some(
+    (h) => window.location.hash === h || window.location.hash.startsWith(h + '/'),
+  )
   const [currentView, setCurrentView] = useState<View>(
-    !isInJcef() && settingsHashes.includes(window.location.hash) ? 'settings' : 'chat',
+    !isInJcef() && isSettingsHash ? 'settings' : 'chat',
   )
 
   // 会话内搜索面板（仅 chat 视图）
@@ -130,6 +134,7 @@ export default function App() {
         newSessionDisabled={currentSessionEmpty}
         onNewSession={handleNewSession}
         onNewTab={() => sendToJava({ op: 'createTab' })}
+        onOpenBrowser={() => sendToJava({ op: 'toggleBrowserPane' })}
         onSearch={() => setSearchOpen(true)}
         onHistory={() => setCurrentView('history')}
         onSettings={() => setCurrentView('settings')}

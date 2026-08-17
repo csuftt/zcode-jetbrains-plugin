@@ -278,6 +278,15 @@ function mockRespond(req: JavaRequest): void {
     return
   }
 
+  // mcpServerTools：延迟 1.2s 响应（浏览器验收 loading spin 态）
+  if (req.op === 'mcpServerTools') {
+    setTimeout(() => {
+      const resp = mockResponse(req)
+      if (resp) listeners.forEach((fn) => fn(resp))
+    }, 1200)
+    return
+  }
+
   // 其他 op 走标准 mock 响应
   setTimeout(() => {
     const resp = mockResponse(req)
@@ -1070,6 +1079,9 @@ flowchart LR
     case 'createTab':
       // 多标签由 IDE 原生 Content 管理，浏览器 mock 无标签概念
       return { op: 'tabCreating' }
+    case 'toggleBrowserPane':
+      // 分栏开关由 IDE 侧处理，mock 模式无意义，返回固定态
+      return { op: 'browserPaneToggled', visible: false }
     case 'setTabTitle':
       return { op: 'tabTitleSet' }
     case 'listFiles':
@@ -1149,7 +1161,7 @@ flowchart LR
     case 'toggleSkill':
       return { op: 'skillToggled', path: req.path, enabled: req.enabled }
     case 'listMcpServers':
-      // mock：stdio/http、connected/failed/disconnected/disabled/未知、runtime 来源各形态
+      // mock：stdio/http、connected/failed/disconnected/disabled、runtime 来源各形态
       return {
         op: 'mcpServers',
         mode: req.mode ?? 'status',
@@ -1157,9 +1169,40 @@ flowchart LR
           { name: 'context7', scope: 'user', transport: 'stdio', command: 'npx', args: ['-y', '@upstash/context7-mcp'], envKeys: ['DEFAULT_MINIMUM_TOKENS'], enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', status: 'connected', toolCount: 2, updatedAt: new Date().toISOString() },
           { name: 'web-reader', scope: 'user', transport: 'http', url: 'https://mcp.example.com/web-reader', enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', status: 'failed', toolCount: 0, statusError: 'connect ETIMEDOUT 1.2.3.4:443', updatedAt: new Date().toISOString() },
           { name: 'legacy-search', scope: 'project', transport: 'sse', url: 'https://mcp.example.com/sse', enabled: false, configPath: 'G:\\mock\\project\\zcode.json', status: 'disabled', toolCount: 0, updatedAt: new Date().toISOString() },
-          { name: 'browser-tools', scope: 'plugin', transport: 'stdio', command: 'node', args: ['server.js'], enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\plugins\\cache\\official\\browser-use\\0.2.1\\.mcp.json', pluginName: 'browser-use', status: 'disconnected', toolCount: 8 },
+          { name: 'browser-tools', scope: 'plugin', transport: 'stdio', command: 'node', args: ['server.js'], enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\plugins\\cache\\official\\browser-use\\0.2.1\\.mcp.json', pluginName: 'browser-use', status: 'connected', toolCount: 0 },
+          { name: 'rpc-count-stale', scope: 'user', transport: 'http', url: 'https://mcp.example.com/stale', enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', status: 'connected', toolCount: 0 },
         ],
       }
+    case 'mcpServerTools':
+      // mock：context7 正常返回；browser-tools 已连接但 0 工具（黄色警告态）；其余报错
+      if (req.name === 'context7') {
+        return {
+          op: 'mcpServerTools',
+          name: req.name,
+          toolCount: 2,
+          tools: [
+            { name: 'resolve-library-id', description: '将通用库/框架名称解析为 Context7 兼容的库 ID（支持模糊匹配）' },
+            { name: 'get-library-docs', description: '按 Context7 库 ID 拉取最新文档片段，用于回答库/框架使用问题' },
+          ],
+        }
+      }
+      if (req.name === 'browser-tools') {
+        return { op: 'mcpServerTools', name: req.name, toolCount: 0, tools: [] }
+      }
+      // RPC toolCount=0 但直连拿到 3 个（验收头部徽章数以直连为准）
+      if (req.name === 'rpc-count-stale') {
+        return {
+          op: 'mcpServerTools',
+          name: req.name,
+          toolCount: 3,
+          tools: [
+            { name: 'fetch_page', description: '抓取指定 URL 的页面内容并转为 Markdown' },
+            { name: 'search_web', description: '全网搜索，返回带摘要的结果列表。这条描述特别长，用来验收工具详情两行截断 + hover title 看全文的效果，超出部分应该被 line-clamp 裁掉而不撑开布局。' },
+            { name: 'read_file', description: '读取服务器侧文件内容' },
+          ],
+        }
+      }
+      return { op: 'mcpServerTools', name: req.name, error: 'mock：连接超时（ETIMEDOUT 1.2.3.4:443）' }
     case 'getMcpLogs':
       // mock：完整连接生命周期样例（started→connected / failed 带 stderr / 启动汇总）
       return {

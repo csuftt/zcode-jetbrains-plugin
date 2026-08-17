@@ -46,11 +46,38 @@ interface ZCodeService {
      */
     fun pushToWebview(msg: JsonObject)
 
+    /** 当前激活会话面板（browser-use 内嵌浏览器宿主定位用）*/
+    fun getActivePanel(): ZCodeToolWindowPanel?
+
+    /**
+     * 全局共享内嵌浏览器面板（跨会话标签，对应协议单一 idea-iab 实例；未创建为 null）。
+     * 实例常驻（收起也保留页面），项目关闭时统一释放。
+     */
+    fun getSharedBrowserPanel(): com.zcode.ideaplugin.ui.ZCodeBrowserPanel?
+
+    /** 创建共享浏览器面板（幂等）*/
+    fun getOrCreateSharedBrowserPanel(): com.zcode.ideaplugin.ui.ZCodeBrowserPanel?
+
+    /** 浏览器当前挂载（分栏展开）的会话面板；收起或未挂载为 null */
+    fun getEmbeddedBrowserOwner(): ZCodeToolWindowPanel?
+
+    fun setEmbeddedBrowserOwner(panel: ZCodeToolWindowPanel?)
+
     /**
      * 注册 interaction/requestUserInput 协调器（幂等，多面板共享一个协议 handler）。
      * 第一个 panel 初始化时调用。
      */
     fun ensureUserInputHandler()
+
+    /**
+     * 注册 browser-use 宿主反向请求 handler（幂等）：interaction/browserList +
+     * interaction/browserExecute → ZCodeBrowserExecutor（AI 的浏览器工具落到 JCEF 面板）。
+     * 第一个 panel 初始化时调用。
+     */
+    fun ensureBrowserExecutor()
+
+    /** browser-use 执行器（UI 层复用其 CDP 通道，如自由尺寸 viewport；未初始化为 null）*/
+    fun getBrowserExecutor(): com.zcode.ideaplugin.ui.ZCodeBrowserExecutor?
 
     /**
      * 前端 askUserResponse 应答：complete 对应 future 并清理重试 id，

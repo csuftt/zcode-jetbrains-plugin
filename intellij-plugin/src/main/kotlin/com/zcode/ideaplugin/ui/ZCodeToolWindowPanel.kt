@@ -25,6 +25,7 @@ import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandler
 import org.cef.network.CefRequest
 import com.zcode.ideaplugin.ZCodeService
+import com.zcode.ideaplugin.ZCodeWebviewServer
 import com.zcode.ideaplugin.zCodeService
 import com.zcode.ideaplugin.protocol.ZCodeProtocolException
 import com.zcode.ideaplugin.protocol.SessionStat
@@ -111,6 +112,78 @@ class ZCodeToolWindowPanel(
     // 主题监听连接（dispose 时断开）
     private var themeBusConn: com.intellij.util.messages.MessageBusConnection? = null
 
+    // ============ 会话内嵌浏览器（AI browser-use 同屏观察用）============
+    // 浏览器作为聊天 webview 的右侧分栏，AI 导航时无需切标签页——对齐 ZCode 桌面端
+    // 「浏览器侧板」形态。实例收回后保留（复用已加载页面）
+    private var embeddedBrowser: ZCodeBrowserPanel? = null
+    private var embeddedSplit: com.intellij.ui.OnePixelSplitter? = null
+    // 浏览器弹出前的 ToolWindow 宽度（收起时还原）；-1 = 未记录
+    private var toolWindowWidthBeforeBrowser: Int = -1
+    // 收起/还原期间屏蔽「浏览器宽驱动总宽」监听（避免恢复过程被自己打断）
+    @Volatile
+    private var suppressWidthFollow = false
+    // 上一轮事件时的 ToolWindow 总宽/浏览器宽：区分「中间分割线拖动」（总宽不变）与
+    // 「左侧边界拖动/主窗口缩放」（总宽先变）两种宽度变化来源
+    private var lastKnownTwWidth: Int = -1
+    private var lastKnownBrowserWidth: Int = -1
+    // 自己发起的总宽调整（followBrowserWidth→applyToolWindowWidth）触发的布局事件
+    // 不算外部拖动——否则会被误判重钉基准，与跟随逻辑互相打架（实测行为反转的根因）
+    @Volatile
+    private var expectOwnTwChange = false
+    // 浏览器是全局单例、分栏可多次摘挂（迁移/收起再展开）：先移除旧监听防叠加
+    private var browserWidthListener: java.awt.event.ComponentListener? = null
+
+    // 重启宽度还原（PropertiesComponent，project 级）：关闭时浏览器展开 → IDE 恢复的
+    // TW 总宽含浏览器宽，重启后浏览器收起、聊天独占总宽显得很大——持久化聊天基准宽+展开
+    // 状态，恢复会话时一次性还原到基准宽
+    private companion object {
+        const val KEY_BROWSER_EXPANDED = "zcode.browser.paneExpanded"
+        const val KEY_CHAT_BASE_WIDTH = "zcode.browser.chatBaseWidth"
+    }
+
+    private fun persistBrowserWidthState(expanded: Boolean, base: Int) {
+        try {
+            val props = com.intellij.ide.util.PropertiesComponent.getInstance(project)
+            props.setValue(KEY_BROWSER_EXPANDED, expanded, false)
+            if (base > 0) props.setValue(KEY_CHAT_BASE_WIDTH, base, -1)
+        } catch (_: Exception) {}
+    }
+
+    /** initJcef 后调用：关闭时浏览器展开则把 TW 宽还原到聊天基准宽（一次性，标志自清）*/
+    private fun restoreWidthAfterRestart() {
+        try {
+            val props = com.intellij.ide.util.PropertiesComponent.getInstance(project)
+            if (props.getBoolean(KEY_BROWSER_EXPANDED, false)) {
+                val base = props.getInt(KEY_CHAT_BASE_WIDTH, -1)
+                if (base > 0) {
+                    // 自清：只还原一次，避免用户之后无浏览器拖宽也被拉回
+                    props.setValue(KEY_BROWSER_EXPANDED, false, false)
+                    toolWindowWidthBeforeBrowser = base // 后续 AI/用户展开浏览器以此为聊天基准
+                    log.info("检测到关闭时浏览器展开，准备还原 TW 宽度到聊天基准宽 $base")
+                    SwingUtilities.invokeLater { tryRestoreWidth(base, 10) }
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("重启宽度还原失败: ${e.message}")
+        }
+    }
+
+    /** 等待 TW 有尺寸后还原（重启初期布局未完成 width=0，限次重试）*/
+    private fun tryRestoreWidth(base: Int, retries: Int) {
+        if (disposed) return
+        val tw = ZCodeToolWindowFactory.getToolWindow(project) ?: return
+        val current = tw.component.width
+        if (current <= 0) {
+            if (retries > 0) SwingUtilities.invokeLater { tryRestoreWidth(base, retries - 1) }
+            return
+        }
+        // 明显大于基准（含浏览器宽）才还原；阈值防正常波动误判
+        if (current > base + JBUI.scale(120)) {
+            applyToolWindowWidth(base)
+            log.info("重启还原 ToolWindow 宽度：$current → $base（纯聊天宽度）")
+        }
+    }
+
     // ============ 流式推送节流缓冲 ============
     // 高频 delta 事件先缓冲，每 16ms（60fps）合并成一批推送，避免 executeJavaScript 积压
     private val streamBuffer = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, JsonObject>>()
@@ -132,6 +205,7 @@ class ZCodeToolWindowPanel(
         } else {
             initJcef()
             registerThemeListener()
+            restoreWidthAfterRestart()
         }
     }
 
@@ -148,6 +222,7 @@ class ZCodeToolWindowPanel(
         log.info("懒加载标签激活，创建 JCEF 面板（initialSessionId=$initialSessionId）")
         initJcef()
         registerThemeListener()
+        restoreWidthAfterRestart()
         revalidate()
         repaint()
     }
@@ -193,6 +268,8 @@ class ZCodeToolWindowPanel(
         loadWebview()
         // AskUser/ExitPlanMode 协调器在 Service 层注册（多标签共享一个协议 handler）
         project.zCodeService().ensureUserInputHandler()
+        // browser-use 宿主执行器（AI 浏览器工具）同样在 Service 层注册一次
+        project.zCodeService().ensureBrowserExecutor()
 
         // 开启 JCEF 外部链接（开发期）
         jbCefBrowser.setOpenLinksInExternalBrowser(true)
@@ -205,10 +282,13 @@ class ZCodeToolWindowPanel(
     }
 
     /**
-     * 注册渲染层诊断（排查白屏用）：
+     * 注册渲染层诊断（排查白屏用）+ 桥变量持续注入：
      * - CefLoadHandler：onLoadEnd（页面真正加载完成的时刻）/ onLoadError（加载失败，白屏第一现场）。
      *   executeJavaScript 是 fire-and-forget，渲染进程死掉也不报错，只有 load 日志能看到真相
      *   （2026-08-15 白屏故障的教训）。
+     * - 桥变量注入：onLoadStart/onLoadEnd 各注一次（executeJavaScript 赋值幂等），
+     *   替代旧「sleep 800ms 一次性注入」——URL 加载路径（dev 5173 / 内置 server）的
+     *   HMR full reload、页面导航后桥不再丢失。
      * - 前端 console.error / window.onerror / unhandledrejection 回传：见 buildBridgeJs 注入的
      *   __ZCODE_LOG_HOOK__（走 JBCefJSQuery 桥，op=__jsLog；此版本 JBCefClient 无 console 监听 API）。
      */
@@ -218,11 +298,14 @@ class ZCodeToolWindowPanel(
                 browser: CefBrowser?, isLoading: Boolean, canGoBack: Boolean, canGoForward: Boolean,
             ) {}
 
-            override fun onLoadStart(browser: CefBrowser?, frame: CefFrame?, transitionType: CefRequest.TransitionType?) {}
+            override fun onLoadStart(browser: CefBrowser?, frame: CefFrame?, transitionType: CefRequest.TransitionType?) {
+                if (frame?.isMain == true) injectBridgeVars()
+            }
 
             override fun onLoadEnd(browser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
                 if (frame?.isMain == true) {
                     log.info("[webview-load] onLoadEnd httpStatus=$httpStatusCode（页面加载完成）")
+                    injectBridgeVars()
                 }
             }
 
@@ -279,10 +362,13 @@ class ZCodeToolWindowPanel(
      *
      * 加载策略（按优先级）：
      * 1. dev 模式：探测 localhost:5173（vite dev server），通了就 loadURL（带 HMR）
-     * 2. 生产模式：从 resources/webview/index.html 读（vite singlefile 构建产物）
-     * 3. fallback：旧的 inline HTML（保证没构建产物时也能用）
+     * 2. 生产首选：内置静态资源 server（ZCodeWebviewServer serve 多文件产物 + sourcemap），
+     *    真实 origin，DevTools 可直接看 TS/TSX 源码断点，外部浏览器亦可打开同地址调试
+     * 3. 生产 fallback：singlefile 单 HTML（server 启动失败/产物缺失时，无 origin 无 sourcemap）
+     * 4. 兜底：旧的 inline HTML（保证没构建产物时也能用）
      *
-     * 加载完成后注入桥变量 window.__ZCODE_CEF_QUERY__，供 React 的 bridge.ts 使用
+     * URL 路径（1/2）的桥变量由 registerDiagnostics 的 load handler 在每次
+     * onLoadStart/onLoadEnd 注入（幂等），HMR full reload / 页面导航后桥不丢。
      */
     private fun loadWebview() {
         val devUrl = "http://localhost:5173"
@@ -291,18 +377,24 @@ class ZCodeToolWindowPanel(
             // dev 模式：连 vite dev server
             log.info("检测到 dev server，加载 $devUrl（dev 模式，HMR）")
             jbCefBrowser.loadURL(devUrl)
-            injectBridgeAfterLoad()
             return
         }
 
-        // 生产模式：读打包的单 HTML
+        // 生产首选：内置静态资源 server
+        val baseUrl = ZCodeWebviewServer.baseUrl()
+        if (baseUrl != null) {
+            log.info("加载内置 server $baseUrl/（生产多文件模式，真实 origin + sourcemap 可调试）")
+            jbCefBrowser.loadURL("$baseUrl/")
+            return
+        }
+
+        // 生产 fallback：读 singlefile 单 HTML
         val bundledHtml = readBundledWebview()
         if (bundledHtml != null) {
-            log.info("加载 resources/webview/index.html（生产模式，长度=${bundledHtml.length}）")
+            log.info("加载 resources/webview-single/index.html（singlefile fallback，长度=${bundledHtml.length}）")
             // 把桥变量注入到 HTML 的 <head> 最前面（DOMContentLoaded 前可用）
             val htmlWithBridge = injectBridgeIntoHtml(bundledHtml)
             jbCefBrowser.loadHTML(htmlWithBridge)
-            injectBridgeAfterLoad()
             return
         }
 
@@ -312,25 +404,49 @@ class ZCodeToolWindowPanel(
         jbCefBrowser.loadHTML(fallbackHtml)
     }
 
-    /** 探测 dev server 是否存活（localhost:5173）*/
+    /**
+     * 探测 dev server 是否为本插件 webview（localhost:5173）。
+     * 仅端口活着不够——其他 vite 项目占 5173 时会把陌生页面当聊天 UI 加载
+     * （实测：AI 调试用的 demo dev server 劫持过插件主界面），
+     * 必须校验页面身份（title=ZCode）才走 dev 模式。
+     */
     private fun isDevServerAlive(url: String): Boolean {
         return try {
             val uri = java.net.URI(url)
             java.net.Socket().use { s ->
                 s.connect(java.net.InetSocketAddress(uri.host, uri.port), 300)
                 s.isConnected
-            }
+            } && isOurWebviewPage(url)
         } catch (e: Exception) {
             false
         }
     }
 
-    /** 从 resources/webview/index.html 读取打包产物（生产模式）*/
+    /** 拉取页面内容校验身份：webview 的 index.html 固定 <title>ZCode</title> */
+    private fun isOurWebviewPage(url: String): Boolean {
+        return try {
+            val body = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(java.time.Duration.ofMillis(800))
+                .build()
+                .send(
+                    java.net.http.HttpRequest.newBuilder(java.net.URI(url))
+                        .timeout(java.time.Duration.ofMillis(1500))
+                        .GET()
+                        .build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString(),
+                ).body()
+            body.contains("<title>ZCode", ignoreCase = true)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** 从 resources/webview-single/index.html 读取 singlefile 产物（内置 server 不可用时的 fallback）*/
     private fun readBundledWebview(): String? {
         return try {
-            javaClass.getResourceAsStream("/webview/index.html")?.bufferedReader()?.use { it.readText() }
+            javaClass.getResourceAsStream("/webview-single/index.html")?.bufferedReader()?.use { it.readText() }
         } catch (e: Exception) {
-            log.warn("读取 resources/webview/index.html 失败: ${e.message}")
+            log.warn("读取 resources/webview-single/index.html 失败: ${e.message}")
             null
         }
     }
@@ -353,27 +469,20 @@ class ZCodeToolWindowPanel(
     }
 
     /**
-     * 页面 load 完成后注入桥变量（dev 模式 + 生产模式兜底）。
-     * 用 JCEF 的 setLoadEnd 监听，或定时重试注入（更简单可靠）。
+     * 桥变量注入（EDT；幂等）。
+     * buildBridgeJs 见下——URL 加载路径（dev 5173 / 内置 server）在 onLoadStart/onLoadEnd
+     * 调用本方法；singlefile 路径 head 已注入，此处为兜底重复（赋值幂等无害）。
      */
-    private fun injectBridgeAfterLoad() {
-        val injectJs = buildBridgeJs()
-        // 页面 load 后注入（executeJavaScript 必须在 UI 线程）
+    private fun injectBridgeVars() {
+        if (!::jsQuery.isInitialized || !::jbCefBrowser.isInitialized) return
+        val js = buildBridgeJs()
         SwingUtilities.invokeLater {
+            if (disposed) return@invokeLater
             try {
-                // JBCefBrowser 的 JBCefClient 可以加 JBCefLoadHandler，但定时重试更简单
-                Thread({
-                    Thread.sleep(800) // 等 React 渲染
-                    SwingUtilities.invokeLater {
-                        try {
-                            jbCefBrowser.cefBrowser.executeJavaScript(injectJs, "zcode-bridge", 0)
-                            log.info("桥变量兜底注入完成（fire-and-forget，不代表页面已加载；funcName=${jsQuery.funcName}）")
-                        } catch (e: Exception) {
-                            log.warn("注入桥变量失败: ${e.message}")
-                        }
-                    }
-                }, "zcode-bridge-inject").apply { isDaemon = true }.start()
-            } catch (_: Exception) {}
+                jbCefBrowser.cefBrowser.executeJavaScript(js, "zcode-bridge", 0)
+            } catch (e: Exception) {
+                log.warn("注入桥变量失败: ${e.message}")
+            }
         }
     }
 
@@ -467,6 +576,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "listSkills" -> handleListSkills(msg)
                         "toggleSkill" -> handleToggleSkill(msg)
                         "listMcpServers" -> handleListMcpServers(msg)
+                        "mcpServerTools" -> handleMcpServerTools(msg)
                         "getMcpLogs" -> handleGetMcpLogs(msg)
                         "askUserResponse" -> handleAskUserResponse(msg)
                         "deleteSession" -> handleDeleteSession(msg)
@@ -484,6 +594,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "showDiff" -> handleShowDiff(msg)
                         "refreshFile" -> handleRefreshFile(msg)
                         "createTab" -> handleCreateTab()
+                        "toggleBrowserPane" -> handleToggleBrowserPane()
                         "setTabTitle" -> handleSetTabTitle(msg)
                         "clearTabSession" -> handleClearTabSession()
                         else -> errorResponse("未知 op: $op")
@@ -581,11 +692,312 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
+    /**
+     * 显示会话内嵌浏览器分栏（EDT；幂等——已显示/已创建均复用）。
+     * 浏览器是**全局共享单例**（协议单一 idea-iab，跨会话标签）：
+     * 已挂在他处且展开中 → 迁移过来（宽度延续，不重新拉宽）；
+     * 收起状态 → 重新挂载并 stretch。
+     * 任何挂载前都先从旧 owner 摘除（Swing 单父语义：不摘会留下空壳 splitter）。
+     * ZCodeBrowserExecutor.ensureBrowserPanel 优先调用本方法（AI 同屏观察）。
+     */
+    fun showEmbeddedBrowser(): ZCodeBrowserPanel? {
+        if (disposed || !::jbCefBrowser.isInitialized || !JBCefApp.isSupported()) return null
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater { showEmbeddedBrowser() }
+            return null
+        }
+        val service = project.zCodeService()
+        // 已挂在自己这（展开中）：直接复用
+        if (embeddedSplit != null) {
+            embeddedBrowser?.let { return it }
+        }
+        val panel = embeddedBrowser ?: service.getOrCreateSharedBrowserPanel() ?: return null
+        // 他处展开中：摘除迁移（返回摘除前浏览器宽，>0 表示迁移；-1 表示收起/未挂载）。
+        // owner 面板销毁时已把 owner 清 null，这里的 owner 必然活着
+        val owner = service.getEmbeddedBrowserOwner()
+        val migrateWidth = if (owner != null && owner !== this) {
+            owner.detachEmbeddedBrowserInternal()
+        } else {
+            -1
+        }
+        embeddedBrowser = panel
+        service.setEmbeddedBrowserOwner(this)
+        attachEmbeddedSplit(panel, stretch = migrateWidth <= 0, migrateBrowserWidth = migrateWidth)
+        log.info("会话内嵌浏览器分栏已显示（${if (migrateWidth > 0) "自其他标签迁移，浏览器宽=$migrateWidth" else "新建挂载/重新展开"}）")
+        return panel
+    }
+
+    /**
+     * 内嵌浏览器全局展开时迁移挂载到自己（标签切换跟随；收起状态不动）。
+     * Factory 的 selectionChanged 调用——修复「切到新标签主界面独占被拉宽的 TW」。
+     */
+    fun adoptEmbeddedBrowserIfDisplayed() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater { adoptEmbeddedBrowserIfDisplayed() }
+            return
+        }
+        if (disposed || !::jbCefBrowser.isInitialized) return
+        val service = project.zCodeService()
+        val owner = service.getEmbeddedBrowserOwner() ?: return
+        if (owner === this) return
+        val panel = service.getSharedBrowserPanel() ?: return
+        val migrateWidth = owner.detachEmbeddedBrowserInternal()
+        if (migrateWidth < 0) return // 浏览器处于收起状态：不自动展开，谁需要谁 show
+        embeddedBrowser = panel
+        service.setEmbeddedBrowserOwner(this)
+        attachEmbeddedSplit(panel, stretch = false, migrateBrowserWidth = migrateWidth)
+        log.info("内嵌浏览器已随标签切换迁移挂载")
+    }
+
+    /**
+     * 从本面板摘除内嵌浏览器分栏（实例与页面保留）。
+     * 返回摘除前的浏览器宽（未挂载/收起状态返回 -1）；迁移与收起共用本内核。
+     */
+    internal fun detachEmbeddedBrowserInternal(): Int {
+        val splitter = embeddedSplit ?: return -1
+        if (!SwingUtilities.isEventDispatchThread()) {
+            var w = -1
+            SwingUtilities.invokeAndWait { w = detachEmbeddedBrowserInternal() }
+            return w
+        }
+        val browserWidth = embeddedBrowser?.width ?: -1
+        suppressWidthFollow = true // 摘除过程中的尺寸变化不再驱动总宽
+        val webviewComp = jbCefBrowser.component
+        remove(splitter)
+        splitter.firstComponent = null // 把 webview 从 splitter 摘出再挂回
+        splitter.secondComponent = null
+        add(webviewComp, BorderLayout.CENTER)
+        embeddedSplit = null
+        revalidate()
+        repaint()
+        return browserWidth
+    }
+
+    private fun attachEmbeddedSplit(
+        browserPanel: ZCodeBrowserPanel,
+        stretch: Boolean,
+        migrateBrowserWidth: Int = -1,
+    ) {
+        val webviewComp = jbCefBrowser.component
+        remove(webviewComp)
+        val splitter = com.intellij.ui.OnePixelSplitter(false, 0.55f).apply {
+            firstComponent = webviewComp
+            secondComponent = browserPanel
+            border = JBUI.Borders.empty()
+        }
+        embeddedSplit = splitter
+        add(splitter, BorderLayout.CENTER)
+        // 拖动来源区分（见 lastKnownTwWidth 注释）：
+        // - 中间分割线拖动 → 总宽不变 → 浏览器宽驱动总宽（聊天区恒定）
+        // - 左侧边界拖动/主窗口缩放 → 总宽先变 → 浏览器宽度钉住、聊天区吸收变化
+        //   （保留 IDE 原生整体调宽能力，不被跟随逻辑劫持）
+        // 浏览器是全局单例、分栏可多次摘挂（迁移/收起再展开）：先移除旧监听防叠加
+        browserWidthListener?.let { browserPanel.removeComponentListener(it) }
+        val listener = object : java.awt.event.ComponentAdapter() {
+            override fun componentResized(e: java.awt.event.ComponentEvent?) {
+                if (embeddedSplit == null || suppressWidthFollow) return
+                val browserWidth = browserPanel.width
+                // 布局中间态（新挂载/跨标签迁移后组件尚未布局，width=0）：不驱动任何
+                // 宽度逻辑——否则 followBrowserWidth 会按"浏览器宽 0"把 ToolWindow
+                // 还原到无浏览器宽度，浏览器被挤成 0 宽（"新标签主界面独占"的根因）
+                if (browserWidth <= 0) return
+                val tw = ZCodeToolWindowFactory.getToolWindow(project) ?: return
+                val twWidth = tw.component.width
+                if (twWidth <= 0) return
+                val isExternalChange = twWidth != lastKnownTwWidth && !expectOwnTwChange
+                if (isExternalChange) {
+                    val pinned = if (lastKnownBrowserWidth > 0) lastKnownBrowserWidth else browserWidth
+                    val desiredChat = (twWidth - pinned - 1).coerceAtLeast(120)
+                    embeddedSplit?.setProportion(desiredChat.toFloat() / twWidth)
+                    toolWindowWidthBeforeBrowser = desiredChat
+                    persistBrowserWidthState(expanded = true, base = desiredChat)
+                }
+                if (twWidth != lastKnownTwWidth && expectOwnTwChange) expectOwnTwChange = false
+                lastKnownTwWidth = twWidth
+                lastKnownBrowserWidth = browserWidth
+                followBrowserWidth(browserPanel)
+            }
+        }
+        browserWidthListener = listener
+        browserPanel.addComponentListener(listener)
+        lastKnownTwWidth = ZCodeToolWindowFactory.getToolWindow(project)?.component?.width ?: -1
+        lastKnownBrowserWidth = -1
+        suppressWidthFollow = false
+        revalidate()
+        repaint()
+        if (stretch) {
+            stretchToolWindowForBrowser(splitter)
+        } else if (migrateBrowserWidth > 0) {
+            // 跨标签迁移：延续浏览器宽与总宽，聊天基准 = 当前总宽 - 浏览器宽（不重新拉宽）
+            val twWidth = ZCodeToolWindowFactory.getToolWindow(project)?.component?.width ?: 0
+            if (twWidth > 0) {
+                toolWindowWidthBeforeBrowser = (twWidth - migrateBrowserWidth - 1).coerceAtLeast(120)
+                splitter.setProportion(toolWindowWidthBeforeBrowser.toFloat() / twWidth)
+            }
+        }
+        if (toolWindowWidthBeforeBrowser > 0) {
+            persistBrowserWidthState(expanded = true, base = toolWindowWidthBeforeBrowser)
+        }
+    }
+
+    /**
+     * 中间分割线拖动后同步 ToolWindow 总宽：总宽 = 聊天基准宽 + 浏览器当前宽。
+     * 仅在总宽未变（分割线内部拖动）时触发（来源区分见 attachEmbeddedSplit）；
+     * 迭代收敛（每轮 chat→基准宽），死区 4px 防像素抖动。
+     */
+    private fun followBrowserWidth(browserPanel: ZCodeBrowserPanel) {
+        if (embeddedSplit == null || suppressWidthFollow) return
+        if (toolWindowWidthBeforeBrowser <= 0) return
+        val tw = ZCodeToolWindowFactory.getToolWindow(project) ?: return
+        val current = tw.component.width
+        val target = toolWindowWidthBeforeBrowser + browserPanel.width
+        if (current > 0 && kotlin.math.abs(target - current) > 4) {
+            applyToolWindowWidth(target)
+        }
+    }
+
+    /**
+     * 浏览器弹出时调宽 ToolWindow：聊天区保持原宽度，浏览器占增量空间；
+     * 收起时 restoreToolWindowWidth 还原。
+     */
+    private fun stretchToolWindowForBrowser(splitter: com.intellij.ui.OnePixelSplitter) {
+        val tw = ZCodeToolWindowFactory.getToolWindow(project) ?: return
+        val current = tw.component.width
+        if (current <= 0) return
+        if (toolWindowWidthBeforeBrowser < 0) toolWindowWidthBeforeBrowser = current
+        val extra = JBUI.scale(560)
+        val newWidth = toolWindowWidthBeforeBrowser + extra
+        splitter.setProportion(toolWindowWidthBeforeBrowser.toFloat() / newWidth.toFloat())
+        applyToolWindowWidth(newWidth)
+    }
+
+    /** 还原浏览器弹出前的 ToolWindow 宽度（收起分栏时）*/
+    private fun restoreToolWindowWidth() {
+        if (toolWindowWidthBeforeBrowser <= 0) return
+        applyToolWindowWidth(toolWindowWidthBeforeBrowser)
+    }
+
+    /** 展示/收起内嵌浏览器（Header「浏览器」按钮的开关语义）；返回收起后的可见状态 */
+    fun toggleEmbeddedBrowser(): Boolean {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            var visible = false
+            SwingUtilities.invokeAndWait { visible = toggleEmbeddedBrowser() }
+            return visible
+        }
+        if (embeddedSplit != null) {
+            hideEmbeddedBrowser()
+            return false
+        }
+        showEmbeddedBrowser()
+        return true
+    }
+
+    /** 内嵌浏览器分栏当前是否展开（browser-use browserVisibilityGet 用；只读不创建）*/
+    fun isEmbeddedBrowserVisible(): Boolean = embeddedSplit != null && embeddedBrowser != null
+
+    /** 只读拿内嵌浏览器面板（已创建返回实例，未创建返回 null——不触发创建）*/
+    fun embeddedBrowserPanelOrNull(): ZCodeBrowserPanel? = embeddedBrowser
+
+    /**
+     * 设置内嵌浏览器分栏可见性（browser-use browserVisibilitySet 用）；
+     * 展开时顺带选中本面板所在 Content（AI 唤起时用户看得见），返回设置后的可见状态
+     */
+    fun setEmbeddedBrowserVisible(visible: Boolean): Boolean {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            var result = false
+            SwingUtilities.invokeAndWait { result = setEmbeddedBrowserVisible(visible) }
+            return result
+        }
+        if (!visible) {
+            hideEmbeddedBrowser()
+            return false
+        }
+        if (showEmbeddedBrowser() == null) return false
+        try {
+            attachedContent?.let { c -> c.manager?.setSelectedContent(c) }
+            ZCodeToolWindowFactory.getToolWindow(project)?.show(null)
+        } catch (e: Exception) {
+            log.warn("选中会话 Content 失败: ${e.message}")
+        }
+        return true
+    }
+
+    private fun applyToolWindowWidth(width: Int) {
+        SwingUtilities.invokeLater {
+            if (disposed) return@invokeLater
+            try {
+                val tw = ZCodeToolWindowFactory.getToolWindow(project) ?: return@invokeLater
+                val twComp = tw.component
+                // 2026.1 新 UI 的编辑器↔工具窗口分隔容器是 ThreeComponentsSplitter
+                // （祖先链实测：InternalDecoratorImpl 的父容器），设 lastSize 即改工具窗口宽
+                var p: java.awt.Container? = twComp.parent
+                while (p != null) {
+                    if (p is com.intellij.openapi.ui.ThreeComponentsSplitter && !p.orientation) {
+                        val splitter = p as com.intellij.openapi.ui.ThreeComponentsSplitter
+                        val applied = when {
+                            isAncestorOf(splitter.lastComponent, twComp) -> {
+                                splitter.lastSize = width.coerceAtMost(splitter.width); true
+                            }
+                            isAncestorOf(splitter.firstComponent, twComp) -> {
+                                splitter.firstSize = width.coerceAtMost(splitter.width); true
+                            }
+                            else -> false
+                        }
+                        if (applied) expectOwnTwChange = true // 布局回声不算外部拖动
+                        break
+                    }
+                    p = p.parent
+                }
+            } catch (e: Exception) {
+                log.warn("调整 ToolWindow 宽度失败: ${e.message}")
+            }
+        }
+    }
+
+    private fun isAncestorOf(candidate: java.awt.Component?, node: java.awt.Component): Boolean {
+        var cur: java.awt.Component? = node
+        while (cur != null) {
+            if (cur === candidate) return true
+            cur = cur.parent
+        }
+        return false
+    }
+
+    /**
+     * 收起内嵌浏览器（保留实例与页面，工具条「收起」按钮/Header 开关/AI visibilitySet 用）。
+     * internal：Service 的全局浏览器 onClose 回调也会调（作用于当前挂载 owner）。
+     */
+    internal fun hideEmbeddedBrowser() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater { hideEmbeddedBrowser() }
+            return
+        }
+        if (detachEmbeddedBrowserInternal() < 0) return
+        restoreToolWindowWidth()
+        persistBrowserWidthState(expanded = false, base = toolWindowWidthBeforeBrowser)
+        log.info("会话内嵌浏览器分栏已收起（实例保留，ToolWindow 宽度还原）")
+    }
+
     /** Content 销毁时释放 JCEF 资源（content.setDisposer(panel) 绑定）*/
     override fun dispose() {
         if (disposed) return
         disposed = true
         log.info("释放标签面板（sessionId=$currentSessionId）")
+        try {
+            // 内嵌浏览器是全局共享单例：只摘除挂载（还原 TW 宽度），实例交由 Service 释放
+            if (embeddedSplit != null) {
+                detachEmbeddedBrowserInternal()
+                restoreToolWindowWidth()
+            }
+            val service = project.zCodeService()
+            if (service.getEmbeddedBrowserOwner() === this) {
+                service.setEmbeddedBrowserOwner(null)
+            }
+        } catch (e: Exception) {
+            log.warn("摘除内嵌浏览器挂载失败: ${e.message}")
+        }
+        embeddedBrowser = null
+        embeddedSplit = null
         try {
             themeBusConn?.dispose()
         } catch (e: Exception) {
@@ -1551,6 +1963,19 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject { put("op", "tabCreating") }
     }
 
+    /**
+     * 内嵌浏览器开关（Header「浏览器」按钮）：展示/收起本会话面板的浏览器分栏。
+     * 区别于浏览器工具条的「收起」：这是主界面快捷开关，同样保障聊天区宽度不变
+     * （弹出加宽 / 收起还原）。
+     */
+    private fun handleToggleBrowserPane(): JsonObject {
+        val visible = toggleEmbeddedBrowser()
+        return buildJsonObject {
+            put("op", "browserPaneToggled")
+            put("visible", visible)
+        }
+    }
+
     /** 处理前端的 askUserResponse（用户选择后回传，转发 Service 层协调器）*/
     private fun handleAskUserResponse(msg: JsonObject): JsonObject {
         val requestId = msg["requestId"]?.jsonPrimitive?.content
@@ -1875,6 +2300,47 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 }
             }))
             rpcError?.let { put("rpcError", it) }
+        }
+    }
+
+    /**
+     * op=mcpServerTools — 单台 MCP 服务器的工具清单（设置页「MCP」卡片展开区）
+     *
+     * 协议 mcp/list 只有 toolCount 无明细 → McpToolsClient 自己连一次服务器
+     * 调 tools/list（stdio 起进程 / http 按 Streamable POST）。
+     * 必须在后台线程调用（handler 已在 pooled thread），单台 45s 超时。
+     * 失败走 {error} 字段不抛异常，前端卡片内联展示 + 可重试。
+     */
+    private fun handleMcpServerTools(msg: JsonObject): JsonObject {
+        val name = msg["name"]?.jsonPrimitive?.contentOrNull
+            ?: return errorResponse("缺少 name")
+        val force = msg["force"]?.jsonPrimitive?.contentOrNull == "true"
+        fun resp(tools: List<McpToolsClient.McpToolInfo>? = null, error: String? = null) = buildJsonObject {
+            put("op", "mcpServerTools")
+            put("name", name)
+            if (force) put("force", true)
+            tools?.let { list ->
+                put("toolCount", list.size)
+                put("tools", JsonArray(list.map { t ->
+                    buildJsonObject {
+                        put("name", t.name)
+                        t.description?.let { d -> put("description", d) }
+                    }
+                }))
+            }
+            error?.let { put("error", it) }
+        }
+
+        val server = McpConfigReader.scan(project.basePath).find { it.name == name }
+            ?: return resp(error = "未在磁盘配置中找到该服务器（运行时注入的服务器无法获取工具列表）")
+        if (!server.enabled) return resp(error = "服务器已禁用")
+        return try {
+            val tools = McpToolsClient.listTools(server, project.basePath ?: ".")
+            log.info("MCP 工具列表 [$name] 获取成功，共 ${tools.size} 个")
+            resp(tools = tools)
+        } catch (e: Exception) {
+            log.warn("MCP 工具列表 [$name] 获取失败：${e.message}")
+            resp(error = e.message ?: "未知错误")
         }
     }
 

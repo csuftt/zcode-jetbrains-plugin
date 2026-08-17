@@ -3,17 +3,19 @@
  *
  * 数据：listMcpServers（Kotlin 端 = McpConfigReader 磁盘三来源配置
  *       + RPC mcp/list 连接状态按名合并；RPC 失败降级为纯配置清单）
- * 交互：刷新（status 快照）/ 检测连接（connect 真实连接，慢）；
- *       工具栏状态汇总条 + 日志按钮（弹 McpLogDialog，读 CLI 落盘的真实连接日志）；
- *       失败服务器卡片头部直接显示错误摘要（不必展开）；卡片展开看命令/URL 详情；
+ *       + mcpServerTools（Kotlin 端 McpToolsClient 直连服务器调 tools/list，
+ *       协议 mcp/list 无工具明细只能自连；对齐 cc-gui ServerToolsPanel）
+ * 交互：刷新（status 快照）/ 检测连接（connect 真实连接，慢，连接成功的
+ *       服务器自动拉工具清单）；工具栏状态汇总条 + 日志按钮（弹 McpLogDialog）；
+ *       失败服务器卡片头部直接显示错误摘要（不必展开）；卡片展开看命令/URL
+ *       详情 + 工具列表（hover 看描述，可强制刷新）；
  *       「打开配置文件」跳来源 config（openFile）
- * 注：协议 mcp/list 不含单服务器工具清单（只有 toolCount），工具列表不做。
  */
 
 import { useEffect, useState } from 'react'
 import { useStore } from '@/store/useStore'
-import { sendToJava } from '@/ipc/bridge'
-import type { McpServerInfo } from '@/types/messages'
+import { sendToJava, isInJcef } from '@/ipc/bridge'
+import type { McpServerInfo, McpToolInfo } from '@/types/messages'
 import { McpLogDialog } from './McpLogDialog'
 import { fmtTime } from '@/utils/format'
 import '../styles/mcp-list-view.less'
@@ -41,11 +43,133 @@ function statusMeta(s?: string) {
   return s ? STATUS_META[s] ?? { label: s, cls: 'unknown' } : { label: '未知', cls: 'unknown' }
 }
 
+/** 工具名 → codicon（照搬 cc-gui serverUtils.getToolIcon 关键词映射）*/
+function toolIcon(name: string): string {
+  const n = name.toLowerCase()
+  if (n.includes('search') || n.includes('query') || n.includes('find')) return 'codicon-search'
+  if (n.includes('read') || n.includes('get') || n.includes('fetch')) return 'codicon-file-text'
+  if (n.includes('write') || n.includes('create') || n.includes('add') || n.includes('insert')) return 'codicon-edit'
+  if (n.includes('delete') || n.includes('remove')) return 'codicon-trash'
+  if (n.includes('update') || n.includes('modify') || n.includes('change')) return 'codicon-sync'
+  if (n.includes('list') || n.includes('all')) return 'codicon-list-tree'
+  if (n.includes('execute') || n.includes('run') || n.includes('call')) return 'codicon-play'
+  if (n.includes('connect')) return 'codicon-plug'
+  if (n.includes('send') || n.includes('post')) return 'codicon-mail'
+  if (n.includes('browser') || n.includes('navigate') || n.includes('page')) return 'codicon-globe'
+  return 'codicon-tools'
+}
+
+/**
+ * 卡片展开区的工具列表面板（对齐 cc-gui ServerToolsPanel 状态分支）
+ * 未连接=提示；已连接未加载=点击加载；loading=spin；失败=错误+重试；
+ * 空结果=黄色警告；正常=「工具 (N)」+ 列表（hover title=description）。
+ */
+function ToolsSection({ server }: { server: McpServerInfo }) {
+  const state = useStore((s) => s.mcpToolsByServer[server.name])
+  const loadMcpServerTools = useStore((s) => s.loadMcpServerTools)
+
+  if (server.status !== 'connected') {
+    return (
+      <div className="mcp-card__row">
+        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__tools-hint">
+          {server.status === 'connecting' ? '连接中，连接成功后可查看工具列表…' : '连接成功后可查看工具列表'}
+        </span>
+      </div>
+    )
+  }
+
+  if (!state) {
+    return (
+      <div className="mcp-card__row">
+        <span className="mcp-card__row-label">工具</span>
+        <button className="mcp-card__tools-load" onClick={() => loadMcpServerTools(server.name)}>
+          <span className="codicon codicon-refresh" />
+          加载工具列表
+        </button>
+      </div>
+    )
+  }
+
+  if (state.loading) {
+    return (
+      <div className="mcp-card__row">
+        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__tools-hint">
+          <span className="codicon codicon-loading spin" /> 正在连接服务器获取工具…
+        </span>
+      </div>
+    )
+  }
+
+  if (state.error) {
+    return (
+      <div className="mcp-card__row">
+        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__tools-error" title={state.error}>
+          获取失败：{state.error}
+        </span>
+        <button className="mcp-card__tools-retry" onClick={() => loadMcpServerTools(server.name, true)} title="重试">
+          <span className="codicon codicon-refresh" />
+        </button>
+      </div>
+    )
+  }
+
+  if (state.tools.length === 0) {
+    return (
+      <div className="mcp-card__row">
+        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__tools-warning">已连接但无可用工具</span>
+        <button className="mcp-card__tools-retry" onClick={() => loadMcpServerTools(server.name, true)} title="重新获取">
+          <span className="codicon codicon-refresh" />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mcp-card__tools-panel">
+      <div className="mcp-card__tools-panel-header">
+        <span className="mcp-card__tools-title">
+          <span className="codicon codicon-tools" /> 工具 ({state.tools.length})
+        </span>
+        <span className="mcp-card__tools-meta">{fmtTime(state.fetchedAt)}</span>
+        <button
+          className="mcp-card__tools-retry"
+          onClick={() => loadMcpServerTools(server.name, true)}
+          title="强制刷新（重新连接服务器）"
+        >
+          <span className="codicon codicon-sync" />
+        </button>
+      </div>
+      <div className="mcp-card__tool-list">
+        {state.tools.map((t: McpToolInfo) => (
+          <div key={t.name} className="mcp-card__tool-item" title={t.description || t.name}>
+            <div className="mcp-card__tool-name-row">
+              <span className={cx('codicon', 'mcp-card__tool-icon', toolIcon(t.name))} />
+              <span className="mcp-card__tool-name">{t.name}</span>
+            </div>
+            {t.description && <div className="mcp-card__tool-desc">{t.description}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** 单个服务器卡片（手风琴展开）*/
 function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInfo; expanded: boolean; onToggleExpand: () => void }) {
   const meta = statusMeta(server.status)
-  const showToolCount = server.status === 'connected' && (server.toolCount ?? 0) > 0
-  const zeroToolsWarning = server.status === 'connected' && (server.toolCount ?? 0) === 0
+  // 头部工具数徽章：直连结果优先（mcp/list 的 toolCount 在 status 快照模式下
+  // app-server 未真实连接恒为 0，与 McpToolsClient 直连拿到的实际数对不上）；
+  // 直连失败/未加载时回退 RPC toolCount
+  const toolsState = useStore((s) => s.mcpToolsByServer[server.name])
+  const liveCount = toolsState && !toolsState.loading && !toolsState.error ? toolsState.tools.length : null
+  const displayCount = liveCount ?? server.toolCount
+  const showToolCount = server.status === 'connected' && (displayCount ?? 0) > 0
+  // 「0 工具」警告只在直连确认 0 时显示（RPC 0 未直连不误导）
+  const zeroToolsWarning = server.status === 'connected' && liveCount === 0
 
   return (
     <div className={cx('mcp-card', expanded && 'expanded', !server.enabled && 'off')}>
@@ -61,9 +185,9 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
         )}
         <span className="mcp-card__transport">{server.transport}</span>
         {showToolCount && (
-          <span className="mcp-card__tools" title="工具数（mcp/list toolCount）">
+          <span className="mcp-card__tools" title="工具数（展开卡片查看工具列表）">
             <span className="codicon codicon-tools" />
-            {server.toolCount}
+            {displayCount}
           </span>
         )}
         {zeroToolsWarning && <span className="mcp-card__tools warn" title="已连接但无工具">0 工具</span>}
@@ -73,6 +197,7 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
 
       {expanded && (
         <div className="mcp-card__body">
+          <ToolsSection server={server} />
           {server.command && (
             <div className="mcp-card__row">
               <span className="mcp-card__row-label">命令</span>
@@ -138,6 +263,12 @@ export function McpListView() {
 
   useEffect(() => {
     loadMcpServers('status')
+    // dev 辅助：#mcp/<服务器名> 直达并自动展开该卡片（点击通道在 IAB 里不稳定，
+    // 验收靠 hash；JCEF 内 hash 恒空不影响生产）
+    if (!isInJcef()) {
+      const m = window.location.hash.match(/^#mcp\/(.+)$/)
+      if (m) setExpandedName(decodeURIComponent(m[1]))
+    }
   }, [loadMcpServers])
 
   const servers = mcpServers ?? []

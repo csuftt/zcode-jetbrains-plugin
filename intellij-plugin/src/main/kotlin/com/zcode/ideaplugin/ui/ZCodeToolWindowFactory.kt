@@ -90,7 +90,37 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 )
             }.toMutableList()
             val selected = cm.selectedContent
-            state.activeIndex = if (selected != null) cm.getIndexOfContent(selected) else 0
+            state.activeIndex = if (selected != null) {
+                // 浏览器标签不计入 tabs，activeIndex 须换算成「聊天标签列表」内的索引：
+                // 取选中标签（含自身）之前有多少个聊天标签（选中的是浏览器标签 → 指向其前一个聊天标签）
+                val idx = cm.getIndexOfContent(selected)
+                if (idx < 0) 0
+                else (cm.contents.take(idx + 1).count { it.component is ZCodeToolWindowPanel } - 1)
+                    .coerceAtLeast(0)
+            } else 0
+        }
+
+        /**
+         * 新建「浏览器」标签页（前端 Header「浏览器」按钮 → op:openBrowserTab）。
+         * 独立 Content：不绑定会话、不持久化（persistTabs 只收集聊天面板）、始终可关闭。
+         * 已有浏览器标签时复用并激活（避免堆积；当前单页形态，需要多站点时开多个标签即可）。
+         */
+        fun createBrowserTab(project: Project, toolWindow: ToolWindow): Content? {
+            val cm = toolWindow.contentManager
+            cm.contents.firstOrNull { it.component is ZCodeBrowserPanel }?.let {
+                cm.setSelectedContent(it)
+                toolWindow.show(null)
+                return it
+            }
+            val panel = ZCodeBrowserPanel(project)
+            val content = ContentFactory.getInstance().createContent(panel, "浏览器", false)
+            content.isCloseable = true
+            content.description = "内嵌浏览器（前端调试）"
+            content.setDisposer(panel)
+            cm.addContent(content)
+            toolWindow.show(null)
+            cm.setSelectedContent(content)
+            return content
         }
     }
 
@@ -98,6 +128,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
         // 侧边栏标签显示名（id 保持 "ZCode" 供 getToolWindow 查找，显示名改为 ZC GUI）
         toolWindow.stripeTitle = "ZC GUI"
         toolWindow.show(null) // TODO 临时：截图实验用，实验后移除
+        ensureCdpPortForBrowserUse()
         val cm = toolWindow.contentManager
 
         // 恢复持久化的标签（或首个默认标签）
@@ -131,12 +162,16 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 val panel = event.content.component as? ZCodeToolWindowPanel ?: return
                 panel.ensureJcefCreated() // 懒加载标签激活（已激活时为 no-op）
                 project.zCodeService().setActivePanel(panel)
+                // 内嵌浏览器全局共享：展开状态下随标签切换迁移挂载（宽度延续）——
+                // 修复「切到新标签后聊天独占被浏览器拉宽的 TW、主界面特别大」
+                panel.adoptEmbeddedBrowserIfDisplayed()
                 persistTabs(project, cm)
             }
 
-            /** 关闭二次确认：移除前弹确认框，取消则拦截关闭（event.consume）*/
+            /** 关闭二次确认：移除前弹确认框，取消则拦截关闭（event.consume）；浏览器标签直接关 */
             override fun contentRemoveQuery(event: ContentManagerEvent) {
                 val content = event.content
+                if (content.component is ZCodeBrowserPanel) return
                 val panel = content.component as? ZCodeToolWindowPanel
                 val tabName = content.displayName ?: "标签"
                 val streaming = panel?.isTabStreaming() == true
@@ -160,6 +195,11 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 updateCloseable(cm)
                 val panel = event.content.component as? ZCodeToolWindowPanel
                 if (panel != null) project.zCodeService().unregisterPanel(panel)
+                // 聊天标签全部关闭后（含「只剩浏览器标签又关掉浏览器」）自动补一个，保证会话入口常在
+                if (cm.contents.none { it.component is ZCodeToolWindowPanel }) {
+                    addTabContent(project, toolWindow, null, getNextTabName(cm))
+                    return
+                }
                 persistTabs(project, cm)
                 // panel 的 JCEF 资源由 content.setDisposer(panel) 释放
             }
@@ -174,9 +214,45 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
         }
     }
 
-    /** 仅剩 1 个标签时禁用关闭按钮 */
+    /**
+     * 仅剩 1 个聊天标签时禁用其关闭按钮（浏览器标签始终可关：无会话状态可丢，
+     * 且不占用「最后一个标签」名额——聊天标签被清空时由 contentRemoved 自动补）
+     */
     private fun updateCloseable(cm: ContentManager) {
-        val closeable = cm.contentCount > 1
-        cm.contents.forEach { it.isCloseable = closeable }
+        val chatCount = cm.contents.count { it.component is ZCodeToolWindowPanel }
+        cm.contents.forEach {
+            it.isCloseable = it.component is ZCodeBrowserPanel || chatCount > 1
+        }
+    }
+
+    /**
+     * 开启 JCEF remote debugging（browser-use 宿主执行器的 CDP 通道依赖）。
+     *
+     * 实测 2026.1 正式 IDE：registry `ide.browser.jcef.debug.port` 默认 -1（不加任何
+     * 调试参数，remote debugging 完全关闭；官方文档「默认 9222 active」与实际不符，
+     * 见 SettingsHelper.getRemoteDebugPort 反汇编）。
+     *
+     * 端口策略：固定 9222 会撞两种坑——①被其他进程占用时 CEF 静默 bind 失败（DevTools
+     * 服务不启动，无任何报错，实测 Windows TCP 僵尸 LISTENING 条目即可触发）；②与并存的
+     * JetBrains IDE 冲突。故设 0（随机端口）：CEF 自动选空闲端口并写入 jcef_cache 的
+     * DevToolsActivePort 文件（首行端口号），executor 侧读文件发现（见
+     * ZCodeBrowserExecutor.findCdpPortFromCache）。
+     * 必须在 JBCefApp 首次初始化前设置才当次生效——本方法在 createToolWindowContent
+     * 开头调用，先于任何 panel 的 JBCefBrowser 创建；若 CEF 已起（如插件热更新场景）
+     * 则写入 registry 等下次重启生效。
+     */
+    private fun ensureCdpPortForBrowserUse() {
+        try {
+            @Suppress("DEPRECATION")
+            val current = com.intellij.openapi.util.registry.Registry.intValue("ide.browser.jcef.debug.port", -1)
+            if (current == 0) return
+            @Suppress("DEPRECATION")
+            com.intellij.openapi.util.registry.Registry.get("ide.browser.jcef.debug.port").setValue(0)
+            com.intellij.openapi.diagnostic.Logger.getInstance("ZCodePlugin")
+                .warn("[browser-use] 已设置 ide.browser.jcef.debug.port=0（随机端口，经 DevToolsActivePort 发现；若 CEF 已启动则重启 IDE 后生效）")
+        } catch (e: Exception) {
+            com.intellij.openapi.diagnostic.Logger.getInstance("ZCodePlugin")
+                .warn("[browser-use] 设置 CDP 调试端口失败: ${e.message}")
+        }
     }
 }

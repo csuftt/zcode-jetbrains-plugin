@@ -71,6 +71,19 @@ class ZCodeProtocolClient private constructor(
     @Volatile
     var userInputRequestHandler: ((serverRequestId: String, params: JsonObject) -> JsonObject)? = null
 
+    /**
+     * 宿主浏览器清单（interaction/browserList）：返回 {browsers:[...]}；
+     * null / 未注册时自动应答空列表（app-server 侧 browser-use 优雅降级为不可用）。
+     * 详见 docs/设计与调研/browser-use宿主协议接入设计.md
+     */
+    var browserListHandler: (() -> JsonObject)? = null
+
+    /**
+     * 宿主浏览器命令执行（interaction/browserExecute）：params 为请求参数
+     * （含 command），返回 execute result。在独立线程调用，可安全阻塞（截图/导航有耗时）。
+     */
+    var browserExecuteHandler: ((params: JsonObject) -> JsonObject)? = null
+
     // -32031 恢复用的 runtimeModel 构造器（默认读 config.json 的 enabled provider；测试可注入）
     @Volatile
     var runtimeModelFactory: () -> JsonObject? = { RuntimeModels.defaultRuntimeModel() }
@@ -242,6 +255,39 @@ class ZCodeProtocolClient private constructor(
             } else {
                 println("[ZCodeProtocolClient] 无 userInputRequestHandler，自动 decline")
                 respondToServer(id, buildJsonObject { put("action", "decline") })
+            }
+        }
+        // 宿主浏览器反向请求（browser-use）：异步执行——navigate/screenshot 可能秒级耗时，
+        // 与 requestUserInput 同理禁止阻塞 reader 线程
+        else if (method == "interaction/browserList") {
+            val handler = browserListHandler
+            if (handler != null) {
+                Thread({
+                    try {
+                        respondToServer(id, handler())
+                    } catch (e: Exception) {
+                        println("[ZCodeProtocolClient] browserList handler 异常(${e.javaClass.simpleName}): ${e.message}")
+                        respondToServer(id, error = ProtocolError(ErrorCodes.INTERNAL_ERROR, "browserList 失败: ${e.message}"))
+                    }
+                }, "zcode-browser-list").apply { isDaemon = true }.start()
+            } else {
+                // 无宿主浏览器能力：空列表（协议允许，browser-use 按不可用降级）
+                respondToServer(id, buildJsonObject { put("browsers", JsonArray(emptyList())) })
+            }
+        }
+        else if (method == "interaction/browserExecute") {
+            val handler = browserExecuteHandler
+            if (handler != null) {
+                Thread({
+                    try {
+                        respondToServer(id, handler(params))
+                    } catch (e: Exception) {
+                        println("[ZCodeProtocolClient] browserExecute handler 异常(${e.javaClass.simpleName}): ${e.message}")
+                        respondToServer(id, error = ProtocolError(ErrorCodes.INTERNAL_ERROR, "browserExecute 失败: ${e.message}"))
+                    }
+                }, "zcode-browser-exec").apply { isDaemon = true }.start()
+            } else {
+                respondToServer(id, error = ProtocolError(ErrorCodes.METHOD_NOT_FOUND, "宿主未注册 browserExecuteHandler"))
             }
         }
         // 其他未知反向请求：回 -32601 避免空等

@@ -36,13 +36,13 @@
 
 ```bash
 # 一键清理 + 重建（推荐）：
-#   清 Gradle 构建目录 + webview 缓存 → build:single → buildPlugin
+#   清 Gradle 构建目录 + webview 缓存 → 双产物构建（多文件+sourcemap / singlefile fallback）→ buildPlugin
 #   产物：intellij-plugin/build/distributions/ZC-GUI-<版本>.zip（IDE 内离线安装）
 ./build.sh               # 完整清理 + 重建
 ./build.sh --skip-clean  # 跳过清理，仅增量构建
 
 # 或分步执行：
-cd webview && npm install && npm run build:single && cd ..
+cd webview && npm install && npm run build && npm run build:single && cd ..
 ./gradlew :intellij-plugin:buildPlugin
 
 # 或启动沙箱 IDE 直接体验
@@ -50,6 +50,8 @@ cd webview && npm install && npm run build:single && cd ..
 ```
 
 前端可脱离 IDE 独立开发（自动切换 mock 数据源）：`cd webview && npm run dev`
+
+生产模式下插件会用内置 HttpServer（127.0.0.1 随机端口）serve 多文件产物——webview 拥有真实 origin 与 sourcemap，聊天页 Header「开发者工具」按钮可直接看 TS/TSX 源码断点；server 启动失败时自动降级 singlefile 单文件加载。
 
 ## 工作原理
 

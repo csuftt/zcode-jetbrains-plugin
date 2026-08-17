@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpLogEntry } from '@/types/messages'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, asSubagentLifecycle } from '@/utils/streamReducer'
 import type { SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/utils/parseStatus'
@@ -145,6 +145,8 @@ interface StoreState {
   mcpChecking: boolean
   /** mcp/list RPC 失败提示（磁盘配置降级清单仍展示）*/
   mcpError: string | null
+  // MCP 工具清单（McpToolsClient 直连服务器调 tools/list，按 serverName 存槽）
+  mcpToolsByServer: Record<string, McpToolsState>
   // MCP 连接日志（CLI 落盘 mcp.* 事件，McpLogReader 读）
   mcpLogs: McpLogEntry[] | null
   mcpLogsLoading: boolean
@@ -204,6 +206,8 @@ interface StoreState {
   toggleSkill: (path: string, enabled: boolean) => void
   /** 拉取 MCP 服务器清单（mode=connect 时真实连接各服务器，慢）*/
   loadMcpServers: (mode?: 'status' | 'connect') => void
+  /** 拉单台服务器的工具清单（有缓存且非 force 直接跳过；loading 中防重入）*/
+  loadMcpServerTools: (name: string, force?: boolean) => void
   /** 拉取 MCP 连接日志（CLI 落盘 mcp.* 事件）*/
   loadMcpLogs: () => void
   /** 设置用量明细时间范围并重拉 model/tool 曲线 */
@@ -308,6 +312,7 @@ export const useStore = create<StoreState>((set, get) => ({
   mcpLoading: false,
   mcpChecking: false,
   mcpError: null,
+  mcpToolsByServer: {},
   mcpLogs: null,
   mcpLogsLoading: false,
   modelUsage: null,
@@ -685,6 +690,17 @@ export const useStore = create<StoreState>((set, get) => ({
     if (mode === 'connect') set({ mcpChecking: true, mcpError: null })
     else set({ mcpLoading: true, mcpError: null })
     sendToJava({ op: 'listMcpServers', mode })
+  },
+
+  loadMcpServerTools: (name, force = false) => {
+    const cur = get().mcpToolsByServer[name]
+    // 有结果且非 force 不重拉；loading 中防重入
+    if (cur?.loading) return
+    if (cur && !force && (cur.tools.length > 0 || cur.error)) return
+    set((s) => ({
+      mcpToolsByServer: { ...s.mcpToolsByServer, [name]: { tools: [], loading: true, fetchedAt: Date.now() } },
+    }))
+    sendToJava({ op: 'mcpServerTools', name, force })
   },
 
   loadMcpLogs: () => {
@@ -1372,7 +1388,28 @@ function handleResponse(
       })
       // 检测连接完成后自动刷新日志：connect 的连接过程刚落盘，日志面板立刻可见结果
       if (msg.mode === 'connect') get().loadMcpLogs()
+      // 连接成功的服务器自动拉工具清单（用户诉求：连上就能看到有哪些工具；
+      // 每台一个独立 op 后台直连，互不阻塞；已有缓存的不重拉）
+      msg.servers.forEach((s) => {
+        if (s.status === 'connected' && s.enabled && s.scope !== 'runtime') get().loadMcpServerTools(s.name)
+      })
       break
+
+    case 'mcpServerTools': {
+      const prevTools = get().mcpToolsByServer
+      set({
+        mcpToolsByServer: {
+          ...prevTools,
+          [msg.name]: {
+            tools: msg.tools ?? [],
+            loading: false,
+            error: msg.error,
+            fetchedAt: Date.now(),
+          },
+        },
+      })
+      break
+    }
 
     case 'mcpLogs':
       set({ mcpLogs: msg.logs, mcpLogsLoading: false })

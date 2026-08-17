@@ -35,6 +35,8 @@ interface Props {
   onBack: () => void
   onNewSession: () => void
   onNewTab: () => void
+  /** 浏览器开关：展开/收起本会话内嵌浏览器分栏（AI browser-use 也用它）*/
+  onOpenBrowser: () => void
   onSearch: () => void
   onHistory: () => void
   onSettings: () => void
@@ -48,6 +50,7 @@ export function ChatHeader({
   onBack,
   onNewSession,
   onNewTab,
+  onOpenBrowser,
   onSearch,
   onHistory,
   onSettings,
@@ -80,6 +83,9 @@ export function ChatHeader({
             </button>
             <button className="icon-button" onClick={onNewTab} data-tooltip="新标签页">
               <span className="codicon codicon-split-horizontal" />
+            </button>
+            <button className="icon-button" onClick={onOpenBrowser} data-tooltip="浏览器（展开/收起）">
+              <span className="codicon codicon-browser" />
             </button>
             <button className="icon-button" onClick={onSearch} data-tooltip="搜索会话">
               <span className="codicon codicon-search" />

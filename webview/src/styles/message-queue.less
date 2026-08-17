@@ -88,6 +88,12 @@
       border-radius: 4px;
       color: var(--text-secondary);
 
+      // codicon 基础样式 .codicon[class*='codicon-'] 的 font 简写固定 16px，单类 font-size 打不赢，
+      // 须用后代选择器提到同级优先级（.btn-primary .codicon 同款）才能生效
+      .codicon {
+        font-size: 11px;
+      }
+
       &:hover {
         border-color: var(--accent-primary);
         background: var(--color-button-accent-hover-bg);
@@ -102,10 +108,9 @@
     }
   }
 
-  // 立即发送图标：调小 + 逆时针 90°（箭头朝上，"发出"语义）
+  // 立即发送图标：尺寸见 &--send .codicon 覆盖 + 逆时针 90°（箭头朝上，"发出"语义）
   &__send-icon {
     display: inline-flex;
-    font-size: 8px;
     transform: rotate(-90deg);
   }
 
