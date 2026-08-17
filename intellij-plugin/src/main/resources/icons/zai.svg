@@ -19,5 +19,5 @@
   <!-- 窗口控制圆点：对齐 c3/c4/c5 块中心 -->
   <g fill="#262A55"><circle cx="347" cy="260" r="10"/><circle cx="377" cy="260" r="10"/><circle cx="407" cy="260" r="10"/></g>
   <!-- GUI 光标：尖端落在下杠顶边(y=704) -->
-  <path d="M690 704 L782 484 L814 580 L885 612 Z" fill="#FFFFFF" stroke="#262A55" stroke-width="13" stroke-linejoin="round"></path>
+  <path d="M660 540 L580 615 L660 690" fill="none" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"></path><path d="M800 540 L880 615 L800 690" fill="none" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"></path><path d="M732 515 L748 715" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" fill="none"></path>
 </svg>
