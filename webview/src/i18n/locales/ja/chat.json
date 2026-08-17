@@ -1,0 +1,68 @@
+{
+  "loading": "メッセージを読み込み中…",
+  "scroll": {
+    "backToTop": "先頭へ戻る",
+    "toBottom": "最後へ移動"
+  },
+  "header": {
+    "back": "戻る",
+    "newSession": "新しいセッション",
+    "newSessionDisabled": "現在のセッションは空のため、新規作成は不要です",
+    "newTab": "新しいタブ",
+    "browser": "ブラウザー（展開/折りたたみ）",
+    "searchSession": "会話を検索",
+    "history": "履歴",
+    "settings": "設定",
+    "sessionTitleAria": "セッションタイトル",
+    "saveTitleAria": "タイトルを保存",
+    "cancelEditAria": "編集をキャンセル",
+    "editTitleAria": "セッションタイトルを編集",
+    "untitled": "新しいセッション"
+  },
+  "message": {
+    "emptyText": "（空）",
+    "working": "処理中",
+    "worked": "処理済み",
+    "cachePercent": "キャッシュ {{percent}}%"
+  },
+  "thinking": {
+    "thinking": "思考中",
+    "thought": "思考プロセス"
+  },
+  "mermaid": {
+    "zoomInView": "拡大表示",
+    "parseFailed": "⚠ Mermaid の解析に失敗したため、ソースコードを表示しています",
+    "generating": "⏳ ダイアグラム生成中…",
+    "zoomOutTitle": "縮小 (-10%)",
+    "zoomInTitle": "拡大 (+10%)",
+    "resetZoom": "100% にリセット（ホイールで拡大縮小）",
+    "close": "閉じる (Esc)"
+  },
+  "preview": {
+    "defaultMeta": "Markdown プレビュー",
+    "close": "閉じる"
+  },
+  "search": {
+    "panelAria": "会話内検索",
+    "placeholder": "会話内を検索…",
+    "regexError": "正規表現エラー",
+    "searching": "検索中…",
+    "noResults": "結果なし",
+    "matchCase": "大文字と小文字を区別 (Alt+C)",
+    "matchCaseAria": "大文字と小文字を区別",
+    "wholeWord": "単語単位で検索 (Alt+W)",
+    "wholeWordAria": "単語単位で検索",
+    "regex": "正規表現を使用 (Alt+R)",
+    "regexAria": "正規表現を使用",
+    "prevMatch": "前の一致 (Shift+Enter)",
+    "prevMatchAria": "前の一致へ",
+    "nextMatch": "次の一致 (Enter)",
+    "nextMatchAria": "次の一致へ",
+    "close": "閉じる (Esc)",
+    "closeAria": "検索を閉じる"
+  },
+  "welcome": {
+    "version": "ZCode バージョン",
+    "sendMsg": "ZCode にメッセージを送信"
+  }
+}

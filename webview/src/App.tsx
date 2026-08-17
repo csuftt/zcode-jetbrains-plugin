@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { useTheme } from '@/hooks/useTheme'
 import { ChatHeader } from '@/components/ChatHeader'
@@ -31,6 +32,7 @@ import './styles/buttons.less'
 type View = 'chat' | 'history' | 'settings'
 
 export default function App() {
+  const { t } = useTranslation()
   const {
     sessions, currentSessionId,
     messages, loadingMessages, streaming, streamingMessageId, waitingSince, lastError,
@@ -43,9 +45,10 @@ export default function App() {
   // IDE 主题同步
   useTheme()
 
-  // 视图切换（dev 辅助：浏览器 mock 验收可带 #settings/#skills/#mcp/#usage 直达；
-  // #mcp/<服务器名> 形式直达并自动展开该卡片；JCEF 内 hash 恒空不影响生产）
-  const settingsHashes = ['#settings', '#skills', '#mcp', '#usage']
+  // 视图切换（dev 辅助：浏览器 mock 验收可带 #settings/#basic/#other/#skills/#mcp/#usage 直达，
+  // 前缀需与 SettingsView 的页签 hash 白名单一致；#mcp/<服务器名> 直达并自动展开该卡片；
+  // JCEF 内 hash 恒空不影响生产）
+  const settingsHashes = ['#settings', '#basic', '#other', '#skills', '#mcp', '#usage']
   const isSettingsHash = settingsHashes.some(
     (h) => window.location.hash === h || window.location.hash.startsWith(h + '/'),
   )
@@ -191,7 +194,7 @@ export default function App() {
       {lastError && (
         <div className="app__error-bar">
           <span>⚠️ {lastError}</span>
-          <button className="app__error-close" onClick={clearError} title="关闭" aria-label="关闭错误">
+          <button className="app__error-close" onClick={clearError} title={t('app.errorClose')} aria-label={t('app.errorCloseAria')}>
             <span className="codicon codicon-close" />
           </button>
         </div>
@@ -203,9 +206,9 @@ export default function App() {
       {/* 新建会话二次确认 */}
       {confirmNewSession && (
         <ConfirmDialog
-          title="新建会话"
-          message="将开启新的空白会话（发送首条消息时才创建），当前会话会保留在历史记录中，可随时切换回来。确定新建吗？"
-          confirmText="新建"
+          title={t('app.newSession.title')}
+          message={t('app.newSession.message')}
+          confirmText={t('app.newSession.confirm')}
           onConfirm={() => {
             setConfirmNewSession(false)
             resetToNewSession() // 延迟创建：先重置为待命态，首条消息触发建会话

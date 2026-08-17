@@ -1,0 +1,62 @@
+{
+  "placeholder": "@ 파일 참조, / 스킬 호출, Enter 전송",
+  "placeholderStreaming": "응답 생성 중, Enter로 전송 대기열에 추가…",
+  "resizeHandle": "드래그하여 높이 조절",
+  "attach": "첨부 파일 추가(파일 선택)",
+  "send": "전송 (Enter)",
+  "stop": "생성 중지",
+  "model": {
+    "selectModel": "모델 선택"
+  },
+  "mode": {
+    "title": "권한 모드",
+    "build": {
+      "label": "변경 전 확인",
+      "title": "Ask before changes — 파일 변경 시마다 확인"
+    },
+    "edit": {
+      "label": "자동 편집",
+      "title": "Edit automatically — 선택/관련 파일 자동 편집"
+    },
+    "plan": {
+      "label": "계획 모드",
+      "title": "Plan mode — 읽기 전용으로 코드를 검토하고 계획 후 편집"
+    },
+    "yolo": {
+      "label": "전체 제어",
+      "title": "Full access — 확인 최소화, 직접 편집 및 명령 실행"
+    }
+  },
+  "thought": {
+    "title": "사고 수준",
+    "titleWithDefault": "사고 수준: {{level}}(모델 기본값)",
+    "default": "기본",
+    "off": "끔",
+    "disabled": "끔",
+    "nothink": "끔",
+    "low": "낮음",
+    "medium": "중간",
+    "high": "높음",
+    "max": "최대",
+    "enabled": "생각"
+  },
+  "queue": {
+    "pendingTitle": "전송 대기 {{index}}번째",
+    "sendNow": "즉시 전송(현재 응답 중단)",
+    "sendNowShort": "즉시",
+    "edit": "편집(입력창으로)",
+    "remove": "대기열에서 제거"
+  },
+  "pasted": {
+    "clickToPreview": "클릭하여 전체 내용 미리보기",
+    "label": "붙여넣기 텍스트 · {{count}}자",
+    "remove": "붙여넣기 내용 제거",
+    "previewAriaLabel": "붙여넣기 내용 미리보기",
+    "previewTitle": "붙여넣기 내용 · {{count}}자",
+    "close": "닫기"
+  },
+  "fileRef": {
+    "lines": " ({{lines}}행)",
+    "remove": "참조 제거"
+  }
+}

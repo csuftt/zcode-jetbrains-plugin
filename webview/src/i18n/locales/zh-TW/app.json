@@ -1,0 +1,41 @@
+{
+  "errorClose": "關閉",
+  "errorCloseAria": "關閉錯誤",
+  "newSession": {
+    "title": "新建會話",
+    "message": "將開啟新的空白會話（傳送首條訊息時才建立），當前會話會保留在歷史記錄中，可隨時切換回來。確定新建嗎？",
+    "confirm": "新建"
+  },
+  "askUser": {
+    "cancel": "取消",
+    "confirm": "確認"
+  },
+  "planApproval": {
+    "title": "計劃審批",
+    "hint": "批准後將退出規劃模式並開始執行",
+    "emptyPlan": "_（計劃內容為空）_",
+    "tip": "點選遮罩或\"繼續規劃\"可拒絕並留在規劃模式",
+    "continuePlanning": "繼續規劃",
+    "approveAndRun": "批准並執行"
+  },
+  "notification": {
+    "subagent": "子代理",
+    "bashTask": "後臺命令",
+    "backgroundTask": "後臺任務",
+    "completed": "✓ 完成",
+    "failed": "✗ 失敗",
+    "notice": "通知"
+  },
+  "status": {
+    "todoTab": "任務",
+    "agentTab": "子代理",
+    "fileTab": "檔案",
+    "noTodos": "暫無任務",
+    "noAgents": "暫無子任務",
+    "noFiles": "暫無檔案改動",
+    "viewSubagentDetail": "點選檢視子代理執行過程",
+    "openInEditor": "在編輯器開啟：{{path}}",
+    "viewDiff": "檢視編輯前後對比",
+    "diffTitle": "編輯對比：{{name}}"
+  }
+}

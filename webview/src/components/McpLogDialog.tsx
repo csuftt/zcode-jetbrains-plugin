@@ -9,6 +9,7 @@
  */
 
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import type { McpLogEntry } from '@/types/messages'
 import '../styles/mcp-log-dialog.less'
@@ -41,6 +42,7 @@ function fmtTime(ts: string): string {
 }
 
 export function McpLogDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
   const mcpLogs = useStore((s) => s.mcpLogs)
   const mcpLogsLoading = useStore((s) => s.mcpLogsLoading)
   const loadMcpLogs = useStore((s) => s.loadMcpLogs)
@@ -63,28 +65,28 @@ export function McpLogDialog({ onClose }: { onClose: () => void }) {
       <div className="modal-content mcp-log-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="mcp-log-dialog__header">
           <span className="codicon codicon-output" />
-          <h3 className="mcp-log-dialog__title">MCP 连接日志</h3>
-          <span className="mcp-log-dialog__hint" title="来源：~/.zcode/cli/log/zcode-<日期>.jsonl 的 mcp.* 事件（ZCode CLI 连接过程落盘）">
-            最近 {visible.length} 条
+          <h3 className="mcp-log-dialog__title">{t('mcp.log.title')}</h3>
+          <span className="mcp-log-dialog__hint" title={t('mcp.log.sourceHint')}>
+            {t('mcp.log.recentCount', { count: visible.length })}
           </span>
           <button
             className="mcp-log-dialog__icon-btn"
             onClick={() => loadMcpLogs()}
             disabled={mcpLogsLoading}
-            title="刷新"
+            title={t('mcp.log.refresh')}
           >
             <span className={cx('codicon', mcpLogsLoading ? 'codicon-loading spin' : 'codicon-refresh')} />
           </button>
-          <button className="mcp-log-dialog__icon-btn" onClick={onClose} title="关闭">
+          <button className="mcp-log-dialog__icon-btn" onClick={onClose} title={t('mcp.log.close')}>
             <span className="codicon codicon-close" />
           </button>
         </div>
 
         {servers.length > 0 && (
           <div className="mcp-log-dialog__filter">
-            <span className="mcp-log-dialog__filter-label">服务器</span>
+            <span className="mcp-log-dialog__filter-label">{t('mcp.log.server')}</span>
             <select value={serverFilter} onChange={(e) => setServerFilter(e.target.value)}>
-              <option value="">全部</option>
+              <option value="">{t('mcp.log.all')}</option>
               {servers.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -97,12 +99,12 @@ export function McpLogDialog({ onClose }: { onClose: () => void }) {
         <div className="mcp-log-dialog__body">
           {mcpLogsLoading && !mcpLogs ? (
             <div className="mcp-log-dialog__empty">
-              <span className="codicon codicon-loading spin" /> 正在读取日志…
+              <span className="codicon codicon-loading spin" /> {t('mcp.log.loading')}
             </div>
           ) : visible.length === 0 ? (
             <div className="mcp-log-dialog__empty">
               <span className="codicon codicon-output" />
-              暂无日志（执行「检测连接」后这里会显示连接过程）
+              {t('mcp.log.empty')}
             </div>
           ) : (
             <div className="mcp-log-dialog__list">

@@ -1,0 +1,68 @@
+{
+  "loading": "載入訊息中…",
+  "scroll": {
+    "backToTop": "回到頂部",
+    "toBottom": "跳到底部"
+  },
+  "header": {
+    "back": "返回",
+    "newSession": "新會話",
+    "newSessionDisabled": "當前會話為空，無需新建",
+    "newTab": "新標籤頁",
+    "browser": "瀏覽器（展開/收起）",
+    "searchSession": "搜尋會話",
+    "history": "歷史記錄",
+    "settings": "設定",
+    "sessionTitleAria": "會話標題",
+    "saveTitleAria": "儲存標題",
+    "cancelEditAria": "取消編輯",
+    "editTitleAria": "編輯會話標題",
+    "untitled": "新會話"
+  },
+  "message": {
+    "emptyText": "(空)",
+    "working": "工作中",
+    "worked": "已工作",
+    "cachePercent": "快取 {{percent}}%"
+  },
+  "thinking": {
+    "thinking": "思考中",
+    "thought": "思考過程"
+  },
+  "mermaid": {
+    "zoomInView": "放大檢視",
+    "parseFailed": "⚠ Mermaid 解析失敗，已顯示原始碼",
+    "generating": "⏳ 圖表生成中…",
+    "zoomOutTitle": "縮小 (-10%)",
+    "zoomInTitle": "放大 (+10%)",
+    "resetZoom": "重置為 100%（滾輪可縮放）",
+    "close": "關閉 (Esc)"
+  },
+  "preview": {
+    "defaultMeta": "Markdown 預覽",
+    "close": "關閉"
+  },
+  "search": {
+    "panelAria": "會話內搜尋",
+    "placeholder": "在會話中搜索…",
+    "regexError": "正則錯誤",
+    "searching": "搜尋中…",
+    "noResults": "無結果",
+    "matchCase": "區分大小寫 (Alt+C)",
+    "matchCaseAria": "區分大小寫",
+    "wholeWord": "整詞匹配 (Alt+W)",
+    "wholeWordAria": "整詞匹配",
+    "regex": "正規表示式 (Alt+R)",
+    "regexAria": "正規表示式",
+    "prevMatch": "上一個匹配 (Shift+Enter)",
+    "prevMatchAria": "上一個匹配",
+    "nextMatch": "下一個匹配 (Enter)",
+    "nextMatchAria": "下一個匹配",
+    "close": "關閉 (Esc)",
+    "closeAria": "關閉搜尋"
+  },
+  "welcome": {
+    "version": "ZCode 版本",
+    "sendMsg": "給 ZCode 傳送訊息"
+  }
+}

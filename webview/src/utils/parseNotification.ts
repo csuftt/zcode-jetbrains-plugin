@@ -16,6 +16,7 @@
  * 供 AgentNotificationCard 友好展示。
  */
 
+import i18n from '@/i18n/config'
 import type { MessageInfo } from '@/types/messages'
 
 // ============ 类型 ============
@@ -195,6 +196,6 @@ export function notificationTitle(info: MessageInfo, parsed: ParsedNotification)
     return parsed.summary
   }
   if (parsed.kind === 'message' && parsed.summary) return parsed.summary
-  if (meta?.subagentMessage?.agentType) return `子代理 · ${meta.subagentMessage.agentType}`
-  return '后台任务'
+  if (meta?.subagentMessage?.agentType) return i18n.t('utils.subagentTitle', { type: meta.subagentMessage.agentType })
+  return i18n.t('utils.backgroundTask')
 }

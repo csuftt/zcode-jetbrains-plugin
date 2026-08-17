@@ -20,6 +20,10 @@
           var pref = inj
             ? inj.themePref
             : ls('zcode-theme-pref')
+          /* 语言：<html lang> 修正（React 加载前；i18n/language.ts 在 languageChanged 时再同步） */
+          if (window.__ZCODE_LANGUAGE__)
+            document.documentElement.lang =
+              window.__ZCODE_LANGUAGE__ === 'zh' ? 'zh-CN' : window.__ZCODE_LANGUAGE__
           var urlTheme = new URLSearchParams(window.location.search).get('theme')
           var theme =
             urlTheme === 'light' || urlTheme === 'dark'

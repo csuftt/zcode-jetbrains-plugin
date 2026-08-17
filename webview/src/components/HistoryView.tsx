@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { SessionInfo } from '@/types/messages'
 import { SessionItem } from './SessionItem'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -55,6 +56,7 @@ export function HistoryView({
   onDelete,
   onRefresh,
 }: Props) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -149,9 +151,9 @@ export function HistoryView({
       <div className="history-header">
         <div className="history-header-main">
           {selectionMode ? (
-            <div className="history-selection-summary">已选择 {selectedIds.size} 个会话</div>
+            <div className="history-selection-summary">{t('history.selectedSessions', { count: selectedIds.size })}</div>
           ) : (
-            <div className="history-info">共 {sessions.length} 个会话</div>
+            <div className="history-info">{t('history.totalSessions', { count: sessions.length })}</div>
           )}
 
           {/* 工具栏（cc-gui HistoryActions）*/}
@@ -162,24 +164,24 @@ export function HistoryView({
                   className="history-toolbar-btn"
                   onClick={toggleSelectAllVisible}
                   disabled={filtered.length === 0}
-                  title={allVisibleSelected ? '清除' : '全选'}
+                  title={allVisibleSelected ? t('history.clearSelection') : t('history.selectAll')}
                 >
                   <span className={`codicon ${allVisibleSelected ? 'codicon-clear-all' : 'codicon-check-all'}`} />
-                  <span>{allVisibleSelected ? '清除' : '全选'}</span>
+                  <span>{allVisibleSelected ? t('history.clearSelection') : t('history.selectAll')}</span>
                 </button>
                 <button
                   className="history-toolbar-btn history-toolbar-danger"
                   onClick={requestDeleteSelected}
                   disabled={selectedIds.size === 0}
-                  title="删除所选"
+                  title={t('history.deleteSelected')}
                 >
                   <span className="codicon codicon-trash" />
-                  <span>删除所选</span>
+                  <span>{t('history.deleteSelected')}</span>
                 </button>
                 <button
                   className="history-toolbar-btn"
                   onClick={exitSelectionMode}
-                  title="退出多选"
+                  title={t('history.exitMultiSelect')}
                 >
                   <span className="codicon codicon-close" />
                 </button>
@@ -189,15 +191,15 @@ export function HistoryView({
                 <button
                   className="history-toolbar-btn"
                   onClick={() => setSelectionMode(true)}
-                  title="多选"
+                  title={t('history.multiSelect')}
                 >
                   <span className="codicon codicon-checklist" />
-                  <span>多选</span>
+                  <span>{t('history.multiSelect')}</span>
                 </button>
                 <button
                   className="history-toolbar-btn"
                   onClick={onRefresh}
-                  title="刷新"
+                  title={t('history.refresh')}
                 >
                   <span className="codicon codicon-refresh" />
                 </button>
@@ -212,7 +214,7 @@ export function HistoryView({
             <input
               type="text"
               className="history-search-input"
-              placeholder="搜索会话…"
+              placeholder={t('history.searchPlaceholder')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -224,7 +226,7 @@ export function HistoryView({
       <div className="history-list">
         {filtered.length === 0 ? (
           <div className="history-empty">
-            {debouncedQuery ? '🔍 无匹配会话' : '📭 暂无会话，点击右上角 + 新建'}
+            {debouncedQuery ? t('history.noMatch') : t('history.empty')}
           </div>
         ) : (
           <ul className="history-items">
@@ -248,13 +250,13 @@ export function HistoryView({
       {/* 删除确认 modal */}
       {deleteTargets && (
         <ConfirmDialog
-          title="确认删除"
+          title={t('history.confirmDeleteTitle')}
           message={
             deleteTargets.length > 1
-              ? `确定要删除所选 ${deleteTargets.length} 个会话吗？此操作不可撤销。`
-              : '确定要删除这个会话吗？此操作不可撤销。'
+              ? t('history.deleteConfirmMulti', { count: deleteTargets.length })
+              : t('history.deleteConfirmSingle')
           }
-          confirmText="删除"
+          confirmText={t('history.delete')}
           danger
           onConfirm={confirmDelete}
           onCancel={cancelDelete}
@@ -264,9 +266,9 @@ export function HistoryView({
       {/* 切换会话确认 modal（历史会话覆盖当前标签页）*/}
       {switchTarget && (
         <ConfirmDialog
-          title="切换会话"
-          message={`将在当前标签页打开「${switchTarget.title.slice(0, 30)}」，当前会话会保留在历史记录中。确定切换吗？`}
-          confirmText="切换"
+          title={t('history.switchTitle')}
+          message={t('history.switchMessage', { title: switchTarget.title.slice(0, 30) })}
+          confirmText={t('history.switch')}
           onConfirm={() => {
             const target = switchTarget
             setSwitchTarget(null)

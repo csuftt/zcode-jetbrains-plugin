@@ -1,0 +1,94 @@
+{
+  "title": "设置",
+  "backToChat": "返回聊天",
+  "tabs": {
+    "basic": "基础设置",
+    "usage": "用量查询",
+    "memory": "记忆",
+    "skills": "技能",
+    "mcp": "MCP",
+    "other": "其他设置"
+  },
+  "theme": {
+    "label": "界面主题",
+    "followIde": "跟随 IDE",
+    "light": "浅色",
+    "dark": "深色",
+    "hint": "跟随 IDE 时随 IDE 的亮/暗主题自动切换"
+  },
+  "font": {
+    "label": "字体大小",
+    "option": "字号 {{percent}}%",
+    "defaultOption": "字号 {{percent}}%（默认）",
+    "hint": "缩放整个界面（含图标与间距），对所有会话标签生效"
+  },
+  "language": {
+    "label": "语言",
+    "hint": "切换界面语言，对所有会话标签生效"
+  },
+  "colors": {
+    "chatBg": {
+      "label": "聊天背景色",
+      "hint": "自定义聊天区域和输入框的背景色"
+    },
+    "chatBar": {
+      "label": "顶栏颜色",
+      "hint": "自定义顶部标题栏颜色，文字与边框颜色按对比度自动适配"
+    },
+    "userMsg": {
+      "label": "用户消息气泡色",
+      "hint": "自定义用户消息气泡背景色，文字颜色按对比度自动适配"
+    },
+    "custom": "自定义",
+    "reset": "重置"
+  },
+  "presets": {
+    "default": "默认",
+    "midnightBlue": "午夜蓝",
+    "forest": "森林",
+    "purple": "紫色",
+    "coffee": "咖啡",
+    "rose": "玫瑰",
+    "cyan": "青色",
+    "graphite": "石墨",
+    "sky": "天空",
+    "mint": "薄荷",
+    "lavender": "薰衣草",
+    "warm": "暖色",
+    "green": "绿色",
+    "amber": "琥珀",
+    "red": "红色",
+    "violet": "紫罗兰",
+    "gray": "灰色"
+  },
+  "other": {
+    "title": "其他设置",
+    "desc": "历史输入补全与历史记录管理",
+    "completionLabel": "历史记录补全",
+    "on": "已开启",
+    "off": "已关闭",
+    "completionHint": "输入时按前缀匹配历史，Tab 采纳灰色建议；关闭后输入框 ↑↓ 历史回溯不受影响",
+    "manageHistory": "管理历史记录",
+    "empty": "暂无历史记录",
+    "add": "添加",
+    "clearLow": "清除低重要度 ({{count}})",
+    "clearLowTooltip": "删除所有仅使用过一次的记录",
+    "clearAll": "清空全部",
+    "importanceTooltip": "重要度（使用次数）",
+    "edit": "编辑",
+    "delete": "删除",
+    "close": "关闭",
+    "editorTitleAdd": "添加历史记录",
+    "editorTitleEdit": "编辑历史记录",
+    "content": "内容",
+    "contentPlaceholder": "输入历史记录内容",
+    "importance": "重要度",
+    "importanceHint": "重要度 = 使用次数，越大越常用；发送一次自动 +1",
+    "cancel": "取消",
+    "save": "保存",
+    "confirmClearAllTitle": "清空全部历史记录",
+    "confirmClearLowTitle": "清除低重要度记录",
+    "confirmClearAllMsg": "将删除全部 {{count}} 条历史记录，删除后不可恢复。",
+    "confirmClearLowMsg": "将删除 {{count}} 条仅使用过一次的记录，删除后不可恢复。"
+  }
+}

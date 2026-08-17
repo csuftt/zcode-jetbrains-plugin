@@ -1,0 +1,94 @@
+{
+  "title": "設定",
+  "backToChat": "チャットに戻る",
+  "tabs": {
+    "basic": "基本設定",
+    "usage": "使用量",
+    "memory": "メモリ",
+    "skills": "スキル",
+    "mcp": "MCP",
+    "other": "その他"
+  },
+  "theme": {
+    "label": "UI テーマ",
+    "followIde": "IDE に従う",
+    "light": "ライト",
+    "dark": "ダーク",
+    "hint": "IDE に従うモードでは IDE のライト/ダークテーマに自動的に切り替わります"
+  },
+  "font": {
+    "label": "フォントサイズ",
+    "option": "フォント {{percent}}%",
+    "defaultOption": "フォント {{percent}}%（デフォルト）",
+    "hint": "アイコンや余白を含む UI 全体を拡大縮小します。すべてのセッションタブに適用されます"
+  },
+  "language": {
+    "label": "言語",
+    "hint": "UI の言語を切り替えます。すべてのセッションタブに適用されます"
+  },
+  "colors": {
+    "chatBg": {
+      "label": "チャット背景色",
+      "hint": "チャット領域と入力欄の背景色をカスタマイズします"
+    },
+    "chatBar": {
+      "label": "トップバーの色",
+      "hint": "トップタイトルバーの色をカスタマイズします。文字と枠線の色はコントラストに応じて自動調整されます"
+    },
+    "userMsg": {
+      "label": "ユーザーバブルの色",
+      "hint": "ユーザーメッセージのバブル背景色をカスタマイズします。文字色はコントラストに応じて自動調整されます"
+    },
+    "custom": "カスタム",
+    "reset": "リセット"
+  },
+  "presets": {
+    "default": "デフォルト",
+    "midnightBlue": "ミッドナイトブルー",
+    "forest": "フォレスト",
+    "purple": "パープル",
+    "coffee": "コーヒー",
+    "rose": "ローズ",
+    "cyan": "シアン",
+    "graphite": "グラファイト",
+    "sky": "スカイ",
+    "mint": "ミント",
+    "lavender": "ラベンダー",
+    "warm": "ウォーム",
+    "green": "グリーン",
+    "amber": "アンバー",
+    "red": "レッド",
+    "violet": "バイオレット",
+    "gray": "グレー"
+  },
+  "other": {
+    "title": "その他設定",
+    "desc": "入力履歴補完と履歴管理",
+    "completionLabel": "履歴補完",
+    "on": "オン",
+    "off": "オフ",
+    "completionHint": "入力中はプレフィックスで履歴を照合し、Tab キーでグレーの候補を確定します。オフにしても入力欄の ↑↓ 履歴移動には影響しません",
+    "manageHistory": "履歴を管理",
+    "empty": "履歴はありません",
+    "add": "追加",
+    "clearLow": "低重要度を削除（{{count}}）",
+    "clearLowTooltip": "使用が 1 回のみの記録をすべて削除します",
+    "clearAll": "すべて削除",
+    "importanceTooltip": "重要度（使用回数）",
+    "edit": "編集",
+    "delete": "削除",
+    "close": "閉じる",
+    "editorTitleAdd": "履歴を追加",
+    "editorTitleEdit": "履歴を編集",
+    "content": "内容",
+    "contentPlaceholder": "履歴の内容を入力",
+    "importance": "重要度",
+    "importanceHint": "重要度＝使用回数。多いほどよく使われ、送信ごとに自動で +1 されます",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "confirmClearAllTitle": "履歴をすべて削除",
+    "confirmClearLowTitle": "低重要度の記録を削除",
+    "confirmClearAllMsg": "{{count}} 件の履歴をすべて削除します。元に戻せません。",
+    "confirmClearLowMsg": "使用が 1 回のみの記録 {{count}} 件を削除します。元に戻せません。"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "loading": "Loading messages…",
+  "scroll": {
+    "backToTop": "Back to top",
+    "toBottom": "Jump to bottom"
+  },
+  "header": {
+    "back": "Back",
+    "newSession": "New session",
+    "newSessionDisabled": "Current session is empty, no need to create a new one",
+    "newTab": "New tab",
+    "browser": "Browser (expand/collapse)",
+    "searchSession": "Search conversation",
+    "history": "History",
+    "settings": "Settings",
+    "sessionTitleAria": "Session title",
+    "saveTitleAria": "Save title",
+    "cancelEditAria": "Cancel editing",
+    "editTitleAria": "Edit session title",
+    "untitled": "New session"
+  },
+  "message": {
+    "emptyText": "(empty)",
+    "working": "Working",
+    "worked": "Worked",
+    "cachePercent": "Cache {{percent}}%"
+  },
+  "thinking": {
+    "thinking": "Thinking",
+    "thought": "Thought process"
+  },
+  "mermaid": {
+    "zoomInView": "Zoom in",
+    "parseFailed": "⚠ Mermaid parse failed, showing source code",
+    "generating": "⏳ Generating diagram…",
+    "zoomOutTitle": "Zoom out (-10%)",
+    "zoomInTitle": "Zoom in (+10%)",
+    "resetZoom": "Reset to 100% (scroll to zoom)",
+    "close": "Close (Esc)"
+  },
+  "preview": {
+    "defaultMeta": "Markdown preview",
+    "close": "Close"
+  },
+  "search": {
+    "panelAria": "Search in conversation",
+    "placeholder": "Search in conversation…",
+    "regexError": "Invalid regex",
+    "searching": "Searching…",
+    "noResults": "No results",
+    "matchCase": "Match case (Alt+C)",
+    "matchCaseAria": "Match case",
+    "wholeWord": "Match whole word (Alt+W)",
+    "wholeWordAria": "Match whole word",
+    "regex": "Use regex (Alt+R)",
+    "regexAria": "Use regular expression",
+    "prevMatch": "Previous match (Shift+Enter)",
+    "prevMatchAria": "Previous match",
+    "nextMatch": "Next match (Enter)",
+    "nextMatchAria": "Next match",
+    "close": "Close (Esc)",
+    "closeAria": "Close search"
+  },
+  "welcome": {
+    "version": "ZCode version",
+    "sendMsg": "Send a message to ZCode"
+  }
+}

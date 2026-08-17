@@ -7,11 +7,13 @@
  */
 
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import '../styles/subagent-detail.less'
 
 export function MarkdownPreviewDialog() {
+  const { t } = useTranslation()
   const preview = useStore((s) => s.markdownPreview)
   const closeMarkdownPreview = useStore((s) => s.closeMarkdownPreview)
 
@@ -37,10 +39,10 @@ export function MarkdownPreviewDialog() {
               {preview.title}
             </span>
             <div className="subagent-detail-header__meta">
-              <span className="subagent-detail-meta-item">{preview.meta ?? 'Markdown 预览'}</span>
+              <span className="subagent-detail-meta-item">{preview.meta ?? t('chat.preview.defaultMeta')}</span>
             </div>
           </div>
-          <button className="subagent-detail-icon-btn" data-tip="关闭" onClick={closeMarkdownPreview}>
+          <button className="subagent-detail-icon-btn" data-tip={t('chat.preview.close')} onClick={closeMarkdownPreview}>
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>

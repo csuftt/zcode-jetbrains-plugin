@@ -1,0 +1,41 @@
+{
+  "errorClose": "閉じる",
+  "errorCloseAria": "エラーを閉じる",
+  "newSession": {
+    "title": "新規セッション",
+    "message": "新しい空のセッションを開始します（最初のメッセージ送信時に作成）。現在のセッションは履歴に残り、いつでも切り替えられます。新規セッションを開始しますか？",
+    "confirm": "新規作成"
+  },
+  "askUser": {
+    "cancel": "キャンセル",
+    "confirm": "確認"
+  },
+  "planApproval": {
+    "title": "プラン承認",
+    "hint": "承認するとプランモードを終了し、実行を開始します",
+    "emptyPlan": "_（プラン内容が空です）_",
+    "tip": "オーバーレイまたは「プランを続ける」をクリックすると拒否してプランモードに留まります",
+    "continuePlanning": "プランを続ける",
+    "approveAndRun": "承認して実行"
+  },
+  "notification": {
+    "subagent": "サブエージェント",
+    "bashTask": "バックグラウンドコマンド",
+    "backgroundTask": "バックグラウンドタスク",
+    "completed": "✓ 完了",
+    "failed": "✗ 失敗",
+    "notice": "通知"
+  },
+  "status": {
+    "todoTab": "タスク",
+    "agentTab": "サブエージェント",
+    "fileTab": "ファイル",
+    "noTodos": "タスクはありません",
+    "noAgents": "サブタスクはありません",
+    "noFiles": "ファイル変更はありません",
+    "viewSubagentDetail": "クリックしてサブエージェントの実行過程を表示",
+    "openInEditor": "エディターで開く：{{path}}",
+    "viewDiff": "編集前後の差分を表示",
+    "diffTitle": "編集差分：{{name}}"
+  }
+}

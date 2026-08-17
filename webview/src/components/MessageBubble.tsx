@@ -17,6 +17,7 @@
  */
 
 import { memo, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage, MessagePart, TextPart } from '@/types/messages'
 import { MarkdownBlock } from './MarkdownBlock'
 import { ToolCallCard } from './ToolCallCard'
@@ -55,10 +56,11 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
 
 /** user 消息：纯文本，右对齐蓝色气泡 */
 function UserBubble({ text, time, anchorAttr }: { text: string; time: string; anchorAttr?: string }) {
+  const { t } = useTranslation()
   return (
     <div className="msg msg--user" data-anchor-msg={anchorAttr}>
       <div className="msg__time">{time}</div>
-      <div className="msg__bubble">{text || '(空)'}</div>
+      <div className="msg__bubble">{text || t('chat.message.emptyText')}</div>
     </div>
   )
 }
@@ -160,6 +162,7 @@ function collectUserText(parts: MessagePart[]): string {
  *   - turn 结束 → 重拉消息之间有短暂窗口缺 completed，用最后一次跳动值冻结过渡
  */
 function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; time: string; streaming?: boolean }) {
+  const { t } = useTranslation()
   const tokens = info.tokens
   const model = info.modelID
 
@@ -186,13 +189,13 @@ function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; 
       {model && <span className="msg__footer-model">{model}</span>}
       {durationMs != null && (
         <span className={`msg__footer-duration${working ? ' msg__footer-duration--working' : ''}`}>
-          ⏱ {working ? '工作中' : '已工作'} {formatDuration(durationMs)}
+          ⏱ {working ? t('chat.message.working') : t('chat.message.worked')} {formatDuration(durationMs)}
         </span>
       )}
       {tokens && (
         <span className="msg__footer-tokens">
           💡 {tokens.input.toLocaleString()} in / {tokens.output.toLocaleString()} out
-          {tokens.cache?.read ? ` · 缓存 ${Math.round((tokens.cache.read / tokens.input) * 100)}%` : ''}
+          {tokens.cache?.read ? ` · ${t('chat.message.cachePercent', { percent: Math.round((tokens.cache.read / tokens.input) * 100) })}` : ''}
         </span>
       )}
       {info.cost ? <span className="msg__footer-cost">${info.cost.toFixed(4)}</span> : null}

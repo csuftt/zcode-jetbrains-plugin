@@ -1,0 +1,27 @@
+{
+  "item": {
+    "modifiedAt": "수정됨 {{time}}",
+    "notCreated": "미생성",
+    "open": "열기",
+    "openTitle": "편집기에서 열기",
+    "creating": "생성 중…",
+    "create": "생성",
+    "createTitle": "기본 템플릿을 생성하고 편집기에서 열기"
+  },
+  "global": {
+    "title": "전역 메모리",
+    "hint": "모든 프로젝트의 ZCode 세션에서 자동으로 읽음"
+  },
+  "refresh": "새로 고침",
+  "loading": "불러오는 중…",
+  "project": {
+    "title": "프로젝트 메모리",
+    "hint": "현재 프로젝트의 ZCode 세션에서만 자동으로 읽음",
+    "empty": "열려 있는 프로젝트가 감지되지 않음"
+  },
+  "auto": {
+    "title": "ZCode 자동 메모리",
+    "hint": "완료된 대화에서 자동으로 추출되어 이후 세션에 자동으로 반영됩니다(ZCode 클라이언트의 설정 → 일반에서 활성화)",
+    "empty": "자동 메모리가 없습니다 — ZCode 클라이언트에서 Memory 기능을 켜고 몇 번 대화하면 추출된 사실이 여기에 표시됩니다"
+  }
+}

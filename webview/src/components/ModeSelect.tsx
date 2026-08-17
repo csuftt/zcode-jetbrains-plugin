@@ -9,17 +9,11 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 
-/** 协议 4 模式（value 与服务端一致；label 中文，title 为官方英文描述）*/
-const MODES = [
-  { value: 'build', label: '变更前询问', title: 'Ask before changes — 每次文件变更前询问' },
-  { value: 'edit', label: '自动编辑', title: 'Edit automatically — 自动编辑选中/相关文件' },
-  { value: 'plan', label: '计划模式', title: 'Plan mode — 只读检查代码、先出计划再编辑' },
-  { value: 'yolo', label: '完全控制', title: 'Full access — 更少确认、直接编辑并运行命令' },
-] as const
-
-const MODE_LABELS: Record<string, string> = Object.fromEntries(MODES.map((m) => [m.value, m.label]))
+/** 协议 4 模式（value 与服务端一致；label/title 文案经 i18n：input.mode.<value>.label/.title）*/
+const MODES = [{ value: 'build' }, { value: 'edit' }, { value: 'plan' }, { value: 'yolo' }] as const
 
 /** 模式图标（build=对话气泡 / edit=盾牌 / plan=任务清单 / yolo=闪电）*/const MODE_ICONS: Record<string, string> = {
   build: 'codicon-comment-discussion',
@@ -30,6 +24,7 @@ const MODE_LABELS: Record<string, string> = Object.fromEntries(MODES.map((m) => 
 const modeIcon = (v: string) => MODE_ICONS[v] ?? 'codicon-shield'
 
 export function ModeSelect() {
+  const { t } = useTranslation()
   const currentMode = useStore((s) => s.currentMode)
   const messages = useStore((s) => s.messages)
   const sessionId = useStore((s) => s.currentSessionId)
@@ -47,7 +42,7 @@ export function ModeSelect() {
     return 'yolo'
   }, [currentMode, messages])
 
-  const displayLabel = MODE_LABELS[displayValue] ?? displayValue
+  const displayLabel = t(`input.mode.${displayValue}.label`, { defaultValue: displayValue })
   const activeMode = MODES.find((m) => m.value === displayValue)
   // 激活色 class：仅完全控制（yolo）着橙金警示色，其余模式用原版按钮色
   const activeClass = displayValue === 'yolo' ? 'mode-active-yolo' : ''
@@ -75,7 +70,7 @@ export function ModeSelect() {
         className={`selector-button ${activeClass}`}
         onClick={() => setOpen((v) => !v)}
         disabled={!sessionId}
-        title={activeMode?.title ?? '权限模式'}
+        title={activeMode ? t(`input.mode.${activeMode.value}.title`) : t('input.mode.title')}
       >
         <span className={`codicon ${modeIcon(displayValue)}`} />
         <span className="selector-button-text">{displayLabel}</span>
@@ -88,7 +83,7 @@ export function ModeSelect() {
             <div
               key={m.value}
               className={`selector-dropdown-item ${displayValue === m.value ? 'is-selected' : ''}`}
-              title={m.title}
+              title={t(`input.mode.${m.value}.title`)}
               onClick={() => {
                 setMode(m.value)
                 setOpen(false)
@@ -96,7 +91,7 @@ export function ModeSelect() {
             >
               <span className={`codicon ${modeIcon(m.value)}`} />
               <div className="selector-dropdown-item-main">
-                <span className="selector-dropdown-item-name">{m.label}</span>
+                <span className="selector-dropdown-item-name">{t(`input.mode.${m.value}.label`)}</span>
                 {displayValue === m.value && <span className="codicon codicon-check selector-dropdown-item-check" />}
               </div>
             </div>

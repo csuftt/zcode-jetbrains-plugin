@@ -10,6 +10,7 @@ import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.content.ContentManager
 import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
+import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.zCodeService
 
 /**
@@ -27,9 +28,14 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
 
     companion object {
         const val TOOL_WINDOW_ID = "ZCode"
-        private const val TAB_NAME_PREFIX = "会话"
-        /** 匹配「会话1」「会话1 ●」等，取数字部分 */
-        private val TAB_NAME_PATTERN = Regex("^$TAB_NAME_PREFIX(\\d+)")
+
+        /** 标签名静态前缀（tab.name.format 中 {0} 之前的部分，用于编号正则匹配；随语言变化）*/
+        private fun tabNamePrefix(): String =
+            message("tab.name.format").substringBefore("{0}")
+
+        /** 匹配「会话1」「Session 1」「会话1 ●」等，取数字部分 */
+        private fun tabNamePattern(): Regex =
+            Regex("^${Regex.escape(tabNamePrefix())}\\s*(\\d+)")
 
         fun getToolWindow(project: Project): ToolWindow? =
             ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
@@ -46,11 +52,12 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
         /** 生成下一个标签名：取现有「会话N」最大编号 + 1 */
         private fun getNextTabName(cm: ContentManager): String {
             var max = 0
+            val pattern = tabNamePattern()
             for (c in cm.contents) {
-                val m = TAB_NAME_PATTERN.find(c.displayName ?: "") ?: continue
+                val m = pattern.find(c.displayName ?: "") ?: continue
                 max = maxOf(max, m.groupValues[1].toIntOrNull() ?: 0)
             }
-            return "$TAB_NAME_PREFIX${max + 1}"
+            return message("tab.name.format", max + 1)
         }
 
         /**
@@ -113,9 +120,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 return it
             }
             val panel = ZCodeBrowserPanel(project)
-            val content = ContentFactory.getInstance().createContent(panel, "浏览器", false)
+            val content = ContentFactory.getInstance().createContent(panel, message("browser.tab.name"), false)
             content.isCloseable = true
-            content.description = "内嵌浏览器（前端调试）"
+            content.description = message("browser.tab.description")
             content.setDisposer(panel)
             cm.addContent(content)
             toolWindow.show(null)
@@ -134,7 +141,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
         // 恢复持久化的标签（或首个默认标签）
         val saved = ZCodeTabState.getInstance(project).state.tabs
         if (saved.isEmpty()) {
-            addTabContent(project, toolWindow, null, "${TAB_NAME_PREFIX}1")
+            addTabContent(project, toolWindow, null, message("tab.name.format", 1))
         } else {
             // 激活索引先算好：只有激活标签立即创建 JCEF，其余懒加载（切到时才建）。
             // 2026-08-15 白屏故障：重启恢复 3 个标签 → 启动瞬间并发拉起 3 个渲染进程全部失败 → UI 空白
@@ -143,7 +150,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             for ((i, info) in saved.withIndex()) {
                 val sid = info.sessionId?.takeIf { it.isNotBlank() }
                 addTabContent(
-                    project, toolWindow, sid, info.name.ifBlank { "$TAB_NAME_PREFIX ?" },
+                    project, toolWindow, sid, info.name.ifBlank { message("tab.name.untitled") },
                     lazy = i != activeIdx,
                 )
             }
@@ -173,17 +180,17 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 val content = event.content
                 if (content.component is ZCodeBrowserPanel) return
                 val panel = content.component as? ZCodeToolWindowPanel
-                val tabName = content.displayName ?: "标签"
+                val tabName = content.displayName ?: message("tab.fallbackName")
                 val streaming = panel?.isTabStreaming() == true
-                val message = if (streaming) {
-                    "标签「$tabName」的会话正在生成中，确定关闭吗？"
+                val dialogMessage = if (streaming) {
+                    message("dialog.closeTab.streaming", tabName)
                 } else {
-                    "确定关闭标签「$tabName」吗？"
+                    message("dialog.closeTab.normal", tabName)
                 }
                 val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
                     project,
-                    message,
-                    "关闭标签",
+                    dialogMessage,
+                    message("dialog.closeTab.title"),
                     com.intellij.openapi.ui.Messages.getQuestionIcon(),
                 )
                 if (result != com.intellij.openapi.ui.Messages.YES) {

@@ -7,6 +7,7 @@
  * - 计数 n/total，非法正则红字提示
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useConversationSearch, DEFAULT_SEARCH_OPTIONS } from '@/hooks/useConversationSearch'
 import type { SearchOptions } from '@/hooks/useConversationSearch'
 import { getPersisted, setPersisted } from '@/utils/persist'
@@ -56,6 +57,7 @@ export const ConversationSearch = memo(function ConversationSearch({
   containerRef,
   messagesSignal,
 }: ConversationSearchProps) {
+  const { t } = useTranslation()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [searchOptions, setSearchOptions] = useState<SearchOptions>(loadStoredOptions)
 
@@ -133,11 +135,11 @@ export const ConversationSearch = memo(function ConversationSearch({
 
   const counterText = useMemo(() => {
     if (!query.trim()) return ''
-    if (isRegexInvalid) return '正则错误'
-    if (isSearching) return '搜索中…'
-    if (matches.length === 0) return '无结果'
+    if (isRegexInvalid) return t('chat.search.regexError')
+    if (isSearching) return t('chat.search.searching')
+    if (matches.length === 0) return t('chat.search.noResults')
     return `${currentIndex + 1}/${matches.length}`
-  }, [query, isSearching, isRegexInvalid, matches.length, currentIndex])
+  }, [t, query, isSearching, isRegexInvalid, matches.length, currentIndex])
 
   if (!open) return null
 
@@ -149,7 +151,7 @@ export const ConversationSearch = memo(function ConversationSearch({
     <div
       className="cc-search-panel"
       role="search"
-      aria-label="会话内搜索"
+      aria-label={t('chat.search.panelAria')}
       onMouseDown={(e) => {
         // 防止点击面板内其他元素导致输入框失焦
         if (e.target !== inputRef.current) e.preventDefault()
@@ -160,8 +162,8 @@ export const ConversationSearch = memo(function ConversationSearch({
         ref={inputRef}
         type="text"
         className={`cc-search-input${inputError ? ' is-no-results' : ''}`}
-        placeholder="在会话中搜索…"
-        aria-label="会话内搜索"
+        placeholder={t('chat.search.placeholder')}
+        aria-label={t('chat.search.panelAria')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -172,8 +174,8 @@ export const ConversationSearch = memo(function ConversationSearch({
         type="button"
         className={`cc-search-toggle${searchOptions.matchCase ? ' is-active' : ''}`}
         onClick={toggleMatchCase}
-        title="区分大小写 (Alt+C)"
-        aria-label="区分大小写"
+        title={t('chat.search.matchCase')}
+        aria-label={t('chat.search.matchCaseAria')}
         aria-pressed={searchOptions.matchCase}
       >
         <span className="codicon codicon-case-sensitive" aria-hidden="true" />
@@ -182,8 +184,8 @@ export const ConversationSearch = memo(function ConversationSearch({
         type="button"
         className={`cc-search-toggle${searchOptions.wholeWord ? ' is-active' : ''}`}
         onClick={toggleWholeWord}
-        title="整词匹配 (Alt+W)"
-        aria-label="整词匹配"
+        title={t('chat.search.wholeWord')}
+        aria-label={t('chat.search.wholeWordAria')}
         aria-pressed={searchOptions.wholeWord}
       >
         <span className="codicon codicon-whole-word" aria-hidden="true" />
@@ -192,8 +194,8 @@ export const ConversationSearch = memo(function ConversationSearch({
         type="button"
         className={`cc-search-toggle${searchOptions.regex ? ' is-active' : ''}`}
         onClick={toggleRegex}
-        title="正则表达式 (Alt+R)"
-        aria-label="正则表达式"
+        title={t('chat.search.regex')}
+        aria-label={t('chat.search.regexAria')}
         aria-pressed={searchOptions.regex}
       >
         <span className="codicon codicon-regex" aria-hidden="true" />
@@ -206,8 +208,8 @@ export const ConversationSearch = memo(function ConversationSearch({
         className="cc-search-btn"
         onClick={previous}
         disabled={!hasResults}
-        title="上一个匹配 (Shift+Enter)"
-        aria-label="上一个匹配"
+        title={t('chat.search.prevMatch')}
+        aria-label={t('chat.search.prevMatchAria')}
       >
         <span className="codicon codicon-arrow-up" />
       </button>
@@ -216,8 +218,8 @@ export const ConversationSearch = memo(function ConversationSearch({
         className="cc-search-btn"
         onClick={next}
         disabled={!hasResults}
-        title="下一个匹配 (Enter)"
-        aria-label="下一个匹配"
+        title={t('chat.search.nextMatch')}
+        aria-label={t('chat.search.nextMatchAria')}
       >
         <span className="codicon codicon-arrow-down" />
       </button>
@@ -225,8 +227,8 @@ export const ConversationSearch = memo(function ConversationSearch({
         type="button"
         className="cc-search-btn"
         onClick={handleClose}
-        title="关闭 (Esc)"
-        aria-label="关闭搜索"
+        title={t('chat.search.close')}
+        aria-label={t('chat.search.closeAria')}
       >
         <span className="codicon codicon-close" />
       </button>

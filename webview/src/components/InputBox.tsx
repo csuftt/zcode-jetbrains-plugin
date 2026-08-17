@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useKeyboard } from '@/hooks/useKeyboard'
 import { useInputHistory, findHistorySuggestion } from '@/hooks/useInputHistory'
 import { useStore } from '@/store/useStore'
@@ -67,6 +68,7 @@ interface Props {
 }
 
 export function InputBox({ onSend, isStreaming = false, onStop, disabled = false, placeholder, currentModel, onModelSelect }: Props) {
+  const { t } = useTranslation()
   const editorRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   /** 当前 tooltip 宿主的内联 chip（删除 chip 后清理残留 tooltip 用）*/
@@ -724,7 +726,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   return (
     <div className="input-area">
       {/* 拖拽调高手柄（顶部细条，向上拖增大）*/}
-      <div className="input-box__resize-handle" onMouseDown={handleResizeStart} title="拖拽调整高度" />
+      <div className="input-box__resize-handle" onMouseDown={handleResizeStart} title={t('input.resizeHandle')} />
       <div className="chat-input-box">
         {/* 排队消息（streaming 中 Enter 入队的，回合结束自动发送）*/}
         <MessageQueue onEdit={editQueuedToInput} />
@@ -769,7 +771,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
             className="context-tool-btn"
             onClick={() => sendToJava({ op: 'pickFiles' })}
             disabled={disabled}
-            title="添加附件（选择文件）"
+            title={t('input.attach')}
           >
             <span className="codicon codicon-attach" />
           </button>
@@ -788,8 +790,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
             suppressContentEditableWarning
             data-placeholder={
               isStreaming
-                ? '回复生成中，Enter 加入发送队列…'
-                : placeholder || '@引用文件，/ 调用技能，Enter 发送'
+                ? t('input.placeholderStreaming')
+                : placeholder || t('input.placeholder')
             }
             data-completion-suffix={ghostSuffix || undefined}
             onInput={handleInput}
@@ -819,7 +821,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
               <button
                 className="submit-button stop-button"
                 onClick={onStop}
-                title="停止生成"
+                title={t('input.stop')}
                 disabled={disabled}
               >
                 <span className="codicon codicon-debug-stop" />
@@ -829,7 +831,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                 className="submit-button"
                 onClick={doSend}
                 disabled={!canSend}
-                title="发送 (Enter)"
+                title={t('input.send')}
               >
                 <span className="codicon codicon-send" />
               </button>

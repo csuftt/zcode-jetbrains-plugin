@@ -13,6 +13,8 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { useStore } from '@/store/useStore'
 import { sendToJava, isInJcef } from '@/ipc/bridge'
 import type { McpServerInfo, McpToolInfo } from '@/types/messages'
@@ -22,25 +24,26 @@ import '../styles/mcp-list-view.less'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
-const SCOPE_LABEL: Record<string, string> = {
-  user: '全局',
-  project: '项目',
-  plugin: '插件',
-  runtime: '运行时',
+/** 配置来源 → 文案 key（未知来源回退原值）*/
+function scopeLabel(scope: string, t: TFunction): string {
+  return t(`mcp.scope.${scope}`, { defaultValue: scope })
 }
 
-/** 连接状态 → 中文 + 状态点配色（对齐 cc-gui：绿=已连接 红=失败 灰=禁用/未知 黄=连接中）*/
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  connected: { label: '已连接', cls: 'connected' },
-  connecting: { label: '连接中', cls: 'connecting' },
-  failed: { label: '失败', cls: 'failed' },
-  disabled: { label: '已禁用', cls: 'disabled' },
-  disconnected: { label: '未连接', cls: 'disconnected' },
-  untrusted: { label: '未信任', cls: 'untrusted' },
+/** 连接状态 → 文案 + 状态点配色（对齐 cc-gui：绿=已连接 红=失败 灰=禁用/未知 黄=连接中）*/
+const STATUS_CLS: Record<string, string> = {
+  connected: 'connected',
+  connecting: 'connecting',
+  failed: 'failed',
+  disabled: 'disabled',
+  disconnected: 'disconnected',
+  untrusted: 'untrusted',
 }
 
-function statusMeta(s?: string) {
-  return s ? STATUS_META[s] ?? { label: s, cls: 'unknown' } : { label: '未知', cls: 'unknown' }
+function statusMeta(s: string | undefined, t: TFunction) {
+  if (!s) return { label: t('mcp.status.unknown'), cls: 'unknown' }
+  return STATUS_CLS[s]
+    ? { label: t(`mcp.status.${s}`), cls: STATUS_CLS[s] }
+    : { label: s, cls: 'unknown' }
 }
 
 /** 工具名 → codicon（照搬 cc-gui serverUtils.getToolIcon 关键词映射）*/
@@ -65,15 +68,16 @@ function toolIcon(name: string): string {
  * 空结果=黄色警告；正常=「工具 (N)」+ 列表（hover title=description）。
  */
 function ToolsSection({ server }: { server: McpServerInfo }) {
+  const { t } = useTranslation()
   const state = useStore((s) => s.mcpToolsByServer[server.name])
   const loadMcpServerTools = useStore((s) => s.loadMcpServerTools)
 
   if (server.status !== 'connected') {
     return (
       <div className="mcp-card__row">
-        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__row-label">{t('mcp.tools')}</span>
         <span className="mcp-card__tools-hint">
-          {server.status === 'connecting' ? '连接中，连接成功后可查看工具列表…' : '连接成功后可查看工具列表'}
+          {server.status === 'connecting' ? t('mcp.toolsHintConnecting') : t('mcp.toolsHint')}
         </span>
       </div>
     )
@@ -82,10 +86,10 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
   if (!state) {
     return (
       <div className="mcp-card__row">
-        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__row-label">{t('mcp.tools')}</span>
         <button className="mcp-card__tools-load" onClick={() => loadMcpServerTools(server.name)}>
           <span className="codicon codicon-refresh" />
-          加载工具列表
+          {t('mcp.loadTools')}
         </button>
       </div>
     )
@@ -94,9 +98,9 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
   if (state.loading) {
     return (
       <div className="mcp-card__row">
-        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__row-label">{t('mcp.tools')}</span>
         <span className="mcp-card__tools-hint">
-          <span className="codicon codicon-loading spin" /> 正在连接服务器获取工具…
+          <span className="codicon codicon-loading spin" /> {t('mcp.loadingTools')}
         </span>
       </div>
     )
@@ -105,11 +109,11 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
   if (state.error) {
     return (
       <div className="mcp-card__row">
-        <span className="mcp-card__row-label">工具</span>
+        <span className="mcp-card__row-label">{t('mcp.tools')}</span>
         <span className="mcp-card__tools-error" title={state.error}>
-          获取失败：{state.error}
+          {t('mcp.fetchToolsFailed', { error: state.error })}
         </span>
-        <button className="mcp-card__tools-retry" onClick={() => loadMcpServerTools(server.name, true)} title="重试">
+        <button className="mcp-card__tools-retry" onClick={() => loadMcpServerTools(server.name, true)} title={t('mcp.retry')}>
           <span className="codicon codicon-refresh" />
         </button>
       </div>
@@ -119,9 +123,9 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
   if (state.tools.length === 0) {
     return (
       <div className="mcp-card__row">
-        <span className="mcp-card__row-label">工具</span>
-        <span className="mcp-card__tools-warning">已连接但无可用工具</span>
-        <button className="mcp-card__tools-retry" onClick={() => loadMcpServerTools(server.name, true)} title="重新获取">
+        <span className="mcp-card__row-label">{t('mcp.tools')}</span>
+        <span className="mcp-card__tools-warning">{t('mcp.noToolsWarning')}</span>
+        <button className="mcp-card__tools-retry" onClick={() => loadMcpServerTools(server.name, true)} title={t('mcp.refetch')}>
           <span className="codicon codicon-refresh" />
         </button>
       </div>
@@ -132,13 +136,13 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
     <div className="mcp-card__tools-panel">
       <div className="mcp-card__tools-panel-header">
         <span className="mcp-card__tools-title">
-          <span className="codicon codicon-tools" /> 工具 ({state.tools.length})
+          <span className="codicon codicon-tools" /> {t('mcp.toolsPanelTitle', { count: state.tools.length })}
         </span>
         <span className="mcp-card__tools-meta">{fmtTime(state.fetchedAt)}</span>
         <button
           className="mcp-card__tools-retry"
           onClick={() => loadMcpServerTools(server.name, true)}
-          title="强制刷新（重新连接服务器）"
+          title={t('mcp.forceRefresh')}
         >
           <span className="codicon codicon-sync" />
         </button>
@@ -160,7 +164,8 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
 
 /** 单个服务器卡片（手风琴展开）*/
 function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInfo; expanded: boolean; onToggleExpand: () => void }) {
-  const meta = statusMeta(server.status)
+  const { t } = useTranslation()
+  const meta = statusMeta(server.status, t)
   // 头部工具数徽章：直连结果优先（mcp/list 的 toolCount 在 status 快照模式下
   // app-server 未真实连接恒为 0，与 McpToolsClient 直连拿到的实际数对不上）；
   // 直连失败/未加载时回退 RPC toolCount
@@ -175,7 +180,7 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
     <div className={cx('mcp-card', expanded && 'expanded', !server.enabled && 'off')}>
       <div className="mcp-card__header" onClick={onToggleExpand}>
         <span className={cx('codicon mcp-card__chevron', expanded && 'open', 'codicon-chevron-right')} />
-        <span className={cx('mcp-card__status-dot', meta.cls)} title={meta.label + (server.statusError ? `：${server.statusError}` : '')} />
+        <span className={cx('mcp-card__status-dot', meta.cls)} title={server.statusError ? t('mcp.statusWithError', { label: meta.label, error: server.statusError }) : meta.label} />
         <span className="mcp-card__name">{server.name}</span>
         <span className={cx('mcp-card__status-text', meta.cls)}>{meta.label}</span>
         {server.status === 'failed' && server.statusError && (
@@ -185,13 +190,13 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
         )}
         <span className="mcp-card__transport">{server.transport}</span>
         {showToolCount && (
-          <span className="mcp-card__tools" title="工具数（展开卡片查看工具列表）">
+          <span className="mcp-card__tools" title={t('mcp.toolsCountBadge')}>
             <span className="codicon codicon-tools" />
             {displayCount}
           </span>
         )}
-        {zeroToolsWarning && <span className="mcp-card__tools warn" title="已连接但无工具">0 工具</span>}
-        <span className={cx('mcp-card__scope', server.scope)}>{SCOPE_LABEL[server.scope] ?? server.scope}</span>
+        {zeroToolsWarning && <span className="mcp-card__tools warn" title={t('mcp.zeroToolsTitle')}>{t('mcp.zeroTools')}</span>}
+        <span className={cx('mcp-card__scope', server.scope)}>{scopeLabel(server.scope, t)}</span>
         <span className="codicon mcp-card__chevron" style={{ visibility: 'hidden' }} />
       </div>
 
@@ -200,7 +205,7 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
           <ToolsSection server={server} />
           {server.command && (
             <div className="mcp-card__row">
-              <span className="mcp-card__row-label">命令</span>
+              <span className="mcp-card__row-label">{t('mcp.command')}</span>
               <code className="mcp-card__code">
                 {[server.command, ...(server.args ?? [])].join(' ')}
               </code>
@@ -208,27 +213,27 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
           )}
           {server.url && (
             <div className="mcp-card__row">
-              <span className="mcp-card__row-label">地址</span>
+              <span className="mcp-card__row-label">{t('mcp.address')}</span>
               <code className="mcp-card__code">{server.url}</code>
             </div>
           )}
           {server.envKeys && server.envKeys.length > 0 && (
             <div className="mcp-card__row">
-              <span className="mcp-card__row-label">环境变量</span>
+              <span className="mcp-card__row-label">{t('mcp.envVars')}</span>
               <span className="mcp-card__env-keys">{server.envKeys.join(' · ')}</span>
             </div>
           )}
           {server.statusError && (
             <div className="mcp-card__row">
-              <span className="mcp-card__row-label">错误</span>
+              <span className="mcp-card__row-label">{t('mcp.error')}</span>
               <span className="mcp-card__error-text">{server.statusError}</span>
             </div>
           )}
           <div className="mcp-card__row">
-            <span className="mcp-card__row-label">来源</span>
+            <span className="mcp-card__row-label">{t('mcp.source')}</span>
             <span className="mcp-card__row-value">
-              {(SCOPE_LABEL[server.scope] ?? server.scope) + (server.pluginName ? ` · 插件 ${server.pluginName}` : '')}
-              {server.updatedAt ? ` · 状态更新于 ${fmtTime(new Date(server.updatedAt).getTime())}` : ''}
+              {(scopeLabel(server.scope, t)) + (server.pluginName ? ` · ${t('mcp.sourcePlugin', { name: server.pluginName })}` : '')}
+              {server.updatedAt ? ` · ${t('mcp.statusUpdatedAt', { time: fmtTime(new Date(server.updatedAt).getTime()) })}` : ''}
             </span>
           </div>
           {server.scope !== 'runtime' && server.configPath && (
@@ -239,7 +244,7 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
                 title={server.configPath}
               >
                 <span className="codicon codicon-go-to-file" />
-                打开配置文件
+                {t('mcp.openConfigFile')}
               </button>
             </div>
           )}
@@ -250,6 +255,7 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
 }
 
 export function McpListView() {
+  const { t } = useTranslation()
   const mcpServers = useStore((s) => s.mcpServers)
   const mcpLoading = useStore((s) => s.mcpLoading)
   const mcpChecking = useStore((s) => s.mcpChecking)
@@ -289,26 +295,26 @@ export function McpListView() {
   return (
     <div className="mcp-list-view">
       <div className="mcp-list-view__toolbar">
-        <span className="mcp-list-view__hint">MCP 服务器与连接状态</span>
+        <span className="mcp-list-view__hint">{t('mcp.toolbarHint')}</span>
         <button
           className="mcp-list-view__btn"
           onClick={() => loadMcpServers('connect')}
           disabled={mcpChecking || mcpLoading}
-          title="真实连接各服务器并刷新状态（较慢，完成后日志自动更新）"
+          title={t('mcp.checkConnectionTitle')}
         >
           <span className={cx('codicon', mcpChecking ? 'codicon-loading spin' : 'codicon-plug')} />
-          {mcpChecking ? '检测中…' : '检测连接'}
+          {mcpChecking ? t('mcp.checking') : t('mcp.checkConnection')}
         </button>
-        <button className="mcp-list-view__log-btn" onClick={openLogs} title="连接日志（CLI 落盘的真实连接过程）">
+        <button className="mcp-list-view__log-btn" onClick={openLogs} title={t('mcp.logsTitle')}>
           <span className="codicon codicon-output" />
-          日志
+          {t('mcp.logs')}
           {mcpLogs && mcpLogs.length > 0 && <span className="mcp-list-view__log-badge">{mcpLogs.length}</span>}
         </button>
         <button
           className="mcp-list-view__icon-btn"
           onClick={() => loadMcpServers('status')}
           disabled={mcpLoading || mcpChecking}
-          title="刷新（状态快照，不实际连接）"
+          title={t('mcp.refreshTitle')}
         >
           <span className={cx('codicon', mcpLoading ? 'codicon-loading spin' : 'codicon-refresh')} />
         </button>
@@ -320,35 +326,35 @@ export function McpListView() {
             .filter((k) => summary[k])
             .map((k) => (
               <span key={k} className={cx('mcp-list-view__summary-item', k)}>
-                {statusMeta(k).label} {summary[k]}
+                {statusMeta(k, t).label} {summary[k]}
               </span>
             ))}
-          <span className="mcp-list-view__summary-total">共 {servers.length} 台</span>
+          <span className="mcp-list-view__summary-total">{t('mcp.totalServers', { count: servers.length })}</span>
         </div>
       )}
 
       {mcpChecking && (
         <div className="mcp-list-view__checking">
-          <span className="codicon codicon-loading spin" /> 正在连接各 MCP 服务器（可能需要几十秒）…
+          <span className="codicon codicon-loading spin" /> {t('mcp.checkingServers')}
         </div>
       )}
 
       {mcpError && (
         <div className="mcp-list-view__error" title={mcpError}>
-          状态查询失败：{mcpError}（以下为磁盘配置清单）
+          {t('mcp.queryFailed', { error: mcpError })}
         </div>
       )}
 
       {mcpLoading && !mcpServers ? (
         <div className="mcp-list-view__loading">
-          <span className="codicon codicon-loading spin" /> 正在读取 MCP 配置…
+          <span className="codicon codicon-loading spin" /> {t('mcp.loadingConfig')}
         </div>
       ) : servers.length === 0 ? (
         <div className="mcp-list-view__empty">
           <span className="codicon codicon-server-process" />
-          <div>未配置任何 MCP 服务器</div>
+          <div>{t('mcp.empty')}</div>
           <span className="mcp-list-view__empty-hint">
-            在 ~/.zcode/cli/config.json 的 mcp.servers 节点添加，或安装含 MCP 的插件
+            {t('mcp.emptyHint')}
           </span>
         </div>
       ) : (

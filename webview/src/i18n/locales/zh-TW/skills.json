@@ -1,0 +1,31 @@
+{
+  "scope": {
+    "all": "全部",
+    "user": "全域性",
+    "project": "專案",
+    "plugin": "外掛"
+  },
+  "card": {
+    "disableHint": "點選停用（寫入 config skill 節點）",
+    "enableHint": "點選啟用",
+    "disabled": "已停用",
+    "pluginContribution": "外掛 {{name}} 貢獻",
+    "descLabel": "描述",
+    "whenLabel": "觸發時機",
+    "sourceLabel": "來源",
+    "pluginSuffix": "外掛 {{name}}",
+    "openInEditor": "在編輯器中開啟",
+    "openTitle": "在 IDEA 編輯器中開啟 SKILL.md（檢視或編輯）"
+  },
+  "toolbar": {
+    "searchPlaceholder": "搜尋名稱 / 描述 / 路徑",
+    "clear": "清空",
+    "rescan": "重新掃描"
+  },
+  "list": {
+    "scanning": "正在掃描技能…",
+    "noMatch": "沒有匹配的技能",
+    "empty": "未發現任何技能"
+  },
+  "removeSkill": "移除技能"
+}

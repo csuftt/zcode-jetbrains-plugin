@@ -1,0 +1,15 @@
+{
+  "subagentTask": "서브에이전트 작업",
+  "backgroundTask": "백그라운드 작업",
+  "subagentTitle": "서브에이전트 · {{type}}",
+  "secondsShort": "{{count}}초",
+  "minutesSeconds": "{{m}}분 {{s}}초",
+  "format": {
+    "mcpMonthlyLimit": "MCP 월간 할당량",
+    "cycleLimit": "주기 할당량",
+    "per5HoursLimit": "5시간마다 할당량",
+    "weeklyLimit": "주간 할당량",
+    "usageLimit": "사용 할당량",
+    "timesUnit": "회"
+  }
+}

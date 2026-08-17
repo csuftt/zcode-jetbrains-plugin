@@ -1,0 +1,41 @@
+{
+  "errorClose": "Close",
+  "errorCloseAria": "Close error",
+  "newSession": {
+    "title": "New Session",
+    "message": "A new blank session will be started (created only when the first message is sent). The current session will be kept in history and can be switched back to at any time. Start a new session?",
+    "confirm": "New"
+  },
+  "askUser": {
+    "cancel": "Cancel",
+    "confirm": "Confirm"
+  },
+  "planApproval": {
+    "title": "Plan Approval",
+    "hint": "Once approved, plan mode will be exited and execution will begin",
+    "emptyPlan": "_(The plan is empty)_",
+    "tip": "Click the overlay or \"Keep Planning\" to decline and stay in plan mode",
+    "continuePlanning": "Keep Planning",
+    "approveAndRun": "Approve & Run"
+  },
+  "notification": {
+    "subagent": "Subagent",
+    "bashTask": "Background Command",
+    "backgroundTask": "Background Task",
+    "completed": "✓ Done",
+    "failed": "✗ Failed",
+    "notice": "Notice"
+  },
+  "status": {
+    "todoTab": "Tasks",
+    "agentTab": "Subagents",
+    "fileTab": "Files",
+    "noTodos": "No tasks",
+    "noAgents": "No subtasks",
+    "noFiles": "No file changes",
+    "viewSubagentDetail": "Click to view subagent execution details",
+    "openInEditor": "Open in editor: {{path}}",
+    "viewDiff": "View diff before and after edits",
+    "diffTitle": "Edit diff: {{name}}"
+  }
+}

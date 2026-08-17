@@ -1,0 +1,53 @@
+{
+  "quota": {
+    "title": "Quota",
+    "titleWithPlan": "Quota ({{level}} plan)",
+    "lastRefresh": "Last refreshed {{time}}",
+    "refresh": "Refresh quota",
+    "loading": "Loading…",
+    "empty": "No quota data",
+    "resetAt": "Resets {{time}}"
+  },
+  "detail": "Usage details",
+  "range": {
+    "today": "Today",
+    "last7": "Last 7 days",
+    "last30": "Last 30 days"
+  },
+  "model": {
+    "title": "Model usage",
+    "totalCalls": "{{count}} calls",
+    "totalTokens": "{{value}} tokens",
+    "colName": "Model",
+    "colTokens": "Token usage"
+  },
+  "tool": {
+    "title": "Tool usage",
+    "totalCalls": "{{count}} calls",
+    "colName": "Tool",
+    "colCount": "Call count"
+  },
+  "chart": {
+    "empty": "No data"
+  },
+  "context": {
+    "titleUsage": "Context usage",
+    "used": "Used",
+    "waitingData": "Waiting for session data…",
+    "titleBreakdown": "Context breakdown",
+    "noBreakdown": "No breakdown yet (shown after chatting)",
+    "hitRate": "Avg. cache hit rate",
+    "glmQuota": "GLM quota",
+    "glmQuotaWithLevel": "GLM quota ({{level}})",
+    "quotaLoading": "Loading quota…",
+    "noQuota": "No quota data",
+    "categories": {
+      "messages": "Messages",
+      "systemTools": "System tools",
+      "skills": "Skills",
+      "systemPrompt": "System prompt",
+      "mcpTools": "MCP tools",
+      "other": "Other"
+    }
+  }
+}

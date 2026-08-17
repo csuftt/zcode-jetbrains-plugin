@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { sendToJava } from '@/ipc/bridge'
 import type { SkillInfo } from '@/types/messages'
@@ -17,13 +18,12 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 
 type ScopeFilter = 'all' | 'user' | 'project' | 'plugin'
 
+/** scope 标签 i18n key（scope 徽章配色对齐 cc-gui：全局蓝 / 项目绿 / 插件紫）*/
 const SCOPE_LABEL: Record<string, string> = {
-  user: '全局',
-  project: '项目',
-  plugin: '插件',
+  user: 'skills.scope.user',
+  project: 'skills.scope.project',
+  plugin: 'skills.scope.plugin',
 }
-
-/** scope 徽章配色（对齐 cc-gui：全局蓝 / 项目绿 / 插件紫）*/
 const SCOPE_CLASS: Record<string, string> = {
   user: 'global',
   project: 'local',
@@ -32,6 +32,7 @@ const SCOPE_CLASS: Record<string, string> = {
 
 /** 单张技能卡片（手风琴展开）*/
 function SkillCard({ skill, expanded, onToggleExpand }: { skill: SkillInfo; expanded: boolean; onToggleExpand: () => void }) {
+  const { t } = useTranslation()
   const skillTogglingPath = useStore((s) => s.skillTogglingPath)
   const toggleSkill = useStore((s) => s.toggleSkill)
   const toggling = skillTogglingPath === skill.path
@@ -46,7 +47,7 @@ function SkillCard({ skill, expanded, onToggleExpand }: { skill: SkillInfo; expa
             if (!toggling) toggleSkill(skill.path, !skill.enabled)
           }}
           disabled={toggling}
-          title={skill.enabled ? '点击禁用（写入 config skill 节点）' : '点击启用'}
+          title={skill.enabled ? t('skills.card.disableHint') : t('skills.card.enableHint')}
         >
           <span className={cx('codicon', toggling ? 'codicon-loading spin' : skill.enabled ? 'codicon-check' : 'codicon-circle-slash')} />
         </button>
@@ -54,10 +55,10 @@ function SkillCard({ skill, expanded, onToggleExpand }: { skill: SkillInfo; expa
         <span className="skill-card__name">{skill.name}</span>
         <span className={cx('skill-card__scope', SCOPE_CLASS[skill.scope])}>
           <span className={cx('codicon', skill.scope === 'user' ? 'codicon-globe' : skill.scope === 'project' ? 'codicon-device-desktop' : 'codicon-extensions')} />
-          {SCOPE_LABEL[skill.scope] ?? skill.scope}
+          {SCOPE_LABEL[skill.scope] ? t(SCOPE_LABEL[skill.scope]) : skill.scope}
         </span>
-        {!skill.enabled && <span className="skill-card__badge-off">已禁用</span>}
-        {skill.pluginName && <span className="skill-card__plugin" title={`插件 ${skill.pluginName} 贡献`}>{skill.pluginName}</span>}
+        {!skill.enabled && <span className="skill-card__badge-off">{t('skills.card.disabled')}</span>}
+        {skill.pluginName && <span className="skill-card__plugin" title={t('skills.card.pluginContribution', { name: skill.pluginName })}>{skill.pluginName}</span>}
         <span className="skill-card__path" title={skill.path}>
           {skill.path}
         </span>
@@ -68,31 +69,31 @@ function SkillCard({ skill, expanded, onToggleExpand }: { skill: SkillInfo; expa
         <div className="skill-card__body">
           {skill.description && (
             <div className="skill-card__row">
-              <span className="skill-card__row-label">描述</span>
+              <span className="skill-card__row-label">{t('skills.card.descLabel')}</span>
               <span className="skill-card__row-value">{skill.description}</span>
             </div>
           )}
           {skill.whenToUse && (
             <div className="skill-card__row">
-              <span className="skill-card__row-label">触发时机</span>
+              <span className="skill-card__row-label">{t('skills.card.whenLabel')}</span>
               <span className="skill-card__row-value">{skill.whenToUse}</span>
             </div>
           )}
           <div className="skill-card__row">
-            <span className="skill-card__row-label">来源</span>
+            <span className="skill-card__row-label">{t('skills.card.sourceLabel')}</span>
             <span className="skill-card__row-value">
-              {SCOPE_LABEL[skill.scope] ?? skill.scope} · {skill.source}
-              {skill.pluginName ? ` · 插件 ${skill.pluginName}` : ''}
+              {SCOPE_LABEL[skill.scope] ? t(SCOPE_LABEL[skill.scope]) : skill.scope} · {skill.source}
+              {skill.pluginName ? ` · ${t('skills.card.pluginSuffix', { name: skill.pluginName })}` : ''}
             </span>
           </div>
           <div className="skill-card__actions">
             <button
               className="skill-card__action"
               onClick={() => sendToJava({ op: 'openFile', filePath: skill.path, line: 1 })}
-              title="在 IDEA 编辑器中打开 SKILL.md（查看或编辑）"
+              title={t('skills.card.openTitle')}
             >
               <span className="codicon codicon-go-to-file" />
-              在编辑器中打开
+              {t('skills.card.openInEditor')}
             </button>
           </div>
         </div>
@@ -102,6 +103,7 @@ function SkillCard({ skill, expanded, onToggleExpand }: { skill: SkillInfo; expa
 }
 
 export function SkillListView() {
+  const { t } = useTranslation()
   const skills = useStore((s) => s.skills)
   const skillsLoading = useStore((s) => s.skillsLoading)
   const skillsError = useStore((s) => s.skillsError)
@@ -143,10 +145,10 @@ export function SkillListView() {
   }, [skills, scopeFilter, query])
 
   const filters: { key: ScopeFilter; label: string }[] = [
-    { key: 'all', label: '全部' },
-    { key: 'user', label: '全局' },
-    { key: 'project', label: '项目' },
-    { key: 'plugin', label: '插件' },
+    { key: 'all', label: t('skills.scope.all') },
+    { key: 'user', label: t('skills.scope.user') },
+    { key: 'project', label: t('skills.scope.project') },
+    { key: 'plugin', label: t('skills.scope.plugin') },
   ]
 
   return (
@@ -169,11 +171,11 @@ export function SkillListView() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索名称 / 描述 / 路径"
+            placeholder={t('skills.toolbar.searchPlaceholder')}
             spellCheck={false}
           />
           {query && (
-            <button className="skill-list-view__search-clear" onClick={() => setQuery('')} title="清空">
+            <button className="skill-list-view__search-clear" onClick={() => setQuery('')} title={t('skills.toolbar.clear')}>
               <span className="codicon codicon-close" />
             </button>
           )}
@@ -182,7 +184,7 @@ export function SkillListView() {
           className="skill-list-view__refresh"
           onClick={() => loadSkills()}
           disabled={skillsLoading}
-          title="重新扫描"
+          title={t('skills.toolbar.rescan')}
         >
           <span className={cx('codicon', skillsLoading ? 'codicon-loading spin' : 'codicon-refresh')} />
         </button>
@@ -192,12 +194,12 @@ export function SkillListView() {
 
       {skillsLoading && !skills ? (
         <div className="skill-list-view__loading">
-          <span className="codicon codicon-loading spin" /> 正在扫描技能…
+          <span className="codicon codicon-loading spin" /> {t('skills.list.scanning')}
         </div>
       ) : visible.length === 0 ? (
         <div className="skill-list-view__empty">
           <span className="codicon codicon-lightbulb" />
-          {query || scopeFilter !== 'all' ? '没有匹配的技能' : '未发现任何技能'}
+          {query || scopeFilter !== 'all' ? t('skills.list.noMatch') : t('skills.list.empty')}
         </div>
       ) : (
         <div className="skill-list-view__list">

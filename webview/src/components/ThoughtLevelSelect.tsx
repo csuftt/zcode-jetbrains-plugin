@@ -9,19 +9,21 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { useStore } from '@/store/useStore'
 
-/** 级别 value → 中文标签（ZCode 客户端 UI 本地化同款，未知值原样显示）
+/** 级别 value → 标签 i18n key（ZCode 客户端 UI 本地化同款，未知值原样显示）
  *  实测补充：部分模型用 disabled / nothink 表示关闭思考（与 off 同义）*/
-const LEVEL_LABELS: Record<string, string> = {
-  off: '不思考',
-  disabled: '不思考',
-  nothink: '不思考',
-  low: '低',
-  medium: '中',
-  high: '高',
-  max: '最高',
-  enabled: '思考',
+const LEVEL_LABEL_KEYS: Record<string, string> = {
+  off: 'input.thought.off',
+  disabled: 'input.thought.disabled',
+  nothink: 'input.thought.nothink',
+  low: 'input.thought.low',
+  medium: 'input.thought.medium',
+  high: 'input.thought.high',
+  max: 'input.thought.max',
+  enabled: 'input.thought.enabled',
 }
 
 /** 级别图标（off/disabled/nothink=禁止圈 / low·enabled=灯泡 / medium·high=灯泡火花 / max=火箭）*/
@@ -37,11 +39,13 @@ const LEVEL_ICONS: Record<string, string> = {
 }
 const levelIcon = (v: string) => LEVEL_ICONS[v] ?? 'codicon-lightbulb'
 
-function levelLabel(value: string): string {
-  return LEVEL_LABELS[value] ?? value
+function levelLabel(value: string, t: TFunction): string {
+  const key = LEVEL_LABEL_KEYS[value]
+  return key ? t(key) : value
 }
 
 export function ThoughtLevelSelect() {
+  const { t } = useTranslation()
   const thoughtLevel = useStore((s) => s.thoughtLevel)
   const sessionId = useStore((s) => s.currentSessionId)
   const setThoughtLevel = useStore((s) => s.setThoughtLevel)
@@ -71,7 +75,7 @@ export function ThoughtLevelSelect() {
 
   // 显示值：current → defaultLevel（标注默认）→ 兜底「思考」
   const current = thoughtLevel.current ?? thoughtLevel.defaultLevel
-  const displayText = current ? levelLabel(current) : '思考'
+  const displayText = current ? levelLabel(current, t) : t('input.thought.enabled')
   const isDefault = !thoughtLevel.current && !!thoughtLevel.defaultLevel
 
   return (
@@ -79,7 +83,7 @@ export function ThoughtLevelSelect() {
       <button
         className="selector-button"
         onClick={() => setOpen((v) => !v)}
-        title={isDefault ? `思考级别：${displayText}（模型默认）` : '思考级别'}
+        title={isDefault ? t('input.thought.titleWithDefault', { level: displayText }) : t('input.thought.title')}
       >
         <span className={`codicon ${current ? levelIcon(current) : 'codicon-lightbulb'}`} />
         <span className="selector-button-text">{displayText}</span>
@@ -99,9 +103,9 @@ export function ThoughtLevelSelect() {
             >
               <span className={`codicon ${levelIcon(l.value)}`} />
               <div className="selector-dropdown-item-main">
-                <span className="selector-dropdown-item-name">{levelLabel(l.value)}</span>
+                <span className="selector-dropdown-item-name">{levelLabel(l.value, t)}</span>
                 {l.value === thoughtLevel.defaultLevel && (
-                  <span className="selector-dropdown-item-sub">默认</span>
+                  <span className="selector-dropdown-item-sub">{t('input.thought.default')}</span>
                 )}
                 {current === l.value && <span className="codicon codicon-check selector-dropdown-item-check" />}
               </div>

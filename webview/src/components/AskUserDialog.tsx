@@ -9,6 +9,7 @@
  */
 
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AskUserQuestion } from '@/types/messages'
 import { sendToJava } from '@/ipc/bridge'
 import '../styles/ask-user-dialog.less'
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function AskUserDialog({ requestId, toolName, questions, onClose }: Props) {
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<Record<number, string>>({})
 
   const handleSelect = (qIdx: number, label: string) => {
@@ -83,14 +85,14 @@ export function AskUserDialog({ requestId, toolName, questions, onClose }: Props
 
         <div className="ask-user-dialog__footer">
           <button className="ask-user-dialog__btn ask-user-dialog__btn--cancel" onClick={handleDecline}>
-            取消
+            {t('app.askUser.cancel')}
           </button>
           <button
             className="ask-user-dialog__btn ask-user-dialog__btn--submit"
             onClick={handleSubmit}
             disabled={!allAnswered}
           >
-            确认
+            {t('app.askUser.confirm')}
           </button>
         </div>
       </div>

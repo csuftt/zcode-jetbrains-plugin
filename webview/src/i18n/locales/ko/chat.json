@@ -1,0 +1,68 @@
+{
+  "loading": "메시지 불러오는 중…",
+  "scroll": {
+    "backToTop": "맨 위로",
+    "toBottom": "맨 아래로"
+  },
+  "header": {
+    "back": "뒤로",
+    "newSession": "새 세션",
+    "newSessionDisabled": "현재 세션이 비어 있어 새로 만들 필요가 없습니다",
+    "newTab": "새 탭",
+    "browser": "브라우저(펼치기/접기)",
+    "searchSession": "대화 검색",
+    "history": "기록",
+    "settings": "설정",
+    "sessionTitleAria": "세션 제목",
+    "saveTitleAria": "제목 저장",
+    "cancelEditAria": "편집 취소",
+    "editTitleAria": "세션 제목 편집",
+    "untitled": "새 세션"
+  },
+  "message": {
+    "emptyText": "(비어 있음)",
+    "working": "작업 중",
+    "worked": "작업 완료",
+    "cachePercent": "캐시 {{percent}}%"
+  },
+  "thinking": {
+    "thinking": "생각 중",
+    "thought": "생각 과정"
+  },
+  "mermaid": {
+    "zoomInView": "확대 보기",
+    "parseFailed": "⚠ Mermaid 구문 분석 실패, 소스 코드를 표시합니다",
+    "generating": "⏳ 다이어그램 생성 중…",
+    "zoomOutTitle": "축소 (-10%)",
+    "zoomInTitle": "확대 (+10%)",
+    "resetZoom": "100%로 초기화(휠로 확대/축소)",
+    "close": "닫기 (Esc)"
+  },
+  "preview": {
+    "defaultMeta": "Markdown 미리보기",
+    "close": "닫기"
+  },
+  "search": {
+    "panelAria": "대화 내 검색",
+    "placeholder": "대화에서 검색…",
+    "regexError": "정규식 오류",
+    "searching": "검색 중…",
+    "noResults": "결과 없음",
+    "matchCase": "대소문자 구분 (Alt+C)",
+    "matchCaseAria": "대소문자 구분",
+    "wholeWord": "단어 단위 일치 (Alt+W)",
+    "wholeWordAria": "단어 단위 일치",
+    "regex": "정규식 사용 (Alt+R)",
+    "regexAria": "정규식 사용",
+    "prevMatch": "이전 일치 (Shift+Enter)",
+    "prevMatchAria": "이전 일치",
+    "nextMatch": "다음 일치 (Enter)",
+    "nextMatchAria": "다음 일치",
+    "close": "닫기 (Esc)",
+    "closeAria": "검색 닫기"
+  },
+  "welcome": {
+    "version": "ZCode 버전",
+    "sendMsg": "ZCode에 메시지 보내기"
+  }
+}

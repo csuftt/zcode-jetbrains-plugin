@@ -11,6 +11,7 @@
  */
 
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { sendToJava } from '@/ipc/bridge'
 import type { MemoryFileInfo } from '@/types/messages'
@@ -30,6 +31,7 @@ function fmtSize(bytes?: number): string {
 
 /** 单条记忆文件条目 */
 function MemoryItem({ file }: { file: MemoryFileInfo }) {
+  const { t } = useTranslation()
   const memoryCreatingPath = useStore((s) => s.memoryCreatingPath)
   const createMemoryFile = useStore((s) => s.createMemoryFile)
   const creating = memoryCreatingPath === file.path
@@ -48,10 +50,10 @@ function MemoryItem({ file }: { file: MemoryFileInfo }) {
           <span className="memory-item__name">{file.name}</span>
           {file.exists ? (
             <span className="memory-item__meta">
-              {fmtSize(file.sizeBytes)} · 修改于 {fmtResetTime(file.lastModified)}
+              {fmtSize(file.sizeBytes)} · {t('memory.item.modifiedAt', { time: fmtResetTime(file.lastModified) })}
             </span>
           ) : (
-            <span className="memory-item__badge">未创建</span>
+            <span className="memory-item__badge">{t('memory.item.notCreated')}</span>
           )}
         </div>
         <div className="memory-item__desc">{file.description}</div>
@@ -63,20 +65,20 @@ function MemoryItem({ file }: { file: MemoryFileInfo }) {
         <button
           className="memory-item__btn"
           onClick={() => sendToJava({ op: 'openFile', filePath: file.path })}
-          title="在编辑器中打开"
+          title={t('memory.item.openTitle')}
         >
           <span className="codicon codicon-go-to-file" />
-          打开
+          {t('memory.item.open')}
         </button>
       ) : (
         <button
           className="memory-item__btn memory-item__btn--create"
           onClick={() => createMemoryFile(file.path)}
           disabled={creating}
-          title="创建默认模板并在编辑器中打开"
+          title={t('memory.item.createTitle')}
         >
           <span className={cx('codicon', creating ? 'codicon-loading spin' : 'codicon-add')} />
-          {creating ? '创建中…' : '创建'}
+          {creating ? t('memory.item.creating') : t('memory.item.create')}
         </button>
       )}
     </div>
@@ -84,6 +86,7 @@ function MemoryItem({ file }: { file: MemoryFileInfo }) {
 }
 
 export function MemoryView() {
+  const { t } = useTranslation()
   const memoryFiles = useStore((s) => s.memoryFiles)
   const memoryLoading = useStore((s) => s.memoryLoading)
   const memoryError = useStore((s) => s.memoryError)
@@ -101,20 +104,20 @@ export function MemoryView() {
     <div className="memory-view">
       <section className="memory-view__section">
         <div className="memory-view__section-head">
-          <h3 className="memory-view__section-title">全局记忆</h3>
-          <span className="memory-view__hint">所有项目的 ZCode 会话自动读取</span>
+          <h3 className="memory-view__section-title">{t('memory.global.title')}</h3>
+          <span className="memory-view__hint">{t('memory.global.hint')}</span>
           <button
             className="memory-view__icon-btn"
             onClick={() => loadMemoryFiles()}
             disabled={memoryLoading}
-            title="刷新"
+            title={t('memory.refresh')}
           >
             <span className={cx('codicon codicon-refresh', memoryLoading && 'spin')} />
           </button>
         </div>
         {memoryError ? <div className="memory-view__error">{memoryError}</div> : null}
         {memoryLoading && !memoryFiles ? (
-          <div className="memory-view__loading">加载中…</div>
+          <div className="memory-view__loading">{t('memory.loading')}</div>
         ) : (
           globalFiles.map((f) => <MemoryItem key={f.path} file={f} />)
         )}
@@ -122,29 +125,25 @@ export function MemoryView() {
 
       <section className="memory-view__section">
         <div className="memory-view__section-head">
-          <h3 className="memory-view__section-title">项目记忆</h3>
-          <span className="memory-view__hint">仅当前项目的 ZCode 会话自动读取</span>
+          <h3 className="memory-view__section-title">{t('memory.project.title')}</h3>
+          <span className="memory-view__hint">{t('memory.project.hint')}</span>
         </div>
         {projectFiles.length > 0 ? (
           projectFiles.map((f) => <MemoryItem key={f.path} file={f} />)
         ) : (
-          <div className="memory-view__loading">未检测到打开的项目</div>
+          <div className="memory-view__loading">{t('memory.project.empty')}</div>
         )}
       </section>
 
       <section className="memory-view__section">
         <div className="memory-view__section-head">
-          <h3 className="memory-view__section-title">ZCode 自动记忆</h3>
-          <span className="memory-view__hint">
-            从已完成对话中自动提炼，后续会话自动带入（ZCode 客户端 设置 → 常规 开启）
-          </span>
+          <h3 className="memory-view__section-title">{t('memory.auto.title')}</h3>
+          <span className="memory-view__hint">{t('memory.auto.hint')}</span>
         </div>
         {autoFiles.length > 0 ? (
           autoFiles.map((f) => <MemoryItem key={f.path} file={f} />)
         ) : (
-          <div className="memory-view__loading">
-            暂无自动记忆——在 ZCode 客户端开启 Memory 功能并完成几轮对话后，提炼的事实会出现在这里
-          </div>
+          <div className="memory-view__loading">{t('memory.auto.empty')}</div>
         )}
       </section>
     </div>

@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage } from '@/types/messages'
 import { MessageBubble } from './MessageBubble'
 import { WaitingIndicator } from './WaitingIndicator'
@@ -46,6 +47,7 @@ function lastMessageFingerprint(messages: ZCodeMessage[]): string {
 }
 
 export function ChatView({ messages, loading, waiting, waitingSince, streamingMessageId, searchOpen, onSearchClose }: Props) {
+  const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
@@ -134,7 +136,7 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
       <div className="messages-shell">
         <div className="chat-view__loading">
           <span className="chat-view__loading-dots"><span /><span /><span /></span>
-          加载消息中…
+          {t('chat.loading')}
         </div>
       </div>
     )
@@ -176,7 +178,7 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
       <button
         type="button"
         className={`scroll-control-button ${scrollBtnVisible ? 'is-visible' : ''}`}
-        title={scrollBtnDirection === 'up' ? '回到顶部' : '跳到底部'}
+        title={scrollBtnDirection === 'up' ? t('chat.scroll.backToTop') : t('chat.scroll.toBottom')}
         onClick={handleJumpClick}
       >
         <span className={`codicon ${scrollBtnDirection === 'up' ? 'codicon-arrow-up' : 'codicon-arrow-down'}`} />

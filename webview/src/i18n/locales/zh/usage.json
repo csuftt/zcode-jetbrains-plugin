@@ -1,0 +1,53 @@
+{
+  "quota": {
+    "title": "额度",
+    "titleWithPlan": "额度（{{level}} 套餐）",
+    "lastRefresh": "上次刷新 {{time}}",
+    "refresh": "刷新额度",
+    "loading": "加载中…",
+    "empty": "暂无额度数据",
+    "resetAt": "重置 {{time}}"
+  },
+  "detail": "用量明细",
+  "range": {
+    "today": "当日",
+    "last7": "近 7 天",
+    "last30": "近 30 天"
+  },
+  "model": {
+    "title": "模型用量",
+    "totalCalls": "总调用 {{count}}",
+    "totalTokens": "总 Token {{value}}",
+    "colName": "模型",
+    "colTokens": "Token 用量"
+  },
+  "tool": {
+    "title": "工具用量",
+    "totalCalls": "总调用 {{count}}",
+    "colName": "工具",
+    "colCount": "调用次数"
+  },
+  "chart": {
+    "empty": "暂无数据"
+  },
+  "context": {
+    "titleUsage": "上下文用量",
+    "used": "已用",
+    "waitingData": "等待会话数据…",
+    "titleBreakdown": "上下文构成",
+    "noBreakdown": "暂无构成明细（对话后将显示）",
+    "hitRate": "平均缓存命中率",
+    "glmQuota": "GLM 额度",
+    "glmQuotaWithLevel": "GLM 额度（{{level}}）",
+    "quotaLoading": "额度加载中…",
+    "noQuota": "暂无额度数据",
+    "categories": {
+      "messages": "消息",
+      "systemTools": "系统工具",
+      "skills": "技能",
+      "systemPrompt": "系统提示词",
+      "mcpTools": "MCP 工具",
+      "other": "其他"
+    }
+  }
+}

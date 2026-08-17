@@ -1,0 +1,62 @@
+{
+  "placeholder": "@引用文件，/ 调用技能，Enter 发送",
+  "placeholderStreaming": "回复生成中，Enter 加入发送队列…",
+  "resizeHandle": "拖拽调整高度",
+  "attach": "添加附件（选择文件）",
+  "send": "发送 (Enter)",
+  "stop": "停止生成",
+  "model": {
+    "selectModel": "请选择模型"
+  },
+  "mode": {
+    "title": "权限模式",
+    "build": {
+      "label": "变更前询问",
+      "title": "Ask before changes — 每次文件变更前询问"
+    },
+    "edit": {
+      "label": "自动编辑",
+      "title": "Edit automatically — 自动编辑选中/相关文件"
+    },
+    "plan": {
+      "label": "计划模式",
+      "title": "Plan mode — 只读检查代码、先出计划再编辑"
+    },
+    "yolo": {
+      "label": "完全控制",
+      "title": "Full access — 更少确认、直接编辑并运行命令"
+    }
+  },
+  "thought": {
+    "title": "思考级别",
+    "titleWithDefault": "思考级别：{{level}}（模型默认）",
+    "default": "默认",
+    "off": "不思考",
+    "disabled": "不思考",
+    "nothink": "不思考",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "max": "最高",
+    "enabled": "思考"
+  },
+  "queue": {
+    "pendingTitle": "第 {{index}} 条待发送",
+    "sendNow": "立即发送（中断当前回复）",
+    "sendNowShort": "立即",
+    "edit": "编辑（回到输入框）",
+    "remove": "移出队列"
+  },
+  "pasted": {
+    "clickToPreview": "点击预览完整内容",
+    "label": "粘贴文本 · {{count}} 字",
+    "remove": "移除粘贴内容",
+    "previewAriaLabel": "粘贴内容预览",
+    "previewTitle": "粘贴内容 · {{count}} 字",
+    "close": "关闭"
+  },
+  "fileRef": {
+    "lines": "（第 {{lines}} 行）",
+    "remove": "移除引用"
+  }
+}

@@ -13,7 +13,9 @@
  */
 
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { BasicSettingsView } from './BasicSettingsView'
+import { OtherSettingsView } from './OtherSettingsView'
 import { UsageView } from './UsageView'
 import { MemoryView } from './MemoryView'
 import { SkillListView } from './SkillListView'
@@ -21,7 +23,7 @@ import { McpListView } from './McpListView'
 import { isInJcef } from '@/ipc/bridge'
 import '../styles/settings.less'
 
-type SettingsTab = 'basic' | 'usage' | 'memory' | 'skills' | 'mcp'
+type SettingsTab = 'basic' | 'usage' | 'memory' | 'skills' | 'mcp' | 'other'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -30,19 +32,23 @@ interface Props {
 }
 
 export function SettingsView({ onBack }: Props) {
+  const { t } = useTranslation()
   // dev 辅助：浏览器 mock 验收可带 #basic / #skills / #mcp 直达页签（#mcp/<服务器名> 只取首段）；
   // JCEF 内 hash 恒空不影响生产
   const hashTab = window.location.hash.replace('#', '').split('/')[0] as SettingsTab
   const initialTab: SettingsTab =
-    !isInJcef() && ['basic', 'usage', 'memory', 'skills', 'mcp'].includes(hashTab) ? hashTab : 'basic'
+    !isInJcef() && ['basic', 'usage', 'memory', 'skills', 'mcp', 'other'].includes(hashTab)
+      ? hashTab
+      : 'basic'
   const [tab, setTab] = useState<SettingsTab>(initialTab)
 
-  const navItems: { key: SettingsTab; icon: string; label: string }[] = [
-    { key: 'basic', icon: 'codicon-paintcan', label: '基础设置' },
-    { key: 'usage', icon: 'codicon-graph', label: '用量查询' },
-    { key: 'memory', icon: 'codicon-notebook', label: '记忆' },
-    { key: 'skills', icon: 'codicon-library', label: '技能' },
-    { key: 'mcp', icon: 'codicon-plug', label: 'MCP' },
+  const navItems: { key: SettingsTab; icon: string }[] = [
+    { key: 'basic', icon: 'codicon-paintcan' },
+    { key: 'usage', icon: 'codicon-graph' },
+    { key: 'memory', icon: 'codicon-notebook' },
+    { key: 'skills', icon: 'codicon-library' },
+    { key: 'mcp', icon: 'codicon-plug' },
+    { key: 'other', icon: 'codicon-ellipsis' },
   ]
 
   return (
@@ -50,10 +56,10 @@ export function SettingsView({ onBack }: Props) {
       {/* 顶部标题栏（对齐 cc-gui SettingsHeader）*/}
       <header className="settings-view__header">
         <div className="settings-view__header-left">
-          <button className="settings-view__back" onClick={onBack} data-tooltip="返回聊天">
+          <button className="settings-view__back" onClick={onBack} data-tooltip={t('settings.backToChat')}>
             <span className="codicon codicon-arrow-left" />
           </button>
-          <h2 className="settings-view__title">设置</h2>
+          <h2 className="settings-view__title">{t('settings.title')}</h2>
         </div>
       </header>
 
@@ -65,7 +71,7 @@ export function SettingsView({ onBack }: Props) {
               key={it.key}
               className={cx('settings-view__nav-item', tab === it.key && 'active')}
               onClick={() => setTab(it.key)}
-              data-tooltip={it.label}
+              data-tooltip={t(`settings.tabs.${it.key}`)}
             >
               <span className={cx('codicon', it.icon)} />
             </button>
@@ -79,6 +85,7 @@ export function SettingsView({ onBack }: Props) {
           {tab === 'memory' && <MemoryView />}
           {tab === 'skills' && <SkillListView />}
           {tab === 'mcp' && <McpListView />}
+          {tab === 'other' && <OtherSettingsView />}
         </main>
       </div>
     </div>

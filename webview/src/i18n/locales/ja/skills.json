@@ -1,0 +1,31 @@
+{
+  "scope": {
+    "all": "すべて",
+    "user": "グローバル",
+    "project": "プロジェクト",
+    "plugin": "プラグイン"
+  },
+  "card": {
+    "disableHint": "クリックで無効化（config の skill ノードに書き込み）",
+    "enableHint": "クリックで有効化",
+    "disabled": "無効",
+    "pluginContribution": "プラグイン {{name}} による提供",
+    "descLabel": "説明",
+    "whenLabel": "使用タイミング",
+    "sourceLabel": "ソース",
+    "pluginSuffix": "プラグイン {{name}}",
+    "openInEditor": "エディターで開く",
+    "openTitle": "SKILL.md を IDEA エディターで開く（表示または編集）"
+  },
+  "toolbar": {
+    "searchPlaceholder": "名前 / 説明 / パスを検索",
+    "clear": "クリア",
+    "rescan": "再スキャン"
+  },
+  "list": {
+    "scanning": "スキルをスキャン中…",
+    "noMatch": "一致するスキルなし",
+    "empty": "スキルが見つかりません"
+  },
+  "removeSkill": "スキルを削除"
+}

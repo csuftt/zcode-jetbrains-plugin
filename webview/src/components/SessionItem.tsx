@@ -12,6 +12,7 @@
  */
 
 import { memo, useEffect, useRef, useState, Fragment, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { SessionInfo } from '@/types/messages'
 import { relativeTime, formatFileSize } from '@/utils/time'
 import '../styles/session-item.less'
@@ -33,6 +34,7 @@ function SessionItemInner({
   session, active, onSelect, onDelete, renderTitle,
   selectionMode = false, selected = false, onToggle,
 }: Props) {
+  const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -90,7 +92,7 @@ function SessionItemInner({
             type="button"
             className={`session-item__delete ${confirming ? 'session-item__delete--confirming' : ''}`}
             onClick={handleDelete}
-            title={confirming ? '再次点击确认删除' : '删除会话'}
+            title={confirming ? t('history.confirmDeleteAgain') : t('history.deleteSession')}
           >
             {confirming ? (
               <span className="codicon codicon-check" style={{ color: 'var(--color-danger)' }} />
@@ -104,7 +106,7 @@ function SessionItemInner({
       {(() => {
         const metaParts: ReactNode[] = []
         if (session.messageCount != null) {
-          metaParts.push(<span key="cnt">{session.messageCount} 条消息</span>)
+          metaParts.push(<span key="cnt">{t('history.messageCount', { count: session.messageCount })}</span>)
         }
         if (session.sizeBytes != null && session.sizeBytes > 0) {
           metaParts.push(
@@ -114,7 +116,7 @@ function SessionItemInner({
           )
         }
         if (session.status === 'running') {
-          metaParts.push(<span key="run" className="session-item__status">运行中</span>)
+          metaParts.push(<span key="run" className="session-item__status">{t('history.running')}</span>)
         }
         if (metaParts.length === 0) return null
         return (

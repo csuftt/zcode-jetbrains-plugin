@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import mermaid from 'mermaid'
 
 interface Props {
@@ -33,6 +34,7 @@ function currentTheme(): 'dark' | 'light' {
 }
 
 export function MermaidBlock({ code, streaming = false }: Props) {
+  const { t } = useTranslation()
   const [theme, setTheme] = useState<'dark' | 'light'>(() => currentTheme())
   const [svg, setSvg] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
@@ -94,7 +96,7 @@ export function MermaidBlock({ code, streaming = false }: Props) {
         <button
           className="mermaid-zoom-btn"
           onClick={() => setModalOpen(true)}
-          title="放大查看"
+          title={t('chat.mermaid.zoomInView')}
         >
           <span className="codicon codicon-chrome-maximize" />
         </button>
@@ -108,8 +110,8 @@ export function MermaidBlock({ code, streaming = false }: Props) {
   return (
     <div className="mermaid-fallback">
       <pre className="mermaid-code"><code>{code}</code></pre>
-      {failed && <div className="mermaid-error">⚠ Mermaid 解析失败，已显示源码</div>}
-      {streaming && !failed && <div className="mermaid-loading">⏳ 图表生成中…</div>}
+      {failed && <div className="mermaid-error">{t('chat.mermaid.parseFailed')}</div>}
+      {streaming && !failed && <div className="mermaid-loading">{t('chat.mermaid.generating')}</div>}
     </div>
   )
 }
@@ -123,6 +125,7 @@ export function MermaidBlock({ code, streaming = false }: Props) {
  *   注意 React 的 onWheel 是 passive 监听，preventDefault() 无效，须原生 addEventListener。
  */
 function MermaidModal({ svg, onClose }: { svg: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const MIN = 0.2
   const MAX = 3
   const STEP = 0.1
@@ -187,25 +190,25 @@ function MermaidModal({ svg, onClose }: { svg: string; onClose: () => void }) {
           className="mermaid-modal-btn"
           onClick={zoomOut}
           disabled={zoom <= MIN}
-          title="缩小 (-10%)"
+          title={t('chat.mermaid.zoomOutTitle')}
         >
           <span className="codicon codicon-zoom-out" />
         </button>
-        <button className="mermaid-modal-pct" onClick={reset} title="重置为 100%（滚轮可缩放）">
+        <button className="mermaid-modal-pct" onClick={reset} title={t('chat.mermaid.resetZoom')}>
           {pct}%
         </button>
         <button
           className="mermaid-modal-btn"
           onClick={zoomIn}
           disabled={zoom >= MAX}
-          title="放大 (+10%)"
+          title={t('chat.mermaid.zoomInTitle')}
         >
           <span className="codicon codicon-zoom-in" />
         </button>
         <button
           className="mermaid-modal-btn mermaid-modal-close"
           onClick={onClose}
-          title="关闭 (Esc)"
+          title={t('chat.mermaid.close')}
         >
           <span className="codicon codicon-chrome-close" />
         </button>

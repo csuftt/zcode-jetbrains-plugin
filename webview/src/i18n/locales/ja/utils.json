@@ -1,0 +1,15 @@
+{
+  "subagentTask": "サブエージェントタスク",
+  "backgroundTask": "バックグラウンドタスク",
+  "subagentTitle": "サブエージェント · {{type}}",
+  "secondsShort": "{{count}}秒",
+  "minutesSeconds": "{{m}}分{{s}}秒",
+  "format": {
+    "mcpMonthlyLimit": "MCP 月間クォータ",
+    "cycleLimit": "サイクルクォータ",
+    "per5HoursLimit": "5時間ごとのクォータ",
+    "weeklyLimit": "週間クォータ",
+    "usageLimit": "利用クォータ",
+    "timesUnit": "回"
+  }
+}

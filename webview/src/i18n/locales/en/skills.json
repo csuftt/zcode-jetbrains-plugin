@@ -1,0 +1,31 @@
+{
+  "scope": {
+    "all": "All",
+    "user": "Global",
+    "project": "Project",
+    "plugin": "Plugin"
+  },
+  "card": {
+    "disableHint": "Click to disable (writes to the config skill node)",
+    "enableHint": "Click to enable",
+    "disabled": "Disabled",
+    "pluginContribution": "Contributed by plugin {{name}}",
+    "descLabel": "Description",
+    "whenLabel": "When to use",
+    "sourceLabel": "Source",
+    "pluginSuffix": "Plugin {{name}}",
+    "openInEditor": "Open in editor",
+    "openTitle": "Open SKILL.md in the IDEA editor (view or edit)"
+  },
+  "toolbar": {
+    "searchPlaceholder": "Search name / description / path",
+    "clear": "Clear",
+    "rescan": "Rescan"
+  },
+  "list": {
+    "scanning": "Scanning skills…",
+    "noMatch": "No matching skills",
+    "empty": "No skills found"
+  },
+  "removeSkill": "Remove skill"
+}

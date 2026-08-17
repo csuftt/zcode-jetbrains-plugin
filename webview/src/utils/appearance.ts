@@ -213,6 +213,20 @@ interface InjectedAppearance {
 declare global {
   interface Window {
     __ZCODE_APPEARANCE__?: InjectedAppearance | null
+    __INITIAL_IDE_THEME__?: 'light' | 'dark'
+    /** Java 侧外观广播（保存后推送到所有已开标签；JCEF 多 browser 间 storage 事件不派发）*/
+    onAppearanceChanged?: (cfg: InjectedAppearance) => void
+  }
+}
+
+/** 应用主题偏好到 DOM：显式 light/dark 直接生效；''（跟随 IDE）回落注入的 IDE 主题 */
+function applyThemePref(themePref: string): void {
+  if (themePref === 'light' || themePref === 'dark') {
+    localStorage.setItem(THEME_PREF_KEY, themePref)
+    document.documentElement.setAttribute('data-theme', themePref)
+  } else {
+    localStorage.removeItem(THEME_PREF_KEY)
+    document.documentElement.setAttribute('data-theme', window.__INITIAL_IDE_THEME__ ?? 'dark')
   }
 }
 
@@ -223,13 +237,10 @@ function applyInjectedAppearance(cfg: InjectedAppearance): void {
     localStorage.setItem(FONT_SCALE_KEY, String(fs))
     applyFontScale(fs as FontScaleLevel)
   }
-  // 主题偏好（''=跟随 IDE=移除 key）；useTheme 的 useEffect 随后读 localStorage 生效
+  // 主题偏好：localStorage + data-theme 都要应用——广播场景其他标签的 useTheme
+  // 已跑完挂载逻辑不会重读 localStorage，DOM 属性必须在此直接设置
   if (typeof cfg.themePref === 'string') {
-    if (cfg.themePref === 'light' || cfg.themePref === 'dark') {
-      localStorage.setItem(THEME_PREF_KEY, cfg.themePref)
-    } else {
-      localStorage.removeItem(THEME_PREF_KEY)
-    }
+    applyThemePref(cfg.themePref)
   }
   const colors: [CustomColorKey, string][] = [
     ['chatBg', cfg.chatBg ?? ''],
@@ -294,6 +305,10 @@ export function initAppearance(): void {
       if (++retries <= 40) setTimeout(poll, 50) // 最多 2s
     }
     poll()
+
+    // Java 侧多标签广播：任一标签保存外观后，所有已开标签经此回调幂等应用
+    // （JCEF 多 browser 间 storage 事件不派发，localStorage 写入不会通知其他标签）
+    window.onAppearanceChanged = (cfg) => applyInjectedAppearance(cfg)
   }
 
   if (storageListenerInstalled) return

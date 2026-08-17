@@ -4,13 +4,14 @@
  * 设置项：
  *   - 界面主题：跟随 IDE / 浅色 / 深色（三卡片，复用 useTheme 的 zcode-theme-pref）
  *   - 字体大小：6 级缩放（--font-scale，#root zoom）
+ *   - 语言：跟随 IDE / 简体中文 / English / 日本語 / 한국어（手动值走 kv 通道持久化）
  *   - 聊天背景色 / 顶栏颜色 / 用户气泡色：预设色板 + 取色器 + HEX 输入 + 重置
  *
- * 持久化纯 localStorage（与 cc-gui 一致），数据流经 utils/appearance.ts；
- * 多标签页通过 storage 事件实时同步。
+ * 数据流经 utils/appearance.ts；语言经 i18n/language.ts；多标签页同步见各通道注释。
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   FONT_SCALE_MAP,
   DEFAULT_FONT_SCALE_LEVEL,
@@ -23,6 +24,8 @@ import {
   type FontScaleLevel,
 } from '@/utils/appearance'
 import { getThemePreference, setThemePreference, type IdeTheme } from '@/hooks/useTheme'
+import { setLanguage } from '@/i18n/language'
+import { SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, isSupportedLanguage, type SupportedLanguage } from '@/i18n/config'
 import '../styles/basic-settings.less'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
@@ -60,11 +63,13 @@ const SystemIcon = () => (
 
 interface Preset {
   color: string
-  label: string
+  /** 翻译 key（settings.presets.*）；专有名词（Tokyo Night 等）用 label 原样显示 */
+  labelKey?: string
+  label?: string
 }
 
 const CHAT_BG_DARK_PRESETS: Preset[] = [
-  { color: '#1e1e1e', label: '默认' },
+  { color: '#1e1e1e', labelKey: 'default' },
   { color: '#1a1b26', label: 'Tokyo Night' },
   { color: '#282c34', label: 'One Dark' },
   { color: '#2b2d30', label: 'JetBrains' },
@@ -75,58 +80,58 @@ const CHAT_BG_DARK_PRESETS: Preset[] = [
 ]
 
 const CHAT_BG_LIGHT_PRESETS: Preset[] = [
-  { color: '#ffffff', label: '默认' },
+  { color: '#ffffff', labelKey: 'default' },
   { color: '#fafafa', label: 'Soft White' },
   { color: '#f5f5f5', label: 'Light Gray' },
   { color: '#faf4ed', label: 'Rose Pine' },
   { color: '#f6f8fa', label: 'GitHub Light' },
-  { color: '#fffbf0', label: 'Warm' },
+  { color: '#fffbf0', labelKey: 'warm' },
   { color: '#f0f4f8', label: 'Cool Blue' },
   { color: '#f5f0eb', label: 'Solarized' },
 ]
 
 const CHAT_BAR_DARK_PRESETS: Preset[] = [
-  { color: '#252526', label: '默认' },
-  { color: '#1e3a5f', label: '午夜蓝' },
-  { color: '#263f36', label: '森林' },
-  { color: '#3b3151', label: '紫色' },
-  { color: '#4a3428', label: '咖啡' },
-  { color: '#3f2b36', label: '玫瑰' },
-  { color: '#243b4a', label: '青色' },
-  { color: '#3b3b3b', label: '石墨' },
+  { color: '#252526', labelKey: 'default' },
+  { color: '#1e3a5f', labelKey: 'midnightBlue' },
+  { color: '#263f36', labelKey: 'forest' },
+  { color: '#3b3151', labelKey: 'purple' },
+  { color: '#4a3428', labelKey: 'coffee' },
+  { color: '#3f2b36', labelKey: 'rose' },
+  { color: '#243b4a', labelKey: 'cyan' },
+  { color: '#3b3b3b', labelKey: 'graphite' },
 ]
 
 const CHAT_BAR_LIGHT_PRESETS: Preset[] = [
-  { color: '#f3f3f3', label: '默认' },
-  { color: '#e5f0fb', label: '天空' },
-  { color: '#e5f2e9', label: '薄荷' },
-  { color: '#eee8f7', label: '薰衣草' },
-  { color: '#f6ebe3', label: '暖色' },
-  { color: '#f7e8ee', label: '玫瑰' },
-  { color: '#e4f1f3', label: '青色' },
-  { color: '#e8e8e8', label: '石墨' },
+  { color: '#f3f3f3', labelKey: 'default' },
+  { color: '#e5f0fb', labelKey: 'sky' },
+  { color: '#e5f2e9', labelKey: 'mint' },
+  { color: '#eee8f7', labelKey: 'lavender' },
+  { color: '#f6ebe3', labelKey: 'warm' },
+  { color: '#f7e8ee', labelKey: 'rose' },
+  { color: '#e4f1f3', labelKey: 'cyan' },
+  { color: '#e8e8e8', labelKey: 'graphite' },
 ]
 
 const USER_MSG_DARK_PRESETS: Preset[] = [
-  { color: '#005fb8', label: '默认' },
-  { color: '#1a7f37', label: '绿色' },
-  { color: '#6e40c9', label: '紫色' },
-  { color: '#9a6700', label: '琥珀' },
-  { color: '#cf222e', label: '红色' },
-  { color: '#0e6b8a', label: '青色' },
-  { color: '#6b4c9a', label: '紫罗兰' },
-  { color: '#4a5568', label: '灰色' },
+  { color: '#005fb8', labelKey: 'default' },
+  { color: '#1a7f37', labelKey: 'green' },
+  { color: '#6e40c9', labelKey: 'purple' },
+  { color: '#9a6700', labelKey: 'amber' },
+  { color: '#cf222e', labelKey: 'red' },
+  { color: '#0e6b8a', labelKey: 'cyan' },
+  { color: '#6b4c9a', labelKey: 'violet' },
+  { color: '#4a5568', labelKey: 'gray' },
 ]
 
 const USER_MSG_LIGHT_PRESETS: Preset[] = [
-  { color: '#0078d4', label: '默认' },
-  { color: '#1a7f37', label: '绿色' },
-  { color: '#8250df', label: '紫色' },
-  { color: '#bf8700', label: '琥珀' },
-  { color: '#cf222e', label: '红色' },
-  { color: '#0e8a9a', label: '青色' },
-  { color: '#7c5cbf', label: '紫罗兰' },
-  { color: '#57606a', label: '灰色' },
+  { color: '#0078d4', labelKey: 'default' },
+  { color: '#1a7f37', labelKey: 'green' },
+  { color: '#8250df', labelKey: 'purple' },
+  { color: '#bf8700', labelKey: 'amber' },
+  { color: '#cf222e', labelKey: 'red' },
+  { color: '#0e8a9a', labelKey: 'cyan' },
+  { color: '#7c5cbf', labelKey: 'violet' },
+  { color: '#57606a', labelKey: 'gray' },
 ]
 
 /** 当前项目主题默认色（variables.less 暗色/亮色值，点预设"默认"等价于清除自定义） */
@@ -135,12 +140,16 @@ const THEME_DEFAULTS: Record<'dark' | 'light', Record<CustomColorKey, string>> =
   light: { chatBg: '#ffffff', chatBar: '#f3f3f3', userMsg: '#0078d4' },
 }
 
-const FONT_SIZE_OPTIONS: { level: FontScaleLevel; label: string }[] = (
-  [1, 2, 3, 4, 5, 6] as FontScaleLevel[]
-).map((level) => ({
-  level,
-  label: `字号 ${Math.round(FONT_SCALE_MAP[level] * 100)}%${level === DEFAULT_FONT_SCALE_LEVEL ? '（默认）' : ''}`,
-}))
+const FONT_SIZE_LEVELS = [1, 2, 3, 4, 5, 6] as FontScaleLevel[]
+
+/** 语言名固定以各自母语显示（国际惯例，不随界面语言翻译）*/
+const LANGUAGE_NATIVE_NAMES: Record<SupportedLanguage, string> = {
+  zh: '简体中文',
+  'zh-TW': '繁體中文',
+  en: 'English',
+  ja: '日本語',
+  ko: '한국어',
+}
 
 /* ============ 颜色配置区（三组复用） ============ */
 
@@ -155,6 +164,7 @@ interface ColorSectionProps {
 }
 
 function ColorSection({ icon, label, hint, value, defaultColor, presets, onChange }: ColorSectionProps) {
+  const { t } = useTranslation()
   const pickerRef = useRef<HTMLInputElement>(null)
   const [hexInput, setHexInput] = useState(value)
 
@@ -183,7 +193,7 @@ function ColorSection({ icon, label, hint, value, defaultColor, presets, onChang
           <button
             key={preset.color}
             type="button"
-            title={preset.label}
+            title={preset.labelKey ? t(`settings.presets.${preset.labelKey}`) : preset.label}
             className={cx('basic-settings__color-swatch', isPresetActive(preset.color) && 'active')}
             onClick={() => onChange(preset.color === defaultColor ? '' : preset.color)}
           >
@@ -193,7 +203,7 @@ function ColorSection({ icon, label, hint, value, defaultColor, presets, onChang
       </div>
 
       <div className="basic-settings__custom-color-row">
-        <span className="basic-settings__custom-color-label">自定义</span>
+        <span className="basic-settings__custom-color-label">{t('settings.colors.custom')}</span>
         <div className="basic-settings__color-picker" onClick={() => pickerRef.current?.click()}>
           <span className="basic-settings__color-picker-preview" style={{ backgroundColor: displayColor }} />
           <input
@@ -219,7 +229,7 @@ function ColorSection({ icon, label, hint, value, defaultColor, presets, onChang
         {value && (
           <button type="button" className="basic-settings__reset-btn" onClick={() => onChange('')}>
             <span className="codicon codicon-discard" />
-            重置
+            {t('settings.colors.reset')}
           </button>
         )}
       </div>
@@ -241,12 +251,24 @@ function readResolvedTheme(): IdeTheme {
 }
 
 export function BasicSettingsView() {
+  const { t, i18n } = useTranslation()
   const [themePref, setThemePref] = useState<ThemeOption>(() => getThemePreference() ?? 'system')
   const [resolvedTheme, setResolvedTheme] = useState<IdeTheme>(readResolvedTheme)
   const [fontLevel, setFontLevel] = useState<FontScaleLevel>(() => getFontScaleLevel())
   const [chatBg, setChatBg] = useState(() => getCustomColor('chatBg'))
   const [chatBar, setChatBar] = useState(() => getCustomColor('chatBar'))
   const [userMsg, setUserMsg] = useState(() => getCustomColor('userMsg'))
+
+  // 下拉选中值 = 当前生效语言（手动选择即切换，广播同步时随 languageChanged 刷新）
+  const currentLanguage = isSupportedLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE
+
+  // 字号选项（label 带插值，随语言刷新须在组件内计算）
+  const fontSizeOptions = FONT_SIZE_LEVELS.map((level) => ({
+    level,
+    label: t(level === DEFAULT_FONT_SCALE_LEVEL ? 'settings.font.defaultOption' : 'settings.font.option', {
+      percent: Math.round(FONT_SCALE_MAP[level] * 100),
+    }),
+  }))
 
   // 跟随 IDE 模式下 IDE 主题切换时，预设色板组（明/暗）跟随刷新
   useEffect(() => {
@@ -255,11 +277,15 @@ export function BasicSettingsView() {
     return () => observer.disconnect()
   }, [])
 
-  const handleThemeChange = (t: ThemeOption) => {
-    setThemePreference(t === 'system' ? null : t)
-    setThemePref(t)
+  const handleThemeChange = (t2: ThemeOption) => {
+    setThemePreference(t2 === 'system' ? null : t2)
+    setThemePref(t2)
     // setThemePreference 同步改 DOM，立即可读到新的 resolvedTheme
     setResolvedTheme(readResolvedTheme())
+  }
+
+  const handleLanguageChange = (lang: SupportedLanguage) => {
+    setLanguage(lang) // i18n 切换 + kv 通道持久化（IDE 广播多标签同步）
   }
 
   const defaults = THEME_DEFAULTS[resolvedTheme]
@@ -271,7 +297,7 @@ export function BasicSettingsView() {
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">
           <span className="codicon codicon-symbol-color" />
-          <span className="basic-settings__field-label">界面主题</span>
+          <span className="basic-settings__field-label">{t('settings.theme.label')}</span>
         </div>
         <div className="basic-settings__theme-selector">
           <button
@@ -282,7 +308,7 @@ export function BasicSettingsView() {
             <span className="basic-settings__theme-icon basic-settings__theme-icon--system">
               <SystemIcon />
             </span>
-            <span className="basic-settings__theme-option-label">跟随 IDE</span>
+            <span className="basic-settings__theme-option-label">{t('settings.theme.followIde')}</span>
           </button>
           <button
             type="button"
@@ -292,7 +318,7 @@ export function BasicSettingsView() {
             <span className="basic-settings__theme-icon basic-settings__theme-icon--light">
               <SunIcon />
             </span>
-            <span className="basic-settings__theme-option-label">浅色</span>
+            <span className="basic-settings__theme-option-label">{t('settings.theme.light')}</span>
           </button>
           <button
             type="button"
@@ -302,12 +328,12 @@ export function BasicSettingsView() {
             <span className="basic-settings__theme-icon basic-settings__theme-icon--dark">
               <MoonIcon />
             </span>
-            <span className="basic-settings__theme-option-label">深色</span>
+            <span className="basic-settings__theme-option-label">{t('settings.theme.dark')}</span>
           </button>
         </div>
         <small className="basic-settings__hint">
           <span className="codicon codicon-info" />
-          <span>跟随 IDE 时随 IDE 的亮/暗主题自动切换</span>
+          <span>{t('settings.theme.hint')}</span>
         </small>
       </section>
 
@@ -315,7 +341,7 @@ export function BasicSettingsView() {
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">
           <span className="codicon codicon-text-size" />
-          <span className="basic-settings__field-label">字体大小</span>
+          <span className="basic-settings__field-label">{t('settings.font.label')}</span>
         </div>
         <select
           className="basic-settings__select"
@@ -326,7 +352,7 @@ export function BasicSettingsView() {
             setFontLevel(level)
           }}
         >
-          {FONT_SIZE_OPTIONS.map((opt) => (
+          {fontSizeOptions.map((opt) => (
             <option key={opt.level} value={opt.level}>
               {opt.label}
             </option>
@@ -334,15 +360,38 @@ export function BasicSettingsView() {
         </select>
         <small className="basic-settings__hint">
           <span className="codicon codicon-info" />
-          <span>缩放整个界面（含图标与间距），对所有会话标签生效</span>
+          <span>{t('settings.font.hint')}</span>
+        </small>
+      </section>
+
+      {/* 语言（cc-gui 同款下拉；语言名固定以各自母语显示，首次未选择时默认取 IDE 注入语言） */}
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-globe" />
+          <span className="basic-settings__field-label">{t('settings.language.label')}</span>
+        </div>
+        <select
+          className="basic-settings__select"
+          value={currentLanguage}
+          onChange={(e) => handleLanguageChange(e.target.value as SupportedLanguage)}
+        >
+          {SUPPORTED_LANGUAGES.map((lang) => (
+            <option key={lang} value={lang}>
+              {LANGUAGE_NATIVE_NAMES[lang]}
+            </option>
+          ))}
+        </select>
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.language.hint')}</span>
         </small>
       </section>
 
       {/* 聊天背景色 */}
       <ColorSection
         icon="codicon-paintcan"
-        label="聊天背景色"
-        hint="自定义聊天区域和输入框的背景色"
+        label={t('settings.colors.chatBg.label')}
+        hint={t('settings.colors.chatBg.hint')}
         value={chatBg}
         defaultColor={defaults.chatBg}
         presets={presets ? CHAT_BG_LIGHT_PRESETS : CHAT_BG_DARK_PRESETS}
@@ -355,8 +404,8 @@ export function BasicSettingsView() {
       {/* 顶栏颜色 */}
       <ColorSection
         icon="codicon-layout"
-        label="顶栏颜色"
-        hint="自定义顶部标题栏颜色，文字与边框颜色按对比度自动适配"
+        label={t('settings.colors.chatBar.label')}
+        hint={t('settings.colors.chatBar.hint')}
         value={chatBar}
         defaultColor={defaults.chatBar}
         presets={presets ? CHAT_BAR_LIGHT_PRESETS : CHAT_BAR_DARK_PRESETS}
@@ -369,8 +418,8 @@ export function BasicSettingsView() {
       {/* 用户气泡色 */}
       <ColorSection
         icon="codicon-comment"
-        label="用户消息气泡色"
-        hint="自定义用户消息气泡背景色，文字颜色按对比度自动适配"
+        label={t('settings.colors.userMsg.label')}
+        hint={t('settings.colors.userMsg.hint')}
         value={userMsg}
         defaultColor={defaults.userMsg}
         presets={presets ? USER_MSG_LIGHT_PRESETS : USER_MSG_DARK_PRESETS}

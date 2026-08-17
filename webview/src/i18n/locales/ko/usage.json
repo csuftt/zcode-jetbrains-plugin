@@ -1,0 +1,53 @@
+{
+  "quota": {
+    "title": "할당량",
+    "titleWithPlan": "할당량({{level}} 플랜)",
+    "lastRefresh": "마지막 갱신 {{time}}",
+    "refresh": "할당량 새로 고침",
+    "loading": "불러오는 중…",
+    "empty": "할당량 데이터 없음",
+    "resetAt": "리셋 {{time}}"
+  },
+  "detail": "사용량 상세",
+  "range": {
+    "today": "오늘",
+    "last7": "최근 7일",
+    "last30": "최근 30일"
+  },
+  "model": {
+    "title": "모델 사용량",
+    "totalCalls": "총 {{count}}회 호출",
+    "totalTokens": "총 {{value}} Token",
+    "colName": "모델",
+    "colTokens": "Token 사용량"
+  },
+  "tool": {
+    "title": "도구 사용량",
+    "totalCalls": "총 {{count}}회 호출",
+    "colName": "도구",
+    "colCount": "호출 횟수"
+  },
+  "chart": {
+    "empty": "데이터 없음"
+  },
+  "context": {
+    "titleUsage": "컨텍스트 사용량",
+    "used": "사용됨",
+    "waitingData": "세션 데이터 대기 중…",
+    "titleBreakdown": "컨텍스트 구성",
+    "noBreakdown": "구성 상세 없음(대화 후 표시됨)",
+    "hitRate": "평균 캐시 적중률",
+    "glmQuota": "GLM 할당량",
+    "glmQuotaWithLevel": "GLM 할당량({{level}})",
+    "quotaLoading": "할당량 불러오는 중…",
+    "noQuota": "할당량 데이터 없음",
+    "categories": {
+      "messages": "메시지",
+      "systemTools": "시스템 도구",
+      "skills": "스킬",
+      "systemPrompt": "시스템 프롬프트",
+      "mcpTools": "MCP 도구",
+      "other": "기타"
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "placeholder": "@ to reference files, / for skills, Enter to send",
+  "placeholderStreaming": "Response generating, press Enter to queue…",
+  "resizeHandle": "Drag to resize height",
+  "attach": "Add attachment (choose file)",
+  "send": "Send (Enter)",
+  "stop": "Stop generating",
+  "model": {
+    "selectModel": "Select a model"
+  },
+  "mode": {
+    "title": "Permission mode",
+    "build": {
+      "label": "Ask before changes",
+      "title": "Ask before changes — ask before every file change"
+    },
+    "edit": {
+      "label": "Edit automatically",
+      "title": "Edit automatically — auto-edit selected/related files"
+    },
+    "plan": {
+      "label": "Plan mode",
+      "title": "Plan mode — read-only code review, plan before editing"
+    },
+    "yolo": {
+      "label": "Full access",
+      "title": "Full access — fewer confirmations, edit and run commands directly"
+    }
+  },
+  "thought": {
+    "title": "Thinking level",
+    "titleWithDefault": "Thinking level: {{level}} (model default)",
+    "default": "Default",
+    "off": "Off",
+    "disabled": "Off",
+    "nothink": "Off",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "max": "Max",
+    "enabled": "Thinking"
+  },
+  "queue": {
+    "pendingTitle": "Queued message {{index}}",
+    "sendNow": "Send now (interrupts current reply)",
+    "sendNowShort": "Now",
+    "edit": "Edit (back to input box)",
+    "remove": "Remove from queue"
+  },
+  "pasted": {
+    "clickToPreview": "Click to preview full content",
+    "label": "Pasted text · {{count}} chars",
+    "remove": "Remove pasted content",
+    "previewAriaLabel": "Pasted content preview",
+    "previewTitle": "Pasted content · {{count}} chars",
+    "close": "Close"
+  },
+  "fileRef": {
+    "lines": " (line {{lines}})",
+    "remove": "Remove reference"
+  }
+}

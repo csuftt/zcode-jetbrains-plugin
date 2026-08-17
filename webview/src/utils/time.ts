@@ -5,24 +5,26 @@
  * 时间戳统一按毫秒处理（ZCode 用的是毫秒级 epoch）
  */
 
+import i18n from '@/i18n/config'
+
 /** 把毫秒时间戳转成相对时间描述 */
 export function relativeTime(ts: number, now: number = Date.now()): string {
   if (!ts || ts <= 0) return ''
 
   const diff = now - ts
-  if (diff < 0) return '刚刚' // 时间戳在未来（时钟偏差）
+  if (diff < 0) return i18n.t('common.relativeTime.justNow') // 时间戳在未来（时钟偏差）
 
   const sec = Math.floor(diff / 1000)
-  if (sec < 60) return '刚刚'
+  if (sec < 60) return i18n.t('common.relativeTime.justNow')
 
   const min = Math.floor(sec / 60)
-  if (min < 60) return `${min} 分钟前`
+  if (min < 60) return i18n.t('common.relativeTime.minutesAgo', { count: min })
 
   const hour = Math.floor(min / 60)
-  if (hour < 24) return `${hour} 小时前`
+  if (hour < 24) return i18n.t('common.relativeTime.hoursAgo', { count: hour })
 
   const day = Math.floor(hour / 24)
-  if (day < 7) return `${day} 天前`
+  if (day < 7) return i18n.t('common.relativeTime.daysAgo', { count: day })
 
   // 超过 7 天：显示 MM-DD（跨年显示 YYYY-MM-DD）
   const d = new Date(ts)
@@ -35,12 +37,12 @@ export function relativeTime(ts: number, now: number = Date.now()): string {
   return `${d.getFullYear()}-${mm}-${dd}`
 }
 
-/** 耗时毫秒 → "X 秒" / "X 分 Y 秒"（人类可读时长，轮次/思考耗时共用） */
+/** 耗时毫秒 → "X 秒" / "X 分 Y 秒"（人类可读时长，轮次/思考耗时共用；文案经 i18n） */
 export function formatDuration(ms: number): string {
   const sec = Math.max(0, Math.floor(ms / 1000))
-  if (sec < 60) return `${sec} 秒`
+  if (sec < 60) return i18n.t('utils.secondsShort', { count: sec })
   const m = Math.floor(sec / 60)
-  return `${m} 分 ${sec % 60} 秒`
+  return i18n.t('utils.minutesSeconds', { m, s: sec % 60 })
 }
 
 /**
@@ -48,7 +50,7 @@ export function formatDuration(ms: number): string {
  * 工具调用常为亚秒级（Read/Edit 等），沿用 formatDuration 会全部显示"0 秒"
  */
 export function formatToolDuration(ms: number): string {
-  if (ms < 60000) return `${(Math.max(0, ms) / 1000).toFixed(1)} 秒`
+  if (ms < 60000) return i18n.t('utils.secondsShort', { count: (Math.max(0, ms) / 1000).toFixed(1) })
   return formatDuration(ms)
 }
 

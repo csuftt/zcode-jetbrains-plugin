@@ -1,0 +1,62 @@
+{
+  "placeholder": "@でファイル参照、/でスキル呼び出し、Enterで送信",
+  "placeholderStreaming": "応答生成中、Enterで送信キューに追加…",
+  "resizeHandle": "ドラッグで高さを調整",
+  "attach": "添付ファイルを追加（ファイル選択）",
+  "send": "送信 (Enter)",
+  "stop": "生成を停止",
+  "model": {
+    "selectModel": "モデルを選択"
+  },
+  "mode": {
+    "title": "権限モード",
+    "build": {
+      "label": "変更前に確認",
+      "title": "Ask before changes — ファイル変更のたびに確認"
+    },
+    "edit": {
+      "label": "自動編集",
+      "title": "Edit automatically — 選択/関連ファイルを自動編集"
+    },
+    "plan": {
+      "label": "プランモード",
+      "title": "Plan mode — 読み取り専用でコードを確認し、計画してから編集"
+    },
+    "yolo": {
+      "label": "フルアクセス",
+      "title": "Full access — 確認を減らし、直接編集・コマンド実行"
+    }
+  },
+  "thought": {
+    "title": "思考レベル",
+    "titleWithDefault": "思考レベル：{{level}}（モデル既定）",
+    "default": "既定",
+    "off": "思考しない",
+    "disabled": "思考しない",
+    "nothink": "思考しない",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "max": "最高",
+    "enabled": "思考"
+  },
+  "queue": {
+    "pendingTitle": "送信待ち {{index}} 件目",
+    "sendNow": "今すぐ送信（現在の応答を中断）",
+    "sendNowShort": "今すぐ",
+    "edit": "編集（入力欄へ戻す）",
+    "remove": "キューから削除"
+  },
+  "pasted": {
+    "clickToPreview": "クリックで全文をプレビュー",
+    "label": "貼り付けテキスト · {{count}}文字",
+    "remove": "貼り付け内容を削除",
+    "previewAriaLabel": "貼り付け内容のプレビュー",
+    "previewTitle": "貼り付け内容 · {{count}}文字",
+    "close": "閉じる"
+  },
+  "fileRef": {
+    "lines": "（{{lines}}行目）",
+    "remove": "参照を削除"
+  }
+}

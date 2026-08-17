@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { elapsedDesc } from '@/utils/time'
 import '../styles/waiting-indicator.less'
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export function WaitingIndicator({ since }: Props) {
+  const { t } = useTranslation()
   const currentModel = useStore((s) => s.currentModel)
   const messages = useStore((s) => s.messages)
   const [, force] = useState(0)
@@ -46,9 +48,9 @@ export function WaitingIndicator({ since }: Props) {
     <div className="waiting">
       <div className="waiting__spinner" />
       <span className="waiting__text">
-        {modelName ? `${modelName} 正在生成响应` : '正在生成响应'}{dots}
+        {(modelName ? t('common.waiting.generatingWithModel', { model: modelName }) : t('common.waiting.generating'))}{dots}
       </span>
-      {elapsed && <span className="waiting__time">（已 {elapsed}）</span>}
+      {elapsed && <span className="waiting__time">{t('common.waiting.elapsed', { time: elapsed })}</span>}
     </div>
   )
 }

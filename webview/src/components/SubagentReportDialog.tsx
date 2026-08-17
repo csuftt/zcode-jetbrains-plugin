@@ -8,11 +8,13 @@
  */
 
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import '../styles/subagent-detail.less'
 
 export function SubagentReportDialog() {
+  const { t } = useTranslation()
   const report = useStore((s) => s.subagentReport)
   const openSubagentDetail = useStore((s) => s.openSubagentDetail)
   const closeSubagentReport = useStore((s) => s.closeSubagentReport)
@@ -39,18 +41,18 @@ export function SubagentReportDialog() {
               {report.title}
             </span>
             <div className="subagent-detail-header__meta">
-              <span className="subagent-detail-meta-item">子代理最终报告</span>
+              <span className="subagent-detail-meta-item">{t('tool.subagent.finalReport')}</span>
             </div>
           </div>
           {/* 切换到完整执行过程弹窗（互斥：本弹窗关闭）*/}
           <button
             className="subagent-detail-icon-btn"
-            data-tip="查看完整执行过程"
+            data-tip={t('tool.subagent.viewFullProcess')}
             onClick={() => openSubagentDetail(report.callID)}
           >
             <span className="codicon codicon-history" />
           </button>
-          <button className="subagent-detail-icon-btn" data-tip="关闭" onClick={closeSubagentReport}>
+          <button className="subagent-detail-icon-btn" data-tip={t('tool.close')} onClick={closeSubagentReport}>
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>

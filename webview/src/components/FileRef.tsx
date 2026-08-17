@@ -11,6 +11,8 @@
  */
 
 import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '@/i18n/config'
 import { FileIcon } from './FileIcon'
 import '../styles/file-ref.less'
 
@@ -38,15 +40,16 @@ export function basename(path: string): string {
   return parts[parts.length - 1] || clean || path
 }
 
-/** tooltip 友好格式（内联/顶部 chip 共用）*/
+/** tooltip 友好格式（内联/顶部 chip 共用；非 React 上下文也调用，走 i18n 实例而非 hook）*/
 export function refTooltip(path: string): string {
   const { file, lines } = splitReference(path)
   return lines
-    ? `${file.replace(/[\\/]+$/, '')}（第 ${lines.replace('L', '').replace('-', '–')} 行）`
+    ? `${file.replace(/[\\/]+$/, '')}${i18n.t('input.fileRef.lines', { lines: lines.replace('L', '').replace('-', '–') })}`
     : file.replace(/[\\/]+$/, '')
 }
 
 function FileRefInner({ path, onRemove }: Props) {
+  const { t } = useTranslation()
   const { file, lines } = splitReference(path)
   const displayName = basename(file)
   return (
@@ -57,7 +60,7 @@ function FileRefInner({ path, onRemove }: Props) {
       <button
         className="file-ref__remove"
         onClick={onRemove}
-        title="移除引用"
+        title={t('input.fileRef.remove')}
         type="button"
       >
         ✕

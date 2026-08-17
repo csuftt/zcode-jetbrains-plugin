@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ReasoningPart } from '@/types/messages'
 import { renderMarkdown } from '@/utils/markdown'
 import { formatDuration } from '@/utils/time'
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function ThinkingBlock({ part, autoExpand = false, streaming = false }: Props) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(autoExpand)
   // 用户是否手动操作过（操作过后不再受 autoExpand 影响）
   const manuallyToggled = useRef(false)
@@ -50,12 +52,12 @@ export function ThinkingBlock({ part, autoExpand = false, streaming = false }: P
   const now = useTick(streaming)
   const lastElapsedRef = useRef<number | null>(null)
   let durationMs: number | null = null
-  const t = part.time
-  if (t?.start) {
-    if (t.end) {
-      durationMs = t.end - t.start
+  const time = part.time
+  if (time?.start) {
+    if (time.end) {
+      durationMs = time.end - time.start
     } else if (streaming) {
-      durationMs = now - t.start
+      durationMs = now - time.start
       lastElapsedRef.current = durationMs
     } else {
       durationMs = lastElapsedRef.current
@@ -73,7 +75,7 @@ export function ThinkingBlock({ part, autoExpand = false, streaming = false }: P
     <div className={`thinking-block ${expanded ? 'thinking-block--expanded' : ''}`}>
       <div className="thinking-block__header" onClick={handleToggle}>
         <span className="thinking-block__icon"><span className="codicon codicon-sparkle-filled" /></span>
-        <span className="thinking-block__title">{streaming ? '思考中' : '思考过程'}</span>
+        <span className="thinking-block__title">{streaming ? t('chat.thinking.thinking') : t('chat.thinking.thought')}</span>
         {durationMs != null && (
           <span className={`thinking-block__duration${streaming ? ' thinking-block__duration--active' : ''}`}>
             {formatDuration(durationMs)}

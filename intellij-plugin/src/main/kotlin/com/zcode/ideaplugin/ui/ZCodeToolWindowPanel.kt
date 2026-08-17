@@ -141,28 +141,28 @@ class ZCodeToolWindowPanel(
         const val KEY_BROWSER_EXPANDED = "zcode.browser.paneExpanded"
         const val KEY_CHAT_BASE_WIDTH = "zcode.browser.chatBaseWidth"
 
-        /** 外观配置（Application 级，跨项目共享）：
+        /** 外观配置（Application 级，跨项目共享，存取见 ZCodeAppearanceStore）：
          *  localStorage 在生产模式下按 origin 隔离——内置 server 每次重启端口随机，
          *  origin 变化导致配置丢失，因此主题/字号/自定义颜色以 IDE 侧持久化为权威源，
          *  webview 启动时经 buildBridgeJs 注入（__ZCODE_APPEARANCE__） */
-        const val KEY_APPEARANCE = "zcode.appearance.config"
 
         /** webview 通用 kv（配置类 localStorage 的权威源，同 appearance 迁移原因）：
-         *  string→string JSON map（搜索开关/输入历史/模型记忆/思考级别/会话标题/上下文构成）*/
-        const val KEY_WEBVIEW_KV = "zcode.webview.kvstore"
+         *  string→string JSON map（搜索开关/输入历史/模型记忆/思考级别/会话标题/上下文构成）
+         *  PropertiesComponent key 定义在 ZCodeLanguageService.KEY_WEBVIEW_KV（语言服务共用）*/
+
+        /** 多标签面板实例注册表：外观配置保存后向所有已开标签广播（JCEF 多 browser
+         *  间 storage 事件不派发，已开标签收不到其他标签的 localStorage 变更——
+         *  cc-gui ThemeConfigService 的 CopyOnWriteArraySet 回调注册同模式）*/
+        val activePanels = java.util.concurrent.CopyOnWriteArraySet<ZCodeToolWindowPanel>()
     }
 
     /** 读取外观配置 JSON（fontScale/themePref/chatBg/chatBar/userMsg），无配置返回 null */
-    private fun readAppearanceJson(): String? {
-        return try {
-            com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_APPEARANCE)
-        } catch (_: Exception) { null }
-    }
+    private fun readAppearanceJson(): String? = ZCodeAppearanceStore.rawJson()
 
     /** 读取 webview kv JSON map，无配置返回 null */
     private fun readKvJson(): String? {
         return try {
-            com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_WEBVIEW_KV)
+            com.intellij.ide.util.PropertiesComponent.getInstance().getValue(ZCodeLanguageService.KEY_WEBVIEW_KV)
         } catch (_: Exception) { null }
     }
 
@@ -219,6 +219,7 @@ class ZCodeToolWindowPanel(
     init {
         border = JBUI.Borders.empty()
         background = JBColor.background()
+        activePanels.add(this) // 多标签实例注册（外观配置广播用）
 
         if (!JBCefApp.isSupported()) {
             add(createUnsupportedPanel(), BorderLayout.CENTER)
@@ -254,7 +255,7 @@ class ZCodeToolWindowPanel(
 
     /** 懒加载标签的占位 UI（不创建 Chromium 渲染进程）*/
     private fun createLazyPlaceholder(): JComponent {
-        val label = javax.swing.JLabel("会话待恢复，切换到本标签后加载")
+        val label = javax.swing.JLabel(com.zcode.ideaplugin.ZCodeBundle.message("panel.lazyPlaceholder"))
         label.foreground = JBColor.foreground()
         label.horizontalAlignment = javax.swing.SwingConstants.CENTER
         val wrapper = JPanel(BorderLayout())
@@ -530,6 +531,9 @@ class ZCodeToolWindowPanel(
         // kv 值来自用户输入（输入历史/会话标题），可能含 "</script>"——singlefile 路径桥脚本
         // 会嵌进 HTML，先转义防提前闭合标签（JS 字符串里 "<\/" 与 "</" 等价，语义不变）
         val kvstore = (readKvJson() ?: "null").replace("</", "<\\/")
+        // 语言（ZCodeLanguageService：手动值优先，否则 IDE locale 映射；恒为白名单四值之一，
+        // 无需转义）；前端 i18n 以此为初始语言权威源
+        val language = ZCodeLanguageService.currentLanguage()
         return """
 window.__ZCODE_CEF_QUERY__ = window['$funcName'];
 window.__INITIAL_IDE_THEME__ = '$theme';
@@ -537,6 +541,7 @@ window.__ZCODE_WORKSPACE__ = '$workspace';
 window.__ZCODE_INITIAL_SESSION__ = '$initialSession';
 window.__ZCODE_APPEARANCE__ = $appearance;
 window.__ZCODE_KVSTORE__ = $kvstore;
+window.__ZCODE_LANGUAGE__ = '$language';
 if (!window.__ZCODE_LOG_HOOK__) {
   window.__ZCODE_LOG_HOOK__ = true;
   (function() {
@@ -732,8 +737,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
             return errorResponse("appearanceSave 参数解析失败: ${e.message}")
         }
         try {
-            com.intellij.ide.util.PropertiesComponent.getInstance().setValue(KEY_APPEARANCE, cfg)
+            com.intellij.ide.util.PropertiesComponent.getInstance()
+                .setValue(ZCodeAppearanceStore.KEY_APPEARANCE, cfg)
             log.info("外观配置已保存")
+            broadcastAppearance(cfg)
         } catch (e: Exception) {
             log.warn("外观配置保存失败: ${e.message}")
         }
@@ -741,9 +748,37 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * 保存 webview 通用 kv（Application 级 PropertiesComponent，string→string map 全量覆盖）。
-     * 前端去抖全量提交 persist 域（zcode./zcode- 前缀、排除外观配置独立通道）；
-     * 限量防护：条目 ≤500、总量 ≤512KB，超限拒绝（localStorage 同源共享本就有限）。
+     * 外观配置广播到所有已开标签（保存后调用）。
+     * JCEF 多 browser 间 storage 事件不派发，其他已开标签无法感知 localStorage 变更——
+     * 统一由本方法推送 onAppearanceChanged（前端 appearance.ts 注册，幂等应用）。
+     * 懒加载标签 JCEF 未创建时跳过（首次加载时注入的 __ZCODE_APPEARANCE__ 已是最新值）。
+     * 同时通知共享浏览器分栏按新生效主题重着色（工具栏/地址栏/欢迎页）。
+     */
+    private fun broadcastAppearance(cfgJson: String) {
+        SwingUtilities.invokeLater {
+            activePanels.forEach { panel ->
+                try {
+                    if (panel.disposed || !panel::jbCefBrowser.isInitialized) return@forEach
+                    panel.jbCefBrowser.cefBrowser.executeJavaScript(
+                        "window.onAppearanceChanged && window.onAppearanceChanged($cfgJson);",
+                        "zcode-appearance-sync", 0
+                    )
+                } catch (e: Exception) {
+                    log.warn("外观同步推送失败（标签 sessionId=${panel.currentSessionId}）: ${e.message}")
+                }
+            }
+            try {
+                project.zCodeService().getSharedBrowserPanel()?.onAppearanceThemeChanged()
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 保存 webview 通用 kv（Application 级 PropertiesComponent，string→string map）。
+     * 增量语义（2026-08-17 修复重装清空事故）：entries upsert 合并进现有 kvstore，
+     * deletes 显式删除——不再整体覆盖。旧版"全量覆盖"在 localStorage 为空（重装/新
+     * origin/注入未达）时会用空快照冲掉存量输入历史等全部数据。
+     * 限量防护：合并后条目 ≤500、总量 ≤512KB，超限拒绝。
      */
     private fun handleKvSave(msg: JsonObject): JsonObject {
         val entries = try {
@@ -751,8 +786,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: Exception) {
             return errorResponse("kvSave entries 解析失败: ${e.message}")
         }
+        val deletes = try {
+            (msg["deletes"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+                ?: emptyList()
+        } catch (e: Exception) {
+            return errorResponse("kvSave deletes 解析失败: ${e.message}")
+        }
         if (entries.size > 500) return errorResponse("kvSave 条目过多（${entries.size} > 500）")
         // 值必须是纯字符串（前端约定），且校验前缀域
+        val upserts = HashMap<String, String>(entries.size)
         entries.forEach { (k, v) ->
             val sv = (v as? JsonPrimitive)?.takeIf { it.isString }?.content
                 ?: return errorResponse("kvSave 值非字符串: $k")
@@ -760,15 +803,57 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 return errorResponse("kvSave key 越域: $k")
             }
             if (sv.length > 64 * 1024) return errorResponse("kvSave 单值过大: $k")
+            upserts[k] = sv
         }
-        val total = entries.entries.sumOf { it.key.length + ((it.value as? JsonPrimitive)?.content?.length ?: 0) }
-        if (total > 512 * 1024) return errorResponse("kvSave 总量过大（$total B）")
+        deletes.forEach { k ->
+            if (!k.startsWith("zcode.") && !k.startsWith("zcode-")) {
+                return errorResponse("kvSave deletes key 越域: $k")
+            }
+        }
         try {
-            com.intellij.ide.util.PropertiesComponent.getInstance().setValue(KEY_WEBVIEW_KV, entries.toString())
+            // 读取现有 kvstore 合并（upsert + delete），失败/无配置按空 map 起步
+            val existing = readKvJson()?.let {
+                try { Json.parseToJsonElement(it).jsonObject } catch (_: Exception) { null }
+            } ?: JsonObject(emptyMap())
+            val merged = LinkedHashMap<String, kotlinx.serialization.json.JsonElement>(existing.size + upserts.size)
+            merged.putAll(existing)
+            upserts.forEach { (k, v) -> merged[k] = JsonPrimitive(v) }
+            deletes.forEach { merged.remove(it) }
+            if (merged.size > 500) return errorResponse("kvSave 合并后条目过多（${merged.size} > 500）")
+            val total = merged.entries.sumOf { it.key.length + ((it.value as? JsonPrimitive)?.content?.length ?: 0) }
+            if (total > 512 * 1024) return errorResponse("kvSave 总量过大（$total B）")
+            com.intellij.ide.util.PropertiesComponent.getInstance()
+                .setValue(ZCodeLanguageService.KEY_WEBVIEW_KV, JsonObject(merged).toString())
+            // 语言选择变化：重算生效语言并广播所有已开标签（JCEF 多 browser 间 storage 事件不派发，
+            // 同 broadcastAppearance；本标签经 kvSave 前端已自行切换，再推一次幂等无害）
+            if (ZCodeLanguageService.KV_KEY_LANGUAGE in upserts.keys || ZCodeLanguageService.KV_KEY_LANGUAGE in deletes) {
+                broadcastLanguage(ZCodeLanguageService.currentLanguage())
+            }
         } catch (e: Exception) {
             log.warn("webview kv 保存失败: ${e.message}")
         }
         return buildJsonObject { put("op", "kvSave") }
+    }
+
+    /**
+     * 语言变更广播到所有已开标签（语言切换保存后调用）：
+     * 推送 onLanguageChanged（前端 i18n/language.ts 注册，幂等 changeLanguage）。
+     * 懒加载标签 JCEF 未创建时跳过（首次加载时注入的 __ZCODE_LANGUAGE__ 已是最新值）。
+     */
+    private fun broadcastLanguage(lang: String) {
+        SwingUtilities.invokeLater {
+            activePanels.forEach { panel ->
+                try {
+                    if (panel.disposed || !panel::jbCefBrowser.isInitialized) return@forEach
+                    panel.jbCefBrowser.cefBrowser.executeJavaScript(
+                        "window.onLanguageChanged && window.onLanguageChanged('$lang');",
+                        "zcode-language-sync", 0
+                    )
+                } catch (e: Exception) {
+                    log.warn("语言同步推送失败（标签 sessionId=${panel.currentSessionId}）: ${e.message}")
+                }
+            }
+        }
     }
 
     /** 更新标签 displayName：baseTitle + 生成中后缀（EDT）*/
@@ -1090,6 +1175,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
     override fun dispose() {
         if (disposed) return
         disposed = true
+        activePanels.remove(this)
         log.info("释放标签面板（sessionId=$currentSessionId）")
         try {
             // 内嵌浏览器是全局共享单例：只摘除挂载（还原 TW 宽度），实例交由 Service 释放
@@ -2705,14 +2791,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun createUnsupportedPanel(): JComponent {
         val panel = JPanel(BorderLayout())
         panel.background = JBColor.background()
-        val label = JLabel(
-            "<html><div style='padding:20px;text-align:center;'>" +
-            "<b>JCEF 不支持</b><br/><br/>" +
-            "当前 IDE 或环境不支持 JCEF（嵌入式 Chromium）。<br/>" +
-            "请使用官方版 IntelliJ IDEA Community / Ultimate。<br/><br/>" +
-            "如果你用的是自定义 JBR，请确认带 JCEF。" +
-            "</div></html>"
-        )
+        val label = JLabel(com.zcode.ideaplugin.ZCodeBundle.message("panel.jcefUnsupported.html"))
         panel.add(label, BorderLayout.CENTER)
         return panel
     }

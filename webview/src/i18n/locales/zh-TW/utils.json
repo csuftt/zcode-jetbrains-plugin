@@ -1,0 +1,15 @@
+{
+  "subagentTask": "子代理任務",
+  "backgroundTask": "後臺任務",
+  "subagentTitle": "子代理 · {{type}}",
+  "secondsShort": "{{count}} 秒",
+  "minutesSeconds": "{{m}} 分 {{s}} 秒",
+  "format": {
+    "mcpMonthlyLimit": "MCP 每月額度",
+    "cycleLimit": "週期額度",
+    "per5HoursLimit": "每 5 小時使用額度",
+    "weeklyLimit": "每週使用額度",
+    "usageLimit": "使用額度",
+    "timesUnit": "次"
+  }
+}

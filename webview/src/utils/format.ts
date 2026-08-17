@@ -7,46 +7,57 @@
  *   - compact：图表 Y 轴刻度缩写
  */
 
+import i18n from '@/i18n/config'
 import type { QuotaLimit } from '@/types/messages'
 
-/** 格式化为万/k（上下文用量、额度已用/总量）*/
+/** 按当前语言紧凑缩写数值（zh/ja/ko → 万/億/만，en → K/M/B；每次调用求值，随语言切换）*/
+function compactNumber(n: number, maxFractionDigits: number): string {
+  try {
+    return new Intl.NumberFormat(i18n.resolvedLanguage ?? 'zh', {
+      notation: 'compact',
+      maximumFractionDigits: maxFractionDigits,
+    }).format(n)
+  } catch {
+    return String(n)
+  }
+}
+
+/** 格式化为万/k（上下文用量、额度已用/总量；万/亿缩写经 Intl 按语言本地化）*/
 export function fmtTokens(n?: number | null): string {
   if (n == null) return '-'
-  if (n >= 10000) return `${(n / 10000).toFixed(1)}万`
+  if (n >= 10000) return compactNumber(n, 1)
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return String(n)
 }
 
-/** 格式化为亿/万/原数（汇总表「总 Token M」用，对齐 glm fmt）*/
+/** 格式化为亿/万/原数（汇总表「总 Token M」用，对齐 glm fmt；缩写经 Intl 按语言本地化）*/
 export function fmtBig(n?: number | null): string {
   if (n == null) return '-'
-  if (n >= 1e8) return `${(n / 1e8).toFixed(2)}亿`
-  if (n >= 1e4) return `${(n / 1e4).toFixed(1)}万`
+  if (n >= 1e8) return compactNumber(n, 2)
+  if (n >= 1e4) return compactNumber(n, 1)
   return n.toFixed(0)
 }
 
-/** Y 轴刻度缩写（对齐 glm LineChart compact）*/
+/** Y 轴刻度缩写（对齐 glm LineChart compact；万/亿缩写经 Intl 按语言本地化）*/
 export function compact(n: number): string {
-  if (n >= 1e8) return `${(n / 1e8).toFixed(1)}亿`
-  if (n >= 1e4) return `${Math.round(n / 1e4)}万`
-  if (n >= 1e3) return `${Math.round(n / 1e3)}k`
+  if (n >= 1e3) return compactNumber(n, 1)
   if (n >= 1) return String(Math.round(n))
   return '0'
 }
 
-/** unit/type → 标题（挖自智谱官方页源码，glm-plan-usage-idea 同款）*/
+/** unit/type → 标题（挖自智谱官方页源码，glm-plan-usage-idea 同款；文案经 i18n）*/
 export function limitTitle(limit: QuotaLimit): string {
   if (limit.type === 'TIME_LIMIT') {
-    return limit.unit === 5 ? 'MCP 每月额度' : '周期额度'
+    return limit.unit === 5 ? i18n.t('utils.format.mcpMonthlyLimit') : i18n.t('utils.format.cycleLimit')
   }
-  if (limit.unit === 3) return '每 5 小时使用额度'
-  if (limit.unit === 6) return '每周使用额度'
-  return '使用额度'
+  if (limit.unit === 3) return i18n.t('utils.format.per5HoursLimit')
+  if (limit.unit === 6) return i18n.t('utils.format.weeklyLimit')
+  return i18n.t('utils.format.usageLimit')
 }
 
 /** 单位文案（TIME_LIMIT → 次，TOKENS_LIMIT → Tokens）*/
 export function limitUnitText(limit: QuotaLimit): string {
-  return limit.type === 'TIME_LIMIT' ? '次' : 'Tokens'
+  return limit.type === 'TIME_LIMIT' ? i18n.t('utils.format.timesUnit') : 'Tokens'
 }
 
 /** 格式化重置时间（毫秒时间戳 → MM-dd HH:mm）*/

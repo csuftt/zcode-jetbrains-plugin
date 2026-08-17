@@ -12,6 +12,7 @@
  * 纯函数、幂等，每次 messages 变化（全量拉取 / 流式增量）后重新解析。
  */
 
+import i18n from '@/i18n/config'
 import type { AgentItem, FileChangeItem, FileEditContent, SubagentActivity, SubagentInfo, TodoItem, ZCodeMessage } from '@/types/messages'
 
 /** 工具 part 的 input 字段名兼容（实测 Edit 用 file_path，Write 用 path）*/
@@ -71,7 +72,7 @@ export function parseAgents(messages: ZCodeMessage[]): AgentItem[] {
       const input = part.state?.input ?? {}
       // description 为空也要展示（流式早期 input 还没解析完），回退 prompt → 占位
       const description = String(input.description ?? input.prompt ?? '').slice(0, 200)
-        || '子代理任务'
+        || i18n.t('utils.subagentTask')
       const item: AgentItem = {
         description,
         status: String(part.state?.status ?? 'pending'),
@@ -106,7 +107,7 @@ export function mergeAgentItems(
     const status = a.status === 'running' ? 'running'
       : a.status === 'failed' ? 'error' : 'completed'
     byCall.set(a.key, {
-      description: a.description || prev?.description || '子代理任务',
+      description: a.description || prev?.description || i18n.t('utils.subagentTask'),
       status,
       ...(a.agentType || prev?.subagentType ? { subagentType: a.agentType || prev?.subagentType } : {}),
       ...(a.childSessionId || prev?.childSessionId
@@ -123,7 +124,7 @@ export function mergeAgentItems(
     const prev = byCall.get(r.toolCallId)
     const rpcStatus = normalizeRpcStatus(r.status, prev?.status)
     byCall.set(r.toolCallId, {
-      description: r.title || prev?.description || '子代理任务',
+      description: r.title || prev?.description || i18n.t('utils.subagentTask'),
       status: rpcStatus,
       ...(r.subagentType || prev?.subagentType
         ? { subagentType: r.subagentType || prev?.subagentType }

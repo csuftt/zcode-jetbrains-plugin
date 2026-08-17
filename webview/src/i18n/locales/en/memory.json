@@ -1,0 +1,27 @@
+{
+  "item": {
+    "modifiedAt": "Modified {{time}}",
+    "notCreated": "Not created",
+    "open": "Open",
+    "openTitle": "Open in editor",
+    "creating": "Creating…",
+    "create": "Create",
+    "createTitle": "Create default template and open in editor"
+  },
+  "global": {
+    "title": "Global memory",
+    "hint": "Automatically read by ZCode sessions in all projects"
+  },
+  "refresh": "Refresh",
+  "loading": "Loading…",
+  "project": {
+    "title": "Project memory",
+    "hint": "Automatically read only by ZCode sessions in the current project",
+    "empty": "No open project detected"
+  },
+  "auto": {
+    "title": "ZCode auto memory",
+    "hint": "Automatically distilled from completed conversations and injected into later sessions (enable in ZCode client: Settings → General)",
+    "empty": "No auto memories yet — enable the Memory feature in the ZCode client and finish a few conversations; distilled facts will appear here"
+  }
+}

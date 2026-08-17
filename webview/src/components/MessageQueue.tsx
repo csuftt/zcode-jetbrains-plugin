@@ -11,6 +11,7 @@
  * 编辑回填涉及 InputBox 私有的 editorRef，经 onEdit 回调上抛。
  */
 
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import '../styles/message-queue.less'
 
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export function MessageQueue({ onEdit }: Props) {
+  const { t } = useTranslation()
   const queued = useStore((s) => s.queuedMessages)
   const removeQueuedMessage = useStore((s) => s.removeQueuedMessage)
   const sendQueuedNow = useStore((s) => s.sendQueuedNow)
@@ -30,7 +32,7 @@ export function MessageQueue({ onEdit }: Props) {
     <div className="message-queue">
       {queued.map((m, i) => (
         <div key={m.id} className="message-queue__item">
-          <span className="message-queue__index" title={`第 ${i + 1} 条待发送`}>
+          <span className="message-queue__index" title={t('input.queue.pendingTitle', { index: i + 1 })}>
             {i + 1}
           </span>
           <span className="message-queue__text" title={m.text}>
@@ -40,10 +42,10 @@ export function MessageQueue({ onEdit }: Props) {
             <button
               className="message-queue__btn message-queue__btn--send"
               onClick={() => sendQueuedNow(m.id)}
-              title="立即发送（中断当前回复）"
+              title={t('input.queue.sendNow')}
             >
               <span className="codicon codicon-export message-queue__send-icon" />
-              <span className="message-queue__send-label">立即</span>
+              <span className="message-queue__send-label">{t('input.queue.sendNowShort')}</span>
             </button>
             {onEdit && (
               <button
@@ -52,7 +54,7 @@ export function MessageQueue({ onEdit }: Props) {
                   removeQueuedMessage(m.id)
                   onEdit(m.text)
                 }}
-                title="编辑（回到输入框）"
+                title={t('input.queue.edit')}
               >
                 <span className="codicon codicon-edit" />
               </button>
@@ -60,7 +62,7 @@ export function MessageQueue({ onEdit }: Props) {
             <button
               className="message-queue__btn message-queue__btn--remove"
               onClick={() => removeQueuedMessage(m.id)}
-              title="移出队列"
+              title={t('input.queue.remove')}
             >
               <span className="codicon codicon-close" />
             </button>

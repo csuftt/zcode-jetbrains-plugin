@@ -11,6 +11,7 @@
  */
 
 import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
 import '../styles/pasted-text-ref.less'
 
 export interface PastedTextItem {
@@ -26,24 +27,25 @@ interface Props {
 }
 
 function PastedTextRefInner({ item, onPreview, onRemove }: Props) {
+  const { t } = useTranslation()
   return (
     <span
       className="pasted-text-ref"
-      data-tip="点击预览完整内容"
+      data-tip={t('input.pasted.clickToPreview')}
       onClick={(e) => {
         e.stopPropagation()
         onPreview()
       }}
     >
       <span className="codicon codicon-note pasted-text-ref__icon" />
-      <span className="pasted-text-ref__name">粘贴文本 · {item.chars} 字</span>
+      <span className="pasted-text-ref__name">{t('input.pasted.label', { count: item.chars })}</span>
       <button
         className="pasted-text-ref__remove"
         onClick={(e) => {
           e.stopPropagation()
           onRemove()
         }}
-        title="移除粘贴内容"
+        title={t('input.pasted.remove')}
         type="button"
       >
         ✕
@@ -56,19 +58,20 @@ export const PastedTextRef = memo(PastedTextRefInner)
 
 /** 预览弹窗（复用全局 .modal-overlay/.modal-content；Escape 在 InputBox 全局监听关闭）*/
 export function PastedTextPreview({ item, onClose }: { item: PastedTextItem; onClose: () => void }) {
+  const { t } = useTranslation()
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
       <div
         className="modal-content pasted-text-preview"
         role="dialog"
-        aria-label="粘贴内容预览"
+        aria-label={t('input.pasted.previewAriaLabel')}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>粘贴内容 · {item.chars} 字</h3>
+        <h3>{t('input.pasted.previewTitle', { count: item.chars })}</h3>
         <pre className="pasted-text-preview__body">{item.text}</pre>
         <div className="modal-actions">
           <button className="modal-btn modal-btn-primary" onClick={onClose} type="button">
-            关闭
+            {t('input.pasted.close')}
           </button>
         </div>
       </div>

@@ -1,0 +1,31 @@
+{
+  "scope": {
+    "all": "전체",
+    "user": "전역",
+    "project": "프로젝트",
+    "plugin": "플러그인"
+  },
+  "card": {
+    "disableHint": "클릭하여 비활성화(config skill 노드에 기록)",
+    "enableHint": "클릭하여 활성화",
+    "disabled": "비활성화됨",
+    "pluginContribution": "플러그인 {{name}} 제공",
+    "descLabel": "설명",
+    "whenLabel": "사용 시점",
+    "sourceLabel": "소스",
+    "pluginSuffix": "플러그인 {{name}}",
+    "openInEditor": "편집기에서 열기",
+    "openTitle": "SKILL.md를 IDEA 편집기에서 열기(보기 또는 편집)"
+  },
+  "toolbar": {
+    "searchPlaceholder": "이름 / 설명 / 경로 검색",
+    "clear": "지우기",
+    "rescan": "다시 스캔"
+  },
+  "list": {
+    "scanning": "스킬 스캔 중…",
+    "noMatch": "일치하는 스킬 없음",
+    "empty": "스킬이 없습니다"
+  },
+  "removeSkill": "스킬 제거"
+}

@@ -7,12 +7,15 @@
  */
 
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   title: string
   /** 正文（可传 string / JSX）*/
   message: ReactNode
+  /** 确认按钮文案（缺省取 common.confirm.ok）*/
   confirmText?: string
+  /** 取消按钮文案（缺省取 common.confirm.cancel）*/
   cancelText?: string
   /** 危险操作（确认按钮红色）*/
   danger?: boolean
@@ -23,12 +26,13 @@ interface Props {
 export function ConfirmDialog({
   title,
   message,
-  confirmText = '确定',
-  cancelText = '取消',
+  confirmText,
+  cancelText,
   danger = false,
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useTranslation()
   return (
     <div className="modal-overlay" onClick={onCancel} role="presentation">
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -36,13 +40,13 @@ export function ConfirmDialog({
         <p>{message}</p>
         <div className="modal-actions">
           <button className="modal-btn modal-btn-cancel" onClick={onCancel}>
-            {cancelText}
+            {cancelText ?? t('common.confirm.cancel')}
           </button>
           <button
             className={`modal-btn ${danger ? 'modal-btn-danger' : 'modal-btn-primary'}`}
             onClick={onConfirm}
           >
-            {confirmText}
+            {confirmText ?? t('common.confirm.ok')}
           </button>
         </div>
       </div>

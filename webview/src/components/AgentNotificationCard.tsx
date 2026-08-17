@@ -12,6 +12,7 @@
  */
 
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage, TextPart } from '@/types/messages'
 import { MarkdownBlock } from './MarkdownBlock'
 import {
@@ -29,6 +30,7 @@ interface Props {
 }
 
 export function AgentNotificationCard({ message, time }: Props) {
+  const { t } = useTranslation()
   const { info, parts } = message
   // 合成通知只有一个 text part，内容是 XML
   const textPart = parts.find((p): p is TextPart => p.type === 'text')
@@ -38,7 +40,8 @@ export function AgentNotificationCard({ message, time }: Props) {
   const title = notificationTitle(info, parsed)
   // 后台 bash 命令与子代理共用 task-notification 通道，按执行体类型分流文案/图标
   const src = resolveTaskSource(info, parsed)
-  const label = src === 'subagent' ? '子代理' : src === 'bash' ? '后台命令' : '后台任务'
+  const label = src === 'subagent' ? t('app.notification.subagent')
+    : src === 'bash' ? t('app.notification.bashTask') : t('app.notification.backgroundTask')
   const icon =
     src === 'bash' ? 'codicon-terminal' : src === 'subagent' ? 'codicon-hubot' : 'codicon-bell'
 
@@ -53,7 +56,8 @@ export function AgentNotificationCard({ message, time }: Props) {
   const status = parsed.kind === 'task' ? parsed.status ?? 'completed'
     : parsed.kind === 'message' ? 'completed' : 'unknown'
   const badgeCls = status === 'completed' ? 'ok' : status === 'error' ? 'err' : 'info'
-  const badgeText = status === 'completed' ? '✓ 完成' : status === 'error' ? '✗ 失败' : '通知'
+  const badgeText = status === 'completed' ? t('app.notification.completed')
+    : status === 'error' ? t('app.notification.failed') : t('app.notification.notice')
 
   return (
     <div className={`notif-card notif-card--${badgeCls}`}>

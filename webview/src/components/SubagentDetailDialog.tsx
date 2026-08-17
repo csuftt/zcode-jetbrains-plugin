@@ -14,6 +14,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import { ToolCallCard } from './ToolCallCard'
@@ -48,12 +50,12 @@ function formatDuration(startedAt?: number, endedAt?: number): string {
 }
 
 /** 状态徽标文案 */
-function statusText(status: string | undefined): { text: string; cls: string } {
+function statusText(status: string | undefined, t: TFunction): { text: string; cls: string } {
   switch (status) {
-    case 'running': return { text: '运行中', cls: 'running' }
-    case 'completed': return { text: '已完成', cls: 'completed' }
-    case 'error': return { text: '失败', cls: 'error' }
-    default: return { text: '等待中', cls: 'pending' }
+    case 'running': return { text: t('tool.status.running'), cls: 'running' }
+    case 'completed': return { text: t('tool.status.completed'), cls: 'completed' }
+    case 'error': return { text: t('tool.status.error'), cls: 'error' }
+    default: return { text: t('tool.status.pending'), cls: 'pending' }
   }
 }
 
@@ -71,6 +73,7 @@ function Transcript({
   /** 点击折叠行打开报告弹窗（入参 = 该条文本，Agent 工具输出缺失时兜底）*/
   onOpenReport: (fallbackMd: string) => void
 }) {
+  const { t } = useTranslation()
   return (
     <div className="subagent-detail-transcript">
       {messages.map((msg, i) => {
@@ -84,7 +87,7 @@ function Transcript({
         return (
           <div key={msg.info.id || i} className={`subagent-detail-msg role-${msg.info.role}`}>
             <div className="subagent-detail-msg-role">
-              {msg.info.role === 'user' ? '任务' : 'AI'}
+              {msg.info.role === 'user' ? t('tool.subagent.roleTask') : 'AI'}
             </div>
             <div className="subagent-detail-msg-body">
               {/* 连续同类工具聚组（同主聊天规则）：子代理连读十几个文件时压缩弹窗长度 */}
@@ -98,7 +101,7 @@ function Transcript({
               {collapsed && (
                 <div className="subagent-detail-report-collapsed" onClick={() => onOpenReport(reportText)}>
                   <span className="codicon codicon-book" />
-                  <span>最终报告已生成，点击弹窗阅读</span>
+                  <span>{t('tool.subagent.finalReportCollapsed')}</span>
                   <span className="codicon codicon-chevron-right" />
                 </div>
               )}
@@ -111,6 +114,7 @@ function Transcript({
 }
 
 export function SubagentDetailDialog() {
+  const { t } = useTranslation()
   const detailKey = useStore((s) => s.subagentDetail)
   const agents = useStore((s) => s.agents)
   const activities = useStore((s) => s.subagentActivities)
@@ -219,7 +223,7 @@ export function SubagentDetailDialog() {
   if (!key) return null
 
   const duration = formatDuration(item?.startedAt ?? info?.startedAt, item?.endedAt ?? info?.endedAt)
-  const badge = statusText(item?.status)
+  const badge = statusText(item?.status, t)
   const toolCount = activity?.tools.length ?? 0
 
   const handleRefresh = () => {
@@ -247,7 +251,7 @@ export function SubagentDetailDialog() {
           <span className="codicon codicon-hubot subagent-detail-header__icon" />
           <div className="subagent-detail-header__main">
             <span className="subagent-detail-header__title" title={item?.description}>
-              {item?.description || activity?.description || '子代理任务'}
+              {item?.description || activity?.description || t('tool.subagent.task')}
             </span>
             <div className="subagent-detail-header__meta">
               {(item?.subagentType || activity?.agentType || info?.subagentType) && (
@@ -257,13 +261,13 @@ export function SubagentDetailDialog() {
               )}
               <span className={`subagent-detail-badge ${badge.cls}`}>{badge.text}</span>
               {duration && <span className="subagent-detail-meta-item">{duration}</span>}
-              {toolCount > 0 && <span className="subagent-detail-meta-item">{toolCount} 个工具</span>}
+              {toolCount > 0 && <span className="subagent-detail-meta-item">{t('tool.toolsCount', { count: toolCount })}</span>}
             </div>
           </div>
           {childSessionId && (
             <button
               className="subagent-detail-icon-btn"
-              data-tip={running ? '立即刷新（每 3 秒自动刷新）' : '重新加载完整记录'}
+              data-tip={running ? t('tool.subagent.refreshNow') : t('tool.subagent.reloadFull')}
               onClick={handleRefresh}
             >
               <span className={`codicon codicon-refresh ${loading || refreshSpin ? 'spin' : ''}`} />
@@ -273,17 +277,17 @@ export function SubagentDetailDialog() {
           {reportReady && (
             <button
               className="subagent-detail-icon-btn"
-              data-tip="弹窗阅读最终报告"
+              data-tip={t('tool.subagent.viewFinalReport')}
               onClick={() => openSubagentReport({
                 callID: key,
-                title: item?.description || activity?.description || '子代理报告',
+                title: item?.description || activity?.description || t('tool.subagentReport'),
                 markdown: agentOutput,
               })}
             >
               <span className="codicon codicon-book" />
             </button>
           )}
-          <button className="subagent-detail-icon-btn" data-tip="关闭" onClick={closeDetail}>
+          <button className="subagent-detail-icon-btn" data-tip={t('tool.close')} onClick={closeDetail}>
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>
@@ -292,9 +296,9 @@ export function SubagentDetailDialog() {
           {error && (
             <div className="subagent-detail-error">
               <span className="codicon codicon-error" />
-              <span>加载失败：{error}</span>
+              <span>{t('tool.subagent.loadFailed', { error })}</span>
               {childSessionId && (
-                <button className="subagent-detail-retry" onClick={handleRefresh}>重试</button>
+                <button className="subagent-detail-retry" onClick={handleRefresh}>{t('tool.retry')}</button>
               )}
             </div>
           )}
@@ -306,7 +310,7 @@ export function SubagentDetailDialog() {
               running={running}
               onOpenReport={(fallbackMd) => openSubagentReport({
                 callID: key,
-                title: item?.description || activity?.description || '子代理报告',
+                title: item?.description || activity?.description || t('tool.subagentReport'),
                 markdown: agentOutput || fallbackMd,
               })}
             />
@@ -317,7 +321,7 @@ export function SubagentDetailDialog() {
             <>
               {running && (
                 <div className="subagent-detail-hint">
-                  <span className="codicon codicon-loading spin" /> 子代理运行中（子会话事件流未就绪，显示转发的工具事件）。
+                  <span className="codicon codicon-loading spin" /> {t('tool.subagent.runningFallback')}
                 </div>
               )}
               <div className="subagent-detail-tools">
@@ -335,7 +339,7 @@ export function SubagentDetailDialog() {
           {/* 层3：无实时数据 → 兜底显示 Agent 工具的最终报告 */}
           {!display && toolCount === 0 && agentOutput && (
             <div className="subagent-detail-fallback">
-              <div className="subagent-detail-hint">无子会话记录，以下为子代理最终报告：</div>
+              <div className="subagent-detail-hint">{t('tool.subagent.noChildSession')}</div>
               <MarkdownBlock markdown={agentOutput} />
             </div>
           )}
@@ -343,9 +347,9 @@ export function SubagentDetailDialog() {
           {/* 层4：什么都没有 */}
           {!display && toolCount === 0 && !agentOutput && (
             <div className="subagent-detail-empty">
-              {loading ? '正在加载子代理记录…' : '暂无子代理过程数据'}
+              {loading ? t('tool.subagent.loading') : t('tool.subagent.noData')}
               {childSessionId && !loading && (
-                <button className="subagent-detail-retry" onClick={handleRefresh}>加载完整记录</button>
+                <button className="subagent-detail-retry" onClick={handleRefresh}>{t('tool.subagent.loadFull')}</button>
               )}
             </div>
           )}

@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { useStore } from '@/store/useStore'
 import { sendToJava } from '@/ipc/bridge'
@@ -34,6 +35,7 @@ function statusIcon(status: string): { icon: string; spin?: boolean } {
 }
 
 export function StatusPanel() {
+  const { t } = useTranslation()
   const todos = useStore((s) => s.todos)
   const agents = useStore((s) => s.agents)
   const fileChanges = useStore((s) => s.fileChanges)
@@ -95,7 +97,7 @@ export function StatusPanel() {
           onClick={() => toggleTab('todo')}
         >
           <span className="codicon codicon-checklist" />
-          <span className="tab-label">任务</span>
+          <span className="tab-label">{t('app.status.todoTab')}</span>
           {todos.length > 0 && (
             <span className="tab-progress">{todoCompleted}/{todos.length}</span>
           )}
@@ -110,7 +112,7 @@ export function StatusPanel() {
           onClick={() => toggleTab('agent')}
         >
           <span className="codicon codicon-hubot" />
-          <span className="tab-label">子代理</span>
+          <span className="tab-label">{t('app.status.agentTab')}</span>
           {agents.length > 0 && (
             <span className="tab-progress">{agentCompleted}/{agents.length}</span>
           )}
@@ -125,7 +127,7 @@ export function StatusPanel() {
           onClick={() => toggleTab('files')}
         >
           <span className="codicon codicon-edit" />
-          <span className="tab-label">文件</span>
+          <span className="tab-label">{t('app.status.fileTab')}</span>
           {fileChanges.length > 0 && (
             <span className="tab-stats">
               {totalAdd > 0 && <span className="stat-additions">+{totalAdd}</span>}
@@ -144,7 +146,7 @@ export function StatusPanel() {
         >
           {openTab === 'todo' && (
             todos.length === 0 ? (
-              <div className="status-panel-empty">暂无任务</div>
+              <div className="status-panel-empty">{t('app.status.noTodos')}</div>
             ) : (
               <div className="status-panel-todo-list">
                 {todos.map((todo, i) => {
@@ -162,7 +164,7 @@ export function StatusPanel() {
 
           {openTab === 'agent' && (
             agents.length === 0 ? (
-              <div className="status-panel-empty">暂无子任务</div>
+              <div className="status-panel-empty">{t('app.status.noAgents')}</div>
             ) : (
               <div className="status-panel-agent-list">
                 {agents.map((a) => {
@@ -171,7 +173,7 @@ export function StatusPanel() {
                     <div
                       key={a.callID}
                       className={`status-panel-agent-item status-${a.status} clickable`}
-                      title="点击查看子代理执行过程"
+                      title={t('app.status.viewSubagentDetail')}
                       onClick={() => openSubagentDetail(a.callID)}
                     >
                       <span className={`codicon ${icon} ${spin ? 'spin' : ''} status-panel-agent-icon`} />
@@ -190,7 +192,7 @@ export function StatusPanel() {
 
           {openTab === 'files' && (
             fileChanges.length === 0 ? (
-              <div className="status-panel-empty">暂无文件改动</div>
+              <div className="status-panel-empty">{t('app.status.noFiles')}</div>
             ) : (
               <div className="status-panel-file-list">
                 {fileChanges.map((f) => {
@@ -200,7 +202,7 @@ export function StatusPanel() {
                     <div
                       key={f.filePath}
                       className="status-panel-file-item clickable"
-                      title={`在编辑器打开：${f.filePath}`}
+                      title={t('app.status.openInEditor', { path: f.filePath })}
                       onClick={() => sendToJava({ op: 'openFile', filePath: f.filePath })}
                     >
                       <span className="file-change-status status-modified">M</span>
@@ -214,7 +216,7 @@ export function StatusPanel() {
                       {hasDiffContent && (
                         <span
                           className="codicon codicon-diff status-panel-file-diff"
-                          title="查看编辑前后对比"
+                          title={t('app.status.viewDiff')}
                           onClick={(e) => {
                             e.stopPropagation()
                             // 同文件多次编辑依次拼接（段间空行分隔，避免相邻片段被 diff 对齐混淆）
@@ -225,7 +227,7 @@ export function StatusPanel() {
                               filePath: f.filePath,
                               oldContent,
                               newContent,
-                              title: `编辑对比：${f.fileName}`,
+                              title: t('app.status.diffTitle', { name: f.fileName }),
                             })
                           }}
                         />

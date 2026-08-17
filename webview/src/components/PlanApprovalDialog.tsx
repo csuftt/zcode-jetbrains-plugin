@@ -15,6 +15,7 @@
  * 两者不能复用同一应答值。
  */
 
+import { useTranslation } from 'react-i18next'
 import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
@@ -27,6 +28,8 @@ interface Props {
 }
 
 export function PlanApprovalDialog({ requestId, plan, onClose }: Props) {
+  const { t } = useTranslation()
+
   const handleApprove = () => {
     sendToJava({
       op: 'askUserResponse',
@@ -53,21 +56,21 @@ export function PlanApprovalDialog({ requestId, plan, onClose }: Props) {
       <div className="plan-approval-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="plan-approval-dialog__header">
           <span className="plan-approval-dialog__icon codicon codicon-tasklist" />
-          <span className="plan-approval-dialog__title">计划审批</span>
-          <span className="plan-approval-dialog__hint">批准后将退出规划模式并开始执行</span>
+          <span className="plan-approval-dialog__title">{t('app.planApproval.title')}</span>
+          <span className="plan-approval-dialog__hint">{t('app.planApproval.hint')}</span>
         </div>
 
         <div className="plan-approval-dialog__body">
-          <MarkdownBlock markdown={plan || '_（计划内容为空）_'} />
+          <MarkdownBlock markdown={plan || t('app.planApproval.emptyPlan')} />
         </div>
 
         <div className="plan-approval-dialog__footer">
-          <span className="plan-approval-dialog__tip">点击遮罩或"继续规划"可拒绝并留在规划模式</span>
+          <span className="plan-approval-dialog__tip">{t('app.planApproval.tip')}</span>
           <button className="plan-approval-dialog__btn plan-approval-dialog__btn--decline" onClick={handleDecline}>
-            继续规划
+            {t('app.planApproval.continuePlanning')}
           </button>
           <button className="plan-approval-dialog__btn plan-approval-dialog__btn--approve" onClick={handleApprove}>
-            批准并执行
+            {t('app.planApproval.approveAndRun')}
           </button>
         </div>
       </div>

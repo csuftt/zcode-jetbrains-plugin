@@ -18,6 +18,9 @@
     <!-- 依赖 JCEF（嵌入式 Chromium，用于渲染 React UI） -->
     <depends>com.intellij.modules.platform</depends>
 
+    <!-- 原生 UI 文案 bundle（messages/ZCodeBundle*.properties，默认中文 + en/ja/ko） -->
+    <resource-bundle>messages.ZCodeBundle</resource-bundle>
+
     <extensions defaultExtensionNs="com.intellij">
         <!-- 注册 ToolWindow（右侧工具栏）；canCloseContents 开启多标签关闭按钮（cc-gui 同款） -->
         <toolWindow id="ZCode"
@@ -35,16 +38,16 @@
         <action id="ZCode.SendFileToInput"
                 class="com.zcode.ideaplugin.action.SendFileToInputAction"
                 icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
-                text="发送到 ZC GUI 输入框"
-                description="把选中的文件引用发送到 ZC GUI 输入框">
+                text="%action.sendFileToInput.text%"
+                description="%action.sendFileToInput.description%">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
             <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
         </action>
         <action id="ZCode.SendSelectionToInput"
                 class="com.zcode.ideaplugin.action.SendSelectionToInputAction"
                 icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
-                text="发送选中代码到 ZC GUI 输入框"
-                description="把选中代码的行号引用发送到 ZC GUI 输入框">
+                text="%action.sendSelectionToInput.text%"
+                description="%action.sendSelectionToInput.description%">
             <add-to-group group-id="EditorPopupMenu" anchor="first"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt K"/>
         </action>
@@ -52,8 +55,8 @@
         <action id="ZCode.CopySelectionReference"
                 class="com.zcode.ideaplugin.action.CopySelectionReferenceAction"
                 icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
-                text="复制AI引用"
-                description="把选中代码的文件路径和行号引用复制到剪贴板">
+                text="%action.copySelectionReference.text%"
+                description="%action.copySelectionReference.description%">
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendSelectionToInput"/>
         </action>
     </actions>

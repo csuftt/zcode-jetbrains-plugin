@@ -1,0 +1,19 @@
+{
+  "relativeTime": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}}分钟前",
+    "hoursAgo": "{{count}}小时前",
+    "daysAgo": "{{count}}天前",
+    "monthsAgo": "{{count}}个月前",
+    "yearsAgo": "{{count}}年前"
+  },
+  "confirm": {
+    "ok": "确定",
+    "cancel": "取消"
+  },
+  "waiting": {
+    "generating": "正在生成响应",
+    "generatingWithModel": "{{model}} 正在生成响应",
+    "elapsed": "（已 {{time}}）"
+  }
+}

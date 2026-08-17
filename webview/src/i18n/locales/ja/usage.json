@@ -1,0 +1,53 @@
+{
+  "quota": {
+    "title": "利用枠",
+    "titleWithPlan": "利用枠（{{level}} プラン）",
+    "lastRefresh": "最終更新 {{time}}",
+    "refresh": "利用枠を更新",
+    "loading": "読み込み中…",
+    "empty": "利用枠データなし",
+    "resetAt": "リセット {{time}}"
+  },
+  "detail": "利用明細",
+  "range": {
+    "today": "当日",
+    "last7": "過去 7 日間",
+    "last30": "過去 30 日間"
+  },
+  "model": {
+    "title": "モデル使用量",
+    "totalCalls": "合計 {{count}} 回",
+    "totalTokens": "合計 {{value}} Token",
+    "colName": "モデル",
+    "colTokens": "Token 使用量"
+  },
+  "tool": {
+    "title": "ツール使用量",
+    "totalCalls": "合計 {{count}} 回",
+    "colName": "ツール",
+    "colCount": "呼び出し回数"
+  },
+  "chart": {
+    "empty": "データなし"
+  },
+  "context": {
+    "titleUsage": "コンテキスト使用量",
+    "used": "使用量",
+    "waitingData": "セッションデータを待機中…",
+    "titleBreakdown": "コンテキスト内訳",
+    "noBreakdown": "内訳データなし（対話後に表示されます）",
+    "hitRate": "平均キャッシュヒット率",
+    "glmQuota": "GLM 利用枠",
+    "glmQuotaWithLevel": "GLM 利用枠（{{level}}）",
+    "quotaLoading": "利用枠を読み込み中…",
+    "noQuota": "利用枠データなし",
+    "categories": {
+      "messages": "メッセージ",
+      "systemTools": "システムツール",
+      "skills": "スキル",
+      "systemPrompt": "システムプロンプト",
+      "mcpTools": "MCP ツール",
+      "other": "その他"
+    }
+  }
+}

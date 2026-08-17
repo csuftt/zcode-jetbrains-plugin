@@ -7,6 +7,7 @@
  */
 
 import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
 import '../styles/skill-ref.less'
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
 }
 
 function SkillRefInner({ name, description, onRemove }: Props) {
+  const { t } = useTranslation()
   const tooltip = description ? `/${name} — ${description}` : `/${name}`
   return (
     <span className="skill-ref" data-tip={tooltip}>
@@ -24,7 +26,7 @@ function SkillRefInner({ name, description, onRemove }: Props) {
       <button
         className="skill-ref__remove"
         onClick={onRemove}
-        title="移除技能"
+        title={t('skills.removeSkill')}
         type="button"
       >
         ✕

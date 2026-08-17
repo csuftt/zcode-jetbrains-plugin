@@ -1,0 +1,27 @@
+{
+  "item": {
+    "modifiedAt": "修改于 {{time}}",
+    "notCreated": "未创建",
+    "open": "打开",
+    "openTitle": "在编辑器中打开",
+    "creating": "创建中…",
+    "create": "创建",
+    "createTitle": "创建默认模板并在编辑器中打开"
+  },
+  "global": {
+    "title": "全局记忆",
+    "hint": "所有项目的 ZCode 会话自动读取"
+  },
+  "refresh": "刷新",
+  "loading": "加载中…",
+  "project": {
+    "title": "项目记忆",
+    "hint": "仅当前项目的 ZCode 会话自动读取",
+    "empty": "未检测到打开的项目"
+  },
+  "auto": {
+    "title": "ZCode 自动记忆",
+    "hint": "从已完成对话中自动提炼，后续会话自动带入（ZCode 客户端 设置 → 常规 开启）",
+    "empty": "暂无自动记忆——在 ZCode 客户端开启 Memory 功能并完成几轮对话后，提炼的事实会出现在这里"
+  }
+}

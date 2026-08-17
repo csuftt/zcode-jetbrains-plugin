@@ -1,0 +1,94 @@
+{
+  "title": "Settings",
+  "backToChat": "Back to chat",
+  "tabs": {
+    "basic": "Basics",
+    "usage": "Usage",
+    "memory": "Memory",
+    "skills": "Skills",
+    "mcp": "MCP",
+    "other": "Other"
+  },
+  "theme": {
+    "label": "UI Theme",
+    "followIde": "Follow IDE",
+    "light": "Light",
+    "dark": "Dark",
+    "hint": "When following the IDE, the theme switches with the IDE light/dark theme automatically"
+  },
+  "font": {
+    "label": "Font Size",
+    "option": "Font {{percent}}%",
+    "defaultOption": "Font {{percent}}% (default)",
+    "hint": "Scales the entire UI (icons and spacing included); applies to all session tabs"
+  },
+  "language": {
+    "label": "Language",
+    "hint": "Switch the UI language; applies to all session tabs"
+  },
+  "colors": {
+    "chatBg": {
+      "label": "Chat Background",
+      "hint": "Customize the background color of the chat area and input box"
+    },
+    "chatBar": {
+      "label": "Top Bar Color",
+      "hint": "Customize the top title bar color; text and border colors adapt by contrast automatically"
+    },
+    "userMsg": {
+      "label": "User Bubble Color",
+      "hint": "Customize the user message bubble background; text color adapts by contrast automatically"
+    },
+    "custom": "Custom",
+    "reset": "Reset"
+  },
+  "presets": {
+    "default": "Default",
+    "midnightBlue": "Midnight Blue",
+    "forest": "Forest",
+    "purple": "Purple",
+    "coffee": "Coffee",
+    "rose": "Rose",
+    "cyan": "Cyan",
+    "graphite": "Graphite",
+    "sky": "Sky",
+    "mint": "Mint",
+    "lavender": "Lavender",
+    "warm": "Warm",
+    "green": "Green",
+    "amber": "Amber",
+    "red": "Red",
+    "violet": "Violet",
+    "gray": "Gray"
+  },
+  "other": {
+    "title": "Other Settings",
+    "desc": "Input history completion and history management",
+    "completionLabel": "History Completion",
+    "on": "On",
+    "off": "Off",
+    "completionHint": "Matches history by prefix while typing; press Tab to accept the gray suggestion. The ↑↓ history navigation in the input box is unaffected when off",
+    "manageHistory": "Manage History",
+    "empty": "No history yet",
+    "add": "Add",
+    "clearLow": "Clear low importance ({{count}})",
+    "clearLowTooltip": "Delete all records that were used only once",
+    "clearAll": "Clear all",
+    "importanceTooltip": "Importance (usage count)",
+    "edit": "Edit",
+    "delete": "Delete",
+    "close": "Close",
+    "editorTitleAdd": "Add History Item",
+    "editorTitleEdit": "Edit History Item",
+    "content": "Content",
+    "contentPlaceholder": "Enter history content",
+    "importance": "Importance",
+    "importanceHint": "Importance = usage count; the higher, the more often used; increases by 1 automatically on each send",
+    "cancel": "Cancel",
+    "save": "Save",
+    "confirmClearAllTitle": "Clear all history",
+    "confirmClearLowTitle": "Clear low-importance records",
+    "confirmClearAllMsg": "This will delete all {{count}} history records. This cannot be undone.",
+    "confirmClearLowMsg": "This will delete {{count}} records that were used only once. This cannot be undone."
+  }
+}

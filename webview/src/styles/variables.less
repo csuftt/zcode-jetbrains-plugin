@@ -77,6 +77,22 @@
   --code-inline-bg: rgba(110, 118, 129, 0.4);
   --code-inline-text: #f0883e;
 
+  /* 下拉弹层（input-box selector-dropdown；曾长期未定义走到硬编码深色 fallback，
+   * 亮色主题下不跟随——补齐双主题定义，暗色值=原 fallback 保持观感不变）*/
+  --dropdown-bg: #252526;
+  --dropdown-border: #454545;
+  --dropdown-hover: #2a2d2e;
+  --dropdown-selected: #094771;
+
+  /* 会话内搜索高亮（曾未定义且无 fallback → 高亮不显示的隐性 bug）*/
+  --color-search-block-border: #f5b942;
+  --color-search-match-bg: rgba(234, 179, 8, 0.28);
+  --color-search-match-current-bg: rgba(245, 158, 11, 0.55);
+  --color-search-match-current-border: #f59e0b;
+
+  /* 消息/会话条目分隔线（暗色=原 fallback 白色低透明）*/
+  --color-message-divider: rgba(255, 255, 255, 0.04);
+
   /* 滚动条 */
   --scrollbar-thumb: #3a3a3a;
   --scrollbar-thumb-hover: #4a4a4a;
@@ -183,6 +199,21 @@
   --color-code-block-border: #d0d0d0;
   --code-inline-bg: rgba(175, 184, 193, 0.2);
   --code-inline-text: #d6336c;
+
+  /* 下拉弹层（亮色值对齐 VSCode Light 风格）*/
+  --dropdown-bg: #ffffff;
+  --dropdown-border: #cecece;
+  --dropdown-hover: #eaeaea;
+  --dropdown-selected: #d6e7fb;
+
+  /* 会话内搜索高亮（黄系双主题可读，当前项加深）*/
+  --color-search-block-border: #c48a10;
+  --color-search-match-bg: rgba(234, 179, 8, 0.32);
+  --color-search-match-current-bg: rgba(217, 119, 6, 0.5);
+  --color-search-match-current-border: #d97706;
+
+  /* 消息/会话条目分隔线（亮色改黑色低透明，白底可见）*/
+  --color-message-divider: rgba(0, 0, 0, 0.06);
 
   /* 滚动条 */
   --scrollbar-thumb: #c1c1c1;

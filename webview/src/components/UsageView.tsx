@@ -12,6 +12,7 @@
  */
 
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import type { UsageRange } from '@/types/messages'
 import { fmtBig, fmtTime } from '@/utils/format'
@@ -56,6 +57,7 @@ function UsageTable({ headers, rows }: { headers: string[]; rows: string[][] }) 
 }
 
 export function UsageView() {
+  const { t } = useTranslation()
   const quota = useStore((s) => s.quota)
   const quotaLoading = useStore((s) => s.quotaLoading)
   const quotaFetchedAt = useStore((s) => s.quotaFetchedAt)
@@ -111,9 +113,9 @@ export function UsageView() {
   const toolTotalCalls = toolSummary.reduce((s, t) => s + (t.totalUsageCount ?? 0), 0)
 
   const rangeTabs: { key: UsageRange; label: string }[] = [
-    { key: 'today', label: '当日' },
-    { key: '7d', label: '近 7 天' },
-    { key: '30d', label: '近 30 天' },
+    { key: 'today', label: t('usage.range.today') },
+    { key: '7d', label: t('usage.range.last7') },
+    { key: '30d', label: t('usage.range.last30') },
   ]
 
   return (
@@ -122,31 +124,31 @@ export function UsageView() {
       <section className="usage-view__section">
         <div className="usage-view__section-head">
           <h3 className="usage-view__section-title">
-            额度{quota?.level ? `（${quota.level} 套餐）` : ''}
+            {quota?.level ? t('usage.quota.titleWithPlan', { level: quota.level }) : t('usage.quota.title')}
           </h3>
           {quotaFetchedAt > 0 && (
-            <span className="usage-view__refresh-time">上次刷新 {fmtTime(quotaFetchedAt)}</span>
+            <span className="usage-view__refresh-time">{t('usage.quota.lastRefresh', { time: fmtTime(quotaFetchedAt) })}</span>
           )}
           <button
             className="usage-view__icon-btn"
             onClick={() => loadQuota()}
             disabled={quotaLoading}
-            title="刷新额度"
+            title={t('usage.quota.refresh')}
           >
             <span className={cx('codicon codicon-refresh', quotaLoading && 'spin')} />
           </button>
         </div>
         {quotaLoading && !quota ? (
-          <div className="usage-view__loading">加载中…</div>
+          <div className="usage-view__loading">{t('usage.quota.loading')}</div>
         ) : quota?.limits?.length ? (
           <QuotaCards limits={quota.limits} />
         ) : (
-          <div className="usage-view__empty">{usageError || '暂无额度数据'}</div>
+          <div className="usage-view__empty">{usageError || t('usage.quota.empty')}</div>
         )}
       </section>
 
       {/* 用量明细分隔 */}
-      <h3 className="usage-view__divider">用量明细</h3>
+      <h3 className="usage-view__divider">{t('usage.detail')}</h3>
 
       {/* 时间范围工具条 */}
       <div className="usage-view__range-bar">
@@ -187,10 +189,10 @@ export function UsageView() {
       {/* 模型用量 */}
       <section className="usage-view__chart-section">
         <div className="usage-view__chart-head">
-          <span className="usage-view__chart-title">模型用量</span>
+          <span className="usage-view__chart-title">{t('usage.model.title')}</span>
           <span className="usage-view__chart-summary">
-            {modelTotalCalls != null ? `总调用 ${modelTotalCalls}` : ''}
-            {modelTotalTokens != null ? ` · 总 Token ${fmtBig(modelTotalTokens)}` : ''}
+            {modelTotalCalls != null ? t('usage.model.totalCalls', { count: modelTotalCalls }) : ''}
+            {modelTotalTokens != null ? ` · ${t('usage.model.totalTokens', { value: fmtBig(modelTotalTokens) })}` : ''}
           </span>
         </div>
         {modelUsage ? (
@@ -201,21 +203,21 @@ export function UsageView() {
               granularity={modelUsage.granularity}
             />
             <UsageTable
-              headers={['模型', 'Token 用量']}
+              headers={[t('usage.model.colName'), t('usage.model.colTokens')]}
               rows={modelSummary.map((m) => [m.modelName ?? '-', fmtBig(m.totalTokens)])}
             />
           </>
         ) : (
-          <div className="usage-view__loading">加载中…</div>
+          <div className="usage-view__loading">{t('usage.quota.loading')}</div>
         )}
       </section>
 
       {/* 工具用量 */}
       <section className="usage-view__chart-section">
         <div className="usage-view__chart-head">
-          <span className="usage-view__chart-title">工具用量</span>
+          <span className="usage-view__chart-title">{t('usage.tool.title')}</span>
           <span className="usage-view__chart-summary">
-            {toolTotalCalls ? `总调用 ${toolTotalCalls}` : ''}
+            {toolTotalCalls ? t('usage.tool.totalCalls', { count: toolTotalCalls }) : ''}
           </span>
         </div>
         {toolUsage ? (
@@ -226,7 +228,7 @@ export function UsageView() {
               granularity={toolUsage.granularity}
             />
             <UsageTable
-              headers={['工具', '调用次数']}
+              headers={[t('usage.tool.colName'), t('usage.tool.colCount')]}
               rows={toolSummary.map((t) => [
                 t.toolName ?? t.toolNameI18n ?? t.toolCode ?? '-',
                 String(t.totalUsageCount ?? 0),
@@ -234,7 +236,7 @@ export function UsageView() {
             />
           </>
         ) : (
-          <div className="usage-view__loading">加载中…</div>
+          <div className="usage-view__loading">{t('usage.quota.loading')}</div>
         )}
       </section>
     </div>

@@ -9,6 +9,7 @@
  * 不展示「已用/总量」。与「工具用量」不同——后者有调用次数。
  */
 
+import { useTranslation } from 'react-i18next'
 import type { QuotaLimit } from '@/types/messages'
 import { limitTitle, fmtResetTime } from '@/utils/format'
 import '../styles/quota-view.less'
@@ -18,8 +19,9 @@ interface Props {
 }
 
 export function QuotaCards({ limits }: Props) {
+  const { t } = useTranslation()
   if (limits.length === 0) {
-    return <div className="quota-view__empty">暂无额度数据</div>
+    return <div className="quota-view__empty">{t('usage.quota.empty')}</div>
   }
   return (
     <div className="quota-view__cards">
@@ -36,7 +38,7 @@ export function QuotaCards({ limits }: Props) {
             </div>
             {limit.nextResetTime ? (
               <div className="quota-card__foot">
-                <span className="quota-card__reset">重置 {fmtResetTime(limit.nextResetTime)}</span>
+                <span className="quota-card__reset">{t('usage.quota.resetAt', { time: fmtResetTime(limit.nextResetTime) })}</span>
               </div>
             ) : null}
           </div>

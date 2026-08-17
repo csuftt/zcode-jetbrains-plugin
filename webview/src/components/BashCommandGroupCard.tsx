@@ -10,6 +10,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type { ToolPart } from '@/types/messages'
 import '../styles/tool-call-card.less'
 
@@ -54,13 +56,14 @@ function truncateCommand(command: string): string {
 }
 
 /** 单行摘要：description 优先，无则截断命令；流式早期两者皆无时回退原始片段 */
-function itemSummary(item: BashItem): string {
+function itemSummary(item: BashItem, t: TFunction): string {
   if (item.description.trim()) return item.description.trim()
   if (item.command.trim()) return truncateCommand(item.command)
-  return item.rawInput ? truncateCommand(item.rawInput) : '(等待输入…)'
+  return item.rawInput ? truncateCommand(item.rawInput) : t('tool.bash.waitingInput')
 }
 
 export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
+  const { t } = useTranslation()
   // 组卡片默认展开（cc-gui 行为：批量任务进行中需要看到进度）
   const [expanded, setExpanded] = useState(true)
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
@@ -96,18 +99,18 @@ export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
         <span className="tool-card__icon bash-group__icon">
           <span className="codicon codicon-terminal" />
         </span>
-        <span className="bash-group__title">批量运行命令 ({totalCount})</span>
+        <span className="bash-group__title">{t('tool.bash.groupTitle', { count: totalCount })}</span>
         <span className="bash-group__spacer" />
         {errorCount > 0 ? (
           <span className="bash-group__progress bash-group__progress--error">
-            <span className="codicon codicon-warning" /> {errorCount} 个失败
+            <span className="codicon codicon-warning" /> {t('tool.bash.failedCount', { count: errorCount })}
           </span>
         ) : doneCount === totalCount ? (
           <span className="bash-group__progress bash-group__progress--ok">
-            <span className="codicon codicon-check" /> 全部完成
+            <span className="codicon codicon-check" /> {t('tool.bash.allDone')}
           </span>
         ) : (
-          <span className="bash-group__progress">{doneCount}/{totalCount} 已完成</span>
+          <span className="bash-group__progress">{t('tool.bash.progress', { done: doneCount, total: totalCount })}</span>
         )}
         <span className="tool-card__toggle">{expanded ? '▼' : '▶'}</span>
       </div>
@@ -141,7 +144,7 @@ export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
                       className={`bash-group__desc${item.description.trim() || !item.command.trim() ? '' : ' bash-group__desc--cmd'}`}
                       title={item.description.trim() || item.command}
                     >
-                      {itemSummary(item)}
+                      {itemSummary(item, t)}
                     </span>
                     {/* 行尾状态角标（与节点色一致的文字态）*/}
                     <span className={`bash-group__status bash-group__status--${nodeCls}`}>
@@ -151,7 +154,7 @@ export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
                   {isItemExpanded && (
                     <div className="bash-group__detail">
                       <div className="bash-group__cmd">
-                        {item.command || item.rawInput || '(未解析)'}
+                        {item.command || item.rawInput || t('tool.bash.unparsed')}
                       </div>
                       {(item.output || item.errorMessage) && (
                         <pre className={`tool-card__code bash-group__out${item.status === 'error' ? ' bash-group__out--err' : ''}`}>

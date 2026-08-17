@@ -1,0 +1,27 @@
+{
+  "item": {
+    "modifiedAt": "修改於 {{time}}",
+    "notCreated": "未建立",
+    "open": "開啟",
+    "openTitle": "在編輯器中開啟",
+    "creating": "建立中…",
+    "create": "建立",
+    "createTitle": "建立預設模板並在編輯器中開啟"
+  },
+  "global": {
+    "title": "全域性記憶",
+    "hint": "所有專案的 ZCode 會話自動讀取"
+  },
+  "refresh": "重新整理",
+  "loading": "載入中…",
+  "project": {
+    "title": "專案記憶",
+    "hint": "僅當前專案的 ZCode 會話自動讀取",
+    "empty": "未檢測到開啟的專案"
+  },
+  "auto": {
+    "title": "ZCode 自動記憶",
+    "hint": "從已完成對話中自動提煉，後續會話自動帶入（ZCode 客戶端 設定 → 常規 開啟）",
+    "empty": "暫無自動記憶——在 ZCode 客戶端開啟 Memory 功能並完成幾輪對話後，提煉的事實會出現在這裡"
+  }
+}

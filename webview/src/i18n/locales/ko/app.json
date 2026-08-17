@@ -1,0 +1,41 @@
+{
+  "errorClose": "닫기",
+  "errorCloseAria": "오류 닫기",
+  "newSession": {
+    "title": "새 세션",
+    "message": "새 빈 세션이 시작됩니다(첫 메시지를 보낼 때 생성됨). 현재 세션은 기록에 보관되며 언제든 다시 전환할 수 있습니다. 새 세션을 시작할까요?",
+    "confirm": "새로 만들기"
+  },
+  "askUser": {
+    "cancel": "취소",
+    "confirm": "확인"
+  },
+  "planApproval": {
+    "title": "계획 승인",
+    "hint": "승인하면 계획 모드를 종료하고 실행을 시작합니다",
+    "emptyPlan": "_（계획 내용이 비어 있음）_",
+    "tip": "오버레이 또는 \"계획 계속\"을 클릭하면 거절하고 계획 모드에 머뭅니다",
+    "continuePlanning": "계획 계속",
+    "approveAndRun": "승인 후 실행"
+  },
+  "notification": {
+    "subagent": "서브에이전트",
+    "bashTask": "백그라운드 명령",
+    "backgroundTask": "백그라운드 작업",
+    "completed": "✓ 완료",
+    "failed": "✗ 실패",
+    "notice": "알림"
+  },
+  "status": {
+    "todoTab": "작업",
+    "agentTab": "서브에이전트",
+    "fileTab": "파일",
+    "noTodos": "작업 없음",
+    "noAgents": "하위 작업 없음",
+    "noFiles": "파일 변경 없음",
+    "viewSubagentDetail": "클릭하여 서브에이전트 실행 과정 보기",
+    "openInEditor": "에디터에서 열기: {{path}}",
+    "viewDiff": "편집 전후 비교 보기",
+    "diffTitle": "편집 비교: {{name}}"
+  }
+}

@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import '../styles/header.less'
 
 /** 返回箭头（cc-gui Icons.tsx BackIcon 简化版）*/
@@ -56,6 +57,7 @@ export function ChatHeader({
   onSettings,
   onTitleChange,
 }: Props) {
+  const { t } = useTranslation()
   // settings 视图不渲染（SettingsView 自带关闭入口）
   if (currentView === 'settings') return null
 
@@ -63,8 +65,8 @@ export function ChatHeader({
     <div className="header">
       <div className="header-left">
         {currentView === 'history' ? (
-          <button className="back-button" onClick={onBack} data-tooltip="返回">
-            <BackIcon /> 返回
+          <button className="back-button" onClick={onBack} data-tooltip={t('chat.header.back')}>
+            <BackIcon /> {t('chat.header.back')}
           </button>
         ) : (
           <SessionTitle title={sessionTitle} onTitleChange={onTitleChange} />
@@ -77,23 +79,23 @@ export function ChatHeader({
               className="icon-button"
               onClick={onNewSession}
               disabled={newSessionDisabled}
-              data-tooltip={newSessionDisabled ? '当前会话为空，无需新建' : '新会话'}
+              data-tooltip={newSessionDisabled ? t('chat.header.newSessionDisabled') : t('chat.header.newSession')}
             >
               <span className="codicon codicon-plus" />
             </button>
-            <button className="icon-button" onClick={onNewTab} data-tooltip="新标签页">
+            <button className="icon-button" onClick={onNewTab} data-tooltip={t('chat.header.newTab')}>
               <span className="codicon codicon-split-horizontal" />
             </button>
-            <button className="icon-button" onClick={onOpenBrowser} data-tooltip="浏览器（展开/收起）">
+            <button className="icon-button" onClick={onOpenBrowser} data-tooltip={t('chat.header.browser')}>
               <span className="codicon codicon-browser" />
             </button>
-            <button className="icon-button" onClick={onSearch} data-tooltip="搜索会话">
+            <button className="icon-button" onClick={onSearch} data-tooltip={t('chat.header.searchSession')}>
               <span className="codicon codicon-search" />
             </button>
-            <button className="icon-button" onClick={onHistory} data-tooltip="历史记录">
+            <button className="icon-button" onClick={onHistory} data-tooltip={t('chat.header.history')}>
               <span className="codicon codicon-history" />
             </button>
-            <button className="icon-button" onClick={onSettings} data-tooltip="设置">
+            <button className="icon-button" onClick={onSettings} data-tooltip={t('chat.header.settings')}>
               <span className="codicon codicon-settings-gear" />
             </button>
           </>
@@ -111,6 +113,7 @@ function SessionTitle({
   title: string
   onTitleChange: (t: string) => void
 }) {
+  const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -164,12 +167,12 @@ function SessionTitle({
           onBlur={handleBlur}
           maxLength={50}
           spellCheck={false}
-          aria-label="会话标题"
+          aria-label={t('chat.header.sessionTitleAria')}
         />
-        <button className="session-title-save-btn" onClick={commitEdit} aria-label="保存标题">
+        <button className="session-title-save-btn" onClick={commitEdit} aria-label={t('chat.header.saveTitleAria')}>
           <span className="codicon codicon-check" />
         </button>
-        <button className="session-title-cancel-btn" onClick={cancelEdit} aria-label="取消编辑">
+        <button className="session-title-cancel-btn" onClick={cancelEdit} aria-label={t('chat.header.cancelEditAria')}>
           <span className="codicon codicon-close" />
         </button>
       </div>
@@ -179,9 +182,9 @@ function SessionTitle({
   return (
     <div className="session-title-wrapper">
       <div className="session-title" title={title}>
-        {title || '新会话'}
+        {title || t('chat.header.untitled')}
       </div>
-      <button className="session-title-edit-btn" onClick={startEditing} aria-label="编辑会话标题">
+      <button className="session-title-edit-btn" onClick={startEditing} aria-label={t('chat.header.editTitleAria')}>
         <span className="codicon codicon-edit" />
       </button>
     </div>

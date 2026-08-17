@@ -9,6 +9,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.zcode.ideaplugin.ZCodeBundle.message
 import java.awt.datatransfer.StringSelection
 
 /**
@@ -38,7 +39,7 @@ class CopySelectionReferenceAction : AnAction() {
         val file = FileDocumentManager.getInstance().getFile(editor.document)
             ?: e.getData(CommonDataKeys.VIRTUAL_FILE)
         if (file == null) {
-            notify(project, "未找到当前编辑文件，复制失败", NotificationType.WARNING)
+            notify(project, message("action.copySelectionReference.notify.noFile"), NotificationType.WARNING)
             return
         }
 
@@ -47,13 +48,13 @@ class CopySelectionReferenceAction : AnAction() {
             selectionModel.selectionStart, selectionModel.selectionEnd
         )
         CopyPasteManager.getInstance().setContents(StringSelection(reference))
-        notify(project, "已复制：$reference", NotificationType.INFORMATION)
+        notify(project, message("action.copySelectionReference.notify.copied", reference), NotificationType.INFORMATION)
     }
 
-    private fun notify(project: Project, message: String, type: NotificationType) {
+    private fun notify(project: Project, messageText: String, type: NotificationType) {
         NotificationGroupManager.getInstance()
             .getNotificationGroup("ZCode")
-            .createNotification("复制AI引用", message, type)
+            .createNotification(message("action.copySelectionReference.text"), messageText, type)
             .notify(project)
     }
 }

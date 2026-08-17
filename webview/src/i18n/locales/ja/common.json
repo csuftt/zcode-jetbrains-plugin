@@ -1,0 +1,19 @@
+{
+  "relativeTime": {
+    "justNow": "たった今",
+    "minutesAgo": "{{count}}分前",
+    "hoursAgo": "{{count}}時間前",
+    "daysAgo": "{{count}}日前",
+    "monthsAgo": "{{count}}か月前",
+    "yearsAgo": "{{count}}年前"
+  },
+  "confirm": {
+    "ok": "OK",
+    "cancel": "キャンセル"
+  },
+  "waiting": {
+    "generating": "応答を生成中",
+    "generatingWithModel": "{{model}} が応答を生成中",
+    "elapsed": "（経過 {{time}}）"
+  }
+}

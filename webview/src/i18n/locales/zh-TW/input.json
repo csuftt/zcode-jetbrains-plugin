@@ -1,0 +1,62 @@
+{
+  "placeholder": "@引用檔案，/ 呼叫技能，Enter 傳送",
+  "placeholderStreaming": "回覆生成中，Enter 加入傳送佇列…",
+  "resizeHandle": "拖拽調整高度",
+  "attach": "新增附件（選擇檔案）",
+  "send": "傳送 (Enter)",
+  "stop": "停止生成",
+  "model": {
+    "selectModel": "請選擇模型"
+  },
+  "mode": {
+    "title": "許可權模式",
+    "build": {
+      "label": "變更前詢問",
+      "title": "Ask before changes — 每次檔案變更前詢問"
+    },
+    "edit": {
+      "label": "自動編輯",
+      "title": "Edit automatically — 自動編輯選中/相關檔案"
+    },
+    "plan": {
+      "label": "計劃模式",
+      "title": "Plan mode — 只讀檢查程式碼、先出計劃再編輯"
+    },
+    "yolo": {
+      "label": "完全控制",
+      "title": "Full access — 更少確認、直接編輯並執行命令"
+    }
+  },
+  "thought": {
+    "title": "思考級別",
+    "titleWithDefault": "思考級別：{{level}}（模型預設）",
+    "default": "預設",
+    "off": "不思考",
+    "disabled": "不思考",
+    "nothink": "不思考",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "max": "最高",
+    "enabled": "思考"
+  },
+  "queue": {
+    "pendingTitle": "第 {{index}} 條待發送",
+    "sendNow": "立即傳送（中斷當前回覆）",
+    "sendNowShort": "立即",
+    "edit": "編輯（回到輸入框）",
+    "remove": "移出佇列"
+  },
+  "pasted": {
+    "clickToPreview": "點選預覽完整內容",
+    "label": "貼上文本 · {{count}} 字",
+    "remove": "移除貼上內容",
+    "previewAriaLabel": "貼上內容預覽",
+    "previewTitle": "貼上內容 · {{count}} 字",
+    "close": "關閉"
+  },
+  "fileRef": {
+    "lines": "（第 {{lines}} 行）",
+    "remove": "移除引用"
+  }
+}

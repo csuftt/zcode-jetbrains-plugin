@@ -1,0 +1,15 @@
+{
+  "subagentTask": "Subagent task",
+  "backgroundTask": "Background task",
+  "subagentTitle": "Subagent · {{type}}",
+  "secondsShort": "{{count}}s",
+  "minutesSeconds": "{{m}}m {{s}}s",
+  "format": {
+    "mcpMonthlyLimit": "MCP Monthly Quota",
+    "cycleLimit": "Cycle Quota",
+    "per5HoursLimit": "Every 5 Hours Quota",
+    "weeklyLimit": "Weekly Quota",
+    "usageLimit": "Usage Quota",
+    "timesUnit": "times"
+  }
+}

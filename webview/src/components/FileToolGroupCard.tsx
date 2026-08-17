@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ToolPart } from '@/types/messages'
 import { sendToJava } from '@/ipc/bridge'
 import { FileIcon } from './FileIcon'
@@ -20,11 +21,11 @@ type FileGroupKind = 'read' | 'edit' | 'search'
 const MAX_VISIBLE_ITEMS = 3
 const ITEM_HEIGHT = 28
 
-/** 头部配置：图标 + 标题 */
-const GROUP_META: Record<FileGroupKind, { icon: string; title: string }> = {
-  read: { icon: 'codicon-file-code', title: '批量读取文件' },
-  edit: { icon: 'codicon-edit', title: '批量编辑文件' },
-  search: { icon: 'codicon-search', title: '批量搜索' },
+/** 头部配置：图标 + 标题文案 key（标题经 i18n）*/
+const GROUP_META: Record<FileGroupKind, { icon: string; titleKey: string }> = {
+  read: { icon: 'codicon-file-code', titleKey: 'tool.fileGroup.read' },
+  edit: { icon: 'codicon-edit', titleKey: 'tool.fileGroup.edit' },
+  search: { icon: 'codicon-search', titleKey: 'tool.fileGroup.search' },
 }
 
 interface FileItem {
@@ -95,6 +96,7 @@ function statusChar(status: ToolPart['state']['status']): { text: string; cls: s
 }
 
 export function FileToolGroupCard({ kind, parts }: { kind: FileGroupKind; parts: ToolPart[] }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(true)
   const listRef = useRef<HTMLDivElement>(null)
   const prevCountRef = useRef(0)
@@ -136,7 +138,7 @@ export function FileToolGroupCard({ kind, parts }: { kind: FileGroupKind; parts:
       filePath: item.filePath,
       oldContent: item.oldContent,
       newContent: item.newContent,
-      title: `编辑文件：${item.fileName}`,
+      title: t('tool.editFileTitle', { name: item.fileName }),
     })
   }
   const handleRefreshFile = (filePath: string) => (e: React.MouseEvent) => {
@@ -153,7 +155,7 @@ export function FileToolGroupCard({ kind, parts }: { kind: FileGroupKind; parts:
         <span className="tool-card__icon bash-group__icon">
           <span className={`codicon ${meta.icon}`} />
         </span>
-        <span className="bash-group__title">{meta.title} ({count})</span>
+        <span className="bash-group__title">{t(meta.titleKey)} ({count})</span>
         {kind === 'edit' && (totalAdditions > 0 || totalDeletions > 0) && (
           <span className="file-group__stats">
             {totalAdditions > 0 && <span className="file-group__add">+{totalAdditions}</span>}
@@ -192,12 +194,12 @@ export function FileToolGroupCard({ kind, parts }: { kind: FileGroupKind; parts:
                     </span>
                   )}
                   {item.isEditTool && item.oldContent && item.newContent && (
-                    <button className="tool-card__action" onClick={handleShowDiff(item)} title="查看 Diff" aria-label="diff">
+                    <button className="tool-card__action" onClick={handleShowDiff(item)} title={t('tool.viewDiff')} aria-label={t('tool.viewDiff')}>
                       <span className="codicon codicon-diff" />
                     </button>
                   )}
                   {item.filePath && (
-                    <button className="tool-card__action" onClick={handleRefreshFile(item.filePath)} title="在编辑器中刷新" aria-label="刷新">
+                    <button className="tool-card__action" onClick={handleRefreshFile(item.filePath)} title={t('tool.refreshInEditor')} aria-label={t('tool.refreshInEditor')}>
                       <span className="codicon codicon-refresh" />
                     </button>
                   )}

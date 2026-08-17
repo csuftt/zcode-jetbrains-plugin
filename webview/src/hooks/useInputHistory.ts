@@ -3,22 +3,40 @@
  *
  * 行为（对齐 cc-gui）：
  * - 输入框为空时 ArrowUp 开始回溯历史（从最新一条开始）
- * - 导航中 ArrowUp 向更早移动（到头停住），ArrowDown 向更新移动
+ * - 导航中 ArrowUp 向更早移动（到头停住），ArrowDown 向最新移动
  * - ArrowDown 越过最新一条时恢复导航开始前的草稿（空输入触发时即清空）
  * - 导航中按任意其他键退出导航态（再次 ArrowUp 从最新重新开始）
  * - Ctrl/Meta/Alt 修饰或 IME 合成中不触发
  *
  * 与 cc-gui 的差异（简化）：
- * - 只记录完整发送文本，不做 fragment 拆分/使用计数/重要性清理
+ * - 只记录完整发送文本，不做 fragment 拆分；重要度=整条使用计数
  * - 历史经 persist 通道持久化（IDE PropertiesComponent 权威源），不同步到磁盘文件
+ *
+ * 数据模型（三条 kv，均在 persist 域，kvSave 全量回存自动携带）：
+ * - zcode-input-history：string[]（时间序，尾部最新，≤200 条）
+ * - zcode-input-history-counts：Record<文本, 使用次数>（=重要度）
+ * - zcode-input-history-timestamps：Record<文本, 最后使用 ISO 时间>
+ * - zcode-history-completion-enabled：幽灵补全开关（'false' 关闭，默认开启）
  */
 
 import { useCallback, useRef } from 'react'
-import { getPersisted, setPersisted } from '@/utils/persist'
+import { getPersisted, setPersisted, removePersisted } from '@/utils/persist'
 
 const HISTORY_STORAGE_KEY = 'zcode-input-history'
+const COUNTS_STORAGE_KEY = 'zcode-input-history-counts'
+const TIMESTAMPS_STORAGE_KEY = 'zcode-input-history-timestamps'
+const COMPLETION_ENABLED_KEY = 'zcode-history-completion-enabled'
 const MAX_HISTORY_ITEMS = 200
 const INVISIBLE_CHARS_RE = /[\u200B-\u200D\uFEFF]/g
+
+/** 设置页展示/管理用条目（cc-gui HistoryItem 同构）*/
+export interface HistoryItem {
+  text: string
+  /** 重要度（使用计数，越大越常用）*/
+  importance: number
+  /** 最后使用时间（ISO 字符串）*/
+  timestamp?: string
+}
 
 interface Options {
   /** 读输入框当前文本 */
@@ -45,6 +63,61 @@ function loadHistory(): string[] {
 /** 模块级内存历史：组件重挂载（流式重渲染/HMR）不丢 */
 let memoryHistory: string[] | null = null
 
+function loadCounts(): Record<string, number> {
+  try {
+    const raw = getPersisted(COUNTS_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'number' && Number.isFinite(v)) out[k] = v
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function loadTimestamps(): Record<string, string> {
+  try {
+    const raw = getPersisted(TIMESTAMPS_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'string') out[k] = v
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveHistory(items: string[]): void {
+  memoryHistory = items
+  try {
+    setPersisted(HISTORY_STORAGE_KEY, JSON.stringify(items))
+  } catch {
+    // 存储禁用时仅保留内存态
+  }
+}
+
+function saveCounts(counts: Record<string, number>): void {
+  try {
+    setPersisted(COUNTS_STORAGE_KEY, JSON.stringify(counts))
+  } catch {
+    /* 同上 */
+  }
+}
+
+function saveTimestamps(timestamps: Record<string, string>): void {
+  try {
+    setPersisted(TIMESTAMPS_STORAGE_KEY, JSON.stringify(timestamps))
+  } catch {
+    /* 同上 */
+  }
+}
+
 /** 幽灵补全最少输入长度（cc-gui minQueryLength 同款：输 2 字符才触发）*/
 const MIN_SUGGESTION_QUERY = 2
 
@@ -52,8 +125,10 @@ const MIN_SUGGESTION_QUERY = 2
  * 历史前缀建议查询（cc-gui useInlineHistoryCompletion.findBestMatch 简化版）：
  * 大小写不敏感前缀匹配，最近的优先（历史数组时间序、尾部最新；本插件无使用计数，
  * 不照搬 cc-gui 的按次数排序）。返回建议全文，无命中返回 null。
+ * 补全开关关闭时恒返回 null（仅停幽灵补全；ArrowUp 导航不受影响，对齐 cc-gui）。
  */
 export function findHistorySuggestion(query: string): string | null {
+  if (!isHistoryCompletionEnabled()) return null
   const clean = query.replace(INVISIBLE_CHARS_RE, '')
   if (clean.length < MIN_SUGGESTION_QUERY) return null
   const lower = clean.toLowerCase()
@@ -65,13 +140,142 @@ export function findHistorySuggestion(query: string): string | null {
   return null
 }
 
+/* ============ 补全开关 ============ */
+
+export function isHistoryCompletionEnabled(): boolean {
+  try {
+    return getPersisted(COMPLETION_ENABLED_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+
+export function setHistoryCompletionEnabled(enabled: boolean): void {
+  try {
+    setPersisted(COMPLETION_ENABLED_KEY, String(enabled))
+  } catch {
+    /* 存储不可用：本次会话内仍可读默认值 */
+  }
+}
+
+/* ============ 历史管理 API（设置页用，cc-gui inputHistoryStorage 对齐简化） ============ */
+
+/** 合并三份存储，按重要度降序（cc-gui loadHistoryWithImportance 同款排序）*/
+export function loadHistoryWithImportance(): HistoryItem[] {
+  const counts = loadCounts()
+  const timestamps = loadTimestamps()
+  const items = loadHistory().map((text) => ({
+    text,
+    importance: counts[text] || 1,
+    timestamp: timestamps[text],
+  }))
+  items.sort((a, b) => b.importance - a.importance)
+  return items
+}
+
+/** 删除单条（连带清理计数与时间戳；memoryHistory 同步，输入框导航立即感知）*/
+export function deleteHistoryItem(text: string): void {
+  const next = loadHistory().filter((item) => item !== text)
+  saveHistory(next)
+  const counts = loadCounts()
+  delete counts[text]
+  saveCounts(counts)
+  const timestamps = loadTimestamps()
+  delete timestamps[text]
+  saveTimestamps(timestamps)
+}
+
+/** 清空全部历史 */
+export function clearAllHistory(): void {
+  memoryHistory = []
+  try {
+    removePersisted(HISTORY_STORAGE_KEY)
+    removePersisted(COUNTS_STORAGE_KEY)
+    removePersisted(TIMESTAMPS_STORAGE_KEY)
+  } catch {
+    /* 存储不可用时内存态已清 */
+  }
+}
+
+/** 手动添加一条（已存在则移到尾部并覆盖重要度；时间戳取现在）*/
+export function addHistoryItem(text: string, importance: number = 1): void {
+  const clean = text.replace(INVISIBLE_CHARS_RE, '').trim()
+  if (!clean) return
+  const next = [...loadHistory().filter((item) => item !== clean), clean].slice(-MAX_HISTORY_ITEMS)
+  saveHistory(next)
+  const counts = loadCounts()
+  counts[clean] = Math.max(1, Math.floor(importance))
+  saveCounts(counts)
+  const timestamps = loadTimestamps()
+  timestamps[clean] = new Date().toISOString()
+  saveTimestamps(timestamps)
+}
+
+/** 编辑一条：改文本时迁移计数/时间戳，与既有条目撞名时计数取较大、时间取较新 */
+export function updateHistoryItem(oldText: string, newText: string, importance: number): void {
+  const clean = newText.replace(INVISIBLE_CHARS_RE, '').trim()
+  if (!clean) return
+  const items = loadHistory()
+  const index = items.indexOf(oldText)
+  if (index === -1) {
+    addHistoryItem(clean, importance)
+    return
+  }
+  const counts = loadCounts()
+  const timestamps = loadTimestamps()
+
+  if (oldText === clean) {
+    counts[clean] = Math.max(1, Math.floor(importance))
+  } else {
+    items.splice(index, 1)
+    const dupIndex = items.indexOf(clean)
+    if (dupIndex !== -1) items.splice(dupIndex, 1)
+    items.push(clean) // 编辑后视为最近使用
+    counts[clean] = Math.max(counts[clean] || 1, Math.floor(importance))
+    delete counts[oldText]
+    // 时间戳取新旧两者中较新的
+    const newer = [timestamps[oldText], timestamps[clean]].filter(Boolean).sort().pop()
+    if (newer) timestamps[clean] = newer
+    delete timestamps[oldText]
+    saveHistory(items.slice(-MAX_HISTORY_ITEMS))
+  }
+  saveCounts(counts)
+  saveTimestamps(timestamps)
+}
+
+/** 清除低重要度（importance ≤ threshold）条目，返回删除条数 */
+export function clearLowImportanceHistory(threshold: number = 1): number {
+  const counts = loadCounts()
+  const timestamps = loadTimestamps()
+  const items = loadHistory()
+  const keep: string[] = []
+  let deleted = 0
+  for (const item of items) {
+    if ((counts[item] || 1) <= threshold) {
+      delete counts[item]
+      delete timestamps[item]
+      deleted++
+    } else {
+      keep.push(item)
+    }
+  }
+  if (deleted > 0) {
+    saveHistory(keep)
+    saveCounts(counts)
+    saveTimestamps(timestamps)
+  }
+  return deleted
+}
+
+/* ============ hook ============ */
+
 export function useInputHistory({ getTextContent, setText }: Options) {
   /** 当前导航到的下标，-1 = 非导航态（导航态随组件实例，历史数据在模块级）*/
   const historyIndexRef = useRef(-1)
   /** 导航开始前的草稿（ArrowDown 越过最新一条时恢复）*/
   const draftRef = useRef('')
 
-  /** 记录一条发送文本：去零宽字符、去重、追加尾部、截断后持久化 */
+  /** 记录一条发送文本：去零宽字符、去重、追加尾部、截断后持久化（计数+1、刷新时间戳） */
   const record = useCallback((text: string) => {
     const clean = text.replace(INVISIBLE_CHARS_RE, '').trim()
     if (!clean) return
@@ -83,6 +287,12 @@ export function useInputHistory({ getTextContent, setText }: Options) {
     draftRef.current = ''
     try {
       setPersisted(HISTORY_STORAGE_KEY, JSON.stringify(next))
+      const counts = loadCounts()
+      counts[clean] = (counts[clean] || 0) + 1
+      setPersisted(COUNTS_STORAGE_KEY, JSON.stringify(counts))
+      const timestamps = loadTimestamps()
+      timestamps[clean] = new Date().toISOString()
+      setPersisted(TIMESTAMPS_STORAGE_KEY, JSON.stringify(timestamps))
     } catch {
       // 存储禁用/写满时静默降级为仅内存历史
     }

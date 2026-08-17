@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { compact, formatXLabel } from '@/utils/format'
 import '../styles/line-chart.less'
 
@@ -31,6 +32,7 @@ const PAD_T = 10
 const PAD_B = 22
 
 export function LineChart({ series, xLabels, granularity, height = 110 }: Props) {
+  const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(420)
 
@@ -64,7 +66,7 @@ export function LineChart({ series, xLabels, granularity, height = 110 }: Props)
 
   // 空数据兜底
   if (n === 0 || series.every((s) => s.values.length === 0)) {
-    return <div ref={ref} className="line-chart line-chart--empty">暂无数据</div>
+    return <div ref={ref} className="line-chart line-chart--empty">{t('usage.chart.empty')}</div>
   }
 
   // Y 网格 4 档（从顶到底）

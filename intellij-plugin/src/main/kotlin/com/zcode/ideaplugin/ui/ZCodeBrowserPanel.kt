@@ -9,6 +9,7 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.util.ui.JBUI
+import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.zCodeService
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
@@ -94,11 +95,104 @@ class ZCodeBrowserPanel(
         val createdAt: Long = System.currentTimeMillis(),
     )
 
+    /** IDE 主题变化订阅（跟随模式下刷新分栏配色；dispose 断开）*/
+    private var lafConn: com.intellij.util.messages.MessageBusConnection? = null
+
     private val log = Logger.getInstance("ZCodePlugin")
     private val jcefSupported = JBCefApp.isSupported()
     private lateinit var addressField: JTextField
     private lateinit var backBtn: JButton
     private lateinit var forwardBtn: JButton
+    private lateinit var toolbarPanel: JPanel
+
+    // ============ 主题（跟 webview 生效主题：显式偏好优先，否则 IDE 主题）============
+
+    /** 主题色组（值对齐 webview variables.less，浏览器分栏与聊天界面观感一致）*/
+    private class PanelTheme(
+        val bg: java.awt.Color,        // 工具栏/tab 条容器背景
+        val fg: java.awt.Color,        // 主文字
+        val fgMuted: java.awt.Color,   // 次文字（非激活 tab）
+        val fieldBg: java.awt.Color,   // 地址栏背景
+        val fieldFg: java.awt.Color,   // 地址栏文字
+        val tabActiveBg: java.awt.Color,
+        val tabInactiveBg: java.awt.Color,
+        val welcomeBg: String,         // 欢迎页 HTML 色
+        val welcomeFg: String,
+        val stripBg: java.awt.Color,   // 底部 tab 条背景（比工具栏深/浅一档，衬出激活卡片）
+        val tabHoverAlpha: Int,        // 非激活 tab hover 提亮的叠加色 alpha（0-255）
+        val closeHoverAlpha: Int,      // 关闭按钮 hover 底色 alpha
+    )
+
+    private fun panelTheme(): PanelTheme {
+        val dark = ZCodeAppearanceStore.effectiveTheme() == "dark"
+        return if (dark) {
+            PanelTheme(
+                bg = java.awt.Color(0x25, 0x25, 0x26), fg = java.awt.Color(0xE0, 0xE0, 0xE0),
+                fgMuted = java.awt.Color(0x85, 0x85, 0x85),
+                fieldBg = java.awt.Color(0x1E, 0x1E, 0x1E), fieldFg = java.awt.Color(0xCC, 0xCC, 0xCC),
+                tabActiveBg = java.awt.Color(0x25, 0x25, 0x26), tabInactiveBg = java.awt.Color(0x2D, 0x2D, 0x2D),
+                welcomeBg = "#1e1f22", welcomeFg = "#b6b9bd",
+                stripBg = java.awt.Color(0x1E, 0x1E, 0x1E),
+                tabHoverAlpha = 0x18, closeHoverAlpha = 0x2E,
+            )
+        } else {
+            PanelTheme(
+                bg = java.awt.Color(0xF3, 0xF3, 0xF3), fg = java.awt.Color(0x1E, 0x1E, 0x1E),
+                fgMuted = java.awt.Color(0x61, 0x61, 0x61),
+                fieldBg = java.awt.Color(0xFF, 0xFF, 0xFF), fieldFg = java.awt.Color(0x33, 0x33, 0x33),
+                tabActiveBg = java.awt.Color(0xFF, 0xFF, 0xFF), tabInactiveBg = java.awt.Color(0xE8, 0xE8, 0xE8),
+                welcomeBg = "#ffffff", welcomeFg = "#42464d",
+                stripBg = java.awt.Color(0xE8, 0xE8, 0xE8),
+                tabHoverAlpha = 0x0D, closeHoverAlpha = 0x14,
+            )
+        }
+    }
+
+    /** 当前生效主题缓存（刷新欢迎页时判断是否变了）*/
+    @Volatile
+    private var appliedTheme: String = ""
+
+    /** 把生效主题应用到分栏可见 UI（EDT）：工具栏/地址栏/tab 条/面板背景 */
+    private fun applyPanelTheme() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater { applyPanelTheme() }
+            return
+        }
+        appliedTheme = ZCodeAppearanceStore.effectiveTheme()
+        val t = panelTheme()
+        background = t.bg
+        if (::toolbarPanel.isInitialized) toolbarPanel.background = t.bg
+        if (::addressField.isInitialized) {
+            addressField.background = t.fieldBg
+            addressField.foreground = t.fieldFg
+            addressField.caretColor = t.fieldFg
+        }
+        // tab 条上的组件颜色在 buildTabButton 里按 panelTheme() 现取，这里重绘即可
+        tabStrip.background = t.stripBg
+        tabScrollPane.background = t.stripBg
+        tabScrollPane.viewport.background = t.stripBg
+        if (tabs.size > 1) rebuildTabStrip()
+        repaint()
+    }
+
+    /**
+     * webview 外观保存后的回调（ZCodeToolWindowPanel.broadcastAppearance 调用）：
+     * 重着色 + 欢迎页 tab 重载（仍在欢迎态时换新配色；已打开网页的不动）。
+     * 自由尺寸激活时重发信箱样式（信箱背景/阴影按生效主题配色）。
+     */
+    internal fun onAppearanceThemeChanged() {
+        val changed = appliedTheme != ZCodeAppearanceStore.effectiveTheme()
+        applyPanelTheme()
+        if (!changed || !jcefSupported) return
+        if (viewportState.active) applyViewportOverride()
+        val tab = activeTab ?: return
+        val cur = try { tab.browser.cefBrowser.url } catch (_: Exception) { null }
+        if (cur == null || cur.startsWith("data:") || cur == "about:blank" ||
+            cur.startsWith("file:///jbcefbrowser/")
+        ) {
+            try { tab.browser.loadHTML(buildWelcomeHtml()) } catch (_: Exception) {}
+        }
+    }
 
     // ============ 多 tab 状态（EDT 约束）============
     private val tabs = java.util.concurrent.CopyOnWriteArrayList<BrowserTab>()
@@ -106,7 +200,85 @@ class ZCodeBrowserPanel(
     private var activeTab: BrowserTab? = null
     private var tabCounter = 0
     private val cardPanel = JPanel(CardLayout())
-    private val tabStrip = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0))
+
+    /**
+     * 底部 tab 条（现代浏览器溢出习惯）：宽度不足时先等比收缩 tab 到最小宽（40px，
+     * 大致只余关闭按钮），仍放不下由外层 JScrollPane 横向滚动（滚轮，无滚动条）。
+     */
+    private inner class TabStripPanel : JPanel(null), javax.swing.Scrollable {
+        private val gap = JBUI.scale(4)
+        /** 收缩下限：再窄关闭按钮都点不中，宁可横向滚 */
+        private val minTabWidth = JBUI.scale(40)
+
+        init {
+            isOpaque = true
+            border = JBUI.Borders.empty(3, 6, 4, 4) // 上方留缝让激活卡片圆角"浮出"
+        }
+
+        /** 内容真实需求宽（未收缩），JScrollPane 据此判断可滚范围 */
+        override fun getPreferredSize(): java.awt.Dimension {
+            val ins = insets
+            var w = ins.left + ins.right
+            var h = 0
+            components.forEachIndexed { i, c ->
+                w += c.preferredSize.width + if (i > 0) gap else 0
+                h = maxOf(h, c.preferredSize.height)
+            }
+            return java.awt.Dimension(w, ins.top + ins.bottom + h)
+        }
+
+        override fun getMaximumSize(): java.awt.Dimension =
+            java.awt.Dimension(Int.MAX_VALUE, preferredSize.height)
+
+        override fun doLayout() {
+            val ins = insets
+            val count = componentCount
+            if (count == 0) return
+            val avail = width - ins.left - ins.right
+            val prefs = IntArray(count) { components[it].preferredSize.width }
+            val totalW = prefs.sum() + gap * (count - 1)
+            // 放不下 → 均匀收缩（对齐浏览器 tab 等比收缩），压到 minTabWidth 后交给滚动
+            val each = if (totalW > avail) {
+                ((avail - gap * (count - 1)) / count).coerceAtLeast(minTabWidth)
+            } else -1
+            var x = ins.left
+            for (i in 0 until count) {
+                val c = components[i]
+                val w = if (each == -1) prefs[i] else each
+                c.setBounds(x, ins.top, w, height - ins.top - ins.bottom)
+                x += w + gap
+            }
+        }
+
+        override fun getPreferredScrollableViewportSize(): java.awt.Dimension = preferredSize
+        override fun getScrollableTracksViewportWidth() = false
+        override fun getScrollableTracksViewportHeight() = true
+        override fun getScrollableBlockIncrement(
+            visibleRect: java.awt.Rectangle, orientation: Int, direction: Int,
+        ) = JBUI.scale(120)
+        override fun getScrollableUnitIncrement(
+            visibleRect: java.awt.Rectangle, orientation: Int, direction: Int,
+        ) = JBUI.scale(30)
+    }
+
+    private val tabStrip = TabStripPanel()
+
+    /** tab 条滚动容器：不显示滚动条，滚轮转横向滚动 */
+    private val tabScrollPane = javax.swing.JScrollPane(tabStrip).apply {
+        horizontalScrollBarPolicy = javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        verticalScrollBarPolicy = javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER
+        border = null
+        isOpaque = true
+        viewport.isOpaque = true
+        addMouseWheelListener { e ->
+            // 默认 wheel 只滚垂直滚动条（且 NEVER 策略下不滚），这里转横向
+            val bar = horizontalScrollBar
+            if (bar.maximum > bar.minimum) {
+                bar.value = (bar.value + e.wheelRotation * JBUI.scale(60)).coerceIn(bar.minimum, bar.maximum)
+                e.consume()
+            }
+        }
+    }
 
     /** tabId → 挂起对话框（一个 tab 同时最多一个：JS alert/confirm 本身模态）*/
     private val pendingDialogs = java.util.concurrent.ConcurrentHashMap<String, PendingDialog>()
@@ -157,12 +329,21 @@ class ZCodeBrowserPanel(
         } else {
             restoreViewportConfig()
             add(buildToolbar(), BorderLayout.NORTH)
-            tabStrip.isOpaque = true
-            tabStrip.background = JBColor.border()
-            tabStrip.border = JBUI.Borders.empty(2, 2, 0, 2)
             tabStrip.isVisible = false // 单 tab 时隐藏，保持精简外观
-            add(tabStrip, BorderLayout.SOUTH)
+            add(tabScrollPane, BorderLayout.SOUTH)
             add(cardPanel, BorderLayout.CENTER)
+            // 跟随 IDE 模式下 IDE 主题切换时刷新分栏配色（显式偏好模式 IDE 切换不生效，
+            // 由 webview 保存时的 onAppearanceThemeChanged 刷新）
+            lafConn = com.intellij.openapi.application.ApplicationManager.getApplication()
+                .messageBus.connect().also { conn ->
+                    conn.subscribe(
+                        com.intellij.ide.ui.LafManagerListener.TOPIC,
+                        com.intellij.ide.ui.LafManagerListener {
+                            if (ZCodeAppearanceStore.themePref().isEmpty()) applyPanelTheme()
+                        },
+                    )
+                }
+            applyPanelTheme()
             // 自由尺寸激活时面板 resize 重发（fit 比例与信箱居中坐标都依赖面板尺寸；去抖 200ms）
             cardPanel.addComponentListener(object : java.awt.event.ComponentAdapter() {
                 override fun componentResized(e: java.awt.event.ComponentEvent?) {
@@ -184,40 +365,39 @@ class ZCodeBrowserPanel(
     /** 顶部工具条：导航按钮 | 地址栏 | DevTools / 外部浏览器 */
     private fun buildToolbar(): JComponent {
         addressField = JTextField().apply {
-            toolTipText = "输入网址后回车打开（无协议按 http:// 补全）"
+            toolTipText = message("browser.urlField.tooltip")
             addActionListener { navigate() }
         }
 
-        backBtn = navButton(AllIcons.Actions.Back, "后退") {
+        backBtn = navButton(AllIcons.Actions.Back, message("browser.nav.back")) {
             activeTab?.browser?.cefBrowser?.goBack()
         }
-        forwardBtn = navButton(AllIcons.Actions.Forward, "前进") {
+        forwardBtn = navButton(AllIcons.Actions.Forward, message("browser.nav.forward")) {
             activeTab?.browser?.cefBrowser?.goForward()
         }
-        val reloadBtn = navButton(AllIcons.Actions.Refresh, "刷新") {
+        val reloadBtn = navButton(AllIcons.Actions.Refresh, message("browser.nav.reload")) {
             activeTab?.browser?.cefBrowser?.reload()
         }
-        val devtoolsBtn = navButton(AllIcons.Actions.Preview, "打开调试工具（DevTools）") {
+        val devtoolsBtn = navButton(AllIcons.Actions.Preview, message("browser.nav.devtools")) {
             try {
                 activeTab?.browser?.openDevtools()
             } catch (e: Exception) {
                 log.error("打开 DevTools 失败", e)
             }
         }
-        val externalBtn = navButton(AllIcons.General.Web, "在默认浏览器中打开") {
+        val externalBtn = navButton(AllIcons.General.Web, message("browser.nav.external")) {
             val url = activeTab?.browser?.cefBrowser?.url
             if (!url.isNullOrBlank() && url != "about:blank") BrowserUtil.browse(url)
         }
-        viewportBtn = JButton("自由尺寸").apply {
-            toolTipText = "自由尺寸：固定视口大小与显示缩放（对齐 ZCode 客户端）"
-            isFocusPainted = false
-            isFocusable = false
-            margin = JBUI.insets(1, 8)
-            addActionListener { showViewportMenu() }
+        viewportBtn = ThemePillButton(message("browser.nav.viewport"), message("browser.nav.viewport.tooltip")) {
+            showViewportMenu()
         }
+        val newTabBtn = ThemeIconButton(message("browser.nav.newTab"), "+") { createTab() }
 
         val toolbar = JPanel(BorderLayout())
+        toolbarPanel = toolbar
         toolbar.border = JBUI.Borders.empty(2, 4)
+        toolbar.isOpaque = true
         toolbar.add(
             Box.createHorizontalBox().apply {
                 add(backBtn)
@@ -229,6 +409,7 @@ class ZCodeBrowserPanel(
         toolbar.add(addressField, BorderLayout.CENTER)
         toolbar.add(
             Box.createHorizontalBox().apply {
+                add(newTabBtn)
                 add(viewportBtn)
                 add(devtoolsBtn)
                 add(externalBtn)
@@ -241,8 +422,63 @@ class ZCodeBrowserPanel(
         return toolbar
     }
 
+    /**
+     * 图标主题染色包装：保留原图形状，整体染成生效主题的前景色；宿主组件禁用时降透明。
+     * AllIcons 跟 IDE LaF 走——IDE 暗色 LaF 的浅灰图标叠在浅色工具栏上"像被禁用"，
+     * 工具栏图标统一经此包装，颜色与主题恒一致。
+     * HiDPI：按设备实际缩放倍数光栅化染色缓存（1x buffer 会被拉伸出马赛克毛刺），
+     * 绘制时以逻辑尺寸落位。
+     */
+    private inner class ThemedIcon(private val base: javax.swing.Icon) : javax.swing.Icon {
+        /** 染色缓存键：theme × scale%（HiDPI 各档分别光栅化）*/
+        private val cache = HashMap<Pair<String, Int>, java.awt.image.BufferedImage>()
+
+        private fun tinted(theme: String, scale: Double): java.awt.image.BufferedImage {
+            val key = theme to (scale * 100).toInt()
+            cache[key]?.let { return it }
+            val t = panelTheme()
+            val w = maxOf(1, Math.ceil(base.iconWidth * scale).toInt())
+            val h = maxOf(1, Math.ceil(base.iconHeight * scale).toInt())
+            val img = java.awt.image.BufferedImage(
+                w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB,
+            )
+            val ig = img.createGraphics()
+            // 带缩放画原图：IntelliJ 图标（SVG 体系）按变换分辨率光栅化，避免 1x 拉伸
+            ig.scale(scale, scale)
+            base.paintIcon(null, ig, 0, 0)
+            // SrcIn：把已画形状的非透明像素替换为主题前景色
+            ig.composite = java.awt.AlphaComposite.SrcIn
+            ig.color = t.fg
+            ig.fillRect(0, 0, w + 2, h + 2)
+            ig.dispose()
+            cache[key] = img
+            return img
+        }
+
+        override fun paintIcon(c: java.awt.Component?, g: java.awt.Graphics, x: Int, y: Int) {
+            val g2 = g as? java.awt.Graphics2D ?: return
+            val at = g2.deviceConfiguration.defaultTransform
+            val scale = maxOf(at.scaleX, at.scaleY).coerceAtLeast(1.0)
+            val disabled = c != null && !c.isEnabled
+            val oldComp = g2.composite
+            if (disabled) {
+                g2.composite = java.awt.AlphaComposite.getInstance(
+                    java.awt.AlphaComposite.SRC_OVER, 0.35f,
+                )
+            }
+            g2.drawImage(
+                tinted(ZCodeAppearanceStore.effectiveTheme(), scale),
+                x, y, base.iconWidth, base.iconHeight, null,
+            )
+            g2.composite = oldComp
+        }
+
+        override fun getIconWidth() = base.iconWidth
+        override fun getIconHeight() = base.iconHeight
+    }
+
     private fun navButton(icon: javax.swing.Icon, tooltip: String, action: () -> Unit): JButton =
-        JButton(icon).apply {
+        JButton(ThemedIcon(icon)).apply {
             toolTipText = tooltip
             isBorderPainted = false
             isFocusPainted = false
@@ -322,6 +558,31 @@ class ZCodeBrowserPanel(
         addressField.text = tab.url
         backBtn.isEnabled = tab.canGoBack
         forwardBtn.isEnabled = tab.canGoForward
+        scrollActiveTabVisible()
+    }
+
+    /** 激活 tab 滚入可见区（条溢出横向滚动时，新建/切换后目标 tab 不在视野外）*/
+    private fun scrollActiveTabVisible() {
+        SwingUtilities.invokeLater {
+            val comp = tabStrip.components.firstOrNull { (it as? TabCard)?.tab === activeTab }
+                as? javax.swing.JComponent ?: return@invokeLater
+            comp.scrollRectToVisible(comp.bounds)
+        }
+    }
+
+    /**
+     * 安全重挂内容卡片区：换全新 CardLayout 后整体重建（removeAll + 逐个 add + show 激活）。
+     * 不能直接 cardPanel.remove(旧组件)：CardLayout.removeLayoutComponent 会自动切下一张卡
+     * 并触发 validate，布局链摸到 dispose 过程中的 JCEF 组件（内部 Alarm 已注销）报
+     * "Already disposed" 插件错误；新 CardLayout 内部无记录，next() 无卡可切不触发布局。
+     */
+    private fun relayoutCardPanel() {
+        cardPanel.layout = CardLayout()
+        cardPanel.removeAll()
+        for (t in tabs) cardPanel.add(t.browser.component, t.id)
+        activeTab?.let { (cardPanel.layout as CardLayout).show(cardPanel, it.id) }
+        cardPanel.revalidate()
+        cardPanel.repaint()
     }
 
     /** 关闭 tab（tab 条关闭按钮）：至少保留一个；返回是否真的关闭 */
@@ -337,7 +598,8 @@ class ZCodeBrowserPanel(
         val wasActive = tab === activeTab
         tabs.remove(tab)
         pendingDialogs.remove(tabId) // 挂起对话框随 tab 销毁放弃（不回调，CEF 侧已重置）
-        cardPanel.remove(tab.browser.component)
+        if (wasActive) activeTab = null
+        relayoutCardPanel() // 被关组件随重建脱离容器，此后才 dispose
         rebuildTabStrip()
         try {
             Disposer.dispose(tab.browser)
@@ -372,8 +634,8 @@ class ZCodeBrowserPanel(
         if (tabs.size > 1) return closeTabById(target.id)
         tabs.remove(target)
         pendingDialogs.remove(target.id)
-        cardPanel.remove(target.browser.component)
         activeTab = null
+        relayoutCardPanel() // 同 closeTabById：先脱离容器再 dispose
         try {
             Disposer.dispose(target.browser)
         } catch (e: Exception) {
@@ -410,41 +672,224 @@ class ZCodeBrowserPanel(
         tabStrip.repaint()
     }
 
-    private fun buildTabButton(tab: BrowserTab): JComponent {
-        val isActive = tab === activeTab
-        val label = JLabel(tab.title.ifBlank { "新标签页" }).apply {
-            foreground = if (isActive) JBColor.foreground() else JBColor.foreground().darker()
-            border = JBUI.Borders.emptyRight(2)
+    /** tab 圆角半径（仅下侧两角，卡片自底部条"浮出"与内容区衔接）*/
+    private val tabArc = 8
+
+    /** 现代 tab 卡片：激活=实底圆角卡片 + 加粗标题；非激活=透明，hover 半透明提亮 */
+    private inner class TabCard(internal val tab: BrowserTab) : JPanel(BorderLayout()) {
+        private var hover = false
+        private val label: JLabel
+
+        init {
+            isOpaque = false
+            val t = panelTheme()
+            val active = tab === activeTab
+            label = JLabel(tab.title.ifBlank { "新标签页" }).apply {
+                foreground = if (active) t.fg else t.fgMuted
+                font = font.deriveFont(if (active) java.awt.Font.BOLD else java.awt.Font.PLAIN, JBUI.scale(11f))
+                border = JBUI.Borders.emptyLeft(8)
+                // 条收缩时标题被截断，tooltip 兜底显示全名
+                toolTipText = tab.title.ifBlank { "新标签页" }
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            }
+            add(label, BorderLayout.CENTER)
+            add(TabCloseButton { closeTabById(tab.id) }, BorderLayout.EAST)
+            // 点击/悬停监听须同时挂卡片与 label：Swing 鼠标事件不冒泡，
+            // 落在 label（占卡片大部分面积）上的事件到不了卡片自身的 listener
+            val handler = object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent?) {
+                    if (e == null || SwingUtilities.isLeftMouseButton(e)) activateTabById(tab.id)
+                }
+                override fun mouseEntered(e: MouseEvent?) { hover = true; repaint() }
+                override fun mouseExited(e: MouseEvent?) { hover = false; repaint() }
+            }
+            addMouseListener(handler)
+            label.addMouseListener(handler)
         }
-        val close = JButton(AllIcons.Actions.Close).apply {
+
+        override fun getPreferredSize(): java.awt.Dimension {
+            val close = (getComponent(1) as TabCloseButton).preferredSize
+            return java.awt.Dimension(
+                (label.preferredSize.width + close.width + JBUI.scale(16)).coerceIn(
+                    JBUI.scale(80), JBUI.scale(220),
+                ),
+                JBUI.scale(28),
+            )
+        }
+
+        override fun paintComponent(g: java.awt.Graphics) {
+            val g2 = g as? java.awt.Graphics2D ?: return
+            g2.setRenderingHint(
+                java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON,
+            )
+            val t = panelTheme()
+            val w = width
+            val h = height
+            val fill = when {
+                tab === activeTab -> t.tabActiveBg
+                hover -> overlay(t.stripBg, t.fg, t.tabHoverAlpha)
+                else -> return // 非激活静息态全透明，融入底条
+            }
+            // 上圆角画到组件上方（y=-arc）被组件 clip 自然裁掉 → 视觉只有下侧两角
+            g2.color = fill
+            g2.fill(java.awt.geom.RoundRectangle2D.Float(
+                0f, -tabArc.toFloat(), (w - 1).toFloat(), (h + tabArc).toFloat(),
+                tabArc.toFloat(), tabArc.toFloat(),
+            ))
+        }
+    }
+
+    /** 关闭按钮：无边框扁平，hover 圆角小底（现代浏览器同款），避免抢视觉 */
+    private inner class TabCloseButton(action: () -> Unit) : JButton(ThemedIcon(AllIcons.Actions.Close)) {
+        private var hover = false
+
+        init {
             toolTipText = "关闭标签页"
             isBorderPainted = false
             isFocusPainted = false
             isContentAreaFilled = false
             isFocusable = false
-            preferredSize = Dimension(JBUI.scale(16), JBUI.scale(16))
-            addActionListener { closeTabById(tab.id) }
-        }
-        val row = JPanel(BorderLayout()).apply {
-            isOpaque = true
-            background = if (isActive) JBColor.background() else JBColor.border().brighter()
-            border = JBUI.Borders.empty(2, 8)
-            add(label, BorderLayout.CENTER)
-            add(close, BorderLayout.EAST)
+            isOpaque = false
+            margin = JBUI.insets(2, 2)
+            preferredSize = java.awt.Dimension(JBUI.scale(22), JBUI.scale(22))
+            addActionListener { action() }
             addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent?) {
-                    if (e == null || SwingUtilities.isLeftMouseButton(e)) activateTabById(tab.id)
-                }
+                override fun mouseEntered(e: MouseEvent?) { hover = true; repaint() }
+                override fun mouseExited(e: MouseEvent?) { hover = false; repaint() }
             })
         }
-        row.preferredSize = Dimension(
-            (label.preferredSize.width + close.preferredSize.width + JBUI.scale(16)).coerceIn(
-                JBUI.scale(60), JBUI.scale(200),
-            ),
-            JBUI.scale(24),
-        )
-        return row
+
+        override fun paintComponent(g: java.awt.Graphics) {
+            if (hover) {
+                val g2 = g as? java.awt.Graphics2D ?: return super.paintComponent(g)
+                g2.setRenderingHint(
+                    java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON,
+                )
+                val t = panelTheme()
+                val s = JBUI.scale(16)
+                val x = (width - s) / 2
+                val y = (height - s) / 2
+                g2.color = overlay(t.tabActiveBg, t.fg, t.closeHoverAlpha)
+                g2.fillOval(x, y, s, s)
+            }
+            super.paintComponent(g)
+        }
     }
+
+    /** 半透明叠加色（base 上叠 fg 的 alpha 混合，用于 hover 提亮）*/
+    private fun overlay(base: java.awt.Color, fg: java.awt.Color, alpha: Int): java.awt.Color {
+        val r = (fg.red * alpha + base.red * (255 - alpha)) / 255
+        val g = (fg.green * alpha + base.green * (255 - alpha)) / 255
+        val b = (fg.blue * alpha + base.blue * (255 - alpha)) / 255
+        return java.awt.Color(r, g, b)
+    }
+
+    /**
+     * 主题化文字胶囊按钮（自绘圆角底 + 边框，文字仍由 LaF 用 foreground 绘制）：
+     * LaF 的 JButton 背景跟随 IDE 主题而非 webview 生效主题，自由尺寸等按钮用它替代。
+     */
+    private inner class ThemePillButton(text: String, tip: String, action: () -> Unit) : JButton(text) {
+        private var hover = false
+
+        init {
+            toolTipText = tip
+            isBorderPainted = false
+            isFocusPainted = false
+            isContentAreaFilled = false
+            isFocusable = false
+            isOpaque = false
+            margin = JBUI.insets(0, 0)
+            font = font.deriveFont(java.awt.Font.PLAIN, JBUI.scale(12f))
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            addActionListener { action() }
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseEntered(e: MouseEvent?) { hover = true; repaint() }
+                override fun mouseExited(e: MouseEvent?) { hover = false; repaint() }
+            })
+        }
+
+        override fun getPreferredSize(): java.awt.Dimension {
+            val fm = getFontMetrics(font)
+            return java.awt.Dimension(fm.stringWidth(text) + JBUI.scale(24), JBUI.scale(24))
+        }
+
+        override fun paintComponent(g: java.awt.Graphics) {
+            val g2 = g as? java.awt.Graphics2D ?: return
+            g2.setRenderingHint(
+                java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON,
+            )
+            g2.setRenderingHint(
+                java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                // LCD 子像素抗锯齿（Windows 桌面默认档，比灰度抗锯齿细腻无毛刺）
+                java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB,
+            )
+            val t = panelTheme()
+            val w = width - 1
+            val h = height - 1
+            val arc = JBUI.scale(10)
+            val fill = if (hover) overlay(t.fieldBg, t.fg, t.tabHoverAlpha) else t.fieldBg
+            g2.color = fill
+            g2.fillRoundRect(0, 0, w, h, arc, arc)
+            g2.color = overlay(t.bg, t.fgMuted, 0x99)
+            g2.drawRoundRect(0, 0, w, h, arc, arc)
+            // 文字自绘：不调 super（断开 LaF 绘制链）——LaF 文字色跟 IDE 主题走，
+            // IDE 暗色 + webview 覆盖浅色时会白字配白底不可读
+            g2.font = font
+            val fm = g2.fontMetrics
+            g2.color = t.fg
+            g2.drawString(text, (width - fm.stringWidth(text)) / 2, (height - fm.height) / 2 + fm.ascent)
+        }
+    }
+
+    /** 主题化图标按钮（自绘符号 + hover 圆底）：新建 tab 的"+"等 */
+    private inner class ThemeIconButton(
+        tip: String,
+        private val symbol: String, // 目前支持 "+"
+        action: () -> Unit,
+    ) : JButton() {
+        private var hover = false
+
+        init {
+            toolTipText = tip
+            isBorderPainted = false
+            isFocusPainted = false
+            isContentAreaFilled = false
+            isFocusable = false
+            isOpaque = false
+            preferredSize = java.awt.Dimension(JBUI.scale(26), JBUI.scale(24))
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            addActionListener { action() }
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseEntered(e: MouseEvent?) { hover = true; repaint() }
+                override fun mouseExited(e: MouseEvent?) { hover = false; repaint() }
+            })
+        }
+
+        override fun paintComponent(g: java.awt.Graphics) {
+            val g2 = g as? java.awt.Graphics2D ?: return
+            g2.setRenderingHint(
+                java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON,
+            )
+            val t = panelTheme()
+            if (hover) {
+                val s = JBUI.scale(18)
+                g2.color = overlay(t.bg, t.fg, t.tabHoverAlpha)
+                g2.fillOval((width - s) / 2, (height - s) / 2, s, s)
+            }
+            // "+"：两条线段自绘（圆头端点防毛刺），颜色完全受控（不依赖随 LaF 走的 IDE 图标色板）
+            g2.color = t.fg
+            g2.stroke = java.awt.BasicStroke(
+                JBUI.scale(1.6f), java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND,
+            )
+            val len = JBUI.scale(9)
+            val cx = width / 2f
+            val cy = height / 2f
+            g2.drawLine((cx - len / 2).toInt(), cy.toInt(), (cx + len / 2).toInt(), cy.toInt())
+            g2.drawLine(cx.toInt(), (cy - len / 2).toInt(), cx.toInt(), (cy + len / 2).toInt())
+        }
+    }
+
+    private fun buildTabButton(tab: BrowserTab): JComponent = TabCard(tab)
 
     // ============ per-browser 事件注册 ============
 
@@ -690,9 +1135,20 @@ class ZCodeBrowserPanel(
     }
 
     private fun showViewportMenu() {
+        val t = panelTheme()
         val menu = javax.swing.JPopupMenu()
-        fun item(text: String, action: () -> Unit) =
-            javax.swing.JMenuItem(text).apply { addActionListener { action() } }
+        menu.background = t.stripBg
+        menu.border = javax.swing.BorderFactory.createCompoundBorder(
+            javax.swing.BorderFactory.createLineBorder(overlay(t.stripBg, t.fgMuted, 0x80), 1),
+            JBUI.Borders.empty(4),
+        )
+        fun item(text: String, action: () -> Unit) = javax.swing.JMenuItem(text).apply {
+            isOpaque = true
+            background = t.stripBg
+            foreground = t.fg
+            font = font.deriveFont(java.awt.Font.PLAIN, JBUI.scale(12f))
+            addActionListener { action() }
+        }
 
         if (!viewportState.active) {
             menu.add(item("进入自由尺寸（${viewportState.width}×${viewportState.height}）") { enterViewportMode() })
@@ -710,42 +1166,75 @@ class ZCodeBrowserPanel(
         menu.show(viewportBtn, 0, viewportBtn.height)
     }
 
-    /** 视口尺寸对话框（宽/高输入，持久化）*/
+    /** 视口尺寸对话框（宽/高输入，持久化）。自绘 JDialog：跟随 webview 生效主题
+     *  （DialogWrapper 走 IDE LaF，webview 显式覆盖主题时观感割裂）*/
     private fun promptViewportSize() {
+        val t = panelTheme()
+        val parent = SwingUtilities.getWindowAncestor(this)
+        val dlg = javax.swing.JDialog(parent, "视口尺寸", java.awt.Dialog.ModalityType.APPLICATION_MODAL)
         var result: Pair<Int, Int>? = null
 
-        object : com.intellij.openapi.ui.DialogWrapper(project) {
-            val wField = JTextField(8)
-            val hField = JTextField(8)
+        val fieldFont = JTextField().font.deriveFont(java.awt.Font.PLAIN, JBUI.scale(13f))
+        fun themedField(initial: Int) = JTextField(initial.toString(), 8).apply {
+            background = t.fieldBg
+            foreground = t.fieldFg
+            caretColor = t.fieldFg
+            font = fieldFont
+            border = JBUI.Borders.empty(4, 6)
+        }
+        val wField = themedField(viewportState.width)
+        val hField = themedField(viewportState.height)
 
-            init {
-                title = "视口尺寸"
-                init()
-            }
+        fun tryConfirm() {
+            val w = wField.text.trim().toIntOrNull() ?: return
+            val h = hField.text.trim().toIntOrNull() ?: return
+            result = w to h
+            dlg.dispose()
+        }
 
-            override fun createCenterPanel(): JComponent {
-                wField.text = viewportState.width.toString()
-                hField.text = viewportState.height.toString()
-                return JPanel(java.awt.GridBagLayout()).apply {
-                    val gbc = java.awt.GridBagConstraints().apply {
-                        insets = JBUI.insets(2, 4)
-                        anchor = java.awt.GridBagConstraints.WEST
-                    }
-                    gbc.gridx = 0; gbc.gridy = 0; add(JLabel("宽 (320-3840)："), gbc)
-                    gbc.gridx = 1; add(wField, gbc)
-                    gbc.gridx = 0; gbc.gridy = 1; add(JLabel("高 (320-2160)："), gbc)
-                    gbc.gridx = 1; add(hField, gbc)
-                }
-            }
+        val okBtn = ThemePillButton("确定", "应用视口尺寸") { tryConfirm() }
+        val cancelBtn = ThemePillButton("取消", "放弃修改") { dlg.dispose() }
 
-            override fun doOKAction() {
-                val w = wField.text.trim().toIntOrNull()
-                val h = hField.text.trim().toIntOrNull()
-                if (w == null || h == null) return
-                result = w to h
-                super.doOKAction()
+        fun label(text: String) = JLabel(text).apply {
+            foreground = t.fg
+            font = font.deriveFont(java.awt.Font.PLAIN, JBUI.scale(12f))
+        }
+
+        val content = JPanel(java.awt.GridBagLayout()).apply {
+            background = t.bg
+            val gbc = java.awt.GridBagConstraints().apply {
+                insets = JBUI.insets(4, 6)
+                anchor = java.awt.GridBagConstraints.WEST
+                fill = java.awt.GridBagConstraints.HORIZONTAL
             }
-        }.show()
+            gbc.gridx = 0; gbc.gridy = 0; add(label("宽 (320-3840)："), gbc)
+            gbc.gridx = 1; add(wField, gbc)
+            gbc.gridx = 0; gbc.gridy = 1; add(label("高 (320-2160)："), gbc)
+            gbc.gridx = 1; add(hField, gbc)
+            gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2
+            gbc.anchor = java.awt.GridBagConstraints.EAST
+            add(javax.swing.Box.createHorizontalBox().apply {
+                add(okBtn)
+                add(javax.swing.Box.createHorizontalStrut(JBUI.scale(6)))
+                add(cancelBtn)
+            }, gbc)
+        }
+
+        // Enter 确认 / Esc 取消（对齐 DialogWrapper 键盘语义）
+        fun bind(key: Int, name: String, act: () -> Unit) {
+            content.inputMap.put(javax.swing.KeyStroke.getKeyStroke(key, 0), name)
+            content.actionMap.put(name, object : javax.swing.AbstractAction() {
+                override fun actionPerformed(e: java.awt.event.ActionEvent?) = act()
+            })
+        }
+        bind(java.awt.event.KeyEvent.VK_ENTER, "confirm") { tryConfirm() }
+        bind(java.awt.event.KeyEvent.VK_ESCAPE, "cancel") { dlg.dispose() }
+
+        dlg.contentPane = content
+        dlg.isUndecorated = false // 保留系统标题栏（可拖动/关闭）
+        dlg.pack()
+        dlg.setLocationRelativeTo(parent)
+        dlg.isVisible = true
 
         result?.let { (w, h) -> setViewportSize(w, h) }
     }
@@ -765,22 +1254,23 @@ class ZCodeBrowserPanel(
         return "http://$t"
     }
 
-    /** 空态欢迎页（跟随 IDE 主题的静态快照；文案对齐 ZCode 客户端浏览器面板）*/
+    /** 空态欢迎页（按 webview 生效主题着色的静态快照；文案对齐 ZCode 客户端浏览器面板）*/
     private fun buildWelcomeHtml(): String {
-        val bg = if (JBColor.isBright()) "#ffffff" else "#1e1f22"
-        val fg = if (JBColor.isBright()) "#42464d" else "#b6b9bd"
+        val dark = ZCodeAppearanceStore.effectiveTheme() == "dark"
+        val bg = if (dark) "#1e1f22" else "#ffffff"
+        val fg = if (dark) "#b6b9bd" else "#42464d"
         return """
             <html><head><meta charset="utf-8"></head>
             <body style="margin:0;background:$bg;color:$fg;font-family:'Segoe UI',system-ui,sans-serif">
             <div style="display:flex;height:100vh;align-items:center;justify-content:center;flex-direction:column;gap:8px">
-              <div style="font-size:15px">粘贴或输入 URL 以打开网页</div>
-              <div style="font-size:12px;opacity:.6">例如 http://localhost:5173（前端 dev server）</div>
+              <div style="font-size:15px">${message("browser.welcome.hint")}</div>
+              <div style="font-size:12px;opacity:.6">${message("browser.welcome.example")}</div>
             </div></body></html>
         """.trimIndent()
     }
 
     private fun createUnsupportedPanel(): JComponent {
-        val label = JLabel("当前 IDE 运行时不支持 JCEF，无法使用内嵌浏览器")
+        val label = JLabel(message("browser.unsupported"))
         label.foreground = JBColor.foreground()
         label.horizontalAlignment = SwingConstants.CENTER
         val wrapper = JPanel(BorderLayout())
@@ -791,6 +1281,8 @@ class ZCodeBrowserPanel(
 
     /** Content 销毁时释放 JCEF 资源（content.setDisposer(panel) 绑定）*/
     override fun dispose() {
+        try { lafConn?.dispose() } catch (_: Exception) {}
+        lafConn = null
         for (tab in tabs) {
             pendingDialogs.remove(tab.id)
             try {

@@ -15,23 +15,26 @@
 
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { useStore, GLM_PLAN_PROVIDER } from '@/store/useStore'
 import { fmtTokens, limitTitle, fmtResetTime, fmtTime } from '@/utils/format'
 import type { ContextBreakdownItem, ContextSource } from '@/types/messages'
 
 const POP_W = 280
 
-/** 分类展示元数据（顺序即显示顺序）*/
+/** 分类展示元数据（顺序即显示顺序；label 为 i18n key，渲染时经 t() 转文案）*/
 const BREAKDOWN_META: { source: ContextSource; label: string; color: string }[] = [
-  { source: 'messages', label: '消息', color: '#4a9eff' },
-  { source: 'system_tool_schemas', label: '系统工具', color: '#b478f0' },
-  { source: 'skills', label: '技能', color: '#2bb3a3' },
-  { source: 'system_prompt', label: '系统提示词', color: '#e09850' },
-  { source: 'mcp_tool_schemas', label: 'MCP 工具', color: '#4caf50' },
+  { source: 'messages', label: 'usage.context.categories.messages', color: '#4a9eff' },
+  { source: 'system_tool_schemas', label: 'usage.context.categories.systemTools', color: '#b478f0' },
+  { source: 'skills', label: 'usage.context.categories.skills', color: '#2bb3a3' },
+  { source: 'system_prompt', label: 'usage.context.categories.systemPrompt', color: '#e09850' },
+  { source: 'mcp_tool_schemas', label: 'usage.context.categories.mcpTools', color: '#4caf50' },
 ]
 /** 合并为"其他"的 source（占比通常极小）*/
 const OTHER_SOURCES: ContextSource[] = ['meta_user_context', 'tool_prompt']
 const OTHER_COLOR = '#888888'
+/** "其他"分类的 i18n key */
+const OTHER_LABEL = 'usage.context.categories.other'
 
 interface CategoryRow {
   label: string
@@ -40,7 +43,7 @@ interface CategoryRow {
   pct: number
 }
 
-/** 把 breakdown 数组聚合成显示用的分类行（含"其他"合并，按占比降序过滤 0 值）*/
+/** 把 breakdown 数组聚合成显示用的分类行（label 为 i18n key，含"其他"合并，按占比降序过滤 0 值）*/
 function aggregateBreakdown(items: ContextBreakdownItem[]): CategoryRow[] {
   const total = items.reduce((sum, it) => sum + it.chars, 0) || 1
   const bySource = new Map<ContextSource, number>()
@@ -53,11 +56,12 @@ function aggregateBreakdown(items: ContextBreakdownItem[]): CategoryRow[] {
   })
   // 其他：合并 meta_user_context + tool_prompt
   const otherChars = OTHER_SOURCES.reduce((sum, s) => sum + (bySource.get(s) ?? 0), 0)
-  if (otherChars > 0) rows.push({ label: '其他', color: OTHER_COLOR, chars: otherChars, pct: (otherChars / total) * 100 })
+  if (otherChars > 0) rows.push({ label: OTHER_LABEL, color: OTHER_COLOR, chars: otherChars, pct: (otherChars / total) * 100 })
   return rows
 }
 
 export function ContextRing() {
+  const { t } = useTranslation()
   const ctx = useStore((s) => s.contextUsage)
   const breakdown = useStore((s) => s.contextBreakdown)
   const currentModel = useStore((s) => s.currentModel)
@@ -140,26 +144,26 @@ export function ContextRing() {
           <div className="ctx-popover" style={{ position: 'fixed', left: pos.left, bottom: pos.bottom, width: POP_W }}>
             {/* 上下文用量 */}
             <div className="ctx-popover__section">
-              <div className="ctx-popover__title">上下文用量</div>
+              <div className="ctx-popover__title">{t('usage.context.titleUsage')}</div>
               <div className="ctx-popover__bar">
                 <div className="ctx-popover__bar-fill" style={{ width: `${percentage}%`, background: color }} />
               </div>
               <div className="ctx-popover__row">
-                <span>已用</span>
+                <span>{t('usage.context.used')}</span>
                 <span className="ctx-popover__num">
-                  {hasData ? `${fmtTokens(ctx!.used)} / ${fmtTokens(ctx!.size)} (${percentage.toFixed(1)}%)` : '等待会话数据…'}
+                  {hasData ? `${fmtTokens(ctx!.used)} / ${fmtTokens(ctx!.size)} (${percentage.toFixed(1)}%)` : t('usage.context.waitingData')}
                 </span>
               </div>
             </div>
 
             {/* 上下文构成（model_complete 的 contextUsageBreakdown，仅主 turn 有数据）*/}
             <div className="ctx-popover__section">
-              <div className="ctx-popover__title">上下文构成</div>
+              <div className="ctx-popover__title">{t('usage.context.titleBreakdown')}</div>
               {categoryRows.length > 0 ? (
                 categoryRows.map((row, i) => (
                   <div className="ctx-popover__row ctx-popover__cat" key={i}>
                     <span className="ctx-popover__dot" style={{ background: row.color }} />
-                    <span className="ctx-popover__label">{row.label}</span>
+                    <span className="ctx-popover__label">{t(row.label)}</span>
                     <span className="ctx-popover__bar-mini">
                       <span style={{ width: `${Math.max(2, row.pct)}%`, background: row.color }} />
                     </span>
@@ -167,10 +171,10 @@ export function ContextRing() {
                   </div>
                 ))
               ) : (
-                <div className="ctx-popover__muted">暂无构成明细（对话后将显示）</div>
+                <div className="ctx-popover__muted">{t('usage.context.noBreakdown')}</div>
               )}
               <div className="ctx-popover__row ctx-popover__row--highlight">
-                <span className="ctx-popover__label">平均缓存命中率</span>
+                <span className="ctx-popover__label">{t('usage.context.hitRate')}</span>
                 {/* hitRate=null 表示本 turn 暂无统计（新 turn 首次模型调用完成前），显示"—"而非误导性的 0% */}
                 <span className="ctx-popover__num">
                   {hasData && ctx!.hitRate != null ? `${(ctx!.hitRate * 100).toFixed(1)}%` : '—'}
@@ -182,7 +186,7 @@ export function ContextRing() {
             {isGlmPlan && (
               <div className="ctx-popover__section">
                 <div className="ctx-popover__title">
-                  GLM 额度{quota?.level ? `（${quota.level}）` : ''}
+                  {quota?.level ? t('usage.context.glmQuotaWithLevel', { level: quota.level }) : t('usage.context.glmQuota')}
                 </div>
                 {quota?.limits?.length ? (
                   quota.limits.map((l, i) => {
@@ -192,20 +196,20 @@ export function ContextRing() {
                         <span className="ctx-popover__label">{limitTitle(l)}</span>
                         <span className="ctx-popover__num">{p.toFixed(0)}%</span>
                         {l.nextResetTime ? (
-                          <span className="ctx-popover__reset">重置 {fmtResetTime(l.nextResetTime)}</span>
+                          <span className="ctx-popover__reset">{t('usage.quota.resetAt', { time: fmtResetTime(l.nextResetTime) })}</span>
                         ) : null}
                       </div>
                     )
                   })
                 ) : quotaLoading ? (
-                  <div className="ctx-popover__muted">额度加载中…</div>
+                  <div className="ctx-popover__muted">{t('usage.context.quotaLoading')}</div>
                 ) : usageError ? (
                   <div className="ctx-popover__muted ctx-popover__muted--error">{usageError}</div>
                 ) : (
-                  <div className="ctx-popover__muted">暂无额度数据</div>
+                  <div className="ctx-popover__muted">{t('usage.context.noQuota')}</div>
                 )}
                 {quotaFetchedAt > 0 && (
-                  <div className="ctx-popover__refresh">上次刷新 {fmtTime(quotaFetchedAt)}</div>
+                  <div className="ctx-popover__refresh">{t('usage.quota.lastRefresh', { time: fmtTime(quotaFetchedAt) })}</div>
                 )}
               </div>
             )}

@@ -200,8 +200,8 @@ export type JavaRequest =
   | { op: 'setTabTitle'; title: string; sessionId?: string }
   /** 外观配置全量回存 IDE（权威源，重启经 __ZCODE_APPEARANCE__ 注入回前端）*/
   | { op: 'appearanceSave'; config: AppearanceConfig }
-  /** 通用 kv 全量回存 IDE（配置类 localStorage 权威源，重启经 __ZCODE_KVSTORE__ 注入）*/
-  | { op: 'kvSave'; entries: Record<string, string> }
+  /** 通用 kv 增量回存 IDE（entries=改动 key 的 upsert，deletes=要删的 key；权威源重启经 __ZCODE_KVSTORE__ 注入）*/
+  | { op: 'kvSave'; entries: Record<string, string>; deletes?: string[] }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {
