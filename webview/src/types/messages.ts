@@ -407,6 +407,8 @@ export interface EnvCredentialStatus {
   /** 生效 provider 的首个 model（展示用）*/
   model?: string
   error?: string
+  /** 实际读取的 config.json 路径（随 dataBaseDir 重定向）*/
+  path?: string
 }
 
 export interface EnvStatus {

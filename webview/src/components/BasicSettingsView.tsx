@@ -496,9 +496,13 @@ function EnvironmentSettings() {
   const cliPath = envStatus?.cli.path ?? ''
 
   useEffect(() => {
-    setNodeInput((cur) => (cur === lastSyncRef.current.node ? nodePath : cur))
-    setCliInput((cur) => (cur === lastSyncRef.current.cli ? cliPath : cur))
+    // 函数式 updater 由 React 延迟到渲染期执行，而 ref 赋值立即生效——
+    // 必须先快照旧 ref 再更新，否则 updater 里读到的是新值，比较恒不成立，
+    // 重新进入设置页时输入框永远同步不进 envStatus 的路径
+    const last = lastSyncRef.current
     lastSyncRef.current = { node: nodePath, cli: cliPath }
+    setNodeInput((cur) => (cur === last.node ? nodePath : cur))
+    setCliInput((cur) => (cur === last.cli ? cliPath : cur))
   }, [nodePath, cliPath])
 
   useEffect(() => {
@@ -518,6 +522,11 @@ function EnvironmentSettings() {
     setTimeout(() => setRechecking(false), 3000)
   }
 
+  // 检测响应到达即停转圈（3s 超时兜底响应丢失的场景）
+  useEffect(() => {
+    if (envStatus) setRechecking(false)
+  }, [envStatus])
+
   return (
     <>
       {/* Node.js 路径 */}
@@ -531,6 +540,7 @@ function EnvironmentSettings() {
                 'basic-settings__version-badge',
                 envStatus.node.versionTooLow ? 'is-error' : 'is-ok'
               )}
+              title={envStatus.node.path ?? undefined}
             >
               {envStatus.node.version}
             </span>
@@ -573,7 +583,9 @@ function EnvironmentSettings() {
           <span className="codicon codicon-rocket" />
           <span className="basic-settings__field-label">{t('settings.env.cli.label')}</span>
           {envStatus?.cli.found && cliPath && (
-            <span className="basic-settings__version-badge is-ok">{t('settings.env.cli.found')}</span>
+            <span className="basic-settings__version-badge is-ok" title={cliPath}>
+              {t('settings.env.cli.found')}
+            </span>
           )}
         </div>
         <div className="basic-settings__path-row">
@@ -612,6 +624,7 @@ function EnvironmentSettings() {
                 'basic-settings__version-badge',
                 envStatus.credentials.ok ? 'is-ok' : 'is-error'
               )}
+              title={envStatus.credentials.path ?? undefined}
             >
               {envStatus.credentials.ok
                 ? t('settings.env.credentials.ok', { model: envStatus.credentials.model ?? '' })
@@ -619,6 +632,12 @@ function EnvironmentSettings() {
             </span>
           )}
         </div>
+        {envStatus?.credentials.path && (
+          <div className="basic-settings__config-path">
+            <span className="codicon codicon-file" />
+            <span className="basic-settings__config-path-text">{envStatus.credentials.path}</span>
+          </div>
+        )}
         {!envStatus?.credentials.ok && envStatus?.credentials.error && (
           <div className="basic-settings__version-warning">
             <span className="codicon codicon-error" />
@@ -634,8 +653,7 @@ function EnvironmentSettings() {
       {/* 重新检测 */}
       <section className="basic-settings__section">
         <button type="button" className="basic-settings__save-btn" onClick={handleRecheck} disabled={rechecking}>
-          {rechecking && <span className="codicon codicon-loading codicon-modifier-spin" />}
-          <span className="codicon codicon-refresh" />
+          <span className={cx('codicon', rechecking ? 'codicon-loading codicon-modifier-spin' : 'codicon-refresh')} />
           {t('settings.env.recheck')}
         </button>
       </section>

@@ -894,8 +894,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
         if (hasCli && cliPath.isNotEmpty()) {
-            if (!java.nio.file.Path.of(cliPath).toFile().isFile) {
-                return envErrorResponse("zcode.cjs 路径无效：文件不存在（$cliPath），未保存")
+            val probe = com.zcode.ideaplugin.env.ZCodeEnvChecker.verifyCliPath(cliPath)
+            if (!probe.found) {
+                return envErrorResponse("zcode.cjs 路径无效：${probe.error}，未保存")
             }
         }
 
@@ -912,6 +913,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
         try { project.zCodeService().shutdown() } catch (e: Exception) {
             log.warn("环境配置变更后关闭旧 app-server 失败: ${e.message}")
         }
+        // 旧进程上的订阅与全局监听器全部作废（含其他标签），下次 subscribe 重新走完整注册
+        activePanels.forEach { it.resetSubscriptionState() }
 
         val status = com.zcode.ideaplugin.env.ZCodeEnvChecker.check(force = true)
         broadcastEnvStatus(status)
@@ -1991,6 +1994,17 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("error", e.message ?: "读取失败")
             }
         }
+    }
+
+    /**
+     * app-server 进程被外部重启（环境配置变更 shutdown）后调用：
+     * 旧 client 上的全局监听器随进程销毁，subscribedSessions 记录的也是旧进程上的订阅。
+     * 不重置的话下次 subscribe 会被两道记忆挡住（监听器不重挂、会话不重订），
+     * 表现为发送正常但收不到实时流，须重启 IDE 才恢复。
+     */
+    fun resetSubscriptionState() {
+        globalListenerRegistered = false
+        subscribedSessions.clear()
     }
 
     /**

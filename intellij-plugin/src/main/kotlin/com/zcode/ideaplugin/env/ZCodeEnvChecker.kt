@@ -24,6 +24,9 @@ import java.util.concurrent.TimeUnit
 /** node 可执行探测结果 */
 data class NodeProbe(val found: Boolean, val version: String?, val error: String?)
 
+/** zcode.cjs 路径校验结果 */
+data class CliProbe(val found: Boolean, val error: String?)
+
 data class NodeStatus(
     val configured: Boolean,
     /** 实际生效的路径（配置值或 PATH 探测值；未找到 null）*/
@@ -50,6 +53,8 @@ data class CredentialStatus(
     /** 生效 provider 的首个 model（展示用）*/
     val model: String?,
     val error: String?,
+    /** 实际读取的 config.json 路径（随 dataBaseDir 重定向，展示用）*/
+    val path: String? = null,
 )
 
 data class EnvStatus(
@@ -78,6 +83,19 @@ object ZCodeEnvChecker {
 
     private const val PROBE_TIMEOUT_SECONDS = 5L
     private const val CACHE_TTL_MILLIS = 30_000L
+
+    /** JS 脚本扩展名（zcode.cjs 的合法形态；自定义 wrapper 也是其一） */
+    private val JS_EXTENSIONS = listOf(".cjs", ".js", ".mjs")
+
+    /**
+     * 常见包管理器文件名：它们也有 --version 且输出版本号（如 npm 10.x），
+     * spawn 校验无法与 node 区分——填错后启动才炸，需按文件名前置拦截
+     */
+    private val PACKAGE_MANAGER_NAMES = setOf(
+        "npm", "npm.cmd", "npm.exe", "npx", "npx.cmd", "npx.exe",
+        "pnpm", "pnpm.cmd", "pnpm.exe", "yarn", "yarn.cmd", "yarn.exe",
+        "corepack", "corepack.cmd", "corepack.exe",
+    )
 
     /** 存储抽象：生产走 Application 级 PropertiesComponent，单测注入内存实现 */
     interface EnvStore {
@@ -201,18 +219,55 @@ object ZCodeEnvChecker {
         }
     }
 
-    private fun detectCredentials(): CredentialStatus = try {
-        val c = Credentials.load()
-        CredentialStatus(ok = true, model = c.model, error = null)
-    } catch (e: Exception) {
-        CredentialStatus(ok = false, model = null, error = e.message ?: "凭证配置读取失败")
+    private fun detectCredentials(): CredentialStatus {
+        val configPath = Credentials.defaultConfigPath().toString()
+        return try {
+            val c = Credentials.load()
+            CredentialStatus(ok = true, model = c.model, error = null, path = configPath)
+        } catch (e: Exception) {
+            CredentialStatus(ok = false, model = null, error = e.message ?: "凭证配置读取失败", path = configPath)
+        }
     }
 
     /**
      * 验证指定 node 路径（envSave 保存前调用）：
-     * 文件存在 + `--version` 可执行且可解析。
+     * 文件名前置拦截（防填反/包管理器）+ 文件存在 + `--version` 可执行且可解析。
      */
     fun verifyNodePath(path: String): NodeProbe = probeNode(path)
+
+    /**
+     * 验证指定 cli 路径（envSave 保存前调用）。
+     *
+     * 语义校验（防"文件存在但不是所需文件"）：
+     * - node 可执行文件 → 提示填反了框
+     * - 标准 zcode.cjs 文件名 → 信任放行
+     * - 非脚本扩展名 → 拒绝
+     * - 其他 JS 文件 → 读文件头找 zcode 特征（bundle 必含 CLI 名），找不到拒绝
+     */
+    fun verifyCliPath(path: String): CliProbe {
+        val file = Path.of(path).toFile()
+        if (!file.isFile) return CliProbe(false, "文件不存在：$path")
+        val name = file.name.lowercase()
+        if (name == "node" || name == "node.exe") {
+            return CliProbe(false, "这是 Node.js 可执行文件，应填入上方「Node.js 路径」")
+        }
+        if (name == "zcode.cjs") return CliProbe(true, null)
+        if (JS_EXTENSIONS.none { name.endsWith(it) }) {
+            return CliProbe(false, "不是 zcode.cjs 脚本文件（期望 .cjs/.js/.mjs）：$name")
+        }
+        return if (hasZcodeSignature(file)) CliProbe(true, null)
+        else CliProbe(false, "文件内容不含 ZCode 特征，请确认这是 zcode.cjs 脚本")
+    }
+
+    /** 文件前 512KB 是否含 "zcode"（忽略大小写）；单字节读取纯 ASCII 子串搜索，不受编码影响 */
+    private fun hasZcodeSignature(file: java.io.File): Boolean = try {
+        file.inputStream().use { ins ->
+            val bytes = ins.readNBytes(512 * 1024)
+            String(bytes, Charsets.ISO_8859_1).lowercase().contains("zcode")
+        }
+    } catch (e: Exception) {
+        false
+    }
 
     // ============ 启动参数解析 ============
 
@@ -244,6 +299,8 @@ object ZCodeEnvChecker {
     private fun probeNode(path: String): NodeProbe {
         val file = Path.of(path).toFile()
         if (!file.exists() || !file.isFile) return NodeProbe(false, null, "文件不存在：$path")
+        // 文件名预检：明显填错的内容给明确提示（spawn 也能失败，但错误信息难懂）
+        precheckNodeName(file.name.lowercase())?.let { return NodeProbe(false, null, it) }
         return try {
             val proc = ProcessBuilder(path, "--version")
                 .redirectErrorStream(true)
@@ -271,6 +328,14 @@ object ZCodeEnvChecker {
     fun parseMajorVersion(version: String?): Int? {
         if (version.isNullOrBlank()) return null
         return Regex("""v?(\d+)\.""").find(version)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    /** node 文件名预检：返回非 null 即拒绝（包管理器伪装 / JS 脚本填反） */
+    private fun precheckNodeName(name: String): String? = when {
+        name in PACKAGE_MANAGER_NAMES -> "这是包管理器（$name），不是 Node.js 可执行文件"
+        JS_EXTENSIONS.any { name.endsWith(it) } ->
+            "这是 JS 脚本文件，不是 Node.js 可执行文件（zcode.cjs 应填到下方「ZCode CLI 路径」）"
+        else -> null
     }
 
     private fun isVersionTooLow(version: String?): Boolean {
@@ -321,6 +386,7 @@ object ZCodeEnvChecker {
             put("ok", s.credentials.ok)
             putStringOrNull("model", s.credentials.model)
             putStringOrNull("error", s.credentials.error)
+            putStringOrNull("path", s.credentials.path)
         })
         put("allOk", s.allOk)
     }

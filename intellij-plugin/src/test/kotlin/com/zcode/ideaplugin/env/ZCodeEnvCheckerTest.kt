@@ -115,6 +115,80 @@ class ZCodeEnvCheckerTest {
         assertTrue(probe.error!!.contains("文件不存在"), "错误信息应含原因: ${probe.error}")
     }
 
+    // ============ 路径语义校验（防填错文件，不依赖本机环境） ============
+
+    /** 建临时文件后执行断言，结束时清理整个临时目录 */
+    private fun withTempFile(fileName: String, content: String = "", block: (java.io.File) -> Unit) {
+        val dir = java.nio.file.Files.createTempDirectory("envcheck-test")
+        try {
+            val f = dir.resolve(fileName).toFile()
+            f.writeText(content)
+            block(f)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `verifyCliPath node 可执行文件填到 cli 框被拒绝`() {
+        withTempFile("node.exe") { f ->
+            val probe = ZCodeEnvChecker.verifyCliPath(f.absolutePath)
+            assertFalse(probe.found)
+            assertTrue(probe.error!!.contains("Node.js"), "应提示填反了框: ${probe.error}")
+        }
+    }
+
+    @Test
+    fun `verifyCliPath 标准 zcode-cjs 文件名直接放行`() {
+        withTempFile("zcode.cjs") { f ->
+            // 内容为空也应放行：标准文件名即信任（bundle 内容校验只针对非标准名）
+            assertTrue(ZCodeEnvChecker.verifyCliPath(f.absolutePath).found)
+        }
+    }
+
+    @Test
+    fun `verifyCliPath 非脚本扩展名被拒绝`() {
+        withTempFile("readme.txt", "zcode zcode zcode") { f ->
+            val probe = ZCodeEnvChecker.verifyCliPath(f.absolutePath)
+            assertFalse(probe.found)
+            assertTrue(probe.error!!.contains("不是"), "应说明不是脚本文件: ${probe.error}")
+        }
+    }
+
+    @Test
+    fun `verifyCliPath 无 zcode 特征的 JS 文件被拒绝`() {
+        withTempFile("my-cli.cjs", "console.log('hello world')") { f ->
+            val probe = ZCodeEnvChecker.verifyCliPath(f.absolutePath)
+            assertFalse(probe.found)
+            assertTrue(probe.error!!.contains("特征"), "应提示缺少 ZCode 特征: ${probe.error}")
+        }
+    }
+
+    @Test
+    fun `verifyCliPath 含 zcode 特征的自定义 JS 放行`() {
+        withTempFile("zcode-wrapper.js", "#!/usr/bin/env node\nrequire('zcode')") { f ->
+            assertTrue(ZCodeEnvChecker.verifyCliPath(f.absolutePath).found)
+        }
+    }
+
+    @Test
+    fun `verifyNodePath JS 脚本填到 node 框被预检拒绝`() {
+        withTempFile("zcode.cjs", "#!/usr/bin/env node") { f ->
+            val probe = ZCodeEnvChecker.verifyNodePath(f.absolutePath)
+            assertFalse(probe.found)
+            assertTrue(probe.error!!.contains("JS 脚本"), "应提示是脚本非可执行文件: ${probe.error}")
+        }
+    }
+
+    @Test
+    fun `verifyNodePath 包管理器被预检拒绝`() {
+        withTempFile("npm.cmd") { f ->
+            val probe = ZCodeEnvChecker.verifyNodePath(f.absolutePath)
+            assertFalse(probe.found)
+            assertTrue(probe.error!!.contains("包管理器"), "应提示是包管理器: ${probe.error}")
+        }
+    }
+
     // ============ check 全流程（真机前置） ============
 
     @Test
@@ -160,6 +234,16 @@ class ZCodeEnvCheckerTest {
         val cred = json["credentials"]!!.jsonObject
         assertEquals("glm-4.7", cred["model"]!!.jsonPrimitive.content)
         assertEquals(true, json["allOk"]!!.jsonPrimitive.content.toBoolean())
+
+        // 凭证实际读取路径（dataBaseDir 跟随验证展示用）
+        val withPath = ZCodeEnvChecker.statusJson(
+            EnvStatus(okNode(), okCli(), CredentialStatus(true, "glm-4.7", null, path = "F:\\Zcode\\.zcode\\v2\\config.json")),
+        )
+        assertEquals(
+            "F:\\Zcode\\.zcode\\v2\\config.json",
+            withPath["credentials"]!!.jsonObject["path"]!!.jsonPrimitive.content,
+        )
+        assertTrue("path" !in cred, "null path 应省略")
 
         // null 字段应省略（putOrNull）
         val bad = ZCodeEnvChecker.statusJson(

@@ -276,6 +276,28 @@
   }
 }
 
+/* 凭证实际读取的 config.json 路径（只读展示，无输入框，直接平铺） */
+.basic-settings__config-path {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 2px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+
+  .codicon {
+    font-size: 12px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  &-text {
+    font-family: var(--font-mono);
+    word-break: break-all;
+    line-height: 1.5;
+  }
+}
+
 /* ============ 子页签选择器（外观/环境，cc-gui basicTabSelector 同款凹槽容器） ============ */
 
 .basic-settings__tabs {
