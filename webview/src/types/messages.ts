@@ -202,6 +202,8 @@ export type JavaRequest =
   | { op: 'appearanceSave'; config: AppearanceConfig }
   /** 通用 kv 增量回存 IDE（entries=改动 key 的 upsert，deletes=要删的 key；权威源重启经 __ZCODE_KVSTORE__ 注入）*/
   | { op: 'kvSave'; entries: Record<string, string>; deletes?: string[] }
+  /** 拉取权威 kv（注入未达时的兜底通道：executeJavaScript 时序不稳 → 走消息通道必然可达）*/
+  | { op: 'kvLoad' }
   /** 环境三件套检测（node/zcode.cjs/凭证），启动时与主界面「重新检测」触发 */
   | { op: 'checkEnv' }
   /** 保存环境路径配置：字段缺席=不改该项，空串=清除（回退自动探测）；后端验证通过才落盘 */
@@ -440,6 +442,8 @@ export type JavaResponse =
   | { op: 'tabTitleSet' }
   | { op: 'appearanceSave' }
   | { op: 'kvSave' }
+  /** 权威 kv 下发（kvLoad 的响应；注入兜底通道）*/
+  | { op: 'kvLoaded'; kv: Record<string, string> }
   /** 环境状态（checkEnv 查询 / envSave 保存成功后的重检结果 / IDE 广播同构体）*/
   | { op: 'envStatus'; status: EnvStatus }
   | { op: 'ideTheme'; isDark: boolean }

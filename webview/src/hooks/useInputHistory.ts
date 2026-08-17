@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useRef } from 'react'
-import { getPersisted, setPersisted, removePersisted } from '@/utils/persist'
+import { getPersisted, setPersisted, removePersisted, KV_HYDRATED_EVENT } from '@/utils/persist'
 
 const HISTORY_STORAGE_KEY = 'zcode-input-history'
 const COUNTS_STORAGE_KEY = 'zcode-input-history-counts'
@@ -62,6 +62,14 @@ function loadHistory(): string[] {
 
 /** 模块级内存历史：组件重挂载（流式重渲染/HMR）不丢 */
 let memoryHistory: string[] | null = null
+
+// 冷启动注入晚于首次 loadHistory 时，memoryHistory 缓存了空数组且此后短路不再读
+// localStorage——水合完成（localStorage 已被权威 kv 写回）时丢弃缓存，下次读取即恢复
+if (typeof window !== 'undefined') {
+  window.addEventListener(KV_HYDRATED_EVENT, () => {
+    memoryHistory = null
+  })
+}
 
 function loadCounts(): Record<string, number> {
   try {

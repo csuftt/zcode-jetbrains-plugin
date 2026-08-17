@@ -166,6 +166,19 @@ class ZCodeToolWindowPanel(
         } catch (_: Exception) { null }
     }
 
+    /** 权威 kv 下发（kvLoad）：onLoadStart/onLoadEnd 的 executeJavaScript 注入时序不稳
+     *  （冷启动 JS 上下文未就绪时丢失），前端超时后经消息通道拉取——必然可达，
+     *  避免输入历史等持久化数据冷启动水合失败（读空） */
+    private fun handleKvLoad(): JsonObject = buildJsonObject {
+        put("op", "kvLoaded")
+        put(
+            "kv",
+            readKvJson()?.let {
+                try { Json.parseToJsonElement(it) } catch (_: Exception) { null }
+            } ?: JsonObject(emptyMap()),
+        )
+    }
+
     private fun persistBrowserWidthState(expanded: Boolean, base: Int) {
         try {
             val props = com.intellij.ide.util.PropertiesComponent.getInstance(project)
@@ -637,6 +650,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "clearTabSession" -> handleClearTabSession()
                         "appearanceSave" -> handleAppearanceSave(msg)
                         "kvSave" -> handleKvSave(msg)
+                        "kvLoad" -> handleKvLoad()
                         "checkEnv" -> handleCheckEnv()
                         "envSave" -> handleEnvSave(msg)
                         else -> errorResponse("未知 op: $op")

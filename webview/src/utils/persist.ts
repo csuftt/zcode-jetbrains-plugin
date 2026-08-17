@@ -24,7 +24,10 @@
  *   3. IDE 侧 handleKvSave 配套改为 merge upsert + 显式 deletes。
  */
 
-import { sendToJava, isInJcef } from '@/ipc/bridge'
+import { sendToJava, isInJcef, onMessage } from '@/ipc/bridge'
+
+/** 水合完成事件（localStorage 写回后派发；缓存了空初始值的模块据此丢弃缓存重读）*/
+export const KV_HYDRATED_EVENT = 'zcode:kv-hydrated'
 
 /** 外观配置专用 key（由 appearance.ts 通道管理，kv 回存时排除）*/
 const APPEARANCE_KEYS = new Set([
@@ -143,34 +146,66 @@ function scheduleKvFlush(): void {
 /**
  * 启动恢复（main.tsx render 前调用）：
  * JCEF 内等待注入的权威 kv（onLoadStart 注入通常早于本模块；executeJavaScript 时序
- * 不保证，轮询兜底 2s），到达后写回 localStorage（仅写注入中存在的 key），
- * 随后放行挂起的增量 flush。
- * 注入为权威源：与 localStorage 冲突时以 IDE 侧为准。
- * 超时未注入（异常场景）：不置 kvHydrated，本会话放弃回存——localStorage 不是权威
- * 快照，若放行 flush 会把 IDE 存量冲掉（重装清空事故的根因，宁丢增量不清存量）。
+ * 不保证，轮询兜底 2s），到达后写回 localStorage，随后放行挂起的增量 flush。
+ * 注入为权威源：与 localStorage 冲突时以 IDE 侧为准；本会话已脏的 key 除外
+ * （水合前用户产生的写入比权威快照新，保留本地版待 flush 补发）。
+ * 注入超时（executeJavaScript 未达/丢失）→ kvLoad 主动拉取兜底：消息通道必然可达，
+ * 消除对注入时序的依赖（输入历史等冷启动即空的事故根因）。
+ * 两条通道均失败（异常场景）：不置 kvHydrated，本会话放弃回存——localStorage 不是
+ * 权威快照，若放行 flush 会把 IDE 存量冲掉（重装清空事故的根因，宁丢增量不清存量）。
  */
 export function initPersist(): void {
   if (!isInJcef()) return
   let retries = 0
+  let pullAttempts = 0
+  let settled = false
+
+  const finish = (kv: Record<string, string>) => {
+    if (settled) return
+    settled = true
+    off()
+    try {
+      Object.entries(kv).forEach(([k, v]) => {
+        if (typeof v !== 'string') return
+        if (dirtyKeys.has(k)) return // 本会话已改动的 key：本地新值优先，不被旧快照覆盖
+        window.localStorage.setItem(k, v)
+      })
+    } catch {
+      /* localStorage 不可用：保持现状 */
+    }
+    kvHydrated = true
+    try {
+      window.dispatchEvent(new Event(KV_HYDRATED_EVENT))
+    } catch {
+      /* 事件派发失败不影响水合本身 */
+    }
+    if (flushTimer || dirtyKeys.size || deletedKeys.size) scheduleKvFlush()
+  }
+
+  // 拉取兜底通道的响应路由（kvLoaded 一次即退订，见 finish 内 off()）
+  const off = onMessage((msg) => {
+    if (msg.op === 'kvLoaded') finish(msg.kv ?? {})
+  })
+
   const poll = () => {
+    if (settled) return
     const kv = window.__ZCODE_KVSTORE__
     if (kv) {
-      try {
-        Object.entries(kv).forEach(([k, v]) => {
-          if (typeof v === 'string') window.localStorage.setItem(k, v)
-        })
-      } catch {
-        /* localStorage 不可用：保持现状 */
-      }
-      kvHydrated = true
-      if (flushTimer || dirtyKeys.size || deletedKeys.size) scheduleKvFlush()
+      finish(kv)
       return
     }
     if (++retries <= 40) {
       setTimeout(poll, 50)
-    } else {
-      console.warn('[persist] __ZCODE_KVSTORE__ 注入 2s 未到达，本会话停用 kv 回存（防覆盖存量）')
+      return
     }
+    // 注入 2s 未到：改走消息通道向 IDE 拉取权威 kv（至多重试 2 轮）
+    if (pullAttempts++ < 2) {
+      sendToJava({ op: 'kvLoad' })
+      setTimeout(poll, 800)
+      return
+    }
+    off()
+    console.warn('[persist] 注入与 kvLoad 均未到达，本会话停用 kv 回存（防覆盖存量）')
   }
   poll()
 }
