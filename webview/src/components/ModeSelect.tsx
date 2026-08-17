@@ -5,6 +5,7 @@
  *   （协议还有 auto，但不可经切换路径设置，不暴露）
  * - 当前值：store currentMode（settings 权威 / setMode 乐观更新）→ 消息流 info.mode 兜底
  * - 切换 = session/setMode；不做 localStorage 记忆（模式是即时意图，新会话默认 yolo）
+ * - 无会话（待命态）也可预选：setMode 只更新本地，createSession 响应里先于首条消息补下发
  * - 外部点击 / Escape 关闭；当前选中项高亮；仅「完全控制」按钮着警示色，其余模式原版
  */
 
@@ -27,12 +28,12 @@ export function ModeSelect() {
   const { t } = useTranslation()
   const currentMode = useStore((s) => s.currentMode)
   const messages = useStore((s) => s.messages)
-  const sessionId = useStore((s) => s.currentSessionId)
   const setMode = useStore((s) => s.setMode)
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  // 显示值：currentMode → 消息流推断（settings 拉取前）→ 兜底「完全控制」（新会话默认 yolo）
+  // 显示值：currentMode → 消息流推断（settings 拉取前）→ 兜底「完全控制」（新会话默认 yolo；
+  // 待命态无消息，恒走兜底）
   const displayValue = useMemo(() => {
     if (currentMode) return currentMode
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -69,7 +70,6 @@ export function ModeSelect() {
       <button
         className={`selector-button ${activeClass}`}
         onClick={() => setOpen((v) => !v)}
-        disabled={!sessionId}
         title={activeMode ? t(`input.mode.${activeMode.value}.title`) : t('input.mode.title')}
       >
         <span className={`codicon ${modeIcon(displayValue)}`} />

@@ -195,6 +195,8 @@ interface StoreState {
   applyModelIfReady: (sessionId: string) => void
   /** 拉取当前会话的运行时设置（mode + thoughtLevel）*/
   loadSettings: () => void
+  /** 待命态（无会话）按当前模型恢复缓存的思考级别集（预选显示用；有会话时无操作）*/
+  hydrateThoughtLevelStandby: () => void
   /** 切换思考级别（session/setThoughtLevel，persist 记忆）*/
   setThoughtLevel: (level: string) => void
   /** 切换权限模式（session/setMode，不记忆——模式是即时意图，避免 plan 粘性）*/
@@ -542,6 +544,8 @@ export const useStore = create<StoreState>((set, get) => ({
       askUser: null, // 旧会话遗留的提问/审批弹窗随会话切换关闭
       exitPlanApproval: null,
     })
+    // 待命态：恢复当前模型的缓存级别集（currentMode 不水合——模式是即时意图，预选重新开始）
+    get().hydrateThoughtLevelStandby()
     sendToJava({ op: 'clearTabSession' })
   },
 
@@ -598,6 +602,8 @@ export const useStore = create<StoreState>((set, get) => ({
     // 会话建立后由 applyModelIfReady 真正下发（见 createSession 响应处理）
     setPersisted('zcode.currentModel', JSON.stringify({ modelId, providerId }))
     set({ currentModel: { modelId, providerId } })
+    // 待命态切模型：级别集随模型变化，按新模型重 hydrate（无缓存的模型 → 选择器隐藏）
+    get().hydrateThoughtLevelStandby()
     const sid = get().currentSessionId
     if (!sid) return
     sendToJava({ op: 'setModel', sessionId: sid, modelId, providerId })
@@ -628,22 +634,40 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setThoughtLevel: (level) => {
-    const sid = get().currentSessionId
-    if (!sid) return
-    // 记忆选择（persist 通道），新会话/切模型后仍尝试恢复
+    // 记忆选择（persist 通道），新会话/切模型后仍尝试恢复；无会话（待命态）也允许预选：
+    // 级别集来自按模型缓存（hydrateThoughtLevelStandby 恢复），createSession 响应里
+    // 先于首条消息补下发（applyModelIfReady 同款时序）
     setPersisted('zcode.thoughtLevel', level)
     // 乐观更新 current（thoughtLevelSet 响应 / settings 重拉时服务端校准）
     const info = get().thoughtLevel
     if (info) set({ thoughtLevel: { ...info, current: level } })
+    const sid = get().currentSessionId
+    if (!sid) return
     set({ thoughtLevelAppliedForSession: sid })
     sendToJava({ op: 'setThoughtLevel', sessionId: sid, thoughtLevel: level })
   },
 
+  hydrateThoughtLevelStandby: () => {
+    // 有会话时级别集以 settings 权威（loadSettings 会覆盖），无需水合
+    if (get().currentSessionId) return
+    const cached = readThoughtLevelCache(get().currentModel?.modelId)
+    if (!cached) {
+      // 该模型未用过/不支持思考：清掉旧模型的 info，选择器隐藏（首个会话的 settings 补缓存）
+      if (get().thoughtLevel) set({ thoughtLevel: null })
+      return
+    }
+    // 记忆级别对当前模型仍有效则作为 current 显示，否则显示 defaultLevel（标注「默认」）
+    const saved = getPersisted('zcode.thoughtLevel')
+    const current = saved && cached.available.some((a) => a.value === saved) ? saved : undefined
+    set({ thoughtLevel: { ...cached, ...(current ? { current } : {}) } })
+  },
+
   setMode: (mode) => {
-    const sid = get().currentSessionId
-    if (!sid) return
     // 不做 localStorage 记忆：模式是"现在想怎么干活"的即时选择（新会话默认 yolo，避免 plan 粘性）
     // 手动切到 plan 记住前一模式（缺陷E：ExitPlanMode 批准后即时恢复）；切离 plan 清除
+    // 无会话（待命态）也允许预选：只更新 currentMode（待命态无 settings/消息污染，值即预选意图），
+    // 不发协议；createSession 响应里会先于首条消息补下发（预选 plan 则首问就按计划模式跑）
+    const sid = get().currentSessionId
     const prev = get().currentMode
     set({
       currentMode: mode,
@@ -651,6 +675,7 @@ export const useStore = create<StoreState>((set, get) => ({
         ? (prev && prev !== 'plan' ? prev : get().prePlanMode)
         : null,
     })
+    if (!sid) return
     sendToJava({ op: 'setMode', sessionId: sid, mode })
   },
 
@@ -975,6 +1000,35 @@ function inferCurrentMode(messages: ZCodeMessage[]): string | null {
   return null
 }
 
+/* ============ 思考级别 info 按模型缓存 ============
+ * settings（session/read）需要会话，待命态（新标签/新建会话，懒创建前）拿不到级别集。
+ * settings 响应时按当前模型把 available/defaultLevel 落 persist，待命态恢复显示，
+ * 让思考深度在无会话时也可预选（与模型预选对齐）。current 是会话态不入缓存。 */
+const THOUGHT_LEVEL_CACHE_PREFIX = 'zcode.thoughtLevelInfo.'
+
+/** 读某模型的缓存级别集（无缓存/模型不支持思考 → null）*/
+function readThoughtLevelCache(modelId: string | null | undefined): ThoughtLevelInfo | null {
+  if (!modelId) return null
+  try {
+    const raw = getPersisted(THOUGHT_LEVEL_CACHE_PREFIX + modelId)
+    if (!raw) return null
+    const info = JSON.parse(raw) as ThoughtLevelInfo
+    return info?.enabled && info.available?.length ? info : null
+  } catch {
+    return null
+  }
+}
+
+/** 写缓存（settings 响应时按当前模型记录）*/
+function writeThoughtLevelCache(modelId: string | null | undefined, info: ThoughtLevelInfo): void {
+  if (!modelId || !info?.enabled || !info.available?.length) return
+  setPersisted(THOUGHT_LEVEL_CACHE_PREFIX + modelId, JSON.stringify({
+    enabled: true,
+    available: info.available,
+    defaultLevel: info.defaultLevel,
+  }))
+}
+
 /**
  * 从 messages 重新解析状态面板数据（todos/agents/fileChanges），返回 store patch。
  * agents 三源合并：parseAgents（兜底）+ 实时聚合活动 + session/subagents RPC（权威）。
@@ -1043,6 +1097,9 @@ function handleResponse(
       // 懒创建暂存的首条消息须在下方 set 清空前取出
       const sid = msg.sessionId
       const pendingFirst = get().pendingFirstMessage
+      // 待命态预选值（currentMode/thoughtLevel 无会话时的本地记录），下方 set 复位前捕获
+      const preselectedMode = get().currentMode
+      const standbyThought = get().thoughtLevel
       if (sid) {
         const ws = get().projectPath
         set({
@@ -1058,8 +1115,10 @@ function handleResponse(
           queuedMessages: [], // 队列绑定旧会话上下文，新建会话丢弃
           contextUsage: null, // 清空旧会话数据，等 getUsage 回来更新
           contextBreakdown: null,
-          thoughtLevel: null,
-          currentMode: null,
+          // 保留待命态的级别集（与当前模型同源缓存）与预选模式，避免选择器/按钮闪回默认；
+          // 服务端权威值由下方 loadSettings → settings 响应校准
+          thoughtLevel: standbyThought,
+          currentMode: preselectedMode,
           todos: [], // 派生状态同步清零：新会话不发 messages 请求，不重算会一直残留旧会话底部栏数据
           agents: [],
           fileChanges: [],
@@ -1078,6 +1137,17 @@ function handleResponse(
         sendToJava({ op: 'subscribe', sessionId: sid, workspacePath: ws })
         // 新会话也按记忆模型下发 setModel（等 models 就绪，由 applyModelIfReady 内部判断）
         get().applyModelIfReady(sid)
+        // 待命态预选的模式补下发——必须先于首条消息，预选 plan 时首问就按计划模式跑
+        if (preselectedMode) get().setMode(preselectedMode)
+        // 记忆的思考级别同样先于首条消息下发（否则首问跑在服务端默认级别上）；
+        // 用待命态 info / 按模型缓存校验有效性，settings 到达后 applyThoughtLevelIfReady
+        // 被 appliedForSession 标记拦下不重发；无效（无缓存/不在列表）则留给该校准路径兜底
+        const savedLevel = getPersisted('zcode.thoughtLevel')
+        const info = standbyThought ?? readThoughtLevelCache(get().currentModel?.modelId)
+        if (savedLevel && info?.enabled && info.available.some((a) => a.value === savedLevel)) {
+          set({ thoughtLevelAppliedForSession: sid, thoughtLevel: { ...info, current: savedLevel } })
+          sendToJava({ op: 'setThoughtLevel', sessionId: sid, thoughtLevel: savedLevel })
+        }
         // 拉取上下文用量（圆环显示）
         get().loadUsage()
         // 拉取运行时设置（新会话默认模式 + 级别集）
@@ -1111,6 +1181,8 @@ function handleResponse(
           }
           : {}),
       })
+      // 删的是当前会话 → 进入待命态，恢复当前模型的缓存级别集供预选
+      if (deletedCurrent) get().hydrateThoughtLevelStandby()
       break
     }
 
@@ -1317,6 +1389,8 @@ function handleResponse(
         const sid = get().currentSessionId
         if (sid) get().applyModelIfReady(sid)
       }
+      // 待命态：currentModel 刚水合，按它恢复缓存的级别集（ThoughtLevelSelect 预选显示）
+      get().hydrateThoughtLevelStandby()
       break
 
     case 'modelSet':
@@ -1334,6 +1408,8 @@ function handleResponse(
         currentMode: msg.mode?.current ?? null,
         thoughtLevel: msg.thoughtLevel,
       })
+      // 按当前模型缓存级别集（待命态/懒创建首问前的显示与校验用）
+      writeThoughtLevelCache(get().currentModel?.modelId, msg.thoughtLevel)
       // 设置就绪：把记忆的思考级别下发给该会话（available 已知，仿 applyModelIfReady 门控）
       get().applyThoughtLevelIfReady(msg.sessionId)
       break

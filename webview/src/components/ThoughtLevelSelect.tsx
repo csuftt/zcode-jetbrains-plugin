@@ -4,7 +4,8 @@
  * - 数据源：session/read → settings.thoughtLevel.available（服务端权威，因模型而异：
  *   GLM-5.2/deepseek=off/high/max，GLM-4.x/qwen=enabled/off，kimi=low/high/max）
  * - 按钮显示当前级别中文；current 未设置时显示 defaultLevel（后缀「默认」）
- * - 模型不支持思考（enabled=false）或无会话时隐藏
+ * - 模型不支持思考（enabled=false）或无级别数据时隐藏；无会话（待命态）也显示——
+ *   级别集来自按模型缓存（hydrateThoughtLevelStandby 恢复），预选后建会话先于首条消息下发
  * - 外部点击 / Escape 关闭；当前选中项高亮
  */
 
@@ -47,7 +48,6 @@ function levelLabel(value: string, t: TFunction): string {
 export function ThoughtLevelSelect() {
   const { t } = useTranslation()
   const thoughtLevel = useStore((s) => s.thoughtLevel)
-  const sessionId = useStore((s) => s.currentSessionId)
   const setThoughtLevel = useStore((s) => s.setThoughtLevel)
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -69,9 +69,9 @@ export function ThoughtLevelSelect() {
     }
   }, [open])
 
-  // 模型不支持思考级别 / 无数据 / 无会话时整个隐藏
+  // 模型不支持思考级别 / 无数据时整个隐藏（待命态无缓存的新模型即此态，首个会话后补缓存）
   const levels = thoughtLevel?.available ?? []
-  if (!thoughtLevel?.enabled || levels.length === 0 || !sessionId) return null
+  if (!thoughtLevel?.enabled || levels.length === 0) return null
 
   // 显示值：current → defaultLevel（标注默认）→ 兜底「思考」
   const current = thoughtLevel.current ?? thoughtLevel.defaultLevel
