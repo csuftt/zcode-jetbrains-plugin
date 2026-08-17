@@ -136,6 +136,10 @@ export interface SessionInfo {
   workspaceKey?: string
   createdAt: number
   updatedAt: number
+  /** 消息数（Java 直读 db.sqlite 统计；统计失败时字段缺省）*/
+  messageCount?: number
+  /** 内容大小（message+part 字节和；统计失败时字段缺省）*/
+  sizeBytes?: number
 }
 
 // ============ IPC 请求 / 响应（JS ↔ Java）============
@@ -143,13 +147,16 @@ export interface SessionInfo {
 export type JavaRequest =
   | { op: 'listSessions'; workspacePath?: string }
   | { op: 'createSession'; workspacePath?: string }
+  /** 前端进入无会话待命态（「新建会话」延迟创建）→ Java 清 TabState 绑定与标签 tooltip */
+  | { op: 'clearTabSession' }
   | { op: 'deleteSession'; sessionId: string }
   | { op: 'messages'; sessionId: string; workspacePath?: string }
   | { op: 'subagents'; sessionId: string }
   | { op: 'subagentMessages'; sessionId: string; workspacePath?: string }
-  | { op: 'stopSubagent'; childSessionId: string; parentSessionId: string; agentId?: string }
   | { op: 'send'; sessionId: string; text: string; workspacePath?: string }
   | { op: 'subscribe'; sessionId: string; workspacePath?: string }
+  /** 订阅子代理会话事件流（实时归约前提；不改当前会话/标签状态，见 Java handleSubscribeChild）*/
+  | { op: 'subscribeChild'; sessionId: string; workspacePath?: string }
   | { op: 'stop'; sessionId: string }
   | { op: 'getIdeTheme' }
   | { op: 'listFiles'; query: string }
@@ -167,6 +174,14 @@ export type JavaRequest =
   | { op: 'openFile'; filePath: string; line?: number }
   | { op: 'showDiff'; filePath: string; oldContent: string; newContent: string; title?: string }
   | { op: 'refreshFile'; filePath: string }
+  | { op: 'listMemoryFiles' }
+  | { op: 'createMemoryFile'; path: string }
+  | { op: 'listSkills' }
+  | { op: 'toggleSkill'; path: string; enabled: boolean }
+  /** mode：status=状态快照（默认）| connect=真实连接（慢）*/
+  | { op: 'listMcpServers'; mode?: 'status' | 'connect' }
+  /** MCP 连接日志（CLI 落盘的 mcp.* 事件，今天+昨天文件尾部）*/
+  | { op: 'getMcpLogs' }
   | { op: 'askUserResponse'; requestId: string; action: 'accept' | 'decline'; answer?: string }
   | { op: 'createTab' }
   | { op: 'setTabTitle'; title: string; sessionId?: string }
@@ -236,16 +251,107 @@ export interface SlashCommand {
   source?: string
 }
 
+/**
+ * 记忆文件项（设置页「记忆」条目，Kotlin 端清单扫描 + 自动记忆目录扫描）
+ * 指令记忆缺失项也返回（exists=false），前端提供「创建」入口。
+ */
+export interface MemoryFileInfo {
+  /** 文件名：AGENTS.md / MEMORY.md / 事实.md */
+  name: string
+  /** global=全局（~/.zcode） / project=项目（项目根或自动记忆目录）*/
+  scope: 'global' | 'project'
+  /** instructions=指令记忆（缺失可创建）/ auto=ZCode 自动提取的事实记忆（只读）*/
+  kind: 'instructions' | 'auto'
+  /** 绝对路径 */
+  path: string
+  /** 是否已存在 */
+  exists: boolean
+  /** 文件大小（exists 时）*/
+  sizeBytes?: number
+  /** 最后修改时间戳（exists 时）*/
+  lastModified?: number
+  /** 展示说明 */
+  description?: string
+}
+
+/**
+ * 技能条目（设置页「技能」数据源 SkillScanner，对齐 zcode skills list 语义）
+ * junction 挂载的同一技能已在后端按真实路径去重。
+ */
+export interface SkillInfo {
+  name: string
+  description?: string
+  /** frontmatter when_to_use：自动触发时机 */
+  whenToUse?: string
+  /** SKILL.md 绝对路径（编辑器打开锚点 / config 禁用条目 key）*/
+  path: string
+  directory: string
+  /** user=全局 | project=项目 | plugin=插件贡献 */
+  scope: 'user' | 'project' | 'plugin'
+  /** zcode | agents | plugin（scope 内的根目录来源）*/
+  source: string
+  /** 插件技能的插件名（路径推断，识别失败缺省）*/
+  pluginName?: string
+  /** false=config skill 节点显式禁用（enable:false）*/
+  enabled: boolean
+}
+
+/**
+ * MCP 服务器条目（设置页「MCP」数据源 = 磁盘配置 McpConfigReader + RPC mcp/list 状态合并）
+ * status 为空 = RPC 未返回（失败降级），前端显示「未知」态。
+ */
+export interface McpServerInfo {
+  name: string
+  /** user=全局 config | project=项目配置 | plugin=插件 .mcp.json | runtime=仅 RPC 可见（临时注入）*/
+  scope: 'user' | 'project' | 'plugin' | 'runtime'
+  /** stdio | http | sse */
+  transport: string
+  command?: string
+  args?: string[]
+  url?: string
+  /** env 变量名（值不透出）*/
+  envKeys?: string[]
+  /** config enabled 字段（false 时 RPC 状态为 disabled）*/
+  enabled: boolean
+  /** 来源配置文件路径（「打开配置文件」用；runtime 条目为空串）*/
+  configPath: string
+  pluginName?: string
+  /** connecting | connected | disabled | disconnected | failed | untrusted（null=未知）*/
+  status?: string
+  toolCount?: number
+  /** 连接失败/异常信息 */
+  statusError?: string
+  updatedAt?: string
+}
+
+/**
+ * MCP 连接日志条目（ZCode CLI 落盘的 mcp.* 事件，McpLogReader 解析）
+ * timestamp 为 UTC ISO8601（前端 new Date() 转本地时区展示）。
+ */
+export interface McpLogEntry {
+  timestamp: string
+  /** info | warn | error */
+  level: string
+  /** 原始事件名（前端按事件染色，如 mcp.server.connected 绿）*/
+  event: string
+  /** 服务器名（startup 类事件为空串）*/
+  serverName: string
+  /** 人读中文摘要（后端已从 context 拼好）*/
+  message: string
+  durationMs?: number
+}
+
 export type JavaResponse =
   | { op: 'listSessions'; sessions: SessionInfo[] }
   | { op: 'createSession'; sessionId: string }
+  | { op: 'tabSessionCleared' }
   | { op: 'sessionDeleted'; sessionId: string }
   | { op: 'messages'; sessionId: string; messages: ZCodeMessage[] }
   | { op: 'subagents'; sessionId: string; data: SubagentsResult; error?: string }
   | { op: 'subagentMessages'; sessionId: string; messages: ZCodeMessage[]; error?: string }
-  | { op: 'subagentStopped'; sessionId: string; stopped?: boolean; via?: string; error?: string }
   | { op: 'sendAccepted'; sessionId: string; accepted: string; cliResponse?: unknown }
   | { op: 'subscribed'; sessionId: string; alreadySubscribed?: boolean }
+  | { op: 'subscribedChild'; sessionId: string }
   | { op: 'stopped'; sessionId: string }
   | { op: 'streamEvent'; sessionId: string; event: StreamEvent }
   | { op: 'streamBatch'; sessionId: string; events: StreamEvent[] }
@@ -264,13 +370,23 @@ export type JavaResponse =
   | { op: 'settings'; sessionId: string; mode: { current?: string }; thoughtLevel: ThoughtLevelInfo }
   | { op: 'thoughtLevelSet'; sessionId: string; thoughtLevel: string }
   | { op: 'modeSet'; sessionId: string; mode: string }
-  | { op: 'usage'; sessionId?: string; used: number; size: number; hitRate: number; breakdown?: ContextBreakdownItem[] }
+  // hitRate 缺省 = 服务端暂无统计（新 turn 首次模型调用完成前聚合器为空），
+  // Kotlin 端对 JSON null 不输出该字段——前端据此显示"—"，而非误导性的 0%
+  | { op: 'usage'; sessionId?: string; used: number; size: number; hitRate?: number; breakdown?: ContextBreakdownItem[] }
   | { op: 'quota'; data?: QuotaData | null; error?: string }
   | { op: 'modelUsage'; data?: ModelUsageData | null; error?: string }
   | { op: 'toolUsage'; data?: ToolUsageData | null; error?: string }
   | { op: 'fileOpened' }
   | { op: 'diffShown' }
   | { op: 'fileRefreshed' }
+  | { op: 'memoryFiles'; files: MemoryFileInfo[] }
+  | { op: 'memoryFileCreated'; path: string }
+  | { op: 'skills'; skills: SkillInfo[] }
+  | { op: 'skillToggled'; path: string; enabled: boolean }
+  /** rpcError 存在 = mcp/list RPC 失败，servers 为磁盘配置降级清单 */
+  | { op: 'mcpServers'; mode: string; servers: McpServerInfo[]; rpcError?: string }
+  /** MCP 连接日志条目（McpLogReader 读 CLI jsonl，中文摘要已拼好）*/
+  | { op: 'mcpLogs'; logs: McpLogEntry[] }
   | { op: 'error'; message: string }
 
 // ============ 流式事件（session/event 透传）============
@@ -448,6 +564,14 @@ export interface FileChangeItem {
   fileName: string
   additions: number
   deletions: number
+  /** 该文件每次编辑的替换内容（弹前后对比用；Write 为整文件新增，oldContent 为空）*/
+  edits?: FileEditContent[]
+}
+
+/** 单次编辑的替换片段（Edit 的 old/new_string；Write 只有 newContent）*/
+export interface FileEditContent {
+  oldContent: string
+  newContent: string
 }
 
 // ============ 额度数据（glm plan usage API）============

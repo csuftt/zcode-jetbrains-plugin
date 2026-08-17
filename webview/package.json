@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:single": "tsc -b && vite build --config vite.singlefile.config.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@lobehub/icons": "^5.16.0",
@@ -28,6 +29,7 @@
     "less": "^4.2.1",
     "typescript": "^5.7.2",
     "vite": "^7.0.0",
-    "vite-plugin-singlefile": "^2.1.0"
+    "vite-plugin-singlefile": "^2.1.0",
+    "vitest": "^4.1.10"
   }
 }

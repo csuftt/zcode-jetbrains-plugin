@@ -43,6 +43,23 @@ export function formatDuration(ms: number): string {
   return `${m} 分 ${sec % 60} 秒`
 }
 
+/**
+ * 工具级耗时毫秒 → "X.X 秒" / "X 分 Y 秒"（单位统一为秒，含亚秒精度）
+ * 工具调用常为亚秒级（Read/Edit 等），沿用 formatDuration 会全部显示"0 秒"
+ */
+export function formatToolDuration(ms: number): string {
+  if (ms < 60000) return `${(Math.max(0, ms) / 1000).toFixed(1)} 秒`
+  return formatDuration(ms)
+}
+
+/** 字节数 → "45.2 KB" / "1.2 MB"（1024 进制，保留 1 位小数；cc-gui 历史列表同款） */
+export function formatFileSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 KB'
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  return `${(kb / 1024).toFixed(1)} MB`
+}
+
 /** 计时器描述：已耗时秒数 → "X 秒" / "X 分 Y 秒"（规划文档第四节 WaitingIndicator） */
 export function elapsedDesc(startMs: number, now: number = Date.now()): string {
   return formatDuration(now - startMs)

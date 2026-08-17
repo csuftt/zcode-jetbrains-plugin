@@ -3,15 +3,17 @@
  *
  *   ┌──────────────────────────────────────────┐
  *   │ 会话标题（active 蓝点）        时间 [🗑]  │  ← 删除按钮 hover 显现
+ *   │ 12 条消息 · 45.2 KB · 运行中              │  ← meta 行（统计缺省时整行隐藏）
  *   └──────────────────────────────────────────┘
  * - hover：浅高亮
  * - active：标题前蓝点 ●，背景 accent 10%
+ * - 大小超 1MB 橙色警示（上下文已很大，cc-gui history-filesize-large 同款）
  * - 删除：hover 显示 codicon-trash，点击进入"确认删除"（红色，3s 未确认自动恢复），再点触发删除
  */
 
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useRef, useState, Fragment, type ReactNode } from 'react'
 import type { SessionInfo } from '@/types/messages'
-import { relativeTime } from '@/utils/time'
+import { relativeTime, formatFileSize } from '@/utils/time'
 import '../styles/session-item.less'
 
 interface Props {
@@ -98,11 +100,34 @@ function SessionItemInner({
           </button>
         )}
       </div>
-      {session.status === 'running' && (
-        <div className="session-item__meta">
-          <span className="session-item__status">运行中</span>
-        </div>
-      )}
+      {/* meta 行：消息数 · 大小 · 运行中（统计缺省且非 running 时整行隐藏）*/}
+      {(() => {
+        const metaParts: ReactNode[] = []
+        if (session.messageCount != null) {
+          metaParts.push(<span key="cnt">{session.messageCount} 条消息</span>)
+        }
+        if (session.sizeBytes != null && session.sizeBytes > 0) {
+          metaParts.push(
+            <span key="size" className={session.sizeBytes > 1024 * 1024 ? 'session-item__size-large' : ''}>
+              {formatFileSize(session.sizeBytes)}
+            </span>,
+          )
+        }
+        if (session.status === 'running') {
+          metaParts.push(<span key="run" className="session-item__status">运行中</span>)
+        }
+        if (metaParts.length === 0) return null
+        return (
+          <div className="session-item__meta">
+            {metaParts.map((part, i) => (
+              <Fragment key={i}>
+                {i > 0 && <span className="session-item__meta-dot">·</span>}
+                {part}
+              </Fragment>
+            ))}
+          </div>
+        )
+      })()}
     </li>
   )
 }

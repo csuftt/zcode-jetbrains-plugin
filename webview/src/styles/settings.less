@@ -2,6 +2,8 @@
  * 设置视图样式（对齐 cc-gui SettingsView：顶部标题栏 + 窄边栏 + 内容区）
  */
 
+@import './mixins.less';
+
 .settings-view {
   flex: 1;
   min-height: 0;
@@ -35,6 +37,8 @@
     background: transparent;
     color: var(--text-tertiary);
     cursor: pointer;
+    position: relative; /* tooltip ::after/::before 的定位基准 */
+    .tooltip-bottom-center(32px);
 
     .codicon {
       font-size: 16px;
@@ -60,7 +64,7 @@
     display: flex;
   }
 
-  /* 左侧窄边栏：纯图标，hover title tooltip 显示文字（对齐 cc-gui collapsed 态）*/
+  /* 左侧窄边栏：纯图标，hover CSS tooltip 从右侧弹出文字（对齐 cc-gui collapsed 态）*/
   &__sidebar {
     width: 48px;
     flex-shrink: 0;
@@ -85,6 +89,7 @@
     color: var(--text-secondary);
     cursor: pointer;
     position: relative;
+    .tooltip-right-center(8px);
 
     .codicon {
       font-size: 13px; /* 与 Header 图标按钮同档，避免撑满按钮 */

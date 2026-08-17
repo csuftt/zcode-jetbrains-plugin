@@ -7,6 +7,7 @@
  * - @文件引用（FileRef chip + 补全下拉）
  * - /斜杠命令技能选择（行首 / 触发，磁盘扫描 skill/command）
  * - 输入历史导航（useInputHistory：空输入 ArrowUp 回溯、ArrowDown 前进）
+ * - 历史前缀幽灵补全（findHistorySuggestion：输入匹配历史前缀显示灰色后缀，Tab 采纳/Esc 关闭）
  * - 发送/停止 28×28 互斥（isStreaming ? codicon-debug-stop : codicon-send）
  * - 排队消息列表（卡片顶部，MessageQueue 组件：序号+预览+立即发送+删除）
  * - 引用 chips 区（技能+文件，对齐 cc-gui：MessageQueue 之下、ContextBar 之上，不贴输入框）
@@ -22,7 +23,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useKeyboard } from '@/hooks/useKeyboard'
-import { useInputHistory } from '@/hooks/useInputHistory'
+import { useInputHistory, findHistorySuggestion } from '@/hooks/useInputHistory'
 import { useStore } from '@/store/useStore'
 import { FileRef } from './FileRef'
 import { SkillRef } from './SkillRef'
@@ -92,6 +93,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   /** 首次加载缓存（会话切换不重复请求磁盘）*/
   const slashCacheRef = useRef<SlashCommand[] | null>(null)
 
+  /** 历史前缀幽灵补全后缀（cc-gui data-completion-suffix 同款，Tab 采纳）*/
+  const [ghostSuffix, setGhostSuffix] = useState('')
+
   const { handleKeyDown, handleCompositionEnd } = useKeyboard({
     onSend: doSend,
     // streaming 中不禁用：Enter 走 sendMessage 入队（回合结束自动发送）
@@ -107,10 +111,11 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     if (!el) return
     el.innerText = text
     setHasText(!!text.trim())
-    // 回填不算输入行为，直接关闭 @ / / 补全
+    // 回填不算输入行为，直接关闭 @ / / 补全与幽灵建议（程序赋值不触发 onInput）
     setMentionQuery(null)
     setMentionFiles([])
     setSlashQuery(null)
+    setGhostSuffix('')
     // 历史文本里的 @绝对路径 回显为内联 chip（includeTrailing：回填内容已完整）
     convertCompletedPaths(el, true)
     placeCursorEnd(el)
@@ -125,6 +130,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const sessionId = useStore((s) => s.currentSessionId)
   useEffect(() => {
     resetNav()
+    setGhostSuffix('')
   }, [sessionId, resetNav])
 
   // ============ 发送 ============
@@ -165,6 +171,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       editorRef.current.textContent = ''
       setHasText(false)
     }
+    setGhostSuffix('')
   }
 
   /** 队列消息回填输入框（编辑）：非空时换行追加，光标移到末尾并聚焦 */
@@ -208,9 +215,10 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     }
 
     // 检测 / 斜杠命令（行首），命中时 @ 不触发（互斥）
-    if (!checkSlashTrigger(el)) {
-      checkMentionTrigger(el)
-    }
+    const slashOpen = checkSlashTrigger(el)
+    const mentionOpen = !slashOpen && checkMentionTrigger(el)
+    // 历史前缀幽灵建议（@ / / 补全打开时不显示，方向键归下拉）
+    updateGhostSuggestion(el, slashOpen, mentionOpen)
   }, [])
 
   /**
@@ -339,20 +347,62 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     return () => window.removeEventListener('keydown', onKey)
   }, [previewPasteId])
 
-  /** 检测光标前是否有未完成的 @xxx，触发文件补全（textBeforeCaret 跳过内联 chip）*/
-  function checkMentionTrigger(el: HTMLDivElement) {
+  /** 检测光标前是否有未完成的 @xxx，触发文件补全（textBeforeCaret 跳过内联 chip）；返回是否命中 */
+  function checkMentionTrigger(el: HTMLDivElement): boolean {
     const sel = window.getSelection()
-    if (!sel || sel.rangeCount === 0) return
+    if (!sel || sel.rangeCount === 0) return false
     const beforeCursor = textBeforeCaret(el, sel.getRangeAt(0))
     const atMatch = beforeCursor.match(/@([^\s@]*)$/)
     if (atMatch) {
       const query = atMatch[1]
       setMentionQuery(query)
       requestFiles(query)
-    } else {
-      setMentionQuery(null)
-      setMentionFiles([])
+      return true
     }
+    setMentionQuery(null)
+    setMentionFiles([])
+    return false
+  }
+
+  /**
+   * 光标是否在编辑器内容末尾（幽灵建议只在末尾输入时显示，中间编辑不提示）。
+   * 不能用 compareBoundaryPoints 与 selectNodeContents(el) 的末 range 比较：
+   * 打字后光标在文本节点内 (text, len)，而容器末 range 是 (el, childNodes.length)，
+   * DOM 边界点比较对这两个等价位置返回 -1 而非 0，导致恒判 false。
+   * 改判：光标 offset 在其所在节点末尾，且该节点在 el 的 lastChild 链上（或就是 el）。
+   */
+  function isCaretAtEnd(el: HTMLDivElement): boolean {
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) return false
+    const node = sel.focusNode
+    if (!node || !el.contains(node)) return false
+    const endOffset =
+      node.nodeType === Node.TEXT_NODE ? (node.textContent ?? '').length : node.childNodes.length
+    if (sel.focusOffset !== endOffset) return false
+    let cur: Node | null = node
+    while (cur && cur !== el) {
+      const parent: Node | null = cur.parentNode
+      if (!parent || parent.lastChild !== cur) return false
+      cur = parent
+    }
+    return cur === el
+  }
+
+  /**
+   * 历史前缀幽灵建议（cc-gui useInlineHistoryCompletion 简化版）：
+   * 单行、≥2 字符、光标在末尾、@ / / 补全未打开时，从输入历史找前缀匹配，
+   * 命中则把建议的剩余部分作为灰色后缀显示（data-completion-suffix，Tab 采纳）。
+   * 内存数组 ≤200 条同步扫描，无需防抖。
+   */
+  function updateGhostSuggestion(el: HTMLDivElement, slashOpen: boolean, mentionOpen: boolean) {
+    const text = el.innerText.replace(/\n$/, '')
+    if (slashOpen || mentionOpen || text.length < 2 || text.includes('\n') || !isCaretAtEnd(el)) {
+      setGhostSuffix('')
+      return
+    }
+    const suggestion = findHistorySuggestion(text)
+    // 后缀取建议文本去掉已输入前缀的剩余部分（保留用户实际输入的大小写）
+    setGhostSuffix(suggestion ? suggestion.slice(text.length) : '')
   }
 
   /** 请求文件列表（防抖）*/
@@ -647,6 +697,20 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         return
       }
     }
+    // 历史前缀幽灵建议：Tab 采纳 / Escape 关闭（IME 合成中按键留给输入法）
+    if (!e.nativeEvent.isComposing && ghostSuffix) {
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        const el = editorRef.current
+        if (el) setTextFromHistory(el.innerText.replace(/\n$/, '') + ghostSuffix)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setGhostSuffix('')
+        return
+      }
+    }
     // 历史导航（补全关闭时）：空输入 ArrowUp 回溯 / 导航中 ArrowDown 前进
     if (handleHistoryKeyDown(e)) return
     // 正常的 IME 安全发送
@@ -727,6 +791,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                 ? '回复生成中，Enter 加入发送队列…'
                 : placeholder || '@引用文件，/ 调用技能，Enter 发送'
             }
+            data-completion-suffix={ghostSuffix || undefined}
             onInput={handleInput}
             onKeyDown={handleEditorKeyDown}
             onCompositionEnd={handleCompositionEnd}

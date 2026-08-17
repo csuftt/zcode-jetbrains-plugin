@@ -189,6 +189,13 @@
     }
   }
 
+  /* 子代理提示词（Agent 输入的 prompt）：自然语言散文，按整词断行
+     （覆盖 __code 的 break-all，英文单词不再被硬切两行）*/
+  &__prompt {
+    word-break: break-word;
+    color: var(--text-secondary);
+  }
+
   &__time {
     font-size: 10px;
     color: var(--text-muted);
@@ -232,6 +239,350 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ===== 批量运行命令组（cc-gui BashToolGroupBlock 移植）===== */
+.bash-group {
+  margin: 8px 0;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  background: var(--color-tool-bg);
+  overflow: hidden;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    /* 展开时头部与列表之间加分隔线 */
+    &--open {
+      border-bottom: 1px solid var(--border-secondary);
+    }
+  }
+
+  &__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    line-height: 1;
+
+    .codicon {
+      font-size: 14px;
+    }
+  }
+
+  &__title {
+    color: var(--text-primary);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  &__spacer {
+    flex: 1;
+  }
+
+  &__progress {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+
+    .codicon {
+      font-size: 12px;
+    }
+
+    &--ok { color: var(--status-success); }
+    &--error { color: var(--status-error); }
+  }
+
+  /* ===== 时间线列表 ===== */
+  &__timeline {
+    padding: 8px 12px 8px 16px;
+    overflow-x: hidden;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 3px;
+
+      &:hover {
+        background: var(--scrollbar-thumb-hover);
+      }
+    }
+  }
+
+  &__item {
+    display: flex;
+    position: relative;
+    min-height: 32px;
+  }
+
+  /* 连接线 + 节点 */
+  &__connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 20px;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  &__line {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border-secondary);
+    transform: translateX(-50%);
+
+    /* 末项的线只到节点处，不垂到行底 */
+    &--last {
+      height: 10px;
+      bottom: auto;
+    }
+  }
+
+  &__node {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    margin-top: 12px;
+
+    /* 运行中：呼吸脉动 */
+    &--pending {
+      background: var(--status-warning);
+      animation: bash-node-breathing 1.5s ease-in-out infinite;
+    }
+
+    &--completed { background: var(--status-success); }
+    &--error { background: var(--status-error); }
+  }
+
+  /* 行内容 */
+  &__content {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px;
+    margin-left: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover,
+    &--open {
+      background: var(--bg-hover);
+    }
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+  }
+
+  &__desc {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    /* 无 description 回退到命令时用等宽字体 */
+    &--cmd {
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+  }
+
+  &__status {
+    font-size: 12px;
+    flex-shrink: 0;
+
+    &--pending { color: var(--status-warning); animation: tool-spin 1s linear infinite; }
+    &--completed { color: var(--status-success); }
+    &--error { color: var(--status-error); }
+  }
+
+  /* 单项展开详情 */
+  &__detail {
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-secondary);
+  }
+
+  &__cmd {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--status-success);
+    background: var(--code-bg);
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  &__out {
+    margin: 6px 0 0;
+    color: var(--text-secondary);
+    max-height: 150px;
+
+    &--err {
+      color: var(--status-error-text);
+      border-color: rgba(244, 67, 54, 0.3);
+    }
+  }
+}
+
+@keyframes bash-node-breathing {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ===== 文件类工具批量组（cc-gui Read/Edit/SearchToolGroupBlock 移植；
+       头部复用 .bash-group__* 样式，仅列表行为文件风格）===== */
+.file-group {
+  margin: 8px 0;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  background: var(--color-tool-bg);
+  overflow: hidden;
+}
+
+.file-group__list {
+  padding: 6px 8px;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
+
+    &:hover {
+      background: var(--scrollbar-thumb-hover);
+    }
+  }
+}
+
+.file-group__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-height: 28px;
+  flex-shrink: 0;
+}
+
+.file-group__row:hover {
+  background: var(--bg-hover);
+}
+
+.file-group__file-ic {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.file-group__tool-ic {
+  font-size: 13px;
+  color: var(--text-secondary);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.file-group__file-name {
+  font-size: 12px;
+  color: var(--link-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+/* 增删统计（行内 + 头部合计共用）*/
+.file-group__stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.file-group__stats-sep {
+  width: 4px;
+}
+
+.file-group__add {
+  color: var(--status-success);
+}
+
+.file-group__del {
+  color: var(--status-error);
+}
+
+/* 搜索行：pattern 等宽主体 + path 次要信息 */
+.file-group__pattern {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-group__path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 40%;
+  opacity: 0.8;
+}
+
+
 
 /* ===== 子代理摘要行（Agent/Task 卡片，header 下方）===== */
 .tool-card__subagent-line {

@@ -61,24 +61,38 @@ function handleTurnStarted(
   const p = payload as { messageId?: string; input?: string }
   const msgId = p.messageId || `stream_${event.turnId || event.seq}`
 
-  // 避免重复创建（turn.started 可能重发）
-  if (messages.some((m) => m.info.id === msgId)) {
-    return { messages, streamingMessageId: msgId, turnEnded: false }
+  // 避免重复创建（turn.started 可能重发）；命中 user 消息不算重发——
+  // 协议的 messageId 是触发 turn 的 user 消息 id，与重拉后的服务端 user 消息
+  // 同 id，直接复用会让后续 delta 叠进用户气泡（排队消息过期重拉竞态），
+  // 换独立命名空间 id 新建流式消息
+  const hit = messages.find((m) => m.info.id === msgId)
+  if (hit) {
+    if (hit.info.role === 'assistant') {
+      return { messages, streamingMessageId: msgId, turnEnded: false }
+    }
+    return {
+      messages: [...messages, createAssistantMessage(event, `stream_${msgId}`)],
+      streamingMessageId: `stream_${msgId}`,
+      turnEnded: false,
+    }
   }
 
-  const newMsg: ZCodeMessage = {
+  return {
+    messages: [...messages, createAssistantMessage(event, msgId)],
+    streamingMessageId: msgId,
+    turnEnded: false,
+  }
+}
+
+function createAssistantMessage(event: StreamEvent, id: string): ZCodeMessage {
+  return {
     info: {
       role: 'assistant',
       time: { created: event.timestamp },
-      id: msgId,
+      id,
       sessionID: event.sessionId,
     },
     parts: [],
-  }
-  return {
-    messages: [...messages, newMsg],
-    streamingMessageId: msgId,
-    turnEnded: false,
   }
 }
 
@@ -119,7 +133,11 @@ function handleModelStreaming(
   }
 
   const idx = messages.findIndex((m) => m.info.id === streamingMessageId)
-  if (idx < 0) return { messages, streamingMessageId, turnEnded: false }
+  // role 防护：流式目标必须是 assistant 消息（user 气泡把 text part 直接拼接显示，
+  // 一旦叠入 AI delta 即"用户消息里长出 AI 回复"），异常定位宁可丢 delta 也不写错
+  if (idx < 0 || messages[idx].info.role !== 'assistant') {
+    return { messages, streamingMessageId, turnEnded: false }
+  }
 
   const msg = messages[idx]
   const parts = [...msg.parts]
@@ -174,7 +192,10 @@ function handleToolInputStreaming(
   if (!callId) return { messages, streamingMessageId, turnEnded: false }
 
   const idx = messages.findIndex((m) => m.info.id === streamingMessageId)
-  if (idx < 0) return { messages, streamingMessageId, turnEnded: false }
+  // role 防护：同 handleModelStreaming，流式目标必须是 assistant 消息
+  if (idx < 0 || messages[idx].info.role !== 'assistant') {
+    return { messages, streamingMessageId, turnEnded: false }
+  }
 
   const msg = messages[idx]
   const parts = [...msg.parts]
@@ -261,7 +282,10 @@ function handleToolUpdated(
     const idx = streamingMessageId
       ? messages.findIndex((m) => m.info.id === streamingMessageId)
       : findLastAssistantIdx(messages)
-    if (idx < 0) return { messages, streamingMessageId, turnEnded: false }
+    // role 防护：同上，streamingMessageId 定位到的必须是 assistant 消息
+    if (idx < 0 || messages[idx].info.role !== 'assistant') {
+      return { messages, streamingMessageId, turnEnded: false }
+    }
 
     const msg = messages[idx]
     const parts = [...msg.parts]
@@ -303,7 +327,10 @@ function handleToolUpdated(
   const idx = targetId
     ? messages.findIndex((m) => m.info.id === targetId)
     : findLastAssistantIdx(messages)
-  if (idx < 0) return { messages, streamingMessageId, turnEnded: false }
+  // role 防护：streamingMessageId 定位到的必须是 assistant 消息（同 handleModelStreaming）
+  if (idx < 0 || messages[idx].info.role !== 'assistant') {
+    return { messages, streamingMessageId, turnEnded: false }
+  }
 
   const msg = messages[idx]
   const parts = [...msg.parts]

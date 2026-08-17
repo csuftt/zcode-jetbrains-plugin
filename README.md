@@ -35,10 +35,14 @@
 ## 快速开始
 
 ```bash
-# 构建前端产物
-cd webview && npm install && npm run build:single && cd ..
+# 一键清理 + 重建（推荐）：
+#   清 Gradle 构建目录 + webview 缓存 → build:single → buildPlugin
+#   产物：intellij-plugin/build/distributions/ZC-GUI-<版本>.zip（IDE 内离线安装）
+./build.sh               # 完整清理 + 重建
+./build.sh --skip-clean  # 跳过清理，仅增量构建
 
-# 构建插件（产物在 intellij-plugin/build/distributions/*.zip，IDE 内离线安装）
+# 或分步执行：
+cd webview && npm install && npm run build:single && cd ..
 ./gradlew :intellij-plugin:buildPlugin
 
 # 或启动沙箱 IDE 直接体验

@@ -55,6 +55,12 @@ tasks {
         enabled = false
     }
 
+    // 发行包命名：默认是「模块名-版本.zip」（intellij-plugin-0.1.0.zip），
+    // 改为 ZC-GUI-<版本>.zip，只改 zip 文件名，不影响包内结构与安装
+    buildPlugin {
+        archiveFileName.set("ZC-GUI-${project.version}.zip")
+    }
+
     // 不签名（开发期）
     signPlugin {
         enabled = false

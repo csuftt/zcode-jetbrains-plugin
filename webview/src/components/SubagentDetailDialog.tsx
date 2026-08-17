@@ -4,20 +4,38 @@
  * 入口：底部状态面板"子代理"条目点击 / 主聊天 Agent 工具卡点击。
  *
  * 数据分三层（按运行状态取最优）：
- * - 运行中：childLiveMessages——子会话原生事件流（含 AI 文本增量）的实时归约，
- *   完整对话实时滚动；即使手动拉过快照（childMessages）也优先实时流；
- * - 已结束：childMessages——subagentMessages op（resume + session/messages）的
- *   权威全量转录；由 stopped 通知 / turn 结束自动拉取；
+ * - 运行中：每 3s 静默轮询 childMessages 快照（subagentMessages op：resume + 读）——
+ *   子会话原生事件流服务端不投递（subscribeChild 实测无效），轮询是实时性的
+ *   唯一可靠来源；childLiveMessages（事件流归约）保留为优先源，服务端若某天
+ *   开始投递原生事件则自动升级为真·实时；
+ * - 已结束：childMessages——stopped 通知 / turn 结束自动拉取的权威全量转录；
  * - 兜底：subagentActivities 的实时工具列表（父会话转发的工具事件聚合，
- *   子会话事件流缺失时——如历史会话——至少展示工具过程）。
+ *   快照未返回时——如历史会话——至少展示工具过程）。
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import { ToolCallCard } from './ToolCallCard'
+import { BashCommandGroupCard } from './BashCommandGroupCard'
+import { FileToolGroupCard } from './FileToolGroupCard'
+import { groupParts, type PartRenderUnit } from '@/utils/groupParts'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
+
+/**
+ * 分组单元 → 组卡片/单卡（弹窗内 Transcript 与回退工具列表共用，
+ * 规则同主聊天 MessageBubble：连续同类工具聚组，单个走原单卡）
+ */
+function UnitRenderer({ unit }: { unit: PartRenderUnit }) {
+  if (unit.kind === 'toolGroup') {
+    return unit.group === 'bash'
+      ? <BashCommandGroupCard parts={unit.parts} />
+      : <FileToolGroupCard kind={unit.group} parts={unit.parts} />
+  }
+  if (unit.part.type === 'tool') return <ToolCallCard part={unit.part} />
+  return null
+}
 
 /** 秒级耗时格式化（子代理 startedAt/endedAt 是 ms 时间戳）*/
 function formatDuration(startedAt?: number, endedAt?: number): string {
@@ -39,28 +57,55 @@ function statusText(status: string | undefined): { text: string; cls: string } {
   }
 }
 
-/** 子会话完整消息 → 转录（user prompt + assistant 文本/工具，复用主聊天渲染组件）*/
-function Transcript({ messages }: { messages: ZCodeMessage[] }) {
+/** 子会话完整消息 → 转录（user prompt + assistant 文本/工具，复用主聊天渲染组件）。
+ *  完成态：末条 assistant 消息即子代理最终报告，在过程流中折叠为入口行
+ *  （全文由报告弹窗承载，避免过程末尾大段报告与独立查看入口重复）；
+ *  运行中不折叠——实时文本是了解进展的唯一窗口。*/
+function Transcript({
+  messages,
+  running,
+  onOpenReport,
+}: {
+  messages: ZCodeMessage[]
+  running: boolean
+  /** 点击折叠行打开报告弹窗（入参 = 该条文本，Agent 工具输出缺失时兜底）*/
+  onOpenReport: (fallbackMd: string) => void
+}) {
   return (
     <div className="subagent-detail-transcript">
-      {messages.map((msg, i) => (
-        <div key={msg.info.id || i} className={`subagent-detail-msg role-${msg.info.role}`}>
-          <div className="subagent-detail-msg-role">
-            {msg.info.role === 'user' ? '任务' : 'AI'}
+      {messages.map((msg, i) => {
+        const reportText = msg.parts
+          .filter((p) => p.type === 'text')
+          .map((p) => p.text)
+          .join('')
+          .trim()
+        const collapsed = !running && i === messages.length - 1
+          && msg.info.role === 'assistant' && reportText.length > 0
+        return (
+          <div key={msg.info.id || i} className={`subagent-detail-msg role-${msg.info.role}`}>
+            <div className="subagent-detail-msg-role">
+              {msg.info.role === 'user' ? '任务' : 'AI'}
+            </div>
+            <div className="subagent-detail-msg-body">
+              {/* 连续同类工具聚组（同主聊天规则）：子代理连读十几个文件时压缩弹窗长度 */}
+              {groupParts(msg.parts).map((unit) =>
+                unit.kind === 'single' && unit.part.type === 'text' && unit.part.text.trim() ? (
+                  collapsed ? null : <MarkdownBlock key={unit.index} markdown={unit.part.text} />
+                ) : (
+                  <UnitRenderer key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index} unit={unit} />
+                ),
+              )}
+              {collapsed && (
+                <div className="subagent-detail-report-collapsed" onClick={() => onOpenReport(reportText)}>
+                  <span className="codicon codicon-book" />
+                  <span>最终报告已生成，点击弹窗阅读</span>
+                  <span className="codicon codicon-chevron-right" />
+                </div>
+              )}
+            </div>
           </div>
-          <div className="subagent-detail-msg-body">
-            {msg.parts.map((part, j) => {
-              if (part.type === 'text' && part.text.trim()) {
-                return <MarkdownBlock key={j} markdown={part.text} />
-              }
-              if (part.type === 'tool') {
-                return <ToolCallCard key={j} part={part} />
-              }
-              return null
-            })}
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -76,10 +121,18 @@ export function SubagentDetailDialog() {
   const error = useStore((s) => s.childMessagesError)
   const messages = useStore((s) => s.messages)
   const closeDetail = useStore((s) => s.closeSubagentDetail)
+  const openSubagentReport = useStore((s) => s.openSubagentReport)
   const loadChildMessages = useStore((s) => s.loadChildMessages)
-  const stopSubagent = useStore((s) => s.stopSubagent)
-  // 停止按钮防重复点击（受理后等事件流收尾，状态变非 running 时按钮消失）
-  const [stopping, setStopping] = useState(false)
+  // 手动刷新/轮询共用的按钮动画：loading 只在非静默请求往返期间为 true
+  // （本地→Kotlin→CLI 链路快时闪烁几十 ms 不可感知），故每次触发保证至少转 600ms
+  const [refreshSpin, setRefreshSpin] = useState(false)
+  const refreshSpinTimer = useRef<number>(0)
+  useEffect(() => () => window.clearTimeout(refreshSpinTimer.current), [])
+  const triggerSpin = () => {
+    setRefreshSpin(true)
+    window.clearTimeout(refreshSpinTimer.current)
+    refreshSpinTimer.current = window.setTimeout(() => setRefreshSpin(false), 600)
+  }
 
   const key = detailKey
   const item = key ? agents.find((a) => a.callID === key) : undefined
@@ -118,7 +171,6 @@ export function SubagentDetailDialog() {
   // 打开/切换子代理详情 → 重置上滑标志并定位到底部（最新进展）
   useEffect(() => {
     userScrolledUp.current = false
-    setStopping(false)
     const el = bodyRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [key])
@@ -129,11 +181,30 @@ export function SubagentDetailDialog() {
     el.scrollTop = el.scrollHeight
   }, [contentFingerprint])
 
-  // 已结束且有 childSessionId 但未加载 → 自动拉完整过程（运行中不拉，见文件头）
+  // 已结束且有 childSessionId 但未加载 → 自动拉完整过程
   useEffect(() => {
     if (!key || !childSessionId || transcript || running || loading || error) return
     loadChildMessages(childSessionId)
   }, [key, childSessionId, transcript, running, loading, error, loadChildMessages])
+
+  // 运行中：每 3s 静默轮询子会话快照（实时兜底）。
+  // 子会话原生事件流（text_delta 等）服务端实测不投递——subscribeChild 补订后
+  // 事件仍不到（只推父会话转发的工具级摘要），实时流归约无源；而"resume + 读
+  // 快照"路径（手动刷新按钮）实测可靠，故运行中以轮询快照为准。
+  // 结束（running=false，事件流收尾时会再拉一次权威全量）或关闭弹窗即停。
+  // 若某版本服务端开始投递原生事件，liveMessages 仍有数据且优先于轮询快照（见 display）
+  useEffect(() => {
+    if (!running || !childSessionId) return
+    // 打开即拉一次（不等第一个 3s），此后每 3s 轮询；每次触发同样旋转按钮
+    // （最短 600ms 心跳动画）——自动刷新对用户可见，而非只有数据悄悄变化
+    const poll = () => {
+      loadChildMessages(childSessionId, true)
+      triggerSpin()
+    }
+    poll()
+    const timer = setInterval(poll, 3000)
+    return () => clearInterval(timer)
+  }, [running, childSessionId, loadChildMessages])
 
   // Escape 关闭
   useEffect(() => {
@@ -152,7 +223,9 @@ export function SubagentDetailDialog() {
   const toolCount = activity?.tools.length ?? 0
 
   const handleRefresh = () => {
-    if (childSessionId) loadChildMessages(childSessionId)
+    if (!childSessionId) return
+    loadChildMessages(childSessionId)
+    triggerSpin()
   }
 
   // 主聊天里 Agent 工具 part 的 output（最终报告，childSessionId 缺失时的兜底内容）
@@ -162,6 +235,10 @@ export function SubagentDetailDialog() {
       if (p.type === 'tool' && p.callID === key && p.state.output) agentOutput = p.state.output
     }
   }
+  // 报告按钮：状态=已完成才显示（running 时报告未生成、error 时无完整报告可读），
+  // 状态取三源之最先非空（流式聚合 / RPC 权威 / 转发活动，见数据分三层注释）
+  const finalStatus = item?.status ?? info?.status ?? activity?.status
+  const reportReady = finalStatus === 'completed' && !!agentOutput
 
   return (
     <div className="subagent-detail-overlay" onClick={closeDetail}>
@@ -183,27 +260,30 @@ export function SubagentDetailDialog() {
               {toolCount > 0 && <span className="subagent-detail-meta-item">{toolCount} 个工具</span>}
             </div>
           </div>
-          {/* 运行中：手动停止子代理（cancelBackgroundTask 优先、停主 turn 兜底；
-              停止后事件流自然收尾：子会话终止 → Agent 中断结果 → stopped → 权威转录）*/}
-          {running && childSessionId && (
-            <button
-              className="subagent-detail-icon-btn subagent-detail-stop-btn"
-              title={stopping ? '停止请求已发出…' : '停止子代理（若无法单独停止，将中断主代理当前回合）'}
-              disabled={stopping}
-              onClick={() => {
-                setStopping(true)
-                stopSubagent(childSessionId, info?.agentId ?? activity?.agentId)
-              }}
-            >
-              <span className={`codicon ${stopping ? 'codicon-loading spin' : 'codicon-debug-stop'}`} />
-            </button>
-          )}
           {childSessionId && (
-            <button className="subagent-detail-icon-btn" title="重新加载完整记录" onClick={handleRefresh}>
-              <span className={`codicon codicon-refresh ${loading ? 'spin' : ''}`} />
+            <button
+              className="subagent-detail-icon-btn"
+              data-tip={running ? '立即刷新（每 3 秒自动刷新）' : '重新加载完整记录'}
+              onClick={handleRefresh}
+            >
+              <span className={`codicon codicon-refresh ${loading || refreshSpin ? 'spin' : ''}`} />
             </button>
           )}
-          <button className="subagent-detail-icon-btn" title="关闭" onClick={closeDetail}>
+          {/* 已完成：弹窗阅读最终报告（与过程弹窗互斥切换，报告弹窗内可切回）*/}
+          {reportReady && (
+            <button
+              className="subagent-detail-icon-btn"
+              data-tip="弹窗阅读最终报告"
+              onClick={() => openSubagentReport({
+                callID: key,
+                title: item?.description || activity?.description || '子代理报告',
+                markdown: agentOutput,
+              })}
+            >
+              <span className="codicon codicon-book" />
+            </button>
+          )}
+          <button className="subagent-detail-icon-btn" data-tip="关闭" onClick={closeDetail}>
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>
@@ -220,7 +300,17 @@ export function SubagentDetailDialog() {
           )}
 
           {/* 层1：完整对话（运行中=实时流；已结束=权威转录）*/}
-          {display && display.length > 0 && <Transcript messages={display} />}
+          {display && display.length > 0 && (
+            <Transcript
+              messages={display}
+              running={running}
+              onOpenReport={(fallbackMd) => openSubagentReport({
+                callID: key,
+                title: item?.description || activity?.description || '子代理报告',
+                markdown: agentOutput || fallbackMd,
+              })}
+            />
+          )}
 
           {/* 层2 回退：无对话流（事件流缺失，如历史会话）→ 父会话转发的实时工具列表 */}
           {!display && toolCount > 0 && (
@@ -231,7 +321,13 @@ export function SubagentDetailDialog() {
                 </div>
               )}
               <div className="subagent-detail-tools">
-                {activity!.tools.map((t) => <ToolCallCard key={t.callID} part={t} />)}
+                {/* 转发的工具事件列表同样聚组（回退场景常见：Explore 连续读多文件）*/}
+                {groupParts(activity!.tools).map((unit) => (
+                  <UnitRenderer
+                    key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index}
+                    unit={unit}
+                  />
+                ))}
               </div>
             </>
           )}

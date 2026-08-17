@@ -14,7 +14,7 @@
 
 import { useState } from 'react'
 import type { ToolPart } from '@/types/messages'
-import { relativeTime } from '@/utils/time'
+import { relativeTime, formatToolDuration } from '@/utils/time'
 import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { FileIcon } from './FileIcon'
@@ -139,6 +139,8 @@ export function ToolCallCard({ part }: Props) {
   // snapshot 引用稳定性 → Maximum update depth exceeded（React 整树卸载）
   const isAgentTool = tool === 'Agent' || tool === 'Task' || tool === 'subagent'
   const openSubagentDetail = useStore((s) => s.openSubagentDetail)
+  const openSubagentReport = useStore((s) => s.openSubagentReport)
+  const openMarkdownPreview = useStore((s) => s.openMarkdownPreview)
   const subCount = useStore((s) =>
     isAgentTool ? (s.subagentActivities.find((a) => a.key === part.callID)?.tools.length ?? 0) : 0)
   const subStatus = useStore((s): string => {
@@ -185,8 +187,9 @@ export function ToolCallCard({ part }: Props) {
     if (filePath) sendToJava({ op: 'refreshFile', filePath })
   }
 
-  // Read 工具不需要展开（只有文件名 + 点击打开，不渲染 output）
-  const expandable = tool !== 'Read'
+  // Read 工具不需要展开（只有文件名 + 点击打开，不渲染 output）；
+  // Skill 输入/输出全在头部 📖 弹窗，展开区仅流式原始输入/出错时有内容
+  const expandable = tool !== 'Read' && !(tool === 'Skill' && !rawInput && !state.error)
 
   return (
     <div className={`tool-card tool-card--${badge.cls}`}>
@@ -218,8 +221,44 @@ export function ToolCallCard({ part }: Props) {
             <span className="codicon codicon-refresh" />
           </button>
         )}
+        {/* 子代理最终报告弹窗阅读（报告不在展开区渲染，这是唯一查看入口）*/}
+        {isAgentTool && hasOutput && (
+          <button
+            className="tool-card__action"
+            title="弹窗查看子代理报告"
+            aria-label="查看报告"
+            onClick={(e) => {
+              e.stopPropagation()
+              openSubagentReport({
+                callID: part.callID,
+                title: summary || '子代理报告',
+                markdown: state.output!,
+              })
+            }}
+          >
+            <span className="codicon codicon-book" />
+          </button>
+        )}
+        {/* 技能加载内容弹窗阅读（output = SKILL.md 全文，md 渲染；技能卡无展开区内容，唯一查看入口）*/}
+        {tool === 'Skill' && hasOutput && (
+          <button
+            className="tool-card__action"
+            title="弹窗查看技能内容"
+            aria-label="查看技能内容"
+            onClick={(e) => {
+              e.stopPropagation()
+              openMarkdownPreview({
+                title: `/${summary || 'skill'}`,
+                meta: '技能文档',
+                markdown: state.output!,
+              })
+            }}
+          >
+            <span className="codicon codicon-book" />
+          </button>
+        )}
         <span className={`tool-card__badge tool-card__badge--${badge.cls}`}>{badge.text}</span>
-        {durMs != null && <span className="tool-card__dur">{Math.round(durMs)}ms</span>}
+        {durMs != null && <span className="tool-card__dur">{formatToolDuration(durMs)}</span>}
         {expandable && <span className="tool-card__toggle">{expanded ? '▼' : '▶'}</span>}
       </div>
       {/* 子代理摘要行（Agent/Task）：实时工具数 + 状态，点击查看原始过程 */}
@@ -282,16 +321,23 @@ export function ToolCallCard({ part }: Props) {
               )}
             </>
           )}
-          {/* 其他工具：保持 JSON 输入/输出 */}
-          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && (
+          {/* 其他工具：JSON 输入/输出。Skill 无展开区内容（技能名在头部摘要、
+              技能文档走 📖 弹窗）；Agent 类输出（最终报告）同样只走头部弹窗按钮 */}
+          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && (
             <>
               {state.input && Object.keys(state.input).length > 0 && (
                 <div className="tool-card__section">
-                  <div className="tool-card__label">输入</div>
-                  <pre className="tool-card__code">{JSON.stringify(state.input, null, 2)}</pre>
+                  <div className="tool-card__label">{isAgentTool ? '提示词' : '输入'}</div>
+                  {/* Agent 输入只展示 prompt（description/subagent_type 已在卡片头部），
+                      其余字段对读者是噪音；无 prompt 的回退 JSON */}
+                  {isAgentTool && typeof input?.prompt === 'string' && input.prompt.trim() ? (
+                    <pre className="tool-card__code tool-card__prompt">{String(input.prompt)}</pre>
+                  ) : (
+                    <pre className="tool-card__code">{JSON.stringify(state.input, null, 2)}</pre>
+                  )}
                 </div>
               )}
-              {hasOutput && (
+              {hasOutput && !isAgentTool && (
                 <div className="tool-card__section">
                   <div className="tool-card__label">输出</div>
                   <pre className="tool-card__code">{state.output}</pre>

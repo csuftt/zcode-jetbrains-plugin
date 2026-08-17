@@ -1,7 +1,7 @@
 /**
  * ExitPlanMode 计划审批弹窗样式
  * 结构参照 ask-user-dialog.less，复用全局 CSS 变量。
- * 审批"批准"按钮用 plan 模式的紫罗兰语义色（ModeSelect 已不随模式着色，此处为弹窗独立设计）。
+ * "批准"按钮用全局主按钮色（--button-primary，与发送按钮一致），hover 同款降低不透明度。
  */
 
 .plan-approval-overlay {
@@ -38,7 +38,7 @@
 
   &__icon {
     font-size: 16px;
-    color: #a78bfa; // plan 模式语义色（弹窗独立设计）
+    color: var(--accent-primary, #007fd4);
   }
 
   &__title {
@@ -89,14 +89,13 @@
   }
 
   &__btn--approve {
-    background: #a78bfa;
-    border-color: #a78bfa;
+    background: var(--button-primary);
+    border-color: var(--button-primary);
     color: #fff;
     font-weight: 600;
 
-    &:hover {
-      background: #8b6ff2;
-      border-color: #8b6ff2;
+    &:hover:not(:disabled) {
+      opacity: 0.85; // 与 .submit-button 同款 hover
     }
   }
 }

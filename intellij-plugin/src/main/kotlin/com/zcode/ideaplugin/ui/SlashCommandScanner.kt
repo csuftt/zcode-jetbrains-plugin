@@ -137,8 +137,8 @@ object SlashCommandScanner {
         }
     }
 
-    /** 解析 YAML frontmatter 首行值（name/description 等单行标量） */
-    private fun parseFrontmatter(text: String): Map<String, String> {
+    /** 解析 YAML frontmatter 首行值（name/description 等单行标量；SkillScanner 共用） */
+    internal fun parseFrontmatter(text: String): Map<String, String> {
         val m = FRONTMATTER_RE.find(text) ?: return emptyMap()
         val map = LinkedHashMap<String, String>()
         for (line in m.groupValues[1].lineSequence()) {

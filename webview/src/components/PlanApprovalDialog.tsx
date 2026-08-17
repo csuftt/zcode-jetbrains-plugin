@@ -16,6 +16,7 @@
  */
 
 import { sendToJava } from '@/ipc/bridge'
+import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import '../styles/plan-approval-dialog.less'
 
@@ -33,6 +34,12 @@ export function PlanApprovalDialog({ requestId, plan, onClose }: Props) {
       action: 'accept',
       answer: 'approve',
     })
+    // 乐观退出计划模式：ExitPlanMode 的 batch 收尾事件不可靠/常迟到，等它会把
+    // ModeSelect 的"计划模式"挂到回合结束的 loadSettings 校正才变。批准瞬间即恢复
+    // 进 plan 前记忆的模式（无记忆则 yolo，同 applyModeEventToPatch 的 exit_plan），
+    // 权威值由后续 state.updated / loadSettings 校正；迟到的 batch 推断有幂等保护不会覆盖
+    const { prePlanMode } = useStore.getState()
+    useStore.setState({ currentMode: prePlanMode ?? 'yolo', prePlanMode: null })
     onClose()
   }
 

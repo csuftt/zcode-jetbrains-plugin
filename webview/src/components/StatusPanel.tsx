@@ -10,13 +10,14 @@
  * 数据从消息历史解析（utils/parseStatus.ts），由 useStore 维护。
  *
  * 简化（与 cc-gui 差异）：
- * - 文件改动只展示统计，无 diff/undo（Java 端无对应能力）
- * - 文件状态统一 M（ZCode 无 git 状态数据）
+ * - 文件状态统一 M（ZCode 无 git 状态数据）；无 undo
+ * - 文件项点击在 IDEA 编辑器打开；行尾 diff 按钮弹该文件编辑内容的前后对比
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '@/store/useStore'
+import { sendToJava } from '@/ipc/bridge'
 import '../styles/status-panel.less'
 
 type TabType = 'todo' | 'agent' | 'files'
@@ -192,18 +193,46 @@ export function StatusPanel() {
               <div className="status-panel-empty">暂无文件改动</div>
             ) : (
               <div className="status-panel-file-list">
-                {fileChanges.map((f) => (
-                  <div key={f.filePath} className="status-panel-file-item">
-                    <span className="file-change-status status-modified">M</span>
-                    <span className="file-change-name" title={f.filePath}>{f.fileName}</span>
-                    {(f.additions > 0 || f.deletions > 0) && (
-                      <span className="file-change-stats">
-                        {f.additions > 0 && <span className="additions">+{f.additions}</span>}
-                        {f.deletions > 0 && <span className="deletions">-{f.deletions}</span>}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                {fileChanges.map((f) => {
+                  const edits = f.edits ?? []
+                  const hasDiffContent = edits.some((e) => e.oldContent || e.newContent)
+                  return (
+                    <div
+                      key={f.filePath}
+                      className="status-panel-file-item clickable"
+                      title={`在编辑器打开：${f.filePath}`}
+                      onClick={() => sendToJava({ op: 'openFile', filePath: f.filePath })}
+                    >
+                      <span className="file-change-status status-modified">M</span>
+                      <span className="file-change-name" title={f.filePath}>{f.fileName}</span>
+                      {(f.additions > 0 || f.deletions > 0) && (
+                        <span className="file-change-stats">
+                          {f.additions > 0 && <span className="additions">+{f.additions}</span>}
+                          {f.deletions > 0 && <span className="deletions">-{f.deletions}</span>}
+                        </span>
+                      )}
+                      {hasDiffContent && (
+                        <span
+                          className="codicon codicon-diff status-panel-file-diff"
+                          title="查看编辑前后对比"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            // 同文件多次编辑依次拼接（段间空行分隔，避免相邻片段被 diff 对齐混淆）
+                            const oldContent = edits.map((x) => x.oldContent).join('\n\n')
+                            const newContent = edits.map((x) => x.newContent).join('\n\n')
+                            sendToJava({
+                              op: 'showDiff',
+                              filePath: f.filePath,
+                              oldContent,
+                              newContent,
+                              title: `编辑对比：${f.fileName}`,
+                            })
+                          }}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )
           )}

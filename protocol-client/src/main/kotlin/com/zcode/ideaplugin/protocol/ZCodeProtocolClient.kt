@@ -605,6 +605,44 @@ class ZCodeProtocolClient private constructor(
         request("session/setMode", params, timeoutMs)
     }
 
+    /**
+     * mcp/list — 列 MCP 服务器及连接状态
+     *
+     * 响应（zcode.cjs LNe/mU schema）：{statuses: {<name>: {status, transport,
+     * toolCount, updatedAt, error?, protocolEra, authorization?}}}
+     * 注意：响应不含 command/url/来源 scope——配置详情由 McpConfigReader 从磁盘配置补齐。
+     *
+     * @param mode status=只报状态不连接（快）；connect=真实连接（每服务器起子进程，
+     *             慢且有副作用 → 不重试，调用方传长超时）
+     */
+    fun listMcpServers(workspacePath: String, mode: String = "status", timeoutMs: Long = 30000): JsonObject {
+        val params = buildJsonObject {
+            put("workspace", buildJsonObject {
+                put("workspacePath", workspacePath)
+                put("workspaceKey", workspacePath) // 本地场景 key = path（同 Workspace 默认值）
+            })
+            put("mode", mode)
+        }
+        return rawMcpList(params, timeoutMs, mode)
+    }
+
+    /**
+     * mcp/list 原始请求（完整 params 由调用方构造）。
+     * 调用方可通过 params.mcpServers 显式传入服务器定义（磁盘扫描的配置转
+     * 协议 schema）——插件 spawn 的 app-server 不会自己发现插件贡献的 MCP
+     * 配置（statuses 恒空），显式传参是获取真实连接状态的唯一途径。
+     */
+    fun rawMcpList(params: JsonObject, timeoutMs: Long = 30000, modeForRetry: String = "status"): JsonObject {
+        val r = if (modeForRetry == "status") {
+            // status 只读幂等 → 可重试；connect 有真实连接副作用 → 单次
+            requestWithRetry("mcp/list", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+        } else {
+            request("mcp/list", params, timeoutMs)
+        }
+        r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
     /** session/usage — 用量查询（累计 token 统计，读类幂等 → 走重试）*/
     fun usage(sessionId: String, timeoutMs: Long = 5000): JsonObject {
         val params = buildJsonObject { put("sessionId", sessionId) }
@@ -733,6 +771,76 @@ class ZCodeProtocolClient private constructor(
         }
     }
 
+    // 会话统计缓存：db 文件指纹（mtime:size，主库+WAL）→ 统计结果（见 getSessionStats）
+    @Volatile
+    private var sessionStatsCache: Pair<String, Map<String, SessionStat>>? = null
+
+    /**
+     * 会话统计（历史列表展示）：sessionId → (消息数, 内容字节数)
+     *
+     * ZCode 主会话存 SQLite（~/.zcode/cli/db/db.sqlite，WAL 模式）而非 jsonl，
+     * cc-gui 的 lite-read jsonl 方案不适用；message/part 表均有 session_id 列，
+     * 两条 GROUP BY 精确统计（实测 204 会话 <100ms）。大小 = message.data +
+     * part.data 的字节和（CAST AS BLOB 后 LENGTH 按 UTF-8 字节数计）。
+     * WAL 下只读不与 CLI 写入竞争；失败/超时降级空 map，不阻塞会话列表主流程。
+     */
+    fun getSessionStats(): Map<String, SessionStat> {
+        val dbPath = Path.of(System.getProperty("user.home"), ".zcode", "cli", "db", "db.sqlite")
+        if (!java.nio.file.Files.exists(dbPath)) return emptyMap()
+
+        // 指纹未变直接复用（WAL 追加写必变 size，空闲时稳定命中），免去 node 子进程开销
+        val fp = fileFingerprint(dbPath) + "|" + fileFingerprint(Path.of(dbPath.toString() + "-wal"))
+        sessionStatsCache?.let { if (it.first == fp) return it.second }
+
+        return try {
+            val pb = ProcessBuilder(nodePath, "-e", SESSION_STATS_JS)
+            pb.environment()["ZCODE_STATS_DB"] = dbPath.toString()
+            // stderr 只有 ExperimentalWarning，丢弃防止与统计输出混流
+            pb.redirectError(ProcessBuilder.Redirect.DISCARD)
+            val p = pb.start()
+            // 先读输出再 waitFor（输出超过管道缓冲时先等会死锁）；脚本恒退出，readText 不致久阻塞
+            val out = p.inputStream.bufferedReader().readText()
+            if (!p.waitFor(10, TimeUnit.SECONDS)) {
+                p.destroyForcibly()
+                println("[ZCodeProtocolClient] 会话统计查询超时，降级为空")
+                return emptyMap()
+            }
+            if (p.exitValue() != 0) {
+                println("[ZCodeProtocolClient] 会话统计查询失败(exit=${p.exitValue()})，降级为空")
+                return emptyMap()
+            }
+            val stats = parseSessionStats(out)
+            sessionStatsCache = fp to stats
+            stats
+        } catch (e: Exception) {
+            println("[ZCodeProtocolClient] 会话统计异常: ${e.message}")
+            emptyMap()
+        }
+    }
+
+    private fun parseSessionStats(out: String): Map<String, SessionStat> = try {
+        Json.parseToJsonElement(out.trim()).jsonObject.mapNotNull { (sid, v) ->
+            try {
+                val o = v.jsonObject
+                sid to SessionStat(
+                    messageCount = o["cnt"]?.jsonPrimitive?.intOrNull ?: 0,
+                    sizeBytes = o["bytes"]?.jsonPrimitive?.longOrNull ?: 0L,
+                )
+            } catch (e: Exception) {
+                null
+            }
+        }.toMap()
+    } catch (e: Exception) {
+        emptyMap()
+    }
+
+    private fun fileFingerprint(path: Path): String = try {
+        val attr = java.nio.file.Files.readAttributes(path, java.nio.file.attribute.BasicFileAttributes::class.java)
+        "${attr.lastModifiedTime().toMillis()}:${attr.size()}"
+    } catch (e: Exception) {
+        "missing"
+    }
+
     /**
      * session/setModel — 会话级切换模型
      *
@@ -842,3 +950,20 @@ private val DELETE_SESSION_JS = """
     try { del(sid); db.exec('COMMIT'); console.log('deleted'); }
     catch (e) { try { db.exec('ROLLBACK'); } catch(_){} console.error('ERR: ' + e.message); process.exit(1); }
 """.trimIndent()
+
+/** node:sqlite 内联脚本：按会话统计消息数与内容字节数（只读，表名硬编码，无注入）。
+ * 输出 {sid: {cnt, bytes}} 单行 JSON；参数经环境变量传入（同上的 Windows 命令行参数坑）*/
+private val SESSION_STATS_JS = """
+    const {DatabaseSync} = require('node:sqlite');
+    const db = new DatabaseSync(process.env.ZCODE_STATS_DB);
+    db.exec('PRAGMA busy_timeout = 15000');
+    const msgs = db.prepare('SELECT session_id AS sid, COUNT(*) AS cnt FROM message GROUP BY session_id').all();
+    const parts = db.prepare('SELECT session_id AS sid, SUM(LENGTH(CAST(data AS BLOB))) AS bytes FROM part GROUP BY session_id').all();
+    const map = {};
+    for (const r of msgs) map[r.sid] = { cnt: r.cnt, bytes: 0 };
+    for (const r of parts) { (map[r.sid] || (map[r.sid] = { cnt: 0, bytes: 0 })).bytes = r.bytes; }
+    console.log(JSON.stringify(map));
+""".trimIndent()
+
+/** 会话统计（历史列表展示）：消息数 + message/part 内容字节和 */
+data class SessionStat(val messageCount: Int, val sizeBytes: Long)

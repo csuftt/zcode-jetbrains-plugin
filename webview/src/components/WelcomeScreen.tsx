@@ -29,7 +29,7 @@ function StaggeredText({ text, startDelay = 0, step = 0.05 }: { text: string; st
   )
 }
 
-export function WelcomeScreen({ noSession = false }: { noSession?: boolean }) {
+export function WelcomeScreen() {
   return (
     <div className="welcome">
       <div className="welcome__logo-wrapper">
@@ -45,17 +45,9 @@ export function WelcomeScreen({ noSession = false }: { noSession?: boolean }) {
         <span className="welcome__version-tag" title="ZCode 版本">v{APP_VERSION}</span>
       </div>
       <div className="welcome__hint">
-        {noSession ? (
-          <>
-            <span className="welcome__hint-icon">+</span>
-            <StaggeredText text="请点击右上方 + 号新建会话" startDelay={0.9} />
-          </>
-        ) : (
-          <>
-            <StaggeredText text="给 ZCode 发送消息" startDelay={0.9} />
-            <span className="welcome__hint-caret" />
-          </>
-        )}
+        {/* 无会话（懒创建待命态）与空会话一致：直接输入即开始对话（首条消息触发建会话） */}
+        <StaggeredText text="给 ZCode 发送消息" startDelay={0.9} />
+        <span className="welcome__hint-caret" />
       </div>
     </div>
   )

@@ -12,7 +12,7 @@
  * 纯函数、幂等，每次 messages 变化（全量拉取 / 流式增量）后重新解析。
  */
 
-import type { AgentItem, FileChangeItem, SubagentActivity, SubagentInfo, TodoItem, ZCodeMessage } from '@/types/messages'
+import type { AgentItem, FileChangeItem, FileEditContent, SubagentActivity, SubagentInfo, TodoItem, ZCodeMessage } from '@/types/messages'
 
 /** 工具 part 的 input 字段名兼容（实测 Edit 用 file_path，Write 用 path）*/
 function getFilePath(input?: Record<string, unknown>): string {
@@ -148,16 +148,20 @@ function normalizeRpcStatus(rpcStatus: string, prev?: string): string {
   return prev ?? 'pending'
 }
 
-/** 从消息列表解析文件改动（Edit/Write/MultiEdit 按路径聚合增删行数）*/
+/**
+ * 从消息列表解析文件改动（Edit/Write/MultiEdit 按路径聚合增删行数）。
+ * 同时保留每次编辑的 old/new 内容（edits，底部文件栏弹前后对比用）。
+ */
 export function parseFileChanges(messages: ZCodeMessage[]): FileChangeItem[] {
   const byPath: Map<string, FileChangeItem> = new Map()
 
-  const add = (path: string, additions: number, deletions: number) => {
+  const add = (path: string, additions: number, deletions: number, edit?: FileEditContent) => {
     const key = path.replace(/\\/g, '/') // 统一分隔符避免同一文件重复统计
     const cur = byPath.get(key)
     if (cur) {
       cur.additions += additions
       cur.deletions += deletions
+      if (edit && cur.edits) cur.edits.push(edit)
     } else {
       const parts = key.split('/')
       byPath.set(key, {
@@ -165,6 +169,7 @@ export function parseFileChanges(messages: ZCodeMessage[]): FileChangeItem[] {
         fileName: parts[parts.length - 1] || key,
         additions,
         deletions,
+        edits: edit ? [edit] : [],
       })
     }
   }
@@ -179,15 +184,28 @@ export function parseFileChanges(messages: ZCodeMessage[]): FileChangeItem[] {
       if (!path) continue
 
       if (tool === 'Write') {
-        // Write = 整文件写入 → 全部算新增
-        const n = lineCount(getNewContent(input))
-        add(path, n, 0)
+        // Write = 整文件写入 → 全部算新增（oldContent 为空，diff 显示为全新文件）
+        const content = getNewContent(input)
+        add(path, lineCount(content), 0, { oldContent: '', newContent: content })
+      } else if (tool === 'MultiEdit') {
+        // MultiEdit = edits 数组，逐项按 Edit 口径统计与收集
+        const edits = input?.edits
+        if (Array.isArray(edits)) {
+          for (const e of edits) {
+            if (!e || typeof e !== 'object') continue
+            const rec = e as Record<string, unknown>
+            const oldC = getOldContent(rec)
+            const newC = getNewContent(rec)
+            const diff = lineCount(newC) - lineCount(oldC)
+            add(path, Math.max(0, diff), Math.max(0, -diff), { oldContent: oldC, newContent: newC })
+          }
+        }
       } else {
-        // Edit / MultiEdit = 替换 → 行数差
-        const oldLines = lineCount(getOldContent(input))
-        const newLines = lineCount(getNewContent(input))
-        const diff = newLines - oldLines
-        add(path, Math.max(0, diff), Math.max(0, -diff))
+        // Edit = 替换 → 行数差
+        const oldC = getOldContent(input)
+        const newC = getNewContent(input)
+        const diff = lineCount(newC) - lineCount(oldC)
+        add(path, Math.max(0, diff), Math.max(0, -diff), { oldContent: oldC, newContent: newC })
       }
     }
   }

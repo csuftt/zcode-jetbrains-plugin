@@ -30,6 +30,8 @@ function BackIcon() {
 interface Props {
   currentView: 'chat' | 'history' | 'settings'
   sessionTitle: string
+  /** 空会话（无对话历史）时置灰新会话按钮——再建只会堆空会话 */
+  newSessionDisabled?: boolean
   onBack: () => void
   onNewSession: () => void
   onNewTab: () => void
@@ -42,6 +44,7 @@ interface Props {
 export function ChatHeader({
   currentView,
   sessionTitle,
+  newSessionDisabled = false,
   onBack,
   onNewSession,
   onNewTab,
@@ -67,7 +70,12 @@ export function ChatHeader({
       <div className="header-right">
         {currentView === 'chat' && (
           <>
-            <button className="icon-button" onClick={onNewSession} data-tooltip="新会话">
+            <button
+              className="icon-button"
+              onClick={onNewSession}
+              disabled={newSessionDisabled}
+              data-tooltip={newSessionDisabled ? '当前会话为空，无需新建' : '新会话'}
+            >
               <span className="codicon codicon-plus" />
             </button>
             <button className="icon-button" onClick={onNewTab} data-tooltip="新标签页">

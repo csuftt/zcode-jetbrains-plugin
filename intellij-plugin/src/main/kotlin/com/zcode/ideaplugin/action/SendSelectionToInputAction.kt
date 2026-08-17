@@ -46,23 +46,24 @@ class SendSelectionToInputAction : AnAction() {
         val ref = buildLineReference(file, editor.document, selectionModel.selectionStart, selectionModel.selectionEnd)
         pushRefs(project, listOf(ref))
     }
+}
 
-    /**
-     * 构造行号引用：`@path#L10` 或 `@path#L10-20`。
-     * 末尾换行特判：选区含末尾换行时排除空行（对齐 cc-gui SelectionReferenceBuilder）
-     */
-    private fun buildLineReference(file: VirtualFile, document: Document, startOffset: Int, endOffset: Int): String {
-        var end = endOffset
-        val textLength = document.textLength
-        if (end > startOffset && end == textLength && textLength > 0 && document.charsSequence[end - 1] == '\n') {
-            end--
-        }
-        val startLine = document.getLineNumber(startOffset.coerceAtMost(end)) + 1
-        val endLine = document.getLineNumber(end.coerceAtLeast(startOffset)) + 1
-        return if (startLine == endLine) {
-            "@${file.path}#L$startLine"
-        } else {
-            "@${file.path}#L$startLine-$endLine"
-        }
+/**
+ * 构造行号引用：`@path#L10` 或 `@path#L10-20`。
+ * 末尾换行特判：选区含末尾换行时排除空行（对齐 cc-gui SelectionReferenceBuilder）。
+ * 编辑器右键"发送选中代码/复制AI引用"两个动作共用，保证引用串格式一致。
+ */
+internal fun buildLineReference(file: VirtualFile, document: Document, startOffset: Int, endOffset: Int): String {
+    var end = endOffset
+    val textLength = document.textLength
+    if (end > startOffset && end == textLength && textLength > 0 && document.charsSequence[end - 1] == '\n') {
+        end--
+    }
+    val startLine = document.getLineNumber(startOffset.coerceAtMost(end)) + 1
+    val endLine = document.getLineNumber(end.coerceAtLeast(startOffset)) + 1
+    return if (startLine == endLine) {
+        "@${file.path}#L$startLine"
+    } else {
+        "@${file.path}#L$startLine-$endLine"
     }
 }

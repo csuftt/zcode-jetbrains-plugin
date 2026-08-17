@@ -94,9 +94,14 @@
     .tooltip-bottom-center(28px);
 }
 
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
     background: var(--color-chat-bars-hover-bg, var(--bg-hover));
     color: var(--color-chat-bars-text, var(--text-secondary));
+}
+
+.icon-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 .icon-button svg {

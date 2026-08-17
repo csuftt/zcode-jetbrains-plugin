@@ -128,11 +128,22 @@
   &__meta {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin-top: 2px;
     padding-left: 14px; /* 与标题文字对齐（蓝点之后）*/
     font-size: 11px;
     color: var(--text-muted);
+  }
+
+  &__meta-dot {
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+
+  /* 会话大小超 1MB 警示（上下文已很大，cc-gui history-filesize-large 同款）*/
+  &__size-large {
+    color: #ff9500;
+    font-weight: 500;
   }
 
   &__status {

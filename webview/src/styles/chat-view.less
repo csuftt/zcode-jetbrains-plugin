@@ -167,6 +167,50 @@
   }
 }
 
+/* ===== 滚动跳转按钮（cc-gui ScrollControl 移植）=====
+   单按钮：滚轮上滑显示↑置顶 / 下滑显示↓置底，
+   停止滚动 1.5s 或回到底部后淡出 */
+.scroll-control-button {
+  position: absolute;
+  right: 18px; /* 避开 8px 滚动条 */
+  bottom: 16px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-secondary);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  z-index: 6;
+  font-size: 14px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out, visibility 0.2s,
+    background 0.15s, color 0.15s, border-color 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+  }
+
+  &:active {
+    transform: translateY(0) scale(0.92);
+  }
+
+  &.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+}
+
 /* 面板太窄时隐藏 rail（cc-gui @media max-width 400px）*/
 @media (max-width: 400px) {
   .messages-anchor-rail {

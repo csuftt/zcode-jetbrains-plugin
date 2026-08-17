@@ -290,6 +290,23 @@
     background: var(--bg-hover);
   }
 
+  &.clickable {
+    cursor: pointer;
+  }
+
+  .status-panel-file-diff {
+    flex-shrink: 0;
+    font-size: 13px;
+    color: var(--text-tertiary);
+    padding: 2px;
+    border-radius: 3px;
+    transition: color 0.15s ease;
+
+    &:hover {
+      color: var(--status-info);
+    }
+  }
+
   .file-change-status {
     font-size: 10px;
     font-weight: 700;

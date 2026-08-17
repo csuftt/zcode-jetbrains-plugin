@@ -96,3 +96,36 @@
         opacity: 1;
     }
 }
+
+/**
+ * 右侧居中 Tooltip 样式（data-tooltip 属性驱动）
+ * 用于左侧窄边栏图标（tooltip 从按钮右侧弹出，适配 IDEA 工具窗条交互）
+ *
+ * 注意：宿主的 ::before 若已被占用（如 active 指示条），此 mixin 只使用 ::after，无箭头
+ * @param offset - tooltip 与触发元素右缘的水平距离
+ */
+.tooltip-right-center(@offset: 8px) {
+    &::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        left: ~"calc(100% + @{offset})";
+        top: 50%;
+        transform: translateY(-50%);
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+        z-index: 1000;
+        box-shadow: var(--shadow-md);
+    }
+
+    &:hover::after {
+        opacity: 1;
+    }
+}
+

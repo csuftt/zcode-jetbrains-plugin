@@ -1,3 +1,5 @@
+<!-- 插件列表图标：平台约定路径 META-INF/pluginIcon.svg（+ pluginIcon_dark.svg），
+     <idea-plugin> 无 icon 属性，放 /icons/ 下不生效；ToolWindow 图标走 ZCodeIcons.Zai -->
 <idea-plugin>
     <id>com.zcode.ideaplugin.zcode-assistant</id>
     <name>ZC GUI</name>
@@ -24,6 +26,8 @@
                     icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
                     secondary="false"
                     canCloseContents="true"/>
+        <!-- 编辑器右键动作的气泡通知（复制AI引用结果反馈） -->
+        <notificationGroup id="ZCode" displayType="BALLOON"/>
     </extensions>
 
     <actions>
@@ -43,6 +47,14 @@
                 description="把选中代码的行号引用发送到 ZC GUI 输入框">
             <add-to-group group-id="EditorPopupMenu" anchor="first"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt K"/>
+        </action>
+        <!-- 右键复制选中代码的路径+行号引用到剪贴板（对齐 cc-gui CopySelectionReferenceAction） -->
+        <action id="ZCode.CopySelectionReference"
+                class="com.zcode.ideaplugin.action.CopySelectionReferenceAction"
+                icon="com.zcode.ideaplugin.ZCodeIcons.Zai"
+                text="复制AI引用"
+                description="把选中代码的文件路径和行号引用复制到剪贴板">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendSelectionToInput"/>
         </action>
     </actions>
 </idea-plugin>

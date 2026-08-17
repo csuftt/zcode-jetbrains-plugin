@@ -97,6 +97,7 @@
 }
 
 .subagent-detail-icon-btn {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -121,14 +122,24 @@
     display: inline-block;
     animation: subagent-detail-spin 1s linear infinite;
   }
-}
 
-/* 停止子代理按钮：红色语义 */
-.subagent-detail-stop-btn {
-  color: var(--status-error);
-  &:hover:not(:disabled) {
-    background: rgba(244, 67, 54, 0.12);
-    color: var(--status-error);
+  /* 即时悬停提示（原生 title 延迟约 1s 且无样式；右缘按钮向下弹出、右对齐防溢出）*/
+  &[data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    padding: 4px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: nowrap;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    box-shadow: var(--shadow-card);
+    pointer-events: none;
   }
 }
 
@@ -252,6 +263,30 @@
   .subagent-detail-retry {
     margin: 10px auto 0;
   }
+}
+
+/* 完成态末条报告折叠行（点击打开报告弹窗），虚线边框示意"此处折叠了内容" */
+.subagent-detail-report-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-primary);
+  border-radius: 4px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+  }
+}
+
+/* 报告弹窗正文（SubagentReportDialog）：纯阅读向，留白比过程弹窗大 */
+.subagent-report-body {
+  padding: 16px 24px;
 }
 
 @keyframes subagent-detail-spin {

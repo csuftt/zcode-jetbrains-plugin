@@ -1,14 +1,19 @@
 /**
  * 思考过程块样式
  * 规划文档第四节：💭 思考过程（可折叠，默认收起）
+ *
+ * 配色：低饱和蓝灰紫（reasoning 通用语义色，业界惯例），视觉安静不抢正文；
+ * 原 assistant 橙太显眼已弃用。
  */
+
+// 思考块语义色（亮/暗主题通用的中性灰紫）
+@thinking-color: #9aa3b8;
 
 .thinking-block {
   margin: 8px 0;
   border: 1px solid var(--border-secondary);
   border-radius: 6px;
-  /* assistant 色（橙）半透明背景，变量无法表达半透明，保留 rgba */
-  background: rgba(217, 119, 87, 0.05);
+  background: rgba(154, 163, 184, 0.05);
   overflow: hidden;
 
   &__header {
@@ -19,7 +24,7 @@
     cursor: pointer;
     user-select: none;
     font-size: 12px;
-    color: var(--color-message-role-assistant);
+    color: @thinking-color;
 
     &:hover {
       /* 微弱 hover 半透明白，变量无法表达，保留 rgba */
@@ -53,7 +58,7 @@
     font-variant-numeric: tabular-nums; /* 等宽数字，跳动时不抖动 */
 
     &--active {
-      color: var(--color-message-role-assistant);
+      color: @thinking-color;
       opacity: 0.85;
     }
   }
@@ -65,8 +70,7 @@
 
   &__body {
     padding: 8px 12px 12px;
-    /* assistant 色（橙）半透明边框，变量无法表达半透明，保留 rgba */
-    border-top: 1px solid rgba(217, 119, 87, 0.15);
+    border-top: 1px solid rgba(154, 163, 184, 0.15);
     font-size: 12px;
     color: var(--text-tertiary);
     line-height: 1.6;

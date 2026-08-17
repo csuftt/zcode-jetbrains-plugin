@@ -71,12 +71,15 @@
   box-shadow: 0 0 0 1px var(--input-focus-border);
 }
 
-/* ===== 上方条（cc-gui ContextBar：附件按钮 + 上下文圆环）===== */
+/* ===== 上方条（cc-gui ContextBar：附件按钮 + 上下文圆环）。
+       带背景色与输入区区分（cc-gui 同款色带），圆角对齐卡片内角（8px - 1px border）*/
 .input-box-topbar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px 0;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border-radius: 7px 7px 0 0;
 }
 
 /* 图标按钮（cc-gui .context-tool-btn：22×22 圆角，hover 变色）*/
@@ -124,14 +127,15 @@
 }
 
 .input-editable {
-  /* 默认 2.67 行（原 2 行 +1/3，约 60px）*/
-  min-height: calc(1.5em * 2.67);
+  /* 默认 3.18 行（约 62px = 原 2.67 行 + 10px 加高）*/
+  min-height: calc(1.5em * 3.18);
   padding: 4px 8px;
   background: transparent;
   border: none;
   outline: none;
   color: var(--text-primary);
-  font-size: 12px;
+  /* 13px：比消息正文（12px）大一档，输入时更易读；min-height 用 em 计算会随字号自适应 */
+  font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -142,6 +146,15 @@
     color: var(--input-placeholder);
     pointer-events: none;
   }
+}
+
+/* 历史前缀幽灵补全后缀（cc-gui data-completion-suffix 同款）：
+   输入与历史消息前缀匹配时，灰色半透明显示建议剩余部分，Tab 采纳 */
+.input-editable[data-completion-suffix]:not(:empty)::after {
+  content: attr(data-completion-suffix);
+  color: var(--input-placeholder);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 /* ===== 按钮区（cc-gui ButtonArea buttons.css）===== */

@@ -9,7 +9,6 @@
  *   - ping：光圈扩散（持续，box 外层不被裁剪）
  *   - version-tag：滑入（一次性，transform+opacity）+ 辉光呼吸（box-shadow，持续）
  *   - hint-char：逐字打字机入场（一次性）
- *   - hint-icon：弹入（一次性）+ 发光脉动（box-shadow，持续）
  *   - hint-caret：光标闪烁（持续）
  */
 
@@ -120,25 +119,6 @@
     animation: welcome-char-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  /* 无会话提示的 + 图标（右上角按钮的示意） */
-  &__hint-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
-    background: var(--bg-hover);
-    border: 1px solid var(--border-primary);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    flex-shrink: 0;
-    animation:
-      welcome-hint-icon-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.75s both,
-      welcome-hint-pulse 1.8s ease-in-out 1.4s infinite;
-  }
-
   /* 终端式闪烁光标（提示语打完字后出现） */
   &__hint-caret {
     display: inline-block;
@@ -202,20 +182,6 @@
   }
 }
 
-@keyframes welcome-hint-icon-in {
-  0% {
-    opacity: 0;
-    transform: scale(0);
-  }
-  70% {
-    transform: scale(1.2);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
 /* ---------- 持续动画 ---------- */
 
 @keyframes welcome-logo-float {
@@ -267,18 +233,6 @@
   }
   50% {
     box-shadow: 0 0 16px rgba(139, 92, 246, 0.5);
-  }
-}
-
-@keyframes welcome-hint-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 rgba(139, 92, 246, 0);
-    border-color: var(--border-primary);
-  }
-  50% {
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.45);
-    border-color: rgba(139, 92, 246, 0.65);
   }
 }
 

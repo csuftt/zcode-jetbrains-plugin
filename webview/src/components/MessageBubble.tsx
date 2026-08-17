@@ -8,19 +8,23 @@
  * part 渲染策略（基于抓包）：
  *   text     → MarkdownBlock（连续的 text part 合并）
  *   reasoning → ThinkingBlock（折叠）
- *   tool     → ToolCallCard（折叠）
+ *   tool     → ToolCallCard（折叠）；连续同类聚组（见 utils/groupParts.ts）：
+ *              Bash → BashCommandGroupCard（批量运行命令）
+ *              Read/Edit/Write/Grep/Glob → FileToolGroupCard（批量读/编/搜）
  *   step-start / step-finish → 不渲染（边界标记）
  *
- * 规划文档第二节第 3 点（工具分组）：连续同类 tool part 合并成一个组。
- * 这里先逐个渲染（分组是视觉优化，阶段 2.4 流式时再细化）。
+ * 规划文档第二节第 3 点（工具分组）：连续同类 tool part 合并成一个组（cc-gui 规则）。
  */
 
-import { memo, useRef } from 'react'
+import { memo, useMemo, useRef } from 'react'
 import type { ZCodeMessage, MessagePart, TextPart } from '@/types/messages'
 import { MarkdownBlock } from './MarkdownBlock'
 import { ToolCallCard } from './ToolCallCard'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AgentNotificationCard } from './AgentNotificationCard'
+import { BashCommandGroupCard } from './BashCommandGroupCard'
+import { FileToolGroupCard } from './FileToolGroupCard'
+import { groupParts } from '@/utils/groupParts'
 import { isAgentNotification } from '@/utils/parseNotification'
 import { clockTime, formatDuration } from '@/utils/time'
 import { useTick } from '@/hooks/useTick'
@@ -78,18 +82,30 @@ function AssistantBubble({ message, time, streaming }: { message: ZCodeMessage; 
   // 流式时最后一个 part 是正在增长的
   const lastPartIdx = parts.length - 1
 
+  // 连续 Bash 命令聚组（cc-gui groupBlocks 规则）：压缩批量命令的消息区长度。
+  // 分组保留原始 part 下标，reasoning 自动展开/流式判定的 index 语义不变
+  const units = useMemo(() => groupParts(parts), [parts])
+
   return (
     <div className="msg msg--assistant">
       <div className="msg__content">
-        {parts.map((part, i) => (
-          <PartRenderer
-            key={i}
-            part={part}
-            // reasoning 自动展开：是最后一个 reasoning + 后面还没有正文
-            autoExpandReasoning={i === lastReasoningIdx && !hasTextAfterLastReasoning}
-            streaming={!!streaming && i === lastPartIdx}
-          />
-        ))}
+        {units.map((unit) =>
+          unit.kind === 'toolGroup' ? (
+            unit.group === 'bash' ? (
+              <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} />
+            ) : (
+              <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} />
+            )
+          ) : (
+            <PartRenderer
+              key={unit.index}
+              part={unit.part}
+              // reasoning 自动展开：是最后一个 reasoning + 后面还没有正文
+              autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
+              streaming={!!streaming && unit.index === lastPartIdx}
+            />
+          ),
+        )}
       </div>
       <MessageFooter info={info} time={time} streaming={streaming} />
     </div>

@@ -5,10 +5,12 @@
  * - 无消息时显示 WelcomeScreen
  * - 左侧 MessageAnchorRail 锚点导航
  * - 右上角 ConversationSearch 会话内搜索浮层
+ * - 右下滚动跳转按钮（cc-gui ScrollControl）：滚轮上滑显示↑置顶、下滑显示↓置底，
+ *   停止滚动 1.5s 后淡出，回到底部或内容不满一屏时隐藏
  * - 停止生成按钮已移到输入框（发送/停止互斥）
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ZCodeMessage } from '@/types/messages'
 import { MessageBubble } from './MessageBubble'
 import { WaitingIndicator } from './WaitingIndicator'
@@ -24,8 +26,6 @@ interface Props {
   waiting: boolean
   waitingSince?: number
   streamingMessageId?: string | null
-  /** 无会话状态（提示新建，区别于空会话欢迎页）*/
-  noSession?: boolean
   /** 会话内搜索面板开关（App 级状态，Ctrl+F / Header 搜索按钮触发）*/
   searchOpen?: boolean
   /** 关闭搜索面板 */
@@ -45,18 +45,54 @@ function lastMessageFingerprint(messages: ZCodeMessage[]): string {
   }).join(',') + '#' + messages.length
 }
 
-export function ChatView({ messages, loading, waiting, waitingSince, streamingMessageId, noSession, searchOpen, onSearchClose }: Props) {
+export function ChatView({ messages, loading, waiting, waitingSince, streamingMessageId, searchOpen, onSearchClose }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
   const prevLastId = useRef<string | undefined>(undefined)
   const fingerprint = lastMessageFingerprint(messages)
+  // 滚动跳转按钮（cc-gui ScrollControl）：单个按钮，方向跟随用户滚轮方向，
+  // 停止滚动 1.5s 后淡出；回到底部或内容不满一屏时立即隐藏
+  const [scrollBtnVisible, setScrollBtnVisible] = useState(false)
+  const [scrollBtnDirection, setScrollBtnDirection] = useState<'up' | 'down'>('down')
+  const scrollHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 卸载时清理隐藏定时器
+  useEffect(() => () => {
+    if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current)
+  }, [])
 
   const handleScroll = () => {
     const el = containerRef.current
     if (!el) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
     userScrolledUp.current = !nearBottom
+    // cc-gui checkScrollPosition：到底部（或内容不再溢出）即隐藏跳转按钮
+    if (nearBottom || el.scrollHeight <= el.clientHeight) {
+      setScrollBtnVisible(false)
+    }
+  }
+
+  // 滚轮方向决定按钮箭头：deltaY>0 下滑→↓置底，deltaY<0 上滑→↑置顶（cc-gui handleWheel）
+  const handleWheel = (e: React.WheelEvent) => {
+    const el = containerRef.current
+    if (!el) return
+    // 内容不满一屏，不显示
+    if (el.scrollHeight <= el.clientHeight) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    // 已在底部附近，不显示（wheel 先于 scroll 触发，此时 scrollTop 还未更新）
+    if (distanceFromBottom < 80) {
+      setScrollBtnVisible(false)
+      return
+    }
+    if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current)
+    if (e.deltaY > 0) {
+      setScrollBtnDirection('down')
+    } else if (e.deltaY < 0) {
+      setScrollBtnDirection('up')
+    }
+    setScrollBtnVisible(true)
+    scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), 1500)
   }
 
   // 消息变化（含流式内容增长）+ 新消息 + waiting 变化时滚动
@@ -79,6 +115,20 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
     }
   }, [fingerprint, waiting])
 
+  // 点击跳转：up 置顶（停止流式自动跟滚）/ down 置底（恢复跟滚），点击后按钮隐藏（cc-gui handleClick）
+  const handleJumpClick = () => {
+    const el = containerRef.current
+    if (!el) return
+    if (scrollBtnDirection === 'up') {
+      userScrolledUp.current = true
+      el.scrollTo({ top: 0, behavior: 'smooth' })
+    } else {
+      userScrolledUp.current = false
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    }
+    setScrollBtnVisible(false)
+  }
+
   if (loading) {
     return (
       <div className="messages-shell">
@@ -93,7 +143,7 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
   if (messages.length === 0 && !waiting) {
     return (
       <div className="messages-shell">
-        <WelcomeScreen noSession={noSession} />
+        <WelcomeScreen />
       </div>
     )
   }
@@ -108,7 +158,7 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
         containerRef={containerRef}
         messagesSignal={`${fingerprint}|${streamingMessageId ?? ''}`}
       />
-      <div className="messages-container" ref={containerRef} onScroll={handleScroll}>
+      <div className="messages-container" ref={containerRef} onScroll={handleScroll} onWheel={handleWheel}>
         <div className="chat-view__inner">
           {messages.map((m) => (
             <MessageBubble
@@ -122,6 +172,15 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
           <div ref={bottomRef} />
         </div>
       </div>
+      {/* 滚动跳转按钮（常驻 DOM + is-visible 过渡显隐，避免条件渲染时动画丢失）*/}
+      <button
+        type="button"
+        className={`scroll-control-button ${scrollBtnVisible ? 'is-visible' : ''}`}
+        title={scrollBtnDirection === 'up' ? '回到顶部' : '跳到底部'}
+        onClick={handleJumpClick}
+      >
+        <span className={`codicon ${scrollBtnDirection === 'up' ? 'codicon-arrow-up' : 'codicon-arrow-down'}`} />
+      </button>
     </div>
   )
 }

@@ -15,14 +15,11 @@
 
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useStore } from '@/store/useStore'
+import { useStore, GLM_PLAN_PROVIDER } from '@/store/useStore'
 import { fmtTokens, limitTitle, fmtResetTime, fmtTime } from '@/utils/format'
 import type { ContextBreakdownItem, ContextSource } from '@/types/messages'
 
 const POP_W = 280
-
-/** GLM 套餐 providerId（有 apiKey 可查额度）*/
-const GLM_PLAN_PROVIDER = 'builtin:bigmodel-coding-plan'
 
 /** 分类展示元数据（顺序即显示顺序）*/
 const BREAKDOWN_META: { source: ContextSource; label: string; color: string }[] = [
@@ -174,7 +171,10 @@ export function ContextRing() {
               )}
               <div className="ctx-popover__row ctx-popover__row--highlight">
                 <span className="ctx-popover__label">平均缓存命中率</span>
-                <span className="ctx-popover__num">{hasData ? `${(ctx!.hitRate * 100).toFixed(1)}%` : '—'}</span>
+                {/* hitRate=null 表示本 turn 暂无统计（新 turn 首次模型调用完成前），显示"—"而非误导性的 0% */}
+                <span className="ctx-popover__num">
+                  {hasData && ctx!.hitRate != null ? `${(ctx!.hitRate * 100).toFixed(1)}%` : '—'}
+                </span>
               </div>
             </div>
 

@@ -14,11 +14,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionInfo } from '@/types/messages'
 import { SessionItem } from './SessionItem'
+import { ConfirmDialog } from './ConfirmDialog'
 import '../styles/history-view.less'
 
 interface Props {
   sessions: SessionInfo[]
   currentSessionId: string | null
+  /** 当前会话是否有对话历史（有 → 切换前二次确认，防止误触覆盖当前标签页）*/
+  currentSessionHasMessages?: boolean
   onSelect: (session: SessionInfo) => void
   /** 切回 chat 视图 */
   onBack: () => void
@@ -43,7 +46,15 @@ function Highlight({ text, query }: { text: string; query: string }) {
   )
 }
 
-export function HistoryView({ sessions, currentSessionId, onSelect, onBack, onDelete, onRefresh }: Props) {
+export function HistoryView({
+  sessions,
+  currentSessionId,
+  currentSessionHasMessages = false,
+  onSelect,
+  onBack,
+  onDelete,
+  onRefresh,
+}: Props) {
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -53,6 +64,8 @@ export function HistoryView({ sessions, currentSessionId, onSelect, onBack, onDe
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   // 删除确认 modal（存储待删除的 sessionId 列表，null = 不显示）
   const [deleteTargets, setDeleteTargets] = useState<string[] | null>(null)
+  // 切换确认 modal（待切换到当前标签页的历史会话，null = 不显示）
+  const [switchTarget, setSwitchTarget] = useState<SessionInfo | null>(null)
 
   // 搜索防抖 300ms
   useEffect(() => {
@@ -107,10 +120,16 @@ export function HistoryView({ sessions, currentSessionId, onSelect, onBack, onDe
   const handleItemClick = (session: SessionInfo) => {
     if (selectionMode) {
       toggleSelection(session.sessionId)
-    } else {
-      onSelect(session)
-      onBack() // 切回 chat 视图
+      return
     }
+    // 切到别的会话且当前标签页有对话历史 → 二次确认（防止误触覆盖当前会话）；
+    // 点当前会话 / 当前为空会话 → 直接切换，无需打扰
+    if (session.sessionId !== currentSessionId && currentSessionHasMessages) {
+      setSwitchTarget(session)
+      return
+    }
+    onSelect(session)
+    onBack() // 切回 chat 视图
   }
 
   // ============ 删除确认 ============
@@ -226,27 +245,36 @@ export function HistoryView({ sessions, currentSessionId, onSelect, onBack, onDe
         )}
       </div>
 
-      {/* 删除确认 modal（cc-gui modal-overlay/modal-content）*/}
+      {/* 删除确认 modal */}
       {deleteTargets && (
-        <div className="modal-overlay" onClick={cancelDelete} role="presentation">
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>确认删除</h3>
-            <p>
-              {deleteTargets.length > 1
-                ? `确定要删除所选 ${deleteTargets.length} 个会话吗？`
-                : '确定要删除这个会话吗？'}
-              此操作不可撤销。
-            </p>
-            <div className="modal-actions">
-              <button className="modal-btn modal-btn-cancel" onClick={cancelDelete}>
-                取消
-              </button>
-              <button className="modal-btn modal-btn-danger" onClick={confirmDelete}>
-                删除
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="确认删除"
+          message={
+            deleteTargets.length > 1
+              ? `确定要删除所选 ${deleteTargets.length} 个会话吗？此操作不可撤销。`
+              : '确定要删除这个会话吗？此操作不可撤销。'
+          }
+          confirmText="删除"
+          danger
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+        />
+      )}
+
+      {/* 切换会话确认 modal（历史会话覆盖当前标签页）*/}
+      {switchTarget && (
+        <ConfirmDialog
+          title="切换会话"
+          message={`将在当前标签页打开「${switchTarget.title.slice(0, 30)}」，当前会话会保留在历史记录中。确定切换吗？`}
+          confirmText="切换"
+          onConfirm={() => {
+            const target = switchTarget
+            setSwitchTarget(null)
+            onSelect(target)
+            onBack()
+          }}
+          onCancel={() => setSwitchTarget(null)}
+        />
       )}
     </div>
   )

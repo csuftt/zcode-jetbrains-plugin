@@ -44,6 +44,26 @@ function loadHistory(): string[] {
 /** 模块级内存历史：组件重挂载（流式重渲染/HMR）不丢 */
 let memoryHistory: string[] | null = null
 
+/** 幽灵补全最少输入长度（cc-gui minQueryLength 同款：输 2 字符才触发）*/
+const MIN_SUGGESTION_QUERY = 2
+
+/**
+ * 历史前缀建议查询（cc-gui useInlineHistoryCompletion.findBestMatch 简化版）：
+ * 大小写不敏感前缀匹配，最近的优先（历史数组时间序、尾部最新；本插件无使用计数，
+ * 不照搬 cc-gui 的按次数排序）。返回建议全文，无命中返回 null。
+ */
+export function findHistorySuggestion(query: string): string | null {
+  const clean = query.replace(INVISIBLE_CHARS_RE, '')
+  if (clean.length < MIN_SUGGESTION_QUERY) return null
+  const lower = clean.toLowerCase()
+  const items = loadHistory()
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item.length > clean.length && item.toLowerCase().startsWith(lower)) return item
+  }
+  return null
+}
+
 export function useInputHistory({ getTextContent, setText }: Options) {
   /** 当前导航到的下标，-1 = 非导航态（导航态随组件实例，历史数据在模块级）*/
   const historyIndexRef = useRef(-1)

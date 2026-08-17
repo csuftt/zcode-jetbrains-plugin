@@ -1,0 +1,182 @@
+/**
+ * MCP 连接日志弹窗样式（对齐 cc-gui mcp-log-dialog.less 视觉：
+ * 等宽字体深色日志列表，级别染红/橙/绿）
+ */
+
+.mcp-log-dialog {
+  width: min(720px, 92vw);
+  max-width: none; /* 覆盖 modal-content 的 max-width 420px */
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    flex: 1;
+  }
+
+  &__hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__icon-btn {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+
+    &:hover:not(:disabled) {
+      color: var(--text-primary);
+      border-color: var(--text-tertiary);
+    }
+    &:disabled {
+      cursor: default;
+      opacity: 0.6;
+    }
+  }
+
+  &__filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    select {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 12px;
+      padding: 3px 8px;
+      outline: none;
+      cursor: pointer;
+
+      &:focus {
+        border-color: var(--accent-primary, #3574f0);
+      }
+    }
+  }
+
+  &__filter-label {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  &__body {
+    min-height: 120px;
+  }
+
+  &__empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 28px 0;
+    color: var(--text-tertiary);
+    font-size: 12px;
+  }
+
+  &__list {
+    max-height: 380px;
+    overflow-y: auto;
+    background: var(--bg-tertiary, rgba(128, 128, 128, 0.08));
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    padding: 6px;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 3px;
+    }
+  }
+
+  /* 单条：时间 | 级别图标 | [server] | 消息（等宽）*/
+  &__entry {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono, Consolas, monospace);
+    font-size: 12px;
+    line-height: 1.6;
+
+    &:hover {
+      background: rgba(128, 128, 128, 0.12);
+    }
+
+    .codicon {
+      font-size: 13px;
+      align-self: center;
+    }
+
+    &.success .codicon {
+      color: #10b981;
+    }
+    &.error {
+      .codicon {
+        color: #ef4444;
+      }
+      .mcp-log-dialog__msg {
+        color: #ef4444;
+      }
+    }
+    &.warn .codicon {
+      color: #f59e0b;
+    }
+    &.info .codicon {
+      color: #6b7280;
+    }
+  }
+
+  &__time {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__server {
+    flex-shrink: 0;
+    color: var(--accent-primary, #3574f0);
+    font-weight: 600;
+
+    &::before {
+      content: '[';
+      color: var(--text-muted);
+    }
+    &::after {
+      content: ']';
+      color: var(--text-muted);
+    }
+  }
+
+  &__msg {
+    color: var(--text-secondary);
+    word-break: break-all;
+    min-width: 0;
+  }
+
+  &.success &__msg {
+    color: #10b981;
+  }
+}

@@ -57,14 +57,17 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
          * 创建标签内容并注册（须在 EDT 调用）
          *
          * @param initialSessionId 重启恢复时绑定的会话 id；null 表示新标签（前端自动建会话）
+         * @param lazy 懒加载：不立即创建 JCEF（占位 UI），首次切到本标签时激活。
+         *        重启恢复的非激活标签用，避免启动风暴并发拉起多个渲染进程；懒加载不自动选中
          */
         private fun addTabContent(
             project: Project,
             toolWindow: ToolWindow,
             initialSessionId: String?,
             tabName: String,
+            lazy: Boolean = false,
         ): Content {
-            val panel = ZCodeToolWindowPanel(project, initialSessionId)
+            val panel = ZCodeToolWindowPanel(project, initialSessionId, lazyStart = lazy)
             val content = ContentFactory.getInstance().createContent(panel, tabName, false)
             content.isCloseable = true
             // 标签关闭/销毁时释放 panel（JCEF 资源）
@@ -72,7 +75,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             panel.attachContent(content)
             toolWindow.contentManager.addContent(content)
             project.zCodeService().registerPanel(panel)
-            toolWindow.contentManager.setSelectedContent(content)
+            if (!lazy) toolWindow.contentManager.setSelectedContent(content)
             return content
         }
 
@@ -102,14 +105,19 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
         if (saved.isEmpty()) {
             addTabContent(project, toolWindow, null, "${TAB_NAME_PREFIX}1")
         } else {
-            for (info in saved) {
+            // 激活索引先算好：只有激活标签立即创建 JCEF，其余懒加载（切到时才建）。
+            // 2026-08-15 白屏故障：重启恢复 3 个标签 → 启动瞬间并发拉起 3 个渲染进程全部失败 → UI 空白
+            val activeIdx = ZCodeTabState.getInstance(project).state.activeIndex
+                .coerceIn(0, saved.size - 1)
+            for ((i, info) in saved.withIndex()) {
                 val sid = info.sessionId?.takeIf { it.isNotBlank() }
-                addTabContent(project, toolWindow, sid, info.name.ifBlank { "$TAB_NAME_PREFIX ?" })
+                addTabContent(
+                    project, toolWindow, sid, info.name.ifBlank { "$TAB_NAME_PREFIX ?" },
+                    lazy = i != activeIdx,
+                )
             }
             // 恢复激活索引
-            val idx = ZCodeTabState.getInstance(project).state.activeIndex
-                .coerceIn(0, cm.contentCount - 1)
-            if (cm.contentCount > 0) cm.setSelectedContent(cm.contents[idx])
+            if (cm.contentCount > 0) cm.setSelectedContent(cm.contents[activeIdx])
         }
 
         cm.addContentManagerListener(object : ContentManagerListener {
@@ -121,6 +129,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             override fun selectionChanged(event: ContentManagerEvent) {
                 if (cm.selectedContent !== event.content) return
                 val panel = event.content.component as? ZCodeToolWindowPanel ?: return
+                panel.ensureJcefCreated() // 懒加载标签激活（已激活时为 no-op）
                 project.zCodeService().setActivePanel(panel)
                 persistTabs(project, cm)
             }
@@ -160,6 +169,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
 
         // 初始激活面板（外部推送目标）
         (cm.selectedContent?.component as? ZCodeToolWindowPanel)?.let {
+            it.ensureJcefCreated() // 兜底：选中项若为懒加载则激活（正常路径激活标签已立即创建）
             project.zCodeService().setActivePanel(it)
         }
     }
