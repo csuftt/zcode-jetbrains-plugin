@@ -144,6 +144,15 @@ export interface SessionInfo {
 
 // ============ IPC 请求 / 响应（JS ↔ Java）============
 
+/** 外观配置（IDE 侧 PropertiesComponent 权威源；'' = 恢复主题默认/跟随 IDE）*/
+export interface AppearanceConfig {
+  fontScale: number
+  themePref: '' | 'light' | 'dark'
+  chatBg: string
+  chatBar: string
+  userMsg: string
+}
+
 export type JavaRequest =
   | { op: 'listSessions'; workspacePath?: string }
   | { op: 'createSession'; workspacePath?: string }
@@ -189,6 +198,10 @@ export type JavaRequest =
   /** 会话内嵌浏览器开关（展示/收起右侧分栏，聊天区宽度恒定）*/
   | { op: 'toggleBrowserPane' }
   | { op: 'setTabTitle'; title: string; sessionId?: string }
+  /** 外观配置全量回存 IDE（权威源，重启经 __ZCODE_APPEARANCE__ 注入回前端）*/
+  | { op: 'appearanceSave'; config: AppearanceConfig }
+  /** 通用 kv 全量回存 IDE（配置类 localStorage 权威源，重启经 __ZCODE_KVSTORE__ 注入）*/
+  | { op: 'kvSave'; entries: Record<string, string> }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {
@@ -384,6 +397,8 @@ export type JavaResponse =
   | { op: 'tabCreating' }
   | { op: 'browserPaneToggled'; visible: boolean }
   | { op: 'tabTitleSet' }
+  | { op: 'appearanceSave' }
+  | { op: 'kvSave' }
   | { op: 'ideTheme'; isDark: boolean }
   | { op: 'files'; files: string[] }
   | { op: 'commands'; commands: SlashCommand[] }

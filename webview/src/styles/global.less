@@ -17,6 +17,20 @@ body,
   font-size: 13px;
 }
 
+/* 字号缩放：#root 用 transform: scale（纯视觉变换，不参与布局计算）。
+ * 不用 cc-gui 的 zoom 方案——本插件 JCEF 的 Chromium 中 zoom 不缩放元素自身的
+ * 百分比 used width：calc(100%/0.9) 的 831px 直接成为最终宽度，缩小时右侧超宽被裁、
+ * 放大时右侧留白（已实测复现）。transform 下布局宽先反除、渲染再缩放，两者解耦稳定：
+ *   布局宽 = 100% / scale，渲染 × scale → 视觉恒等于视口宽。
+ * 挂 body 的 JS tooltip（inline-chip-tip）在变换容器外不受影响（gBCR 视觉坐标一致）；
+ * 容器内 fixed 弹窗均为 inset/居中定位，以 #root 为包含块铺满全屏，自洽。 */
+#root {
+  width: calc(100% / var(--font-scale, 1));
+  height: calc(100% / var(--font-scale, 1));
+  transform: scale(var(--font-scale, 1));
+  transform-origin: 0 0;
+}
+
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -34,7 +48,7 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%; /* #root 已按 --font-scale 反除，此处不能用 100vh（zoom 容器内会超出） */
   overflow: hidden;
 
   /* 主区域（Header 之下）*/

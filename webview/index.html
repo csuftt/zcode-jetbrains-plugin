@@ -4,6 +4,50 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ZCode</title>
+    <script>
+      /* 首屏防闪（来源 cc-gui index.html）：React 加载前应用用户外观偏好。
+       * 优先 Java 注入的权威配置 __ZCODE_APPEARANCE__（onLoadStart 注入；生产模式
+       * 内置 server 端口随机、origin 每次重启变化，localStorage 按 origin 隔离会丢，
+       * IDE 侧 PropertiesComponent 才是权威源）；
+       * 注入未到（HMR reload/同 origin 二次加载/mock）回退 localStorage。
+       * 跟随 IDE 模式由 useTheme 在 React 内处理；顶栏派生变量组由 initAppearance 补齐。 */
+      ;(function () {
+        try {
+          var inj = window.__ZCODE_APPEARANCE__
+          var ls = function (k) {
+            return inj ? undefined : localStorage.getItem(k)
+          }
+          var pref = inj
+            ? inj.themePref
+            : ls('zcode-theme-pref')
+          var urlTheme = new URLSearchParams(window.location.search).get('theme')
+          var theme =
+            urlTheme === 'light' || urlTheme === 'dark'
+              ? urlTheme
+              : pref === 'light' || pref === 'dark'
+                ? pref
+                : window.__INITIAL_IDE_THEME__ === 'light'
+                  ? 'light'
+                  : 'dark'
+          document.documentElement.setAttribute('data-theme', theme)
+
+          var s = document.documentElement.style
+          var lvl = inj
+            ? inj.fontScale
+            : parseInt(localStorage.getItem('zcode.fontScale') || '', 10)
+          var map = { 1: 0.8, 2: 0.9, 3: 1, 4: 1.1, 5: 1.2, 6: 1.4 }
+          if (lvl >= 1 && lvl <= 6) s.setProperty('--font-scale', String(map[lvl] || 1))
+          var v
+          if ((v = inj ? inj.chatBg : ls('zcode.chatBgColor'))) s.setProperty('--bg-chat', v)
+          if ((v = inj ? inj.userMsg : ls('zcode.userMsgColor')))
+            s.setProperty('--color-message-user-bg', v)
+          if ((v = inj ? inj.chatBar : ls('zcode.chatBarColor')))
+            s.setProperty('--color-chat-bars-bg', v)
+        } catch (e) {
+          /* localStorage 不可用时静默降级 */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

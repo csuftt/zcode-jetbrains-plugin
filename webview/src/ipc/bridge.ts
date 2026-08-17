@@ -1084,6 +1084,11 @@ flowchart LR
       return { op: 'browserPaneToggled', visible: false }
     case 'setTabTitle':
       return { op: 'tabTitleSet' }
+    case 'appearanceSave':
+      // mock 模式 localStorage 即权威源，保存仅回执
+      return { op: 'appearanceSave' }
+    case 'kvSave':
+      return { op: 'kvSave' }
     case 'listFiles':
       return { op: 'files', files: ['README.md', 'package.json', 'src/main.tsx'] }
     case 'listCommands':

@@ -20,6 +20,7 @@ import type { SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/utils/parseStatus'
 import { isHiddenSyntheticMessage } from '@/utils/parseNotification'
 import { mergeTurnMessages } from '@/utils/mergeTurnMessages'
+import { getPersisted, setPersisted, removePersisted, entriesWithPrefix } from '@/utils/persist'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'mock' | 'error'
 
@@ -97,7 +98,7 @@ interface StoreState {
 
   // 模型切换（config.json provider 注册表）
   models: ModelOption[]
-  /** 当前会话选择的模型（localStorage 记忆）*/
+  /** 当前会话选择的模型（persist 记忆）*/
   currentModel: { modelId: string; providerId: string } | null
   /** 已为该会话下发过 setModel（避免每次 messages 刷新重复下发）*/
   modelAppliedForSession: string | null
@@ -176,21 +177,21 @@ interface StoreState {
   resetToNewSession: () => void
   deleteSession: (sessionId: string) => void
   stopStreaming: () => void
-  /** 重命名会话（CLI 协议无 rename op，仅前端 localStorage 持久化）*/
+  /** 重命名会话（CLI 协议无 rename op，仅前端 persist 持久化）*/
   renameSession: (sessionId: string, title: string) => void
   /** 拉取可切换的模型列表（config.json）*/
   loadModels: () => void
   /** 切换当前会话模型（session/setModel）*/
   setModel: (modelId: string, providerId: string) => void
-  /** 把 localStorage 记忆的模型下发给指定会话（models 列表已就绪时才生效）*/
+  /** 把 persist 记忆的模型下发给指定会话（models 列表已就绪时才生效）*/
   applyModelIfReady: (sessionId: string) => void
   /** 拉取当前会话的运行时设置（mode + thoughtLevel）*/
   loadSettings: () => void
-  /** 切换思考级别（session/setThoughtLevel，localStorage 记忆）*/
+  /** 切换思考级别（session/setThoughtLevel，persist 记忆）*/
   setThoughtLevel: (level: string) => void
   /** 切换权限模式（session/setMode，不记忆——模式是即时意图，避免 plan 粘性）*/
   setMode: (mode: string) => void
-  /** 把 localStorage 记忆的思考级别下发给指定会话（available 就绪且值仍有效时才生效）*/
+  /** 把 persist 记忆的思考级别下发给指定会话（available 就绪且值仍有效时才生效）*/
   applyThoughtLevelIfReady: (sessionId: string) => void
   /** 拉取当前会话的上下文用量 */
   loadUsage: () => void
@@ -390,7 +391,7 @@ export const useStore = create<StoreState>((set, get) => ({
     get().loadUsage()
     // 拉取运行时设置（mode + 思考级别，级别列表随模型变化）
     get().loadSettings()
-    // 会话切换后，把 localStorage 记忆的模型真正下发 setModel（见 models 响应里的 applyModelIfReady）
+    // 会话切换后，把 persist 记忆的模型真正下发 setModel（见 models 响应里的 applyModelIfReady）
     get().applyModelIfReady(session.sessionId)
   },
 
@@ -557,10 +558,8 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   renameSession: (sessionId, title) => {
-    // 持久化到 localStorage（listSessions 响应时合并回来）
-    try {
-      localStorage.setItem(`zcode.sessionTitle.${sessionId}`, title)
-    } catch { /* localStorage 不可用时仅内存生效 */ }
+    // 持久化（persist 通道，listSessions 响应时合并回来）
+    setPersisted(`zcode.sessionTitle.${sessionId}`, title)
     set((s) => ({
       sessions: s.sessions.map((x) => (x.sessionId === sessionId ? { ...x, title } : x)),
     }))
@@ -571,11 +570,9 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setModel: (modelId, providerId) => {
-    // 记忆当前选择（localStorage），切换会话后仍显示；无会话（懒创建待命态）也先记忆，
+    // 记忆当前选择（persist 通道），切换会话后仍显示；无会话（懒创建待命态）也先记忆，
     // 会话建立后由 applyModelIfReady 真正下发（见 createSession 响应处理）
-    try {
-      localStorage.setItem('zcode.currentModel', JSON.stringify({ modelId, providerId }))
-    } catch { /* ignore */ }
+    setPersisted('zcode.currentModel', JSON.stringify({ modelId, providerId }))
     set({ currentModel: { modelId, providerId } })
     const sid = get().currentSessionId
     if (!sid) return
@@ -587,7 +584,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (get().modelAppliedForSession === sessionId) return
     let saved: { modelId: string; providerId: string } | null = null
     try {
-      const raw = localStorage.getItem('zcode.currentModel')
+      const raw = getPersisted('zcode.currentModel')
       if (raw) saved = JSON.parse(raw)
     } catch { /* ignore */ }
     if (!saved) return
@@ -609,10 +606,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setThoughtLevel: (level) => {
     const sid = get().currentSessionId
     if (!sid) return
-    // 记忆选择（localStorage），新会话/切模型后仍尝试恢复
-    try {
-      localStorage.setItem('zcode.thoughtLevel', level)
-    } catch { /* ignore */ }
+    // 记忆选择（persist 通道），新会话/切模型后仍尝试恢复
+    setPersisted('zcode.thoughtLevel', level)
     // 乐观更新 current（thoughtLevelSet 响应 / settings 重拉时服务端校准）
     const info = get().thoughtLevel
     if (info) set({ thoughtLevel: { ...info, current: level } })
@@ -638,10 +633,7 @@ export const useStore = create<StoreState>((set, get) => ({
   applyThoughtLevelIfReady: (sessionId) => {
     // 同一会话只下发一次（settings 可能在切会话/切模型后多次到达）
     if (get().thoughtLevelAppliedForSession === sessionId) return
-    let saved: string | null = null
-    try {
-      saved = localStorage.getItem('zcode.thoughtLevel')
-    } catch { /* ignore */ }
+    const saved = getPersisted('zcode.thoughtLevel')
     if (!saved) return
     // 等级别列表就绪，且记忆值仍有效（切模型后级别集会变，如 off/high/max ↔ enabled/off）
     const info = get().thoughtLevel
@@ -872,7 +864,7 @@ const silentChildFetches = new Set<string>()
 // ===== 上下文构成持久化（历史会话恢复兜底）=====
 // 构成明细（runtime.breakdown）只挂在 CLI 内存 eventStore 的 ModelComplete 事件上，
 // 不随消息落盘——会话被 resume 到新进程（IDE 重启/标签重开/换标签）后 session/read
-// 不再返回，悬浮栏「上下文构成」就丢了。这里在收到 breakdown 时按会话写 localStorage，
+// 不再返回，悬浮栏「上下文构成」就丢了。这里在收到 breakdown 时按会话写 persist 通道，
 // 恢复历史会话时若上下文用量 used 与缓存时一致（消息未变 → 构成未变）则兜底显示；
 // 别处对话过 / compact 过的会话 used 必变，缓存自动失效。LRU 保留最近 30 个会话。
 const CTX_BREAKDOWN_PREFIX = 'zcode.ctxBreakdown.'
@@ -884,16 +876,15 @@ function saveBreakdownCache(sessionId: string, breakdown: ContextBreakdownItem[]
     const key = CTX_BREAKDOWN_PREFIX + sessionId
     const value = JSON.stringify({ breakdown, used, savedAt: Date.now() })
     // 流式期间 5s 轮询都会走这里：内容没变不重复写（也省掉 LRU 扫描）
-    if (localStorage.getItem(key) === value) return
-    localStorage.setItem(key, value)
+    if (getPersisted(key) === value) return
+    setPersisted(key, value)
     // LRU 淘汰：按 savedAt 只保留最近 N 个会话（损坏条目按最旧处理，顺带清理）
     const entries: { key: string; savedAt: number }[] = []
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)
-      if (!k?.startsWith(CTX_BREAKDOWN_PREFIX) || k === key) continue
+    for (const { key: k, value: v } of entriesWithPrefix(CTX_BREAKDOWN_PREFIX)) {
+      if (k === key) continue
       let savedAt = 0
       try {
-        const parsed = JSON.parse(localStorage.getItem(k) ?? '') as { savedAt?: number }
+        const parsed = JSON.parse(v) as { savedAt?: number }
         if (typeof parsed.savedAt === 'number') savedAt = parsed.savedAt
       } catch { /* 损坏条目保持 savedAt=0，优先淘汰 */ }
       entries.push({ key: k, savedAt })
@@ -901,14 +892,14 @@ function saveBreakdownCache(sessionId: string, breakdown: ContextBreakdownItem[]
     const overflow = entries.length + 1 - CTX_BREAKDOWN_MAX_SESSIONS
     if (overflow <= 0) return
     entries.sort((a, b) => a.savedAt - b.savedAt)
-    for (const e of entries.slice(0, overflow)) localStorage.removeItem(e.key)
-  } catch { /* localStorage 不可用/写满：放弃持久化，内存态不受影响 */ }
+    for (const e of entries.slice(0, overflow)) removePersisted(e.key)
+  } catch { /* 存储不可用/写满：放弃持久化，内存态不受影响 */ }
 }
 
 function loadBreakdownCache(sessionId: string, used: number): ContextBreakdownItem[] | null {
   if (!sessionId) return null
   try {
-    const raw = localStorage.getItem(CTX_BREAKDOWN_PREFIX + sessionId)
+    const raw = getPersisted(CTX_BREAKDOWN_PREFIX + sessionId)
     if (!raw) return null
     const parsed = JSON.parse(raw) as { breakdown?: ContextBreakdownItem[]; used?: number }
     // used 不一致 = 缓存后会话变过（别处对话/compact），构成已过期，不采用
@@ -971,18 +962,16 @@ function handleResponse(
 ) {
   switch (msg.op) {
     case 'listSessions': {
-      // 标题合并优先级：手动重命名（localStorage）> 服务端正式标题（顺带清临时标题）
+      // 标题合并优先级：手动重命名（persist）> 服务端正式标题（顺带清临时标题）
       // > 本地临时标题（乐观占位，见 sendMessage）> 服务端占位（空/会话 id）
       const prevProvisionals = get().provisionalTitles
       const nextProvisionals = { ...prevProvisionals }
       const merged = msg.sessions.map((s) => {
-        try {
-          const stored = localStorage.getItem(`zcode.sessionTitle.${s.sessionId}`)
-          if (stored) {
-            delete nextProvisionals[s.sessionId]
-            return { ...s, title: stored }
-          }
-        } catch { /* localStorage 不可用时继续走后续优先级 */ }
+        const stored = getPersisted(`zcode.sessionTitle.${s.sessionId}`)
+        if (stored) {
+          delete nextProvisionals[s.sessionId]
+          return { ...s, title: stored }
+        }
         if (!isDefaultSessionTitle(s.title, s.sessionId)) {
           delete nextProvisionals[s.sessionId]
           return s
@@ -1264,9 +1253,9 @@ function handleResponse(
 
     case 'models':
       set({ models: msg.models })
-      // 恢复 localStorage 记忆的模型选择（如仍在列表里）
+      // 恢复记忆的模型选择（如仍在列表里）
       try {
-        const saved = localStorage.getItem('zcode.currentModel')
+        const saved = getPersisted('zcode.currentModel')
         if (saved && get().currentModel === null) {
           const parsed = JSON.parse(saved) as { modelId: string; providerId: string }
           if (msg.models.some((m) => m.modelId === parsed.modelId && m.providerId === parsed.providerId)) {
@@ -1274,7 +1263,7 @@ function handleResponse(
           }
         }
       } catch { /* ignore */ }
-      // localStorage 无记忆时，从已有消息推断（models 刚加载，messages 推断可能因缺 providerId 失败）
+      // persist 无记忆时，从已有消息推断（models 刚加载，messages 推断可能因缺 providerId 失败）
       if (!get().currentModel) {
         const inferred = inferCurrentModel(get().messages, msg.models)
         if (inferred) set({ currentModel: inferred })
@@ -1322,7 +1311,7 @@ function handleResponse(
       if (msg.sessionId && msg.sessionId !== get().currentSessionId) break
       if (msg.breakdown) {
         // 构成明细来自 session/read 的 runtime.breakdown（turn 后 CLI 构建）：
-        // 落一份 localStorage 缓存，历史会话恢复后服务端拿不到时兜底（见 loadBreakdownCache）
+        // 落一份 persist 缓存，历史会话恢复后服务端拿不到时兜底（见 loadBreakdownCache）
         saveBreakdownCache(msg.sessionId ?? '', msg.breakdown, msg.used)
         set({
           contextUsage: { used: msg.used, size: msg.size, hitRate: msg.hitRate ?? null },

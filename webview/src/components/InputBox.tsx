@@ -126,7 +126,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     setText: setTextFromHistory,
   })
 
-  // 历史跨会话共享（localStorage），切会话仅重置导航位置
+  // 历史跨会话共享（persist 通道），切会话仅重置导航位置
   const sessionId = useStore((s) => s.currentSessionId)
   useEffect(() => {
     resetNav()

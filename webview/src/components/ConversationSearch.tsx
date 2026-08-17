@@ -9,14 +9,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConversationSearch, DEFAULT_SEARCH_OPTIONS } from '@/hooks/useConversationSearch'
 import type { SearchOptions } from '@/hooks/useConversationSearch'
+import { getPersisted, setPersisted } from '@/utils/persist'
 import '../styles/conversation-search.less'
 
 const STORAGE_KEY = 'zcode.search.options'
 
-/** 从 localStorage 读持久化选项，坏数据回默认 */
+/** 从持久化通道读选项，坏数据回默认 */
 function loadStoredOptions(): SearchOptions {
   try {
-    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null
+    const raw = typeof window !== 'undefined' ? getPersisted(STORAGE_KEY) : null
     if (!raw) return { ...DEFAULT_SEARCH_OPTIONS }
     const parsed = JSON.parse(raw) as Partial<SearchOptions>
     return {
@@ -30,9 +31,9 @@ function loadStoredOptions(): SearchOptions {
 }
 
 function persistOptions(opts: SearchOptions): void {
+  if (typeof window === 'undefined') return
   try {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(opts))
+    setPersisted(STORAGE_KEY, JSON.stringify(opts))
   } catch {
     // 存储配额 / 隐私模式 —— 静默忽略
   }

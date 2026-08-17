@@ -9,11 +9,11 @@
  */
 
 import { useEffect } from 'react'
+import { persistAppearance, THEME_PREF_KEY } from '@/utils/appearance'
 
 export type IdeTheme = 'light' | 'dark'
 
-/** localStorage key */
-const THEME_PREF_KEY = 'zcode-theme-pref'
+/** localStorage key（THEME_PREF_KEY 定义于 utils/appearance.ts，两处共用）*/
 
 /** 读取用户主题偏好（null/'' = 跟随 IDE）*/
 export function getThemePreference(): IdeTheme | null {
@@ -29,8 +29,9 @@ export function setThemePreference(theme: IdeTheme | null): void {
   } else {
     localStorage.setItem(THEME_PREF_KEY, theme)
   }
-  // 立即应用
+  // 立即应用 + 回存 IDE（PropertiesComponent，重启还原）
   applyTheme()
+  persistAppearance()
 }
 
 /** 获取 IDE 当前主题（注入值，mock 模式默认暗色）*/

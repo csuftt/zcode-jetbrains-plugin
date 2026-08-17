@@ -2313,14 +2313,24 @@ class ZCodeBrowserExecutor(private val project: Project) {
         for (tabId in allTabIds()) applyViewportToTab(tabId, width, height, scale)
     }
 
-    /** 信箱化注入脚本（设备屏居中 + transform 缩放 + html 深色信箱背景）*/
+    /**
+     * 信箱化注入脚本（设备屏居中 + transform 缩放 + html 信箱背景）。
+     * 信箱背景/阴影按 webview 生效主题配色（浅色下不再是黑边）。
+     */
     private fun deviceFrameScript(width: Int, height: Int, scale: Double): String {
         val z = "%.4f".format(scale.coerceIn(0.05, 5.0))
+        val dark = ZCodeAppearanceStore.effectiveTheme() == "dark"
+        val letterboxBg = if (dark) "#1e1f22" else "#f0f0f0"
+        val shadow = if (dark) {
+            "0 0 0 1px rgba(128,128,128,.5), 0 4px 16px rgba(0,0,0,.4)"
+        } else {
+            "0 0 0 1px rgba(128,128,128,.45), 0 4px 16px rgba(0,0,0,.15)"
+        }
         return "(function(){var Z=$z,VW=$width,VH=$height;" +
             "var html=document.documentElement,body=document.body;if(!body)return;" +
             "var vv=window.visualViewport||{};var visW=vv.width||window.innerWidth,visH=vv.height||window.innerHeight;" +
             "var left=Math.max(0,(visW-VW*Z)/2),top=Math.max(0,(visH-VH*Z)/2);" +
-            "html.style.setProperty('background','#1e1f22','important');" +
+            "html.style.setProperty('background','$letterboxBg','important');" +
             "html.style.setProperty('overflow','hidden','important');" +
             "body.style.setProperty('position','absolute','important');" +
             "body.style.setProperty('overflow','auto','important');" +
@@ -2331,7 +2341,7 @@ class ZCodeBrowserExecutor(private val project: Project) {
             "body.style.setProperty('transform-origin','0 0','important');" +
             "body.style.setProperty('left',left+'px','important');" +
             "body.style.setProperty('top',top+'px','important');" +
-            "body.style.setProperty('box-shadow','0 0 0 1px rgba(128,128,128,.5), 0 4px 16px rgba(0,0,0,.4)','important');" +
+            "body.style.setProperty('box-shadow','$shadow','important');" +
             "})()"
     }
 

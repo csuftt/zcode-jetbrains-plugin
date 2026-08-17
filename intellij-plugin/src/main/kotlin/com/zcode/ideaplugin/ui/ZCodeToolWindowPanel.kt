@@ -38,6 +38,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import java.awt.BorderLayout
 import javax.swing.JComponent
@@ -139,6 +140,30 @@ class ZCodeToolWindowPanel(
     private companion object {
         const val KEY_BROWSER_EXPANDED = "zcode.browser.paneExpanded"
         const val KEY_CHAT_BASE_WIDTH = "zcode.browser.chatBaseWidth"
+
+        /** 外观配置（Application 级，跨项目共享）：
+         *  localStorage 在生产模式下按 origin 隔离——内置 server 每次重启端口随机，
+         *  origin 变化导致配置丢失，因此主题/字号/自定义颜色以 IDE 侧持久化为权威源，
+         *  webview 启动时经 buildBridgeJs 注入（__ZCODE_APPEARANCE__） */
+        const val KEY_APPEARANCE = "zcode.appearance.config"
+
+        /** webview 通用 kv（配置类 localStorage 的权威源，同 appearance 迁移原因）：
+         *  string→string JSON map（搜索开关/输入历史/模型记忆/思考级别/会话标题/上下文构成）*/
+        const val KEY_WEBVIEW_KV = "zcode.webview.kvstore"
+    }
+
+    /** 读取外观配置 JSON（fontScale/themePref/chatBg/chatBar/userMsg），无配置返回 null */
+    private fun readAppearanceJson(): String? {
+        return try {
+            com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_APPEARANCE)
+        } catch (_: Exception) { null }
+    }
+
+    /** 读取 webview kv JSON map，无配置返回 null */
+    private fun readKvJson(): String? {
+        return try {
+            com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_WEBVIEW_KV)
+        } catch (_: Exception) { null }
     }
 
     private fun persistBrowserWidthState(expanded: Boolean, base: Int) {
@@ -499,11 +524,19 @@ class ZCodeToolWindowPanel(
         val theme = if (isDark) "dark" else "light"
         val workspace = (project.basePath ?: "").replace("\\", "\\\\").replace("'", "\\'")
         val initialSession = (initialSessionId ?: "").replace("\\", "\\\\").replace("'", "\\'")
+        // 外观配置：JSON 直接作为 JS 对象字面量注入（值为白名单校验过的数字/枚举/#hex 色，
+        // 不含需要转义的字符）；无配置时置 null，前端回退 localStorage（dev mock 同）
+        val appearance = readAppearanceJson() ?: "null"
+        // kv 值来自用户输入（输入历史/会话标题），可能含 "</script>"——singlefile 路径桥脚本
+        // 会嵌进 HTML，先转义防提前闭合标签（JS 字符串里 "<\/" 与 "</" 等价，语义不变）
+        val kvstore = (readKvJson() ?: "null").replace("</", "<\\/")
         return """
 window.__ZCODE_CEF_QUERY__ = window['$funcName'];
 window.__INITIAL_IDE_THEME__ = '$theme';
 window.__ZCODE_WORKSPACE__ = '$workspace';
 window.__ZCODE_INITIAL_SESSION__ = '$initialSession';
+window.__ZCODE_APPEARANCE__ = $appearance;
+window.__ZCODE_KVSTORE__ = $kvstore;
 if (!window.__ZCODE_LOG_HOOK__) {
   window.__ZCODE_LOG_HOOK__ = true;
   (function() {
@@ -597,6 +630,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "toggleBrowserPane" -> handleToggleBrowserPane()
                         "setTabTitle" -> handleSetTabTitle(msg)
                         "clearTabSession" -> handleClearTabSession()
+                        "appearanceSave" -> handleAppearanceSave(msg)
+                        "kvSave" -> handleKvSave(msg)
                         else -> errorResponse("未知 op: $op")
                     }
                     log.info("op=$op 处理完成，发送回 JS")
@@ -661,6 +696,79 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
         return buildJsonObject { put("op", "tabTitleSet") }
+    }
+
+    /**
+     * 保存外观配置（Application 级 PropertiesComponent）。
+     * 前端全量提交（fontScale/themePref/chatBg/chatBar/userMsg），此处白名单校验后
+     * 整体覆盖存储；颜色仅接受 #rrggbb 或空串（空=恢复主题默认）。
+     * 前端不依赖应答（乐观更新），回执仅作调试可见性。
+     */
+    private fun handleAppearanceSave(msg: JsonObject): JsonObject {
+        val cfg = try {
+            val c = msg["config"]?.jsonObject ?: return errorResponse("appearanceSave 缺少 config")
+            val fontScale = c["fontScale"]?.jsonPrimitive?.intOrNull ?: 3
+            val themePref = c["themePref"]?.jsonPrimitive?.contentOrNull ?: ""
+            // 颜色白名单：#rrggbb 或空串（空=恢复主题默认），非法返回 null
+            fun colorOf(k: String): String? {
+                val v = c[k]?.jsonPrimitive?.contentOrNull ?: ""
+                return if (v.isEmpty() || v.matches(Regex("^#[0-9a-fA-F]{6}$"))) v.lowercase() else null
+            }
+            val chatBg = colorOf("chatBg") ?: return errorResponse("chatBg 颜色格式非法")
+            val chatBar = colorOf("chatBar") ?: return errorResponse("chatBar 颜色格式非法")
+            val userMsg = colorOf("userMsg") ?: return errorResponse("userMsg 颜色格式非法")
+            if (fontScale !in 1..6) return errorResponse("fontScale 越界")
+            if (themePref.isNotEmpty() && themePref !in setOf("light", "dark")) {
+                return errorResponse("themePref 非法")
+            }
+            buildJsonObject {
+                put("fontScale", fontScale)
+                put("themePref", themePref)
+                put("chatBg", chatBg)
+                put("chatBar", chatBar)
+                put("userMsg", userMsg)
+            }.toString()
+        } catch (e: Exception) {
+            return errorResponse("appearanceSave 参数解析失败: ${e.message}")
+        }
+        try {
+            com.intellij.ide.util.PropertiesComponent.getInstance().setValue(KEY_APPEARANCE, cfg)
+            log.info("外观配置已保存")
+        } catch (e: Exception) {
+            log.warn("外观配置保存失败: ${e.message}")
+        }
+        return buildJsonObject { put("op", "appearanceSave") }
+    }
+
+    /**
+     * 保存 webview 通用 kv（Application 级 PropertiesComponent，string→string map 全量覆盖）。
+     * 前端去抖全量提交 persist 域（zcode./zcode- 前缀、排除外观配置独立通道）；
+     * 限量防护：条目 ≤500、总量 ≤512KB，超限拒绝（localStorage 同源共享本就有限）。
+     */
+    private fun handleKvSave(msg: JsonObject): JsonObject {
+        val entries = try {
+            msg["entries"]?.jsonObject ?: return errorResponse("kvSave 缺少 entries")
+        } catch (e: Exception) {
+            return errorResponse("kvSave entries 解析失败: ${e.message}")
+        }
+        if (entries.size > 500) return errorResponse("kvSave 条目过多（${entries.size} > 500）")
+        // 值必须是纯字符串（前端约定），且校验前缀域
+        entries.forEach { (k, v) ->
+            val sv = (v as? JsonPrimitive)?.takeIf { it.isString }?.content
+                ?: return errorResponse("kvSave 值非字符串: $k")
+            if (!k.startsWith("zcode.") && !k.startsWith("zcode-")) {
+                return errorResponse("kvSave key 越域: $k")
+            }
+            if (sv.length > 64 * 1024) return errorResponse("kvSave 单值过大: $k")
+        }
+        val total = entries.entries.sumOf { it.key.length + ((it.value as? JsonPrimitive)?.content?.length ?: 0) }
+        if (total > 512 * 1024) return errorResponse("kvSave 总量过大（$total B）")
+        try {
+            com.intellij.ide.util.PropertiesComponent.getInstance().setValue(KEY_WEBVIEW_KV, entries.toString())
+        } catch (e: Exception) {
+            log.warn("webview kv 保存失败: ${e.message}")
+        }
+        return buildJsonObject { put("op", "kvSave") }
     }
 
     /** 更新标签 displayName：baseTitle + 生成中后缀（EDT）*/

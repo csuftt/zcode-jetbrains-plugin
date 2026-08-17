@@ -10,10 +10,11 @@
  *
  * 与 cc-gui 的差异（简化）：
  * - 只记录完整发送文本，不做 fragment 拆分/使用计数/重要性清理
- * - 历史仅存 localStorage（JCEF 内持久），不同步到磁盘文件
+ * - 历史经 persist 通道持久化（IDE PropertiesComponent 权威源），不同步到磁盘文件
  */
 
 import { useCallback, useRef } from 'react'
+import { getPersisted, setPersisted } from '@/utils/persist'
 
 const HISTORY_STORAGE_KEY = 'zcode-input-history'
 const MAX_HISTORY_ITEMS = 200
@@ -29,13 +30,13 @@ interface Options {
 function loadHistory(): string[] {
   if (memoryHistory) return memoryHistory
   try {
-    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY)
+    const raw = getPersisted(HISTORY_STORAGE_KEY)
     const parsed = raw ? JSON.parse(raw) : []
     memoryHistory = Array.isArray(parsed)
       ? parsed.filter((x): x is string => typeof x === 'string')
       : []
   } catch {
-    // localStorage 禁用时降级为仅内存历史（页面会话内有效）
+    // 存储不可用时降级为仅内存历史（页面会话内有效）
     memoryHistory = []
   }
   return memoryHistory
@@ -81,9 +82,9 @@ export function useInputHistory({ getTextContent, setText }: Options) {
     historyIndexRef.current = -1
     draftRef.current = ''
     try {
-      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next))
+      setPersisted(HISTORY_STORAGE_KEY, JSON.stringify(next))
     } catch {
-      // localStorage 禁用/写满时静默降级为仅内存历史
+      // 存储禁用/写满时静默降级为仅内存历史
     }
   }, [])
 

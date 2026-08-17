@@ -13,6 +13,7 @@
  */
 
 import { useState } from 'react'
+import { BasicSettingsView } from './BasicSettingsView'
 import { UsageView } from './UsageView'
 import { MemoryView } from './MemoryView'
 import { SkillListView } from './SkillListView'
@@ -20,7 +21,7 @@ import { McpListView } from './McpListView'
 import { isInJcef } from '@/ipc/bridge'
 import '../styles/settings.less'
 
-type SettingsTab = 'usage' | 'memory' | 'skills' | 'mcp'
+type SettingsTab = 'basic' | 'usage' | 'memory' | 'skills' | 'mcp'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -29,13 +30,15 @@ interface Props {
 }
 
 export function SettingsView({ onBack }: Props) {
-  // dev 辅助：浏览器 mock 验收可带 #skills / #mcp 直达页签（#mcp/<服务器名> 只取首段）；
+  // dev 辅助：浏览器 mock 验收可带 #basic / #skills / #mcp 直达页签（#mcp/<服务器名> 只取首段）；
   // JCEF 内 hash 恒空不影响生产
   const hashTab = window.location.hash.replace('#', '').split('/')[0] as SettingsTab
-  const initialTab: SettingsTab = !isInJcef() && ['usage', 'memory', 'skills', 'mcp'].includes(hashTab) ? hashTab : 'usage'
+  const initialTab: SettingsTab =
+    !isInJcef() && ['basic', 'usage', 'memory', 'skills', 'mcp'].includes(hashTab) ? hashTab : 'basic'
   const [tab, setTab] = useState<SettingsTab>(initialTab)
 
   const navItems: { key: SettingsTab; icon: string; label: string }[] = [
+    { key: 'basic', icon: 'codicon-paintcan', label: '基础设置' },
     { key: 'usage', icon: 'codicon-graph', label: '用量查询' },
     { key: 'memory', icon: 'codicon-notebook', label: '记忆' },
     { key: 'skills', icon: 'codicon-library', label: '技能' },
@@ -71,6 +74,7 @@ export function SettingsView({ onBack }: Props) {
 
         {/* 右侧内容区 */}
         <main className="settings-view__content">
+          {tab === 'basic' && <BasicSettingsView />}
           {tab === 'usage' && <UsageView />}
           {tab === 'memory' && <MemoryView />}
           {tab === 'skills' && <SkillListView />}
