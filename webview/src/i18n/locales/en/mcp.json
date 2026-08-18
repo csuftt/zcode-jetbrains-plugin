@@ -16,7 +16,8 @@
     "user": "Global",
     "project": "Project",
     "plugin": "Plugin",
-    "runtime": "Runtime"
+    "runtime": "Runtime",
+    "host": "Host Built-in"
   },
   "status": {
     "connected": "Connected",

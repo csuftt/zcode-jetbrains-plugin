@@ -21,6 +21,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
+import type { ZCodeMessage } from '@/types/messages'
 import { MarkdownBlock } from './MarkdownBlock'
 import '../styles/plan-approval-dialog.less'
 
@@ -60,6 +61,21 @@ export function PlanApprovalDialog({ requestId, plan, onClose }: Props) {
       action: 'accept',
       answer: text,
     })
+    // 意见立即可见于主 UI：interaction 应答只回传服务端，消息流重拉前用户输入无踪影；
+    // 乐观插入 user 消息（与 sendMessage 同构），turn 结束重拉时由服务端权威数据覆盖
+    const sid = useStore.getState().currentSessionId
+    if (sid) {
+      const userMsg: ZCodeMessage = {
+        info: {
+          role: 'user',
+          time: { created: Date.now() },
+          id: `local_u_${Date.now()}`,
+          sessionID: sid,
+        },
+        parts: [{ type: 'text', text }],
+      }
+      useStore.setState((s) => ({ messages: [...s.messages, userMsg] }))
+    }
     // 不做模式切换：反馈路径仍留在 plan 模式（服务端未批准，currentMode 不变）
     onClose()
   }
@@ -92,17 +108,16 @@ export function PlanApprovalDialog({ requestId, plan, onClose }: Props) {
             </button>
             <span className="plan-approval-dialog__divider" />
             <div className="plan-approval-dialog__feedback-group">
-              <textarea
+              <input
                 className="plan-approval-dialog__feedback-input"
-                rows={2}
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
                 placeholder={t('app.planApproval.feedbackPlaceholder')}
                 maxLength={500}
                 spellCheck={false}
                 onKeyDown={(e) => {
-                  // Enter 提交（Shift+Enter 换行，聊天输入惯例）
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  // 单行输入：Enter 直接提交（无换行语义，Shift+Enter 不再区分）
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                     e.preventDefault()
                     handleContinueWithFeedback()
                   }

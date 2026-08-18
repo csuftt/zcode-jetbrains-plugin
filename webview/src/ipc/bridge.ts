@@ -253,6 +253,20 @@ const mockSessions = [
 function mockRespond(req: JavaRequest): void {
   console.log('[bridge:mock] 收到请求', req.op)
 
+  // send 文本 "#plan"：模拟 plan 模式下 ExitPlanMode 审批弹窗（验收 PlanApprovalDialog）
+  if (req.op === 'send' && req.text.trim() === '#plan') {
+    setTimeout(() => {
+      listeners.forEach((fn) =>
+        fn({
+          op: 'exitPlanApproval',
+          requestId: `mock_plan_${Date.now()}`,
+          plan: '## 实施计划（mock）\n\n1. 第一步：读取配置文件\n2. 第二步：修改 provider 节点\n3. 第三步：验证并提交',
+        }),
+      )
+    }, 300)
+    return
+  }
+
   // send：触发流式事件模拟（验收阶段 2.4 用）
   if (req.op === 'send') {
     // 先回 sendAccepted
@@ -495,6 +509,40 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
           { providerId: 'builtin:zai-coding-plan', providerName: 'ZAI - Coding Plan', modelId: 'glm-5.1', modelName: 'glm-5.1' },
           { providerId: '27d2ecde-5da2-43bd-b2d8-dae985bfaf8f', providerName: 'DeepSeek', modelId: 'deepseek-v4-flash', modelName: 'deepseek-v4-flash' },
           { providerId: '27d2ecde-5da2-43bd-b2d8-dae985bfaf8f', providerName: 'DeepSeek', modelId: 'deepseek-v3.2', modelName: 'deepseek-v3.2' },
+        ],
+      }
+    case 'modelManageList':
+      // 模拟设置页「模型管理」的全量 provider→models 结构（含 disabled，验收只读展示）
+      return {
+        op: 'modelManage',
+        configPath: 'C:\\Users\\dev\\.zcode\\v2\\config.json',
+        providers: [
+          {
+            providerId: 'builtin:bigmodel-coding-plan',
+            providerName: 'BigModel - Coding Plan',
+            baseURL: 'https://open.bigmodel.cn/api/anthropic',
+            enabled: true,
+            models: [
+              { modelId: 'GLM-5.2', modelName: 'GLM-5.2', contextWindow: 1000000, maxOutput: 128000 },
+              { modelId: 'GLM-5-Turbo', modelName: 'glm-5-turbo', contextWindow: 204800 },
+            ],
+          },
+          {
+            providerId: '27d2ecde-5da2-43bd-b2d8-dae985bfaf8f',
+            providerName: 'DeepSeek',
+            baseURL: 'https://api.deepseek.com/anthropic',
+            enabled: true,
+            models: [
+              { modelId: 'deepseek-v4-flash', modelName: 'deepseek-v4-flash', contextWindow: 128000, maxOutput: 8192 },
+              { modelId: 'deepseek-v3.2', modelName: 'deepseek-v3.2', contextWindow: 64000, maxOutput: 8192 },
+            ],
+          },
+          {
+            providerId: 'builtin:zai-coding-plan',
+            providerName: 'ZAI - Coding Plan',
+            enabled: false,
+            models: [{ modelId: 'glm-5.1', modelName: 'glm-5.1' }],
+          },
         ],
       }
     case 'getUsage':
@@ -1109,7 +1157,7 @@ flowchart LR
     case 'listFiles':
       return { op: 'files', files: ['README.md', 'package.json', 'src/main.tsx'] }
     case 'listCommands':
-      // mock：技能 + 命令混合列表（skill/command 两种 kind）
+      // mock：技能 + 命令混合列表（skill/command 两种 kind，builtin=CLI 内置命令）
       return {
         op: 'commands',
         commands: [
@@ -1118,7 +1166,9 @@ flowchart LR
           { name: 'handoff', description: '压缩会话生成交接文档', kind: 'skill', source: 'user' },
           { name: 'research', description: '调研问题并落盘 Markdown 发现', kind: 'skill', source: 'user' },
           { name: 'diagnosing-bugs', description: '硬 bug 与性能回归的诊断循环', kind: 'skill', source: 'user' },
+          { name: 'init', description: 'Create or update workspace AGENTS.md instructions.', kind: 'command', source: 'builtin' },
           { name: 'compact', description: '压缩当前会话上下文', kind: 'command', source: 'builtin' },
+          { name: 'goal', description: 'Show or set the current session goal.', kind: 'command', source: 'builtin' },
           { name: 'review:code', description: '评审代码（嵌套目录命令）', kind: 'command', source: 'user' },
         ],
       }

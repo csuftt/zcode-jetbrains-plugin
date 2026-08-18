@@ -3,6 +3,7 @@
   "backToChat": "채팅으로 돌아가기",
   "tabs": {
     "basic": "기본 설정",
+    "models": "모델 관리",
     "usage": "사용량",
     "memory": "메모리",
     "skills": "스킬",

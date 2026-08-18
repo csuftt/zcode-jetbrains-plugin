@@ -24,6 +24,7 @@ import zhUsage from './locales/zh/usage.json'
 import zhMemory from './locales/zh/memory.json'
 import zhSkills from './locales/zh/skills.json'
 import zhUtils from './locales/zh/utils.json'
+import zhModels from './locales/zh/models.json'
 
 import zhTwCommon from './locales/zh-TW/common.json'
 import zhTwApp from './locales/zh-TW/app.json'
@@ -37,6 +38,7 @@ import zhTwUsage from './locales/zh-TW/usage.json'
 import zhTwMemory from './locales/zh-TW/memory.json'
 import zhTwSkills from './locales/zh-TW/skills.json'
 import zhTwUtils from './locales/zh-TW/utils.json'
+import zhTwModels from './locales/zh-TW/models.json'
 
 import enCommon from './locales/en/common.json'
 import enApp from './locales/en/app.json'
@@ -50,6 +52,7 @@ import enUsage from './locales/en/usage.json'
 import enMemory from './locales/en/memory.json'
 import enSkills from './locales/en/skills.json'
 import enUtils from './locales/en/utils.json'
+import enModels from './locales/en/models.json'
 
 import jaCommon from './locales/ja/common.json'
 import jaApp from './locales/ja/app.json'
@@ -63,6 +66,7 @@ import jaUsage from './locales/ja/usage.json'
 import jaMemory from './locales/ja/memory.json'
 import jaSkills from './locales/ja/skills.json'
 import jaUtils from './locales/ja/utils.json'
+import jaModels from './locales/ja/models.json'
 
 import koCommon from './locales/ko/common.json'
 import koApp from './locales/ko/app.json'
@@ -76,6 +80,7 @@ import koUsage from './locales/ko/usage.json'
 import koMemory from './locales/ko/memory.json'
 import koSkills from './locales/ko/skills.json'
 import koUtils from './locales/ko/utils.json'
+import koModels from './locales/ko/models.json'
 
 /** 支持的语言码（IDE 侧 ZCodeLanguageService 同款白名单）*/
 export const SUPPORTED_LANGUAGES = ['zh', 'zh-TW', 'en', 'ja', 'ko'] as const
@@ -98,8 +103,9 @@ function merge(
   memory: object,
   skills: object,
   utils: object,
+  models: object,
 ) {
-  return { common, app, settings, input, chat, tool, history, mcp, usage, memory, skills, utils }
+  return { common, app, settings, input, chat, tool, history, mcp, usage, memory, skills, utils, models }
 }
 
 /** IDE 注入的权威语言（buildBridgeJs 生成；无注入为 undefined）*/
@@ -132,11 +138,11 @@ export function getInitialLanguage(): SupportedLanguage {
 
 void i18n.use(initReactI18next).init({
   resources: {
-    zh: { translation: merge(zhCommon, zhApp, zhSettings, zhInput, zhChat, zhTool, zhHistory, zhMcp, zhUsage, zhMemory, zhSkills, zhUtils) },
-    'zh-TW': { translation: merge(zhTwCommon, zhTwApp, zhTwSettings, zhTwInput, zhTwChat, zhTwTool, zhTwHistory, zhTwMcp, zhTwUsage, zhTwMemory, zhTwSkills, zhTwUtils) },
-    en: { translation: merge(enCommon, enApp, enSettings, enInput, enChat, enTool, enHistory, enMcp, enUsage, enMemory, enSkills, enUtils) },
-    ja: { translation: merge(jaCommon, jaApp, jaSettings, jaInput, jaChat, jaTool, jaHistory, jaMcp, jaUsage, jaMemory, jaSkills, jaUtils) },
-    ko: { translation: merge(koCommon, koApp, koSettings, koInput, koChat, koTool, koHistory, koMcp, koUsage, koMemory, koSkills, koUtils) },
+    zh: { translation: merge(zhCommon, zhApp, zhSettings, zhInput, zhChat, zhTool, zhHistory, zhMcp, zhUsage, zhMemory, zhSkills, zhUtils, zhModels) },
+    'zh-TW': { translation: merge(zhTwCommon, zhTwApp, zhTwSettings, zhTwInput, zhTwChat, zhTwTool, zhTwHistory, zhTwMcp, zhTwUsage, zhTwMemory, zhTwSkills, zhTwUtils, zhTwModels) },
+    en: { translation: merge(enCommon, enApp, enSettings, enInput, enChat, enTool, enHistory, enMcp, enUsage, enMemory, enSkills, enUtils, enModels) },
+    ja: { translation: merge(jaCommon, jaApp, jaSettings, jaInput, jaChat, jaTool, jaHistory, jaMcp, jaUsage, jaMemory, jaSkills, jaUtils, jaModels) },
+    ko: { translation: merge(koCommon, koApp, koSettings, koInput, koChat, koTool, koHistory, koMcp, koUsage, koMemory, koSkills, koUtils, koModels) },
   },
   lng: getInitialLanguage(),
   fallbackLng: DEFAULT_LANGUAGE,

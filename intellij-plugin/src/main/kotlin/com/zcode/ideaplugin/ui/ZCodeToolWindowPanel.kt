@@ -19,6 +19,7 @@ import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.ui.JBUI
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
@@ -27,6 +28,8 @@ import org.cef.network.CefRequest
 import com.zcode.ideaplugin.ZCodeService
 import com.zcode.ideaplugin.ZCodeWebviewServer
 import com.zcode.ideaplugin.zCodeService
+import com.zcode.ideaplugin.protocol.Credentials
+import com.zcode.ideaplugin.protocol.ZCodeProtocolClient
 import com.zcode.ideaplugin.protocol.ZCodeProtocolException
 import com.zcode.ideaplugin.protocol.SessionStat
 import kotlinx.serialization.json.Json
@@ -35,6 +38,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.boolean
@@ -632,6 +636,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "askUserResponse" -> handleAskUserResponse(msg)
                         "deleteSession" -> handleDeleteSession(msg)
                         "listModels" -> handleListModels(msg)
+                        "modelManageList" -> handleModelManageList(msg)
                         "setModel" -> handleSetModel(msg)
                         "getSettings" -> handleGetSettings(msg)
                         "setThoughtLevel" -> handleSetThoughtLevel(msg)
@@ -1379,14 +1384,21 @@ if (!window.__ZCODE_LOG_HOOK__) {
         log.info("ZCodeService 获取成功: ${service.javaClass.name}")
         val client = service.getClient()
         log.info("ZCodeProtocolClient 获取成功, isAlive=${client.isAlive()}")
-        val sessions = client.listSessions()
-        log.info("listSessions 返回 ${sessions.size} 个会话（全量）")
 
         // workspace 过滤：只显示当前项目的会话（差异化优势，cc-gui 不做）
         // 前端传 workspacePath；没传则用 project.basePath；空串表示不过滤（返回全部）
         val workspacePath = msg["workspacePath"]?.jsonPrimitive?.content
             ?: project.basePath
             ?: ""
+        // 服务端过滤（按项目 + 大 limit），避免 app-server 默认"全库最新 50 条"截断；
+        // 客户端 normalizePath 过滤保留作兜底
+        val sessions = if (workspacePath.isEmpty()) {
+            client.listSessions()
+        } else {
+            client.listSessions(workspacePath)
+        }
+        log.info("listSessions(workspace=$workspacePath) 返回 ${sessions.size} 个会话")
+
         val filtered = if (workspacePath.isEmpty()) {
             sessions
         } else {
@@ -1458,12 +1470,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** op=listModels — 读取 ~/.zcode/v2/config.json 的 provider 注册表，返回可切换的模型列表 */
+    /** op=listModels — 读取 config.json 的 provider 注册表，返回可切换的模型列表 */
     private fun handleListModels(msg: JsonObject): JsonObject {
-        val configPath = System.getProperty("user.home") + "/.zcode/v2/config.json"
-        val configFile = java.io.File(configPath)
+        // 路径跟随 dataBaseDir 迁移（setting.json 重定向后旧位置是冻结快照），与环境检测同一来源
+        val configFile = Credentials.defaultConfigPath().toFile()
         if (!configFile.exists()) {
-            log.warn("config.json 不存在: $configPath")
+            log.warn("config.json 不存在: $configFile")
             return buildJsonObject {
                 put("op", "models")
                 put("models", JsonArray(emptyList()))
@@ -1508,6 +1520,65 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject {
             put("op", "models")
             put("models", models)
+        }
+    }
+
+    /**
+     * op=modelManageList — 设置页「模型管理」只读清单。
+     *
+     * 与 listModels（聊天切换用）的差异：不跨 provider 去重、不滤 disabled（返回 enabled 标记）、
+     * 保留无 baseURL 的 provider；configPath 一并返回供前端展示与「打开配置文件」。
+     * 路径同样走 Credentials.defaultConfigPath() 跟随 dataBaseDir 迁移。
+     */
+    private fun handleModelManageList(msg: JsonObject): JsonObject {
+        val configPath = Credentials.defaultConfigPath()
+        fun emptyResult() = buildJsonObject {
+            put("op", "modelManage")
+            put("configPath", configPath.toString())
+            put("providers", JsonArray(emptyList()))
+        }
+        if (!java.nio.file.Files.isRegularFile(configPath)) {
+            log.warn("config.json 不存在: $configPath")
+            return emptyResult()
+        }
+        val providers = try {
+            json.parseToJsonElement(configPath.toFile().readText()).jsonObject["provider"]?.jsonObject
+        } catch (e: Exception) {
+            log.warn("解析 config.json 失败: ${e.message}")
+            null
+        } ?: return emptyResult()
+
+        val providerArr = JsonArray(providers.map { (providerId, providerEl) ->
+            val pv = providerEl.jsonObject
+            // enabled 缺省视为启用（与 listModels/额度查询口径一致）
+            val enabled = pv["enabled"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: true
+            val providerName = pv["name"]?.jsonPrimitive?.contentOrNull ?: providerId
+            val baseURL = pv["options"]?.jsonObject?.get("baseURL")?.jsonPrimitive?.contentOrNull
+            val models = JsonArray(pv["models"]?.jsonObject?.map { (modelId, modelEl) ->
+                val modelObj = modelEl.jsonObject
+                val modelName = modelObj["name"]?.jsonPrimitive?.contentOrNull ?: modelId
+                val limit = modelObj["limit"]?.jsonObject
+                buildJsonObject {
+                    put("modelId", modelId)
+                    put("modelName", modelName)
+                    limit?.get("context")?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.let { put("contextWindow", it) }
+                    limit?.get("output")?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.let { put("maxOutput", it) }
+                }
+            } ?: emptyList())
+            buildJsonObject {
+                put("providerId", providerId)
+                put("providerName", providerName)
+                put("enabled", enabled)
+                baseURL?.let { put("baseURL", it) }
+                put("models", models)
+            }
+        })
+        val modelCount = providerArr.sumOf { it.jsonObject["models"]?.jsonArray?.size ?: 0 }
+        log.info("modelManageList 返回 ${providerArr.size} 个 provider / $modelCount 个模型")
+        return buildJsonObject {
+            put("op", "modelManage")
+            put("configPath", configPath.toString())
+            put("providers", providerArr)
         }
     }
 
@@ -2397,9 +2468,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 路径归一化：统一分隔符 + 去尾部分隔符，用于 workspace 匹配 */
+    /** 路径归一化：统一分隔符 + 去尾部分隔符 + Windows 大小写折叠，用于 workspace 匹配 */
     private fun normalizePath(p: String): String {
-        return p.replace('\\', '/').trimEnd('/')
+        val base = p.replace('\\', '/').trimEnd('/')
+        return if (SystemInfo.isWindows) base.lowercase() else base
     }
 
     /**
@@ -2528,8 +2600,17 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val mode = msg["mode"]?.jsonPrimitive?.content?.takeIf { it == "connect" } ?: "status"
         val servers = McpConfigReader.scan(project.basePath).toMutableList()
 
-        var rpcError: String? = null
+        // 0. 宿主内置插件 MCP（CLI 内置注册表声明的 hostMcpServerNames，如
+        // browser-use → node_repl）：定义不在任何磁盘配置里（注册表硬编码在
+        // zcode.cjs），按 plugins/list 补齐；RPC 失败静默降级不影响磁盘条目
         val basePath = project.basePath
+        if (basePath != null) {
+            runCatching {
+                appendHostPluginMcpServers(servers, project.zCodeService().getClient(), basePath)
+            }.onFailure { log.warn("plugins/list（宿主内置 MCP）失败：${it.message}") }
+        }
+
+        var rpcError: String? = null
         if (basePath != null) {
             try {
                 val client = project.zCodeService().getClient()
@@ -2554,13 +2635,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 val logs = runCatching { McpLogReader.readRecent(500) }.getOrDefault(emptyList())
                 servers.replaceAll { s ->
                     val st = statuses[s.name]?.jsonObject
+                    val inferred = inferFromLogs(s.name, logs)
                     val status = when {
                         st != null -> st["status"]?.jsonPrimitive?.contentOrNull
                         !s.enabled -> "disabled"
-                        else -> inferStatusFromLogs(s.name, logs) ?: "disconnected"
+                        else -> inferred?.first ?: "disconnected"
                     }
                     if (st == null) {
-                        s.copy(status = status)
+                        // RPC 无此服务器（宿主条目恒走此分支）：工具数从 connected 日志兜底
+                        s.copy(status = status, toolCount = inferred?.second ?: s.toolCount)
                     } else s.copy(
                         transport = st["transport"]?.jsonPrimitive?.contentOrNull ?: s.transport,
                         status = status,
@@ -2599,12 +2682,30 @@ if (!window.__ZCODE_LOG_HOOK__) {
             rpcError = "项目路径不可用"
         }
 
+        // connect 模式：宿主内置条目不参与 RPC 传参（会话自动连，11:04 类失败后
+        // app-server 内无重试入口）——「检测连接」时插件侧直连探测刷新状态：
+        // McpToolsClient 走 modern 信封握手（同款启动命令，探测完销毁进程），
+        // 成功 → connected + 工具数；失败 → failed + 可读错误
+        if (mode == "connect" && basePath != null) {
+            servers.replaceAll { s ->
+                if (s.scope != "host") s
+                else runCatching {
+                    val tools = McpToolsClient.listTools(s, basePath, 30_000L)
+                    log.info("宿主 MCP 直连探测 [${s.name}] 成功，${tools.size} 个工具")
+                    s.copy(status = "connected", toolCount = tools.size, statusError = null)
+                }.getOrElse { e ->
+                    log.warn("宿主 MCP 直连探测 [${s.name}] 失败：${e.message}")
+                    s.copy(status = "failed", statusError = e.message?.take(200))
+                }
+            }
+        }
+
         // RPC 失败时也给出可读状态（日志兜底），「未知」不再是常态
         if (rpcError != null) {
             val logs = runCatching { McpLogReader.readRecent(500) }.getOrDefault(emptyList())
             servers.replaceAll { s ->
                 if (s.status != null) s
-                else s.copy(status = if (!s.enabled) "disabled" else inferStatusFromLogs(s.name, logs) ?: "disconnected")
+                else s.copy(status = if (!s.enabled) "disabled" else inferFromLogs(s.name, logs)?.first ?: "disconnected")
             }
         }
 
@@ -2661,8 +2762,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
             error?.let { put("error", it) }
         }
 
-        val server = McpConfigReader.scan(project.basePath).find { it.name == name }
-            ?: return resp(error = "未在磁盘配置中找到该服务器（运行时注入的服务器无法获取工具列表）")
+        // 磁盘三来源 + 宿主内置插件条目（node_repl 等不在磁盘配置，plugins/list 合成）
+        val basePath = project.basePath
+        var server = McpConfigReader.scan(basePath).find { it.name == name }
+        if (server == null && basePath != null) {
+            val hostServers = mutableListOf<McpConfigReader.McpServerInfo>()
+            runCatching { appendHostPluginMcpServers(hostServers, project.zCodeService().getClient(), basePath) }
+            server = hostServers.find { it.name == name }
+        }
+        if (server == null) return resp(error = "未在磁盘配置与宿主内置插件中找到该服务器（会话临时注入的无法获取工具列表）")
         if (!server.enabled) return resp(error = "服务器已禁用")
         return try {
             val tools = McpToolsClient.listTools(server, project.basePath ?: ".")
@@ -2674,19 +2782,77 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 从连接日志推断服务器最近状态（从新到旧找第一条生命周期事件；无记录 null） */
-    private fun inferStatusFromLogs(name: String, logs: List<McpLogReader.McpLogEntry>): String? {
+    /** 从连接日志推断服务器最近状态与工具数（从新到旧找第一条生命周期事件；无记录 null）*/
+    private fun inferFromLogs(name: String, logs: List<McpLogReader.McpLogEntry>): Pair<String, Int?>? {
         for (e in logs.asReversed()) {
             if (e.serverName != name) continue
             return when (e.event) {
-                "mcp.server.connected" -> "connected"
-                "mcp.server.failed" -> "failed"
-                "mcp.server.connect.started", "mcp.server.reconnect.started" -> "connecting"
-                "mcp.server.connection_lost", "mcp.server.closed", "mcp.pool.connection.closed" -> "disconnected"
+                "mcp.server.connected" -> "connected" to e.toolCount
+                "mcp.server.failed" -> "failed" to null
+                "mcp.server.connect.started", "mcp.server.reconnect.started" -> "connecting" to null
+                "mcp.server.connection_lost", "mcp.server.closed", "mcp.pool.connection.closed" -> "disconnected" to null
                 else -> continue
             }
         }
         return null
+    }
+
+    /**
+     * 宿主内置插件 MCP 条目合成（MCP 列表第四来源，scope=host）
+     *
+     * CLI 内置插件注册表（zcode.cjs 硬编码，browser-use@0.2.1 携带
+     * hostMcpServerNames=["node_repl"]）声明的服务器由 CLI 会话自动以
+     * `node zcode.cjs __zcode-plugin-host <插件根>/dist/mcp/server.js` 拉起
+     * （插件根取 ~/.zcode/cli/plugins/cache 下的已安装副本）——定义不在任何
+     * 用户可读的磁盘配置里，McpConfigReader 三来源扫描天然读不到。
+     * 这里按 plugins/list 的 hostMcpServerNames + rootPath 补齐：
+     *   - server.js 存在 → 合成真实 command/args（工具列表可直连实测）
+     *   - 插件 enabled=false → 条目仍列出（enabled=false，卡片呈关闭态）
+     *   - 同名已有条目（用户自配同名服务器）跳过，磁盘配置优先
+     */
+    private fun appendHostPluginMcpServers(
+        out: MutableList<McpConfigReader.McpServerInfo>,
+        client: ZCodeProtocolClient,
+        basePath: String,
+    ) {
+        val plugins = runCatching { client.listPlugins(basePath)["plugins"]?.jsonArray }.getOrNull() ?: return
+        // 展示与工具列表直连用的启动参数（与 CLI 实际拉起方式一致；解析失败回退 node）
+        val env = runCatching { com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveForStart() }.getOrNull()
+        val nodeCmd = env?.nodePath?.takeIf { it.isNotBlank() } ?: "node"
+        for (el in plugins) {
+            val p = runCatching { el.jsonObject }.getOrNull() ?: continue
+            val pluginName = p["name"]?.jsonPrimitive?.contentOrNull ?: continue
+            val hostNames = runCatching { p["hostMcpServerNames"]?.jsonArray }.getOrNull() ?: continue
+            val pluginEnabled = runCatching { p["enabled"]?.jsonPrimitive?.boolean }.getOrNull() ?: true
+            val rootPath = p["rootPath"]?.jsonPrimitive?.contentOrNull
+            for (n in hostNames) {
+                val name = runCatching { n.jsonPrimitive.content }.getOrNull() ?: continue
+                if (out.any { it.name == name }) continue
+                // CLI 约定的 server 入口（内置插件 requiredSeedPaths 同名文件）
+                val serverJs = rootPath?.let { java.io.File(java.io.File(it), "dist/mcp/server.js") }?.takeIf { it.isFile }
+                out.add(
+                    McpConfigReader.McpServerInfo(
+                        name = name,
+                        scope = "host",
+                        transport = "stdio",
+                        command = serverJs?.let { nodeCmd },
+                        args = serverJs?.let { listOf(env?.zcodePath?.toString() ?: "zcode.cjs", "__zcode-plugin-host", it.absolutePath) } ?: emptyList(),
+                        url = null,
+                        envKeys = emptyList(),
+                        envValues = emptyMap(),
+                        headerValues = emptyMap(),
+                        enabled = pluginEnabled,
+                        configPath = "",
+                        pluginName = pluginName,
+                        cwd = null,
+                        status = null,
+                        toolCount = null,
+                        statusError = null,
+                        updatedAt = null,
+                    )
+                )
+            }
+        }
     }
 
     /**

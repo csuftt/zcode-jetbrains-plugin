@@ -1,0 +1,29 @@
+{
+  "toolbarHint": "モデル一覧は Zcode 設定ファイルから取得（ここでは閲覧のみ）",
+  "add": "モデル追加",
+  "refreshTitle": "設定ファイルを再読み込み",
+  "searchPlaceholder": "モデル / プロバイダーを検索",
+  "searchClear": "クリア",
+  "configPathLabel": "設定ファイル",
+  "configPathOpenTitle": "エディターで開く",
+  "loading": "モデル設定を読み込み中…",
+  "empty": "モデルが設定されていません",
+  "emptyHint": "Zcode クライアントでモデルを設定するか、設定ファイルを編集して更新してください",
+  "errorLoad": "読み込みに失敗しました：{{error}}",
+  "providerDisabled": "無効",
+  "providerNoModels": "このプロバイダーにモデルはありません",
+  "modelsCount": "{{count}} 件のモデル",
+  "contextBadge": "コンテキスト {{size}}",
+  "contextTitle": "コンテキストウィンドウ（limit.context）",
+  "outputBadge": "出力 {{size}}",
+  "outputTitle": "最大出力（limit.output）",
+  "deleteTitle": "モデル削除",
+  "dialog": {
+    "addTitle": "モデル追加",
+    "deleteTitle": "モデル削除",
+    "addBody": "モデルは Zcode 設定ファイルで一元管理されており、プラグイン内では変更できません。Zcode クライアントのモデル設定で追加するか、下記設定ファイルの該当 provider の models ノードを編集してください。変更後、このページを更新すると反映されます。",
+    "deleteBody": "「{{name}}」（{{provider}}）は Zcode 設定ファイルで一元管理されており、プラグイン内では削除できません。Zcode クライアントのモデル設定で削除するか、下記設定ファイルの該当 provider models ノードからエントリを削除してください。変更後、このページを更新すると反映されます。",
+    "openConfig": "設定ファイルを開く",
+    "dismiss": "閉じる"
+  }
+}

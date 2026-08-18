@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus } from '@/types/messages'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, asSubagentLifecycle } from '@/utils/streamReducer'
 import type { SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/utils/parseStatus'
@@ -158,6 +158,13 @@ interface StoreState {
   mcpToolsByServer: Record<string, McpToolsState>
   // MCP 连接日志（CLI 落盘 mcp.* 事件，McpLogReader 读）
   mcpLogs: McpLogEntry[] | null
+
+  // 模型管理清单（设置视图「模型」条目 = config.json provider→models 全量只读结构）
+  modelProviders: ModelManageProvider[] | null
+  modelManageLoading: boolean
+  modelManageError: string | null
+  /** 实际读取的 config.json 路径（随 dataBaseDir 重定向，展示/打开用）*/
+  modelConfigPath: string | null
   mcpLogsLoading: boolean
 
   // 用量明细曲线（model-usage / tool-usage）
@@ -221,6 +228,8 @@ interface StoreState {
   loadMcpServerTools: (name: string, force?: boolean) => void
   /** 拉取 MCP 连接日志（CLI 落盘 mcp.* 事件）*/
   loadMcpLogs: () => void
+  /** 拉取模型管理清单（设置视图「模型」条目，config.json 只读结构）*/
+  loadModelManage: () => void
   /** 设置用量明细时间范围并重拉 model/tool 曲线 */
   setUsageRange: (range: UsageRange) => void
   /** 设置自定义日期范围并重拉 */
@@ -338,6 +347,11 @@ export const useStore = create<StoreState>((set, get) => ({
   mcpToolsByServer: {},
   mcpLogs: null,
   mcpLogsLoading: false,
+
+  modelProviders: null,
+  modelManageLoading: false,
+  modelManageError: null,
+  modelConfigPath: null,
   modelUsage: null,
   toolUsage: null,
   usageRange: '7d',
@@ -747,6 +761,11 @@ export const useStore = create<StoreState>((set, get) => ({
   loadMcpLogs: () => {
     set({ mcpLogsLoading: true })
     sendToJava({ op: 'getMcpLogs' })
+  },
+
+  loadModelManage: () => {
+    set({ modelManageLoading: true, modelManageError: null })
+    sendToJava({ op: 'modelManageList' })
   },
 
   setUsageRange: (range) => {
@@ -1339,6 +1358,7 @@ function handleResponse(
         mcpLoading: false,
         mcpChecking: false,
         mcpLogsLoading: false,
+        modelManageLoading: false,
         ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null } : {}),
       })
       console.error('[store] Java 错误:', msg.message)
@@ -1501,6 +1521,15 @@ function handleResponse(
       // 每台一个独立 op 后台直连，互不阻塞；已有缓存的不重拉）
       msg.servers.forEach((s) => {
         if (s.status === 'connected' && s.enabled && s.scope !== 'runtime') get().loadMcpServerTools(s.name)
+      })
+      break
+
+    case 'modelManage':
+      set({
+        modelProviders: msg.providers,
+        modelManageLoading: false,
+        modelManageError: msg.error ?? null,
+        modelConfigPath: msg.configPath ?? null,
       })
       break
 

@@ -1,0 +1,412 @@
+/**
+ * 模型列表面板样式（设置页「模型」条目，视觉对齐 skill-list-view / mcp-list-view）
+ * provider 分组卡片：头部 = 名称 + ID + 禁用徽章 + baseURL + 计数；body = 模型行
+ */
+
+.model-list-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 4px 24px;
+  overflow-y: auto;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
+  }
+
+  /* 工具栏：hint + 搜索 + 刷新 + 新增 */
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  &__hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+
+    .codicon {
+      font-size: 14px;
+      color: var(--status-info, #64b5f6);
+    }
+  }
+
+  &__search {
+    flex: 1;
+    min-width: 140px;
+    max-width: 240px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    padding: 0 8px;
+    background: var(--bg-secondary);
+
+    .codicon-search {
+      font-size: 13px;
+      color: var(--text-tertiary);
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-primary);
+      font-size: 12px;
+      padding: 5px 0;
+
+      &::placeholder {
+        color: var(--text-placeholder);
+      }
+    }
+  }
+
+  &__search-clear {
+    background: transparent;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 2px;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  &__refresh {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+
+    &:hover:not(:disabled) {
+      color: var(--text-primary);
+      border-color: var(--border-hover);
+      background: var(--bg-hover);
+    }
+    &:disabled {
+      cursor: default;
+      opacity: 0.6;
+    }
+  }
+
+  &__add {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--accent-primary, #007fd4);
+    border: none;
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 12px;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:hover {
+      background: var(--accent-primary-hover, #026ec1);
+    }
+  }
+
+  /* 当前生效的配置文件路径（随 dataBaseDir 重定向，点击打开）*/
+  &__config-path {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    border: 1px dashed var(--border-primary);
+    border-radius: 8px;
+    padding: 5px 10px;
+    cursor: pointer;
+    min-width: 0;
+
+    &:hover {
+      color: var(--text-primary);
+      border-color: var(--border-hover);
+
+      .codicon-go-to-file {
+        color: var(--accent-primary, #007fd4);
+      }
+    }
+
+    .codicon-file-code {
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+    .codicon-go-to-file {
+      flex-shrink: 0;
+      font-size: 13px;
+      margin-left: auto;
+    }
+  }
+
+  &__config-label {
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  &__config-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl; /* 长路径截头留尾（尾部文件名更关键）*/
+    font-family: var(--font-mono, Consolas, monospace);
+  }
+
+  &__error {
+    border: 1px solid var(--status-error, #f44336);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--status-error-text, #f48f8f);
+  }
+
+  &__loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 40px 0;
+    color: var(--text-tertiary);
+    font-size: 12px;
+  }
+
+  &__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 40px 0;
+    color: var(--text-tertiary);
+    font-size: 13px;
+
+    .codicon {
+      font-size: 28px;
+      opacity: 0.5;
+    }
+  }
+
+  &__empty-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* provider 分组卡片 */
+  &__provider {
+    border: 1px solid var(--border-primary);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    overflow: hidden;
+
+    & + & {
+      margin-top: 10px;
+    }
+
+    &.disabled {
+      opacity: 0.65;
+    }
+  }
+
+  &__provider-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    background: var(--bg-tertiary, rgba(128, 128, 128, 0.08));
+    border-bottom: 1px solid var(--border-primary);
+    min-width: 0;
+
+    > .codicon {
+      flex-shrink: 0;
+      font-size: 15px;
+      color: var(--accent-primary, #007fd4);
+    }
+  }
+
+  &__provider-name {
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  &__provider-id {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono, Consolas, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+  }
+
+  &__provider-off {
+    flex-shrink: 0;
+    font-size: 10px;
+    line-height: 16px;
+    padding: 0 7px;
+    border-radius: 8px;
+    background: rgba(255, 152, 0, 0.15);
+    color: var(--status-warning, #ff9800);
+  }
+
+  &__provider-url {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl; /* 截头留尾（域名在尾部更直观）*/
+  }
+
+  &__provider-count {
+    flex-shrink: 0;
+    font-size: 10px;
+    line-height: 14px;
+    padding: 0 6px;
+    border-radius: 7px;
+    background: rgba(128, 128, 128, 0.2);
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__models {
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__models-empty {
+    padding: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* 单个模型行 */
+  &__model {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    min-width: 0;
+
+    & + & {
+      border-top: 1px solid var(--border-secondary);
+    }
+
+    &:hover {
+      background: var(--bg-hover);
+
+      .model-list-view__model-delete {
+        opacity: 1;
+      }
+    }
+  }
+
+  &__model-icon {
+    flex-shrink: 0;
+    font-size: 13px;
+    color: var(--accent-primary, #007fd4);
+  }
+
+  &__model-name {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 260px;
+  }
+
+  &__model-id {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono, Consolas, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__model-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    line-height: 16px;
+    padding: 0 7px;
+    border-radius: 8px;
+    background: rgba(0, 127, 212, 0.12);
+    color: var(--accent-primary, #007fd4);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  &__model-delete {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 2px;
+    opacity: 0; /* hover 才出现，弱化"不可直接删除"的误导 */
+    transition: opacity 0.15s;
+
+    &:hover {
+      color: var(--status-error, #f44336);
+    }
+  }
+
+  /* 提示对话框正文（ConfirmDialog message 插槽）*/
+  &__dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+
+    p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      word-break: break-word;
+    }
+  }
+
+  &__dialog-path {
+    display: block;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: var(--bg-tertiary, rgba(128, 128, 128, 0.1));
+    font-family: var(--font-mono, Consolas, monospace);
+    font-size: 11px;
+    color: var(--text-primary);
+    word-break: break-all;
+  }
+}

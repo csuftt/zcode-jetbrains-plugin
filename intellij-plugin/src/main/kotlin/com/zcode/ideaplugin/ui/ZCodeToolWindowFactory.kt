@@ -49,15 +49,15 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             return content
         }
 
-        /** 生成下一个标签名：取现有「会话N」最大编号 + 1 */
+        /** 生成下一个标签名：从 1 起取最小未被占用的编号（最后一个标签禁关、编号只增不减，故不复用 max+1）*/
         private fun getNextTabName(cm: ContentManager): String {
-            var max = 0
             val pattern = tabNamePattern()
-            for (c in cm.contents) {
-                val m = pattern.find(c.displayName ?: "") ?: continue
-                max = maxOf(max, m.groupValues[1].toIntOrNull() ?: 0)
+            val used = cm.contents.mapNotNullTo(mutableSetOf()) { c ->
+                pattern.find(c.displayName ?: "")?.groupValues?.get(1)?.toIntOrNull()
             }
-            return message("tab.name.format", max + 1)
+            var next = 1
+            while (next in used) next++
+            return message("tab.name.format", next)
         }
 
         /**

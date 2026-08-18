@@ -1,0 +1,29 @@
+{
+  "toolbarHint": "模型清單來自 Zcode 設定檔，此處僅查看",
+  "add": "新增模型",
+  "refreshTitle": "重新讀取設定檔",
+  "searchPlaceholder": "搜尋模型 / 供應商",
+  "searchClear": "清空",
+  "configPathLabel": "設定檔",
+  "configPathOpenTitle": "在編輯器中開啟",
+  "loading": "正在讀取模型設定…",
+  "empty": "未設定任何模型",
+  "emptyHint": "請前往 Zcode 用戶端設定模型，或編輯設定檔後重新整理",
+  "errorLoad": "讀取失敗：{{error}}",
+  "providerDisabled": "已停用",
+  "providerNoModels": "該供應商未設定模型",
+  "modelsCount": "{{count}} 個模型",
+  "contextBadge": "上下文 {{size}}",
+  "contextTitle": "上下文視窗（limit.context）",
+  "outputBadge": "輸出 {{size}}",
+  "outputTitle": "最大輸出（limit.output）",
+  "deleteTitle": "刪除模型",
+  "dialog": {
+    "addTitle": "新增模型",
+    "deleteTitle": "刪除模型",
+    "addBody": "模型由 Zcode 設定檔統一管理，插件內不直接修改。請在 Zcode 用戶端的模型設定中新增，或編輯下方設定檔中對應 provider 的 models 節點；修改後回到此頁重新整理即可。",
+    "deleteBody": "「{{name}}」（{{provider}}）由 Zcode 設定檔統一管理，插件內不直接刪除。請在 Zcode 用戶端的模型設定中刪除，或編輯下方設定檔移除對應 provider models 節點中的條目；修改後回到此頁重新整理即可。",
+    "openConfig": "開啟設定檔",
+    "dismiss": "知道了"
+  }
+}

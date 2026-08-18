@@ -16,7 +16,8 @@
     "user": "全局",
     "project": "项目",
     "plugin": "插件",
-    "runtime": "运行时"
+    "runtime": "运行时",
+    "host": "宿主内置"
   },
   "status": {
     "connected": "已连接",

@@ -32,7 +32,7 @@
 
 **运行时控制** — 模型下拉切换、权限模式（build / edit / plan / yolo）与思考级别（随模型动态）调整，待命态（未建会话）可预选、建会话即生效；上下文容量圆环（含用量构成与缓存命中）、5 小时 / 每周额度查询
 
-**设置中心** — 六页签：基础（主题 / 字体 / 语言 / 自定义配色 + 环境路径）、用量（额度卡片 + 模型 / 工具用量曲线与明细表）、记忆（AGENTS.md 指令记忆 + 自动记忆，缺失可创建）、技能（全局 / 项目 / 插件三来源扫描，行内启用禁用）、MCP（服务器清单 / 工具列表 / 连接日志）、其他（输入历史补全开关与历史记录管理）
+**设置中心** — 七页签：基础（主题 / 字体 / 语言 / 自定义配色 + 环境路径）、模型（provider 分组只读清单，路径跟随数据目录迁移，新增 / 删除引导前往 Zcode 配置并可一键打开配置文件）、用量（额度卡片 + 模型 / 工具用量曲线与明细表）、记忆（AGENTS.md 指令记忆 + 自动记忆，缺失可创建）、技能（全局 / 项目 / 插件三来源扫描，行内启用禁用）、MCP（服务器清单 / 工具列表 / 连接日志）、其他（输入历史补全开关与历史记录管理）
 
 **环境检测** — 启动自检 Node.js（≥18）/ ZCode CLI / 登录凭证三件套，异常时顶栏提醒条逐项给出修复入口与重新检测；路径可手动配置，留空自动探测
 
@@ -79,13 +79,15 @@ Header 地球按钮在聊天区右侧展开浏览器分栏（上图）：工具�
 
 **设置中心**
 
-| 基础设置（主题 / 字体 / 语言 / 自定义配色 + 环境路径） | 用量查询（额度卡片 / 模型与工具用量曲线） |
+| 基础设置（主题 / 字体 / 语言 / 自定义配色 + 环境路径） | 模型管理（provider 分组只读清单 / 增删引导前往 Zcode 配置） |
 | :---: | :---: |
-| ![基础设置](docs/screenshots/settings-basic.png) | ![用量查询](docs/screenshots/settings-usage.png) |
-| **记忆（指令 / 自动记忆管理）** | **技能（三来源扫描与启用管理）** |
-| ![记忆](docs/screenshots/settings-memory.png) | ![技能](docs/screenshots/settings-skills.png) |
-| **MCP（服务器清单 / 工具列表 / 连接日志）** | **其他（输入历史补全与管理）** |
-| ![MCP](docs/screenshots/settings-mcp.png) | ![其他](docs/screenshots/settings-other.png) |
+| ![基础设置](docs/screenshots/settings-basic.png) | ![模型管理](docs/screenshots/settings-models.png) |
+| **用量查询（额度卡片 / 模型与工具用量曲线）** | **记忆（指令 / 自动记忆管理）** |
+| ![用量查询](docs/screenshots/settings-usage.png) | ![记忆](docs/screenshots/settings-memory.png) |
+| **技能（三来源扫描与启用管理）** | **MCP（服务器清单 / 工具列表 / 连接日志）** |
+| ![技能](docs/screenshots/settings-skills.png) | ![MCP](docs/screenshots/settings-mcp.png) |
+| **其他（输入历史补全与管理）** | |
+| ![其他](docs/screenshots/settings-other.png) | |
 
 ## 快速开始
 

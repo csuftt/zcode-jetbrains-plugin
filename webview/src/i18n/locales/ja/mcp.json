@@ -16,7 +16,8 @@
     "user": "グローバル",
     "project": "プロジェクト",
     "plugin": "プラグイン",
-    "runtime": "ランタイム"
+    "runtime": "ランタイム",
+    "host": "ホスト内蔵"
   },
   "status": {
     "connected": "接続済み",

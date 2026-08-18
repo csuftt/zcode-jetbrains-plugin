@@ -1,0 +1,29 @@
+{
+  "toolbarHint": "Model list comes from the Zcode config file — read-only here",
+  "add": "Add Model",
+  "refreshTitle": "Reload config file",
+  "searchPlaceholder": "Search models / providers",
+  "searchClear": "Clear",
+  "configPathLabel": "Config file",
+  "configPathOpenTitle": "Open in editor",
+  "loading": "Loading model configuration…",
+  "empty": "No models configured",
+  "emptyHint": "Configure models in the Zcode client, or edit the config file and refresh",
+  "errorLoad": "Failed to load: {{error}}",
+  "providerDisabled": "Disabled",
+  "providerNoModels": "No models configured for this provider",
+  "modelsCount": "{{count}} models",
+  "contextBadge": "ctx {{size}}",
+  "contextTitle": "Context window (limit.context)",
+  "outputBadge": "out {{size}}",
+  "outputTitle": "Max output (limit.output)",
+  "deleteTitle": "Delete model",
+  "dialog": {
+    "addTitle": "Add Model",
+    "deleteTitle": "Delete Model",
+    "addBody": "Models are managed by the Zcode config file and cannot be modified in this plugin. Add models in the Zcode client model settings, or edit the models node of the corresponding provider in the config file below; refresh this page after changes.",
+    "deleteBody": "\"{{name}}\" ({{provider}}) is managed by the Zcode config file and cannot be deleted in this plugin. Delete it in the Zcode client model settings, or remove its entry from the provider models node in the config file below; refresh this page after changes.",
+    "openConfig": "Open Config File",
+    "dismiss": "Got it"
+  }
+}

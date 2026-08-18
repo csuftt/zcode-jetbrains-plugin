@@ -3,6 +3,7 @@
   "backToChat": "Back to chat",
   "tabs": {
     "basic": "Basics",
+    "models": "Models",
     "usage": "Usage",
     "memory": "Memory",
     "skills": "Skills",

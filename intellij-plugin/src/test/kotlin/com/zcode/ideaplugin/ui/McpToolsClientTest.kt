@@ -49,6 +49,41 @@ class McpToolsClientTest {
     private fun nodeAvailable(): Boolean =
         runCatching { ProcessBuilder("node", "--version").start().waitFor() == 0 }.getOrDefault(false)
 
+    /**
+     * 极简 modern era server（仿宿主内置 node_repl 行为）：
+     * initialize 一律拒绝并声明 data.supported=["2026-07-28"]；
+     * tools/list 必须带完整 _meta 信封（version+clientInfo+clientCapabilities）才回工具
+     */
+    private val MODERN_SERVER_JS = """
+        let buf = '';
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', (d) => {
+          buf += d;
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i);
+            buf = buf.slice(i + 1);
+            if (!line.trim()) continue;
+            const msg = JSON.parse(line);
+            const meta = (msg.params && msg.params._meta) || {};
+            const ver = meta['io.modelcontextprotocol/protocolVersion'];
+            if (msg.method === 'initialize') {
+              process.stdout.write(JSON.stringify({
+                jsonrpc: '2.0', id: msg.id,
+                error: { code: -32022, message: 'Unsupported protocol version: ' + (msg.params.protocolVersion || 'none'),
+                         data: { supported: ['2026-07-28'], requested: msg.params.protocolVersion } }
+              }) + '\n');
+            } else if (msg.method === 'tools/list' && ver === '2026-07-28'
+                && meta['io.modelcontextprotocol/clientInfo'] && meta['io.modelcontextprotocol/clientCapabilities']) {
+              process.stdout.write(JSON.stringify({
+                jsonrpc: '2.0', id: msg.id,
+                result: { tools: [{ name: 'js', description: '浏览器 REPL' }] }
+              }) + '\n');
+            }
+          }
+        });
+    """.trimIndent()
+
     @Test
     fun `stdio 连接内联 server 拿到工具清单`() {
         if (!nodeAvailable()) {
@@ -66,6 +101,24 @@ class McpToolsClientTest {
         println("✅ stdio 工具: ${tools.joinToString { it.name }}")
         assertEquals(listOf("echo", "search_items"), tools.map { it.name }, "应拿到假 server 的两个工具")
         assertEquals("回显输入", tools.first().description, "description 应解析")
+    }
+
+    @Test
+    fun `stdio modern era server 拒绝 initialize 后走信封流程`() {
+        if (!nodeAvailable()) {
+            println("⚠️ 本机无 node，跳过")
+            return
+        }
+        val server = McpConfigReader.McpServerInfo(
+            name = "fake-modern", scope = "host", transport = "stdio",
+            command = "node", args = listOf("-e", MODERN_SERVER_JS), url = null,
+            envKeys = emptyList(), envValues = emptyMap(), headerValues = emptyMap(),
+            enabled = true, configPath = "", pluginName = "browser-use",
+            status = null, toolCount = null, statusError = null, updatedAt = null,
+        )
+        val tools = McpToolsClient.listTools(server, workspacePath = ".")
+        println("✅ modern 工具: ${tools.joinToString { it.name }}")
+        assertEquals(listOf("js"), tools.map { it.name }, "应通过 _meta 信封拿到 modern server 的工具")
     }
 
     @Test

@@ -106,17 +106,15 @@
   &__feedback-input {
     flex: 1;
     min-width: 0;
-    padding: 8px 12px;
-    min-height: 54px; // 两行（13px × 1.5 行高 × 2 + 上下内边距）
-    max-height: 120px; // 更长意见内滚，不撑爆弹窗
+    padding: 7px 12px;
     border: none;
     background: transparent;
     color: var(--text-primary);
     font-size: 13px;
     font-family: inherit;
-    line-height: 1.5;
-    resize: none;
-    overflow-y: auto;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow-x: auto; /* 超长意见横向内滚，不撑高单行输入 */
 
     &::placeholder {
       color: var(--text-placeholder, #6e6e6e);
@@ -131,7 +129,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 7px 12px;
+    padding: 6px 12px;
     border: none;
     border-left: 1px solid var(--border-primary);
     border-radius: 0 6px 6px 0;
@@ -185,14 +183,13 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 18px;
+    padding: 6px 14px;
     background: var(--status-success, #4caf50);
     border: none;
     border-radius: 6px;
     color: var(--color-button-text, #fff);
     font-size: 13px;
     font-weight: 400;
-    box-shadow: 0 1px 3px color-mix(in srgb, var(--status-success, #4caf50) 35%, transparent);
 
     &:hover:not(:disabled) {
       background: color-mix(in srgb, var(--status-success, #4caf50) 85%, #000);

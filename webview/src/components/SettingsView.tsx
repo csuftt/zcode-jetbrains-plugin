@@ -20,10 +20,11 @@ import { UsageView } from './UsageView'
 import { MemoryView } from './MemoryView'
 import { SkillListView } from './SkillListView'
 import { McpListView } from './McpListView'
+import { ModelListView } from './ModelListView'
 import { isInJcef } from '@/ipc/bridge'
 import '../styles/settings.less'
 
-type SettingsTab = 'basic' | 'usage' | 'memory' | 'skills' | 'mcp' | 'other'
+type SettingsTab = 'basic' | 'models' | 'usage' | 'memory' | 'skills' | 'mcp' | 'other'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -37,13 +38,14 @@ export function SettingsView({ onBack }: Props) {
   // JCEF 内 hash 恒空不影响生产
   const hashTab = window.location.hash.replace('#', '').split('/')[0] as SettingsTab
   const initialTab: SettingsTab =
-    !isInJcef() && ['basic', 'usage', 'memory', 'skills', 'mcp', 'other'].includes(hashTab)
+    !isInJcef() && ['basic', 'models', 'usage', 'memory', 'skills', 'mcp', 'other'].includes(hashTab)
       ? hashTab
       : 'basic'
   const [tab, setTab] = useState<SettingsTab>(initialTab)
 
   const navItems: { key: SettingsTab; icon: string }[] = [
     { key: 'basic', icon: 'codicon-paintcan' },
+    { key: 'models', icon: 'codicon-server-process' },
     { key: 'usage', icon: 'codicon-graph' },
     { key: 'memory', icon: 'codicon-notebook' },
     { key: 'skills', icon: 'codicon-library' },
@@ -81,6 +83,7 @@ export function SettingsView({ onBack }: Props) {
         {/* 右侧内容区 */}
         <main className="settings-view__content">
           {tab === 'basic' && <BasicSettingsView />}
+          {tab === 'models' && <ModelListView />}
           {tab === 'usage' && <UsageView />}
           {tab === 'memory' && <MemoryView />}
           {tab === 'skills' && <SkillListView />}

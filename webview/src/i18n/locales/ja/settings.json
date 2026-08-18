@@ -3,6 +3,7 @@
   "backToChat": "チャットに戻る",
   "tabs": {
     "basic": "基本設定",
+    "models": "モデル管理",
     "usage": "使用量",
     "memory": "メモリ",
     "skills": "スキル",

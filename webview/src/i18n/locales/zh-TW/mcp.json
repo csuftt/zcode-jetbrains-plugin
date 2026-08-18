@@ -16,7 +16,8 @@
     "user": "全域性",
     "project": "專案",
     "plugin": "外掛",
-    "runtime": "執行時"
+    "runtime": "執行時",
+    "host": "宿主內建"
   },
   "status": {
     "connected": "已連線",

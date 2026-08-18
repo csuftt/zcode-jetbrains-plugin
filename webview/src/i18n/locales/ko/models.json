@@ -1,0 +1,29 @@
+{
+  "toolbarHint": "모델 목록은 Zcode 설정 파일에서 가져오며 여기서는 조회만 가능합니다",
+  "add": "모델 추가",
+  "refreshTitle": "설정 파일 다시 읽기",
+  "searchPlaceholder": "모델 / 공급자 검색",
+  "searchClear": "지우기",
+  "configPathLabel": "설정 파일",
+  "configPathOpenTitle": "편집기에서 열기",
+  "loading": "모델 설정을 불러오는 중…",
+  "empty": "구성된 모델이 없습니다",
+  "emptyHint": "Zcode 클라이언트에서 모델을 구성하거나 설정 파일을 편집한 후 새로 고치세요",
+  "errorLoad": "불러오기 실패: {{error}}",
+  "providerDisabled": "비활성화됨",
+  "providerNoModels": "이 공급자에는 모델이 없습니다",
+  "modelsCount": "모델 {{count}}개",
+  "contextBadge": "컨텍스트 {{size}}",
+  "contextTitle": "컨텍스트 윈도우(limit.context)",
+  "outputBadge": "출력 {{size}}",
+  "outputTitle": "최대 출력(limit.output)",
+  "deleteTitle": "모델 삭제",
+  "dialog": {
+    "addTitle": "모델 추가",
+    "deleteTitle": "모델 삭제",
+    "addBody": "모델은 Zcode 설정 파일로 일괄 관리되며 플러그인에서 직접 수정할 수 없습니다. Zcode 클라이언트의 모델 설정에서 추가하거나, 아래 설정 파일에서 해당 provider의 models 노드를 편집하세요. 변경 후 이 페이지를 새로 고치면 반영됩니다.",
+    "deleteBody": "\"{{name}}\"({{provider}})은(는) Zcode 설정 파일로 일괄 관리되며 플러그인에서 직접 삭제할 수 없습니다. Zcode 클라이언트의 모델 설정에서 삭제하거나, 아래 설정 파일의 해당 provider models 노드에서 항목을 제거하세요. 변경 후 이 페이지를 새로 고치면 반영됩니다.",
+    "openConfig": "설정 파일 열기",
+    "dismiss": "확인"
+  }
+}

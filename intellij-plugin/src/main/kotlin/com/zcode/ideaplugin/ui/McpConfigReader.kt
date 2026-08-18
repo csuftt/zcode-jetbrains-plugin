@@ -24,7 +24,7 @@ object McpConfigReader {
 
     data class McpServerInfo(
         val name: String,
-        /** user=全局 | project=项目 | plugin=插件贡献 */
+        /** user=全局 | project=项目 | plugin=插件贡献 | host=CLI 内置插件宿主 MCP | runtime=会话运行时注入 */
         val scope: String,
         /** stdio | http | sse（按配置推断：有 url→type，否则 stdio）*/
         val transport: String,
@@ -233,11 +233,13 @@ object McpConfigReader {
      * 服务器配置 → mcp/list 的 mcpServers 请求条目（zod strict schema：
      * stdio={name,command,args,env,...} / http={name,type,url,headers,...}，
      * args/env/headers 必填；cwd 等多余字段会被拒需丢弃）。
-     * 占位符替换规则见 [substitute]；enabled=false 或结构不完整
-     * （stdio 缺 command / 远程缺 url）返回 null。
+     * 占位符替换规则见 [substitute]；enabled=false、host 宿主条目或结构不完整
+     * （stdio 缺 command / 远程缺 url）返回 null。host 条目（browser-use 的
+     * node_repl 等）由 CLI 会话自动拉起，显式传参只会多起一个重复进程。
      */
     fun toProtocolParam(s: McpServerInfo, workspacePath: String): kotlinx.serialization.json.JsonObject? {
         if (!s.enabled) return null
+        if (s.scope == "host") return null
         fun sub(v: String) = substitute(s, workspacePath, v)
 
         return if (s.transport == "stdio") {

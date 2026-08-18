@@ -3,6 +3,7 @@ package com.zcode.ideaplugin.protocol
 import com.zcode.ideaplugin.protocol.model.*
 import kotlinx.serialization.json.*
 import java.io.BufferedReader
+import java.io.File
 import java.io.IOException
 import java.io.PrintWriter
 import java.nio.file.Path
@@ -433,9 +434,36 @@ class ZCodeProtocolClient private constructor(
 
     // ============ 高层 API：session 方法族 ============
 
-    /** session/list — 列所有会话（读类幂等，初始化并发易超时 → 走重试）*/
-    fun listSessions(timeoutMs: Long = 10000): List<SessionInfo> {
-        val r = requestWithRetry("session/list", JsonObject(emptyMap()), timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+    /**
+     * session/list — 列会话（读类幂等，初始化并发易超时 → 走重试）
+     *
+     * 不传 workspacePath 时 app-server 的默认行为是"全库维度、排除子代理、按更新
+     * 时间倒序取 limit=50"——历史项目多的机器上，当前项目的会话会被其他项目的
+     * 活跃会话挤出前 50 名窗口（表现为历史会话"丢失"）。传 workspacePath 让服务
+     * 端按项目过滤，limit 放大取全量。
+     *
+     * 注意：服务端底层是 SQL `directory = ?` 精确匹配，DB 记录的是 CLI 写入的原生
+     * 分隔符形态（Windows 反斜杠），而 IDE basePath 是 VFS 正斜杠形态——这里统一
+     * 转成原生形态再传，否则 0 命中。
+     */
+    fun listSessions(
+        workspacePath: String? = null,
+        includeArchived: Boolean = false,
+        limit: Int = 500,
+        timeoutMs: Long = 10000
+    ): List<SessionInfo> {
+        val params = buildJsonObject {
+            if (!workspacePath.isNullOrBlank()) {
+                val nativePath = workspacePath.replace('/', File.separatorChar)
+                put("workspace", buildJsonObject {
+                    put("workspacePath", nativePath)
+                    put("workspaceKey", nativePath)
+                })
+            }
+            put("includeArchived", includeArchived)
+            put("limit", limit)
+        }
+        val r = requestWithRetry("session/list", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
         r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
 
         val sessionsArray = r["result"]?.jsonObject?.get("sessions")?.jsonArray ?: return emptyList()
@@ -670,6 +698,31 @@ class ZCodeProtocolClient private constructor(
             put("mode", mode)
         }
         return rawMcpList(params, timeoutMs, mode)
+    }
+
+    /**
+     * plugins/list — 已安装插件清单（MCP 列表「宿主内置」条目来源）
+     *
+     * 响应（zcode.cjs mVn/fVn 构造）：{plugins: [{id, name, description?,
+     * version?, enabled, source, marketplace, skillCount, skillRootCount,
+     * commandRootCount, components, declaredMcpServerNames, mcpServerNames,
+     * hostMcpServerNames?, hookDetails, rootPath, ...}], diagnostics: [...]}
+     *
+     * hostMcpServerNames：CLI 内置注册表（browser-use@0.2.1 → ["node_repl"]）
+     * 声明的「宿主提供 MCP server」名——不在任何磁盘配置里，会话启动时由
+     * CLI 按 `node zcode.cjs __zcode-plugin-host <rootPath>/dist/mcp/server.js`
+     * 自动拉起，磁盘配置扫描天然读不到。
+     */
+    fun listPlugins(workspacePath: String, timeoutMs: Long = 15000): JsonObject {
+        val params = buildJsonObject {
+            put("workspace", buildJsonObject {
+                put("workspacePath", workspacePath)
+                put("workspaceKey", workspacePath)
+            })
+        }
+        val r = requestWithRetry("plugins/list", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+        r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
     }
 
     /**

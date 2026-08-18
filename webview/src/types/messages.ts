@@ -171,6 +171,8 @@ export type JavaRequest =
   | { op: 'listFiles'; query: string }
   | { op: 'listCommands'; query?: string }
   | { op: 'listModels' }
+  /** 设置页「模型管理」只读清单（不去重/不滤 disabled，带 configPath）*/
+  | { op: 'modelManageList' }
   | { op: 'setModel'; sessionId: string; modelId: string; providerId: string }
   | { op: 'getSettings'; sessionId: string }
   | { op: 'setThoughtLevel'; sessionId: string; thoughtLevel: string }
@@ -219,6 +221,23 @@ export interface ModelOption {
   contextWindow?: number
   /** 最大输出 token（config.json limit.output）*/
   maxOutput?: number
+}
+
+/** 模型管理条目（config.json provider.models 节点，设置页只读展示）*/
+export interface ModelManageModel {
+  modelId: string
+  modelName: string
+  contextWindow?: number
+  maxOutput?: number
+}
+
+/** 模型管理 provider 分组（与聊天 listModels 的差异：不去重、含 disabled、保留无 baseURL 项）*/
+export interface ModelManageProvider {
+  providerId: string
+  providerName: string
+  baseURL?: string
+  enabled: boolean
+  models: ModelManageModel[]
 }
 
 /**
@@ -326,7 +345,7 @@ export interface SkillInfo {
 export interface McpServerInfo {
   name: string
   /** user=全局 config | project=项目配置 | plugin=插件 .mcp.json | runtime=仅 RPC 可见（临时注入）*/
-  scope: 'user' | 'project' | 'plugin' | 'runtime'
+  scope: 'user' | 'project' | 'plugin' | 'host' | 'runtime'
   /** stdio | http | sse */
   transport: string
   command?: string
@@ -451,6 +470,7 @@ export type JavaResponse =
   | { op: 'commands'; commands: SlashCommand[] }
   | { op: 'filesToInput'; refs: string[] }
   | { op: 'models'; models: ModelOption[] }
+  | { op: 'modelManage'; configPath?: string; providers: ModelManageProvider[]; error?: string }
   | { op: 'modelSet'; sessionId: string; modelId: string; providerId: string }
   | { op: 'settings'; sessionId: string; mode: { current?: string }; thoughtLevel: ThoughtLevelInfo }
   | { op: 'thoughtLevelSet'; sessionId: string; thoughtLevel: string }

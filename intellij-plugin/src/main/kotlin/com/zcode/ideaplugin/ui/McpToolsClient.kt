@@ -52,6 +52,24 @@ object McpToolsClient {
     private const val CLIENT_VERSION = "0.1.0"
     private const val DESC_MAX_LEN = 400
 
+    /**
+     * ZCode modern era 协议版本（宿主内置 server 如 node_repl 专用，2026-07-28）：
+     * 不做标准 initialize（对旧版本号回 Unsupported protocol version -32022，
+     * data.supported 列出可用地版本），改由每个请求 params._meta 携带信封
+     * （protocolVersion + clientInfo + clientCapabilities，缺一即拒）。
+     */
+    private const val MODERN_PROTOCOL_VERSION = "2026-07-28"
+
+    /** modern era 请求信封（io.modelcontextprotocol/ 前缀扩展键，三字段缺一不可） */
+    private fun modernMeta() = buildJsonObject {
+        put("io.modelcontextprotocol/protocolVersion", MODERN_PROTOCOL_VERSION)
+        put("io.modelcontextprotocol/clientInfo", buildJsonObject {
+            put("name", CLIENT_NAME)
+            put("version", CLIENT_VERSION)
+        })
+        put("io.modelcontextprotocol/clientCapabilities", buildJsonObject { })
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
 
     /** 连接指定服务器并调 tools/list（阻塞直至完成或超时，调用方须在后台线程）*/
@@ -118,7 +136,8 @@ object McpToolsClient {
 
             fun remaining() = (deadline - System.currentTimeMillis()).coerceAtLeast(0)
 
-            fun request(id: Int, method: String, params: JsonObject? = null): JsonObject {
+            /** 原始请求（error 响应原样返回不抛，协议协商判断用） */
+            fun requestRaw(id: Int, method: String, params: JsonObject? = null): JsonObject {
                 val fut = responses.getOrPut(id) { CompletableFuture() }
                 val req = buildJsonObject {
                     put("jsonrpc", "2.0")
@@ -128,7 +147,11 @@ object McpToolsClient {
                 }
                 process.outputStream.write((req.toString() + "\n").toByteArray(StandardCharsets.UTF_8))
                 process.outputStream.flush()
-                val resp = fut.get(remaining(), java.util.concurrent.TimeUnit.MILLISECONDS)
+                return fut.get(remaining(), java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
+
+            fun request(id: Int, method: String, params: JsonObject? = null): JsonObject {
+                val resp = requestRaw(id, method, params)
                 resp["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull?.let { throw McpClientException("$method 失败: $it") }
                 return resp
             }
@@ -142,7 +165,11 @@ object McpToolsClient {
                 process.outputStream.flush()
             }
 
-            request(1, "initialize", buildJsonObject {
+            // 标准 initialize 优先（第三方 server 零开销）；宿主内置 modern server
+            // （node_repl 等）不认旧版本号 → 回 Unsupported protocol version 且
+            // data.supported 含 2026-07-28 → 切 modern 信封流程（无需任何握手，
+            // tools/list 直接带 _meta 即可——实测 discover/initialize 均非必需）
+            val initResp = requestRaw(1, "initialize", buildJsonObject {
                 put("protocolVersion", PROTOCOL_VERSION)
                 put("capabilities", buildJsonObject { })
                 put("clientInfo", buildJsonObject {
@@ -150,8 +177,15 @@ object McpToolsClient {
                     put("version", CLIENT_VERSION)
                 })
             })
+            if (isModernRejection(initResp)) {
+                val toolsResp = request(2, "tools/list", buildJsonObject { put("_meta", modernMeta()) })
+                return parseTools(toolsResp["result"]?.jsonObject)
+            }
+            initResp["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull?.let {
+                throw McpClientException("initialize 失败: $it")
+            }
             notifyInitialized()
-            val toolsResp = request(2, "tools/list", buildJsonObject { })
+            val toolsResp = request(3, "tools/list", buildJsonObject { })
             return parseTools(toolsResp["result"]?.jsonObject)
         } catch (e: McpClientException) {
             throw e
@@ -235,6 +269,16 @@ object McpToolsClient {
             throw McpClientException("tools/list 失败: $it")
         }
         return parseTools(toolsResp["result"]?.jsonObject)
+    }
+
+    /** initialize 响应是否为「仅支持 modern era」拒绝（error.data.supported 含 modern 版本） */
+    private fun isModernRejection(resp: kotlinx.serialization.json.JsonElement?): Boolean {
+        val err = resp?.let { runCatching { it.jsonObject["error"]?.jsonObject }.getOrNull() } ?: return false
+        val supported = runCatching {
+            err["data"]?.jsonObject?.get("supported")?.jsonArray
+                ?.mapNotNull { e -> runCatching { e.jsonPrimitive.content }.getOrNull() }
+        }.getOrNull() ?: return false
+        return MODERN_PROTOCOL_VERSION in supported
     }
 
     // ============ 公共解析 ============

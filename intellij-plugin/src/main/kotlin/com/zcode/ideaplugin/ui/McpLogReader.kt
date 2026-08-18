@@ -39,6 +39,8 @@ object McpLogReader {
         val message: String,
         /** 顶层 durationMs（connected/failed 行有）*/
         val durationMs: Long?,
+        /** connected 事件 context.toolCount（宿主条目等拿不到 RPC 状态时的工具数兜底）*/
+        val toolCount: Int?,
     )
 
     private const val TAIL_BYTES = 3L * 1024 * 1024 // 每文件读尾部 3MB
@@ -102,6 +104,7 @@ object McpLogReader {
                     serverName = str(ctx?.get("mcpServerName")) ?: "",
                     message = renderMessage(event, obj, ctx),
                     durationMs = obj["durationMs"]?.let { runCatching { it.jsonPrimitive.content.toLong() }.getOrNull() },
+                    toolCount = ctx?.get("toolCount")?.let { runCatching { it.jsonPrimitive.content.toInt() }.getOrNull() },
                 )
             )
         }
