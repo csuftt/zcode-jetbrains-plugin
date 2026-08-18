@@ -11,6 +11,9 @@ import java.nio.file.Files
  *   1. 用户级  ~/.zcode/skills、~/.agents/skills、~/.zcode/commands、~/.agents/commands
  *   2. 工作区级 项目根 .zcode/skills、.agents/skills、.zcode/commands、.agents/commands
  *   3. 插件贡献 ~/.zcode/cli/plugins 下的 skills（限深 7 容错）
+ *   4. CLI 内置命令兜底（仅 init/compact/goal 3 个，对齐官方客户端 `/` 补全；
+ *      定义在 zcode.cjs 内磁盘无文件，app-server 协议也无 commands/list RPC，
+ *      只能随插件内置清单）
  *
  * - SKILL.md：解析 frontmatter（name/description/userInvocable），name 缺省用目录名，
  *   userInvocable: false 过滤（与 cc-gui SlashCommandRegistry 一致）
@@ -25,12 +28,24 @@ object SlashCommandScanner {
         val description: String?,
         /** skill=技能（SKILL.md）| command=命令（.md）*/
         val kind: String,
-        /** user / workspace / plugin */
+        /** user / workspace / plugin / builtin */
         val source: String,
     )
 
     private val FRONTMATTER_RE = Regex("^---\\s*\\r?\\n([\\s\\S]*?)\\r?\\n---")
     private const val MAX_READ = 4096
+
+    /**
+     * CLI 内置命令提示清单（对齐官方客户端 `/` 补全只展示这 3 个；
+     * 其余内置命令如 model/mode/effort/mcp 在官方客户端走专门 UI，不进输入框提示）。
+     * name+summary 从 zcode.cjs bundle 提取，版本升级时校准：
+     * grep -o 'name:"[a-z-]*",summary:"[^"]*"' zcode.cjs
+     */
+    private val BUILTIN_COMMANDS = listOf(
+        "compact" to "Compact the current conversation with optional instructions.",
+        "goal" to "Show or set the current session goal.",
+        "init" to "Create or update workspace AGENTS.md instructions.",
+    )
 
     /** 扫描全部来源，返回按名去重后的列表（先扫先得） */
     fun scan(projectBasePath: String?): List<SlashCommand> {
@@ -54,6 +69,11 @@ object SlashCommandScanner {
 
         // 3. 插件贡献
         scanPluginResources(File(home, ".zcode/cli/plugins"), result)
+
+        // 4. CLI 内置命令（最后合入：用户/插件自定义同名命令优先展示）
+        BUILTIN_COMMANDS.forEach { (name, summary) ->
+            putIfAbsent(result, name, summary, "command", "builtin")
+        }
 
         return result.values.toList()
     }

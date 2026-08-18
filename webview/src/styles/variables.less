@@ -71,8 +71,10 @@
   --color-tool-value: #cfd8dc;
 
   /* 代码高亮（暗色用 highlight.js github-dark 主题，这里只定义背景）*/
-  --code-bg: #1e1e1e;
-  --color-code-block-bg: #1e1e1e; /* cc-gui */
+  /* 比聊天区 #1e1e1e 深一档（GitHub dark 画布色）：助手消息无气泡背景，
+   * 代码块若同色等于无背景，必须可辨 */
+  --code-bg: #161b22;
+  --color-code-block-bg: #161b22; /* cc-gui */
   --color-code-block-border: #333; /* cc-gui */
   --code-inline-bg: rgba(110, 118, 129, 0.4);
   --code-inline-text: #f0883e;

@@ -1,6 +1,7 @@
 /**
- * 技能引用 chip 样式
- * 紫色调（区别于文件引用的蓝色），笔图标 + 技能名
+ * 技能/命令引用 chip 样式
+ * 默认紫色调笔图标（技能），--command 变体绿色调终端图标（命令），
+ * 均区别于文件引用的蓝色
  */
 
 .skill-ref {
@@ -72,6 +73,17 @@
     &:hover {
       opacity: 1;
       color: var(--status-error);
+    }
+  }
+
+  /* 命令变体：终端图标绿色调（VSCode 终端绿），区别于技能紫、文件蓝 */
+  &--command {
+    background: rgba(78, 201, 176, 0.12);
+    border-color: rgba(78, 201, 176, 0.3);
+    color: #4ec9b0;
+
+    .skill-ref__remove {
+      color: #4ec9b0;
     }
   }
 }

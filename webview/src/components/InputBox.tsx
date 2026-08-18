@@ -74,7 +74,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   /** 当前 tooltip 宿主的内联 chip（删除 chip 后清理残留 tooltip 用）*/
   const tipChipRef = useRef<HTMLElement | null>(null)
   const [fileRefs, setFileRefs] = useState<string[]>([])
-  const [skillRefs, setSkillRefs] = useState<string[]>([])
+  const [skillRefs, setSkillRefs] = useState<SlashCommand[]>([])
   /** 折叠的粘贴长文本（≥10 行或 ≥500 字符），发送时拼到正文末尾 */
   const [pastedTexts, setPastedTexts] = useState<PastedTextItem[]>([])
   /** 正在预览的粘贴文本 id（null = 弹窗关闭）*/
@@ -147,7 +147,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     // 折叠的粘贴文本按粘贴顺序拼到正文末尾（CLI 收到完整原文）
     const parts: string[] = []
     if (skillRefs.length > 0) {
-      parts.push(skillRefs.map((s) => `/${s}`).join(' '))
+      parts.push(skillRefs.map((s) => `/${s.name}`).join(' '))
     }
     if (fileRefs.length > 0) {
       parts.push(fileRefs.map((f) => `@${f}`).join(' '))
@@ -558,7 +558,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   /** 选中命令：把技能名加到 SkillRef chip 列表 + 清除输入框里的 /xxx 文本 */
   function selectSlash(item: SlashCommand) {
     // 先加 chip（确保 UI 更新不受 DOM 操作异常影响）
-    setSkillRefs((prev) => (prev.includes(item.name) ? prev : [...prev, item.name]))
+    setSkillRefs((prev) => (prev.some((x) => x.name === item.name) ? prev : [...prev, item]))
     setSlashQuery(null)
 
     // 再清除输入框里的 /xxx 文本（容错：失败不影响 chip）
@@ -760,17 +760,15 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
             不贴输入框 */}
         {(skillRefs.length > 0 || fileRefs.length > 0 || pastedTexts.length > 0) && (
           <div className="input-box__refs">
-            {skillRefs.map((s) => {
-              const desc = slashCacheRef.current?.find((c) => c.name === s)?.description
-              return (
-                <SkillRef
-                  key={s}
-                  name={s}
-                  description={desc}
-                  onRemove={() => setSkillRefs((prev) => prev.filter((x) => x !== s))}
-                />
-              )
-            })}
+            {skillRefs.map((s) => (
+              <SkillRef
+                key={`${s.kind}:${s.name}`}
+                name={s.name}
+                kind={s.kind}
+                description={s.description}
+                onRemove={() => setSkillRefs((prev) => prev.filter((x) => x.name !== s.name))}
+              />
+            ))}
             {fileRefs.map((f) => (
               <FileRef
                 key={f}
