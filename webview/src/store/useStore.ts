@@ -15,8 +15,9 @@
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
 import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus } from '@/types/messages'
-import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, asSubagentLifecycle } from '@/utils/streamReducer'
-import type { SubagentLifecyclePayload } from '@/utils/streamReducer'
+import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, asSubagentLifecycle, looksLikeQuotaError } from '@/utils/streamReducer'
+import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
+import i18n from '@/i18n/config'
 import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/utils/parseStatus'
 import { isHiddenSyntheticMessage } from '@/utils/parseNotification'
 import { mergeTurnMessages } from '@/utils/mergeTurnMessages'
@@ -1064,6 +1065,21 @@ function refreshStatus(
   }
 }
 
+/** 后端模型 API 错误（backendError 通道）→ 顶栏文案；配额类给"重试不会成功"的专门提示 */
+function formatBackendError(statusCode: number | undefined, code: string | undefined, message: string): string {
+  const trimmed = (message || '').slice(0, 300)
+  if (looksLikeQuotaError(code, trimmed)) return i18n.t('app.backendQuotaError')
+  return i18n.t('app.backendApiError', { statusCode: statusCode ?? '?', message: trimmed })
+}
+
+/** turn.failed 错误 → 顶栏文案（配额类归一成配额提示，无详情给兜底文案） */
+function formatTurnError(err: TurnErrorInfo): string {
+  if (looksLikeQuotaError(err.code, err.message)) return i18n.t('app.backendQuotaError')
+  return err.message
+    ? i18n.t('app.turnFailed', { message: err.message.slice(0, 300) })
+    : i18n.t('app.turnFailedNoDetail')
+}
+
 function handleResponse(
   msg: JavaResponse,
   set: (partial: Partial<StoreState>) => void,
@@ -1365,6 +1381,14 @@ function handleResponse(
       // 错误清 streaming 后继续发队列下一条（排队意图明确；持续失败时用户可删队列项）
       get().flushQueue()
       break
+
+    case 'backendError': {
+      // app-server stderr 兜底通道：模型 API 错误（429 配额超限等）在 turn 终止帧之外
+      // 到达（服务端按可重试分类持续退避，事件流上无迹象）——只提示，
+      // 不复位 streaming（turn 可能仍在服务端重试，由终止帧收尾）
+      set({ lastError: formatBackendError(msg.statusCode, msg.code, msg.message) })
+      break
+    }
 
     case 'askUser':
       // AskUserQuestion 弹窗（服务器反向请求 interaction/requestUserInput）
@@ -1716,6 +1740,7 @@ function handleStreamBatch(
   let turnStarted = false
   let turnEnded = false
   let modeEvent: 'enter_plan' | 'exit_plan' | undefined
+  let turnError: TurnErrorInfo | undefined
   const childKeyPatch: Record<string, string> = {}
 
   for (const event of events) {
@@ -1760,6 +1785,7 @@ function handleStreamBatch(
     streamingMessageId = result.streamingMessageId
     if (result.turnEnded) turnEnded = true
     if (result.modeEvent) modeEvent = result.modeEvent
+    if (result.turnError) turnError = result.turnError
   }
 
   // 一次性 set（整批只触发一次重渲染）
@@ -1779,6 +1805,8 @@ function handleStreamBatch(
     patch.streaming = false
     patch.streamingMessageId = null
     patch.waitingSince = null
+    // 失败回合展示错误详情（同批 failed+started 的自动续轮不打扰）
+    if (turnError) patch.lastError = formatTurnError(turnError)
   }
   if (modeEvent) applyModeEventToPatch(modeEvent, patch, get)
   set(patch)
@@ -1870,7 +1898,7 @@ function handleStreamEvent(
     }
   }
 
-  const { messages, streamingMessageId, turnEnded, modeEvent } = applyStreamEvent(
+  const { messages, streamingMessageId, turnEnded, modeEvent, turnError } = applyStreamEvent(
     get().messages,
     event,
     get().streamingMessageId,
@@ -1893,7 +1921,13 @@ function handleStreamEvent(
 
   // turn 结束：重新拉完整消息确保数据一致，清除流式状态，自动发送队列下一条
   if (turnEnded) {
-    set({ streaming: false, streamingMessageId: null, waitingSince: null })
+    set({
+      streaming: false,
+      streamingMessageId: null,
+      waitingSince: null,
+      // 失败回合展示错误详情（此前 payload.error 被丢弃，失败只表现为"转圈停了"）
+      ...(turnError ? { lastError: formatTurnError(turnError) } : {}),
+    })
     console.log(`[store] turn ${event.type}，重新拉取消息确保一致`)
     get().flushQueue()
     setTimeout(() => {

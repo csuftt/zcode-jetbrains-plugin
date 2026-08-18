@@ -496,6 +496,9 @@ export type JavaResponse =
   | { op: 'mcpLogs'; logs: McpLogEntry[] }
   /** envStatus 存在 = 环境前置检查失败（EnvCheckException），前端据此刷新环境提醒条 */
   | { op: 'error'; message: string; envStatus?: EnvStatus }
+  /** app-server stderr 解析出的后端模型 API 错误（APICallError 兜底通道）：
+   *  429 配额超限等被服务端按可重试分类退避重试，turn 终止帧迟迟不发时的第一现场 */
+  | { op: 'backendError'; statusCode?: number; code?: string; message: string }
 
 // ============ 流式事件（session/event 透传）============
 // 基于抓包确认（scripts/capture-tool-use.json 的事件汇总）

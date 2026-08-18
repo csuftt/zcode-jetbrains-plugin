@@ -7,7 +7,7 @@
  * 基于 2026-08-13 抓包确认的事件结构。
  */
 
-import type { ZCodeMessage, MessagePart, StreamEvent, StreamEventPayload, ToolPart, SubagentActivity, ToolUpdatedPayload } from '@/types/messages'
+import type { ZCodeMessage, MessagePart, StreamEvent, StreamEventPayload, ToolPart, SubagentActivity, ToolUpdatedPayload, TurnFailedPayload } from '@/types/messages'
 
 /**
  * 把一个流式事件应用到消息数组，返回新的消息数组（不可变更新）。
@@ -20,11 +20,36 @@ import type { ZCodeMessage, MessagePart, StreamEvent, StreamEventPayload, ToolPa
 /** 归约结果附带的模式推断事件（缺陷E修复）：EnterPlanMode 成功 / ExitPlanMode 批准 */
 export type ModeEvent = 'enter_plan' | 'exit_plan'
 
+/** turn.failed 提取的展示用错误信息（message 为空 = 服务端未带详情，由 store 兜底文案） */
+export interface TurnErrorInfo {
+  message: string
+  type?: string
+  code?: string | number
+}
+
+/** turn.failed payload → 错误信息（payload.error 缺失时返回空 message） */
+function extractTurnError(payload: StreamEventPayload): TurnErrorInfo {
+  const p = (payload || {}) as Partial<TurnFailedPayload>
+  const e = p.error
+  return {
+    message: typeof e?.message === 'string' ? e.message : '',
+    ...(e?.type ? { type: e.type } : {}),
+    ...(e?.code !== undefined ? { code: e.code } : {}),
+  }
+}
+
+/** 是否配额类错误（token_quota_exceeded 等）：确定性失败，重试不会成功，配专门文案 */
+export function looksLikeQuotaError(code?: string | number, message?: string): boolean {
+  const c = code !== undefined ? String(code).toLowerCase() : ''
+  const m = (message || '').toLowerCase()
+  return c.includes('quota') || m.includes('quota_exceeded') || m.includes('token_quota')
+}
+
 export function applyStreamEvent(
   messages: ZCodeMessage[],
   event: StreamEvent,
   streamingMessageId: string | null,
-): { messages: ZCodeMessage[]; streamingMessageId: string | null; turnEnded: boolean; modeEvent?: ModeEvent } {
+): { messages: ZCodeMessage[]; streamingMessageId: string | null; turnEnded: boolean; modeEvent?: ModeEvent; turnError?: TurnErrorInfo } {
   const { type, payload } = event
 
   switch (type) {
@@ -38,12 +63,21 @@ export function applyStreamEvent(
       return handleToolUpdated(messages, streamingMessageId, event.timestamp, payload)
 
     case 'turn.completed':
-    case 'turn.failed':
+    case 'turn.failed': {
+      // turn.failed 读取 payload.error 供 UI 展示（此前错误信息被整体丢弃，
+      // 失败只表现为"转圈停了"）；turn.completed 无错误
+      const turnError = type === 'turn.failed' ? extractTurnError(payload) : undefined
       // 兜底：turn 结束时把所有还在 pending/running 的工具标记为已完成。
       // 真实场景：ExitPlanMode/AskUserQuestion 等控制流工具不发 tool.updated(kind:result)，
       // 只发 batch（streamReducer 内处理）或 permission.resolved；若 batch 也丢失，
       // turn 结束时这些工具会永远停在 pending/running，表现为"工具卡住"。
-      return { messages: finalizePendingTools(messages, event.timestamp), streamingMessageId, turnEnded: true }
+      return {
+        messages: finalizePendingTools(messages, event.timestamp),
+        streamingMessageId,
+        turnEnded: true,
+        ...(turnError ? { turnError } : {}),
+      }
+    }
 
     default:
       // session.updated / session.titleUpdated / streamRecovery.updated 等暂不处理

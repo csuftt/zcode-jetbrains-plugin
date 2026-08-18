@@ -20,14 +20,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // ---- mock localStorage（node 环境无实现）----
 const storage = new Map<string, string>()
-vi.stubGlobal('localStorage', {
+const lsMock = {
   getItem: (k: string) => storage.get(k) ?? null,
   setItem: (k: string, v: string) => { storage.set(k, v) },
   removeItem: (k: string) => { storage.delete(k) },
   key: (i: number) => Array.from(storage.keys())[i] ?? null,
   get length() { return storage.size },
   clear: () => storage.clear(),
-})
+}
+vi.stubGlobal('localStorage', lsMock)
+// persist.ts 走 window.localStorage（node 环境无 window 会静默失败 → 缓存写不进）
+vi.stubGlobal('window', { localStorage: lsMock, dispatchEvent: () => {}, __ZCODE_KVSTORE__: null })
 
 // ---- mock 桥接层：捕获 sendToJava，手动注入响应 ----
 let messageHandler: ((msg: unknown) => void) | null = null

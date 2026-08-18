@@ -1,6 +1,10 @@
 {
   "errorClose": "Close",
   "errorCloseAria": "Close error",
+  "backendQuotaError": "Model quota exceeded (monthly token limit): the server keeps retrying but will never succeed — stop this turn and switch model/plan, or wait for the quota to reset",
+  "backendApiError": "Model API error (HTTP {{statusCode}}): {{message}}",
+  "turnFailed": "Turn failed: {{message}}",
+  "turnFailedNoDetail": "Turn failed (no error detail returned)",
   "newSession": {
     "title": "New Session",
     "message": "A new blank session will be started (created only when the first message is sent). The current session will be kept in history and can be switched back to at any time. Start a new session?",

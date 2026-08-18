@@ -89,6 +89,14 @@ class ZCodeProtocolClient private constructor(
     @Volatile
     var runtimeModelFactory: () -> JsonObject? = { RuntimeModels.defaultRuntimeModel() }
 
+    /**
+     * 后端模型 API 错误回调（stderr 的 APICallError dump 解析结果，见 BackendErrorDetector）。
+     * 场景：429 配额超限等被 app-server 按可重试分类持续退避，turn 终止帧迟迟不发，
+     * 事件流上无错误迹象——stderr 是唯一的第一现场。在 stderr 线程调用。
+     */
+    @Volatile
+    var backendErrorHandler: ((BackendErrorDetector.BackendApiError) -> Unit)? = null
+
     // 进程是否还活着
     @Volatile
     private var closed = false
@@ -125,9 +133,18 @@ class ZCodeProtocolClient private constructor(
             // 无人读 → node 永久阻塞在写 stderr → 整个 app-server 事件循环停摆，
             // 症状为所有协议请求超时（进程 alive 但不响应）。
             val stderr = process.errorStream.bufferedReader()
+            val backendErrorDetector = BackendErrorDetector()
             Thread({
                 try {
-                    stderr.forEachLine { line -> System.err.println("[app-server stderr] $line") }
+                    stderr.forEachLine { line ->
+                        System.err.println("[app-server stderr] $line")
+                        // 模型 API 错误兜底：429 配额超限等被 app-server 按可重试分类退避重试，
+                        // turn 终止帧迟迟不发（UI 无限转圈无提示），stderr dump 是错误第一现场
+                        backendErrorDetector.feed(line)?.let { err ->
+                            println("[ZCodeProtocolClient] 检测到后端 API 错误: statusCode=${err.statusCode} code=${err.code}")
+                            client.backendErrorHandler?.invoke(err)
+                        }
+                    }
                 } catch (e: IOException) {
                     // 进程退出时管道关闭，属正常
                 }

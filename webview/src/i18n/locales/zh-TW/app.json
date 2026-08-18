@@ -1,6 +1,10 @@
 {
   "errorClose": "關閉",
   "errorCloseAria": "關閉錯誤",
+  "backendQuotaError": "模型配額已超限（每月 Token 額度用盡）：伺服器仍在自動重試但不會成功，建議停止本輪並切換模型或方案，或等待額度重置",
+  "backendApiError": "模型服務錯誤（HTTP {{statusCode}}）：{{message}}",
+  "turnFailed": "本輪執行失敗：{{message}}",
+  "turnFailedNoDetail": "本輪執行失敗（伺服器未返回錯誤詳情）",
   "newSession": {
     "title": "新建會話",
     "message": "將開啟新的空白會話（傳送首條訊息時才建立），當前會話會保留在歷史記錄中，可隨時切換回來。確定新建嗎？",

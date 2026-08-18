@@ -1,6 +1,10 @@
 {
   "errorClose": "閉じる",
   "errorCloseAria": "エラーを閉じる",
+  "backendQuotaError": "モデルの利用枠を超過しました（月間トークン上限）：サーバーは自動リトライを続けていますが成功しません。このターンを停止してモデル/プランを切り替えるか、リセットまでお待ちください",
+  "backendApiError": "モデル API エラー（HTTP {{statusCode}}）：{{message}}",
+  "turnFailed": "ターンが失敗しました：{{message}}",
+  "turnFailedNoDetail": "ターンが失敗しました（サーバーからエラー詳細は返却されませんでした）",
   "newSession": {
     "title": "新規セッション",
     "message": "新しい空のセッションを開始します（最初のメッセージ送信時に作成）。現在のセッションは履歴に残り、いつでも切り替えられます。新規セッションを開始しますか？",

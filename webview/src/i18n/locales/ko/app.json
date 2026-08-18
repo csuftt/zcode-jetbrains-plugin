@@ -1,6 +1,10 @@
 {
   "errorClose": "닫기",
   "errorCloseAria": "오류 닫기",
+  "backendQuotaError": "모델 할당량 초과(월간 토큰 한도): 서버가 계속 재시도 중이지만 성공하지 못합니다. 이 턴을 중지하고 모델/플랜을 전환하거나 초기화를 기다리세요",
+  "backendApiError": "모델 API 오류(HTTP {{statusCode}}): {{message}}",
+  "turnFailed": "턴 실패: {{message}}",
+  "turnFailedNoDetail": "턴 실패(서버가 오류 상세를 반환하지 않음)",
   "newSession": {
     "title": "새 세션",
     "message": "새 빈 세션이 시작됩니다(첫 메시지를 보낼 때 생성됨). 현재 세션은 기록에 보관되며 언제든 다시 전환할 수 있습니다. 새 세션을 시작할까요?",

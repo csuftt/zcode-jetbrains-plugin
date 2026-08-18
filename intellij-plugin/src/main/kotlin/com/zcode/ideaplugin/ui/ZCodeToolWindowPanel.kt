@@ -2117,6 +2117,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             client.addGlobalEventListener { event ->
                 pushStreamEvent(event.sessionId, event)
             }
+            registerBackendErrorHandler(client)
             globalListenerRegistered = true
             log.info("全局事件监听器已注册")
         }
@@ -2180,6 +2181,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             client.addGlobalEventListener { event ->
                 pushStreamEvent(event.sessionId, event)
             }
+            registerBackendErrorHandler(client)
             globalListenerRegistered = true
             log.info("全局事件监听器已注册")
         }
@@ -2212,6 +2214,25 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: Exception) {
             log.warn("subscribeChild: subscribe 失败 $sessionId: ${e.message}")
             errorResponse("子会话订阅失败: ${e.message}")
+        }
+    }
+
+    /**
+     * 注册后端模型 API 错误兜底通道（app-server stderr 的 APICallError 解析结果，
+     * 见 BackendErrorDetector）。场景：429 配额超限等被 app-server 按可重试分类
+     * 持续退避重试，turn 终止帧（turn.failed）迟迟不发，事件流上无错误迹象——
+     * 前端无限转圈且无提示。stderr 是错误的第一现场，推给前端顶栏展示。
+     * 只提示、不复位前端 streaming（turn 可能仍在服务端重试，由终止帧收尾）。
+     */
+    private fun registerBackendErrorHandler(client: com.zcode.ideaplugin.protocol.ZCodeProtocolClient) {
+        client.backendErrorHandler = { err ->
+            log.warn("[backendError] 模型 API 错误 statusCode=${err.statusCode} code=${err.code} message=${err.message.take(300)}")
+            sendToJsDirect(buildJsonObject {
+                put("op", "backendError")
+                err.statusCode?.let { put("statusCode", it) }
+                err.code?.let { put("code", it) }
+                put("message", err.message)
+            })
         }
     }
 

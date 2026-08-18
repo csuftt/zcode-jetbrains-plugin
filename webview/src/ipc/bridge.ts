@@ -267,6 +267,44 @@ function mockRespond(req: JavaRequest): void {
     return
   }
 
+  // send 文本 "#fail"：模拟 turn.failed（验收失败回合的顶栏错误提示）
+  if (req.op === 'send' && req.text.trim() === '#fail') {
+    const turnId = `turn_fail_${Date.now()}`
+    const mk = (type: string, payload: Record<string, unknown>) =>
+      ({ type, seq: 0, sessionId: req.sessionId, turnId, timestamp: Date.now(), payload })
+    setTimeout(() => {
+      streamListeners.forEach((fn) => fn(req.sessionId, mk('turn.started', { turnNumber: 1, messageId: `msg_fail_${Date.now()}` }) as unknown as StreamEvent))
+    }, 300)
+    setTimeout(() => {
+      streamListeners.forEach((fn) => fn(req.sessionId, mk('turn.failed', {
+        error: { type: 'api_error', code: 'internal_error', message: 'Error code: 500 - {\'error\': {\'message\': \'mock 内部错误\'}}' },
+      }) as unknown as StreamEvent))
+    }, 900)
+    return
+  }
+
+  // send 文本 "#quota"：模拟 429 配额超限（stderr 兜底通道 backendError + turn 持续重试不终止，
+  // 验收"转圈中顶栏出现配额提示"）
+  if (req.op === 'send' && req.text.trim() === '#quota') {
+    const turnId = `turn_quota_${Date.now()}`
+    setTimeout(() => {
+      streamListeners.forEach((fn) => fn(req.sessionId, {
+        type: 'turn.started', seq: 0, sessionId: req.sessionId, turnId, timestamp: Date.now(),
+        payload: { turnNumber: 1, messageId: `msg_quota_${Date.now()}` },
+      } as unknown as StreamEvent))
+    }, 300)
+    setTimeout(() => {
+      listeners.forEach((fn) => fn({
+        op: 'backendError',
+        statusCode: 429,
+        code: 'token_quota_exceeded',
+        message: 'Token Plan Person monthly quota limit exceeded',
+      }))
+    }, 900)
+    // 不推 turn.failed：模拟 app-server 对 429 按可重试分类持续退避（转圈不停止）
+    return
+  }
+
   // send：触发流式事件模拟（验收阶段 2.4 用）
   if (req.op === 'send') {
     // 先回 sendAccepted
