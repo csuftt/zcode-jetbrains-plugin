@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import type { ModelOption } from '@/types/messages'
 import { ModelIcon } from './ModelIcon'
+import { PlanBadge } from './PlanBadge'
 
 interface Props {
   /** 当前会话模型（null 时回退到消息 footer 的 modelID）*/
@@ -104,7 +105,10 @@ export function ModelSelect({ currentModel, onSelect, disabled = false }: Props)
         <div className="selector-dropdown">
           {groups.map(([providerId, items]) => (
             <div key={providerId} className="selector-dropdown-group">
-              <div className="selector-dropdown-group-title">{items[0]?.providerName ?? providerId}</div>
+              <div className="selector-dropdown-group-title">
+                {items[0]?.providerName ?? providerId}
+                <PlanBadge plan={items[0]?.plan} />
+              </div>
               {items.map((m) => (
                 <div
                   key={m.modelId}

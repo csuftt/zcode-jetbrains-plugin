@@ -533,55 +533,89 @@ function mockStreamTurn(sessionId: string): void {
   }, 50)
 }
 
+/** 模型管理 mock 状态（可变）：模拟 config.json 的 provider 注册表，切换写回后就地翻转 enabled */
+let _mockProviders: import('../types/messages').ModelManageProvider[] | null = null
+function mockModelProviders(): import('../types/messages').ModelManageProvider[] {
+  if (!_mockProviders) {
+    _mockProviders = [
+      {
+        providerId: 'builtin:bigmodel-coding-plan',
+        providerName: 'BigModel - Coding Plan',
+        plan: 'personal',
+        baseURL: 'https://open.bigmodel.cn/api/anthropic',
+        enabled: true,
+        models: [
+          { modelId: 'GLM-5.3', modelName: 'GLM-5.3', contextWindow: 1000000, maxOutput: 128000 },
+          { modelId: 'GLM-5-Turbo', modelName: 'glm-5-turbo', contextWindow: 204800, maxOutput: 128000 },
+        ],
+      },
+      {
+        providerId: 'builtin:bigmodel-start-plan',
+        providerName: 'BigModel - Coding Plan',
+        plan: 'trial',
+        baseURL: 'https://zcode.z.ai/api/v1/zcode-plan/anthropic',
+        enabled: false,
+        models: [
+          { modelId: 'glm-5.3', modelName: 'glm-5.3', contextWindow: 1000000, maxOutput: 128000 },
+          { modelId: 'glm-5-turbo', modelName: 'glm-5-turbo', contextWindow: 204800, maxOutput: 128000 },
+        ],
+      },
+      {
+        providerId: '27d2ecde-5da2-43bd-b2d8-dae985bfaf8f',
+        providerName: 'DeepSeek',
+        baseURL: 'https://api.deepseek.com/anthropic',
+        enabled: true,
+        models: [
+          { modelId: 'deepseek-v4-flash', modelName: 'deepseek-v4-flash', contextWindow: 1000000, maxOutput: 384000 },
+        ],
+      },
+    ]
+  }
+  return _mockProviders
+}
+
 function mockResponse(req: JavaRequest): JavaResponse | null {
   switch (req.op) {
     case 'listSessions':
       return { op: 'listSessions', sessions: mockSessions }
     case 'listModels':
-      // 模拟 ~/.zcode/v2/config.json 的 provider 注册表（验收模型下拉用）
+      // 模拟 ~/.zcode/v2/config.json 的 provider 注册表（验收模型下拉用；内置套餐带 plan 标记）
       return {
         op: 'models',
         models: [
-          { providerId: 'builtin:bigmodel-coding-plan', providerName: 'BigModel - Coding Plan', modelId: 'GLM-5.2', modelName: 'GLM-5.2' },
-          { providerId: 'builtin:bigmodel-coding-plan', providerName: 'BigModel - Coding Plan', modelId: 'GLM-5-Turbo', modelName: 'glm-5-turbo' },
-          { providerId: 'builtin:zai-coding-plan', providerName: 'ZAI - Coding Plan', modelId: 'glm-5.1', modelName: 'glm-5.1' },
+          { providerId: 'builtin:bigmodel-coding-plan', providerName: 'BigModel - Coding Plan', plan: 'personal', modelId: 'GLM-5.3', modelName: 'GLM-5.3' },
+          { providerId: 'builtin:bigmodel-coding-plan', providerName: 'BigModel - Coding Plan', plan: 'personal', modelId: 'GLM-5-Turbo', modelName: 'glm-5-turbo' },
+          { providerId: 'builtin:bigmodel-start-plan', providerName: 'BigModel - Coding Plan', plan: 'trial', modelId: 'glm-5.3', modelName: 'glm-5.3' },
           { providerId: '27d2ecde-5da2-43bd-b2d8-dae985bfaf8f', providerName: 'DeepSeek', modelId: 'deepseek-v4-flash', modelName: 'deepseek-v4-flash' },
-          { providerId: '27d2ecde-5da2-43bd-b2d8-dae985bfaf8f', providerName: 'DeepSeek', modelId: 'deepseek-v3.2', modelName: 'deepseek-v3.2' },
         ],
       }
+    case 'modelToggleProvider': {
+      // mock：启用内置套餐时模拟互斥联动（真实链路备份+原子写回 config.json）
+      const changes: { providerId: string; enabled: boolean }[] = [
+        { providerId: req.providerId, enabled: req.enabled },
+      ]
+      if (req.enabled && req.providerId.startsWith('builtin:')) {
+        const cur = mockModelProviders()
+        cur.forEach((p) => {
+          if (p.providerId !== req.providerId && p.providerId.startsWith('builtin:') && p.enabled) {
+            changes.push({ providerId: p.providerId, enabled: false })
+          }
+        })
+      }
+      // mock 状态就地翻转（模拟 config.json 写回后的读取结果）
+      mockModelProviders().forEach((p) => {
+        const c = changes.find((x) => x.providerId === p.providerId)
+        if (c) p.enabled = c.enabled
+      })
+      return { op: 'modelToggled', changes }
+    }
     case 'modelManageList':
-      // 模拟设置页「模型管理」的全量 provider→models 结构（含 disabled，验收只读展示）
+      // 模拟设置页「模型管理」的全量 provider→models 结构（含 disabled + 套餐标记，验收展示与切换；
+      // mockModelProviders 可变，切换写回后重新读取反映变更）
       return {
         op: 'modelManage',
         configPath: 'C:\\Users\\dev\\.zcode\\v2\\config.json',
-        providers: [
-          {
-            providerId: 'builtin:bigmodel-coding-plan',
-            providerName: 'BigModel - Coding Plan',
-            baseURL: 'https://open.bigmodel.cn/api/anthropic',
-            enabled: true,
-            models: [
-              { modelId: 'GLM-5.2', modelName: 'GLM-5.2', contextWindow: 1000000, maxOutput: 128000 },
-              { modelId: 'GLM-5-Turbo', modelName: 'glm-5-turbo', contextWindow: 204800 },
-            ],
-          },
-          {
-            providerId: '27d2ecde-5da2-43bd-b2d8-dae985bfaf8f',
-            providerName: 'DeepSeek',
-            baseURL: 'https://api.deepseek.com/anthropic',
-            enabled: true,
-            models: [
-              { modelId: 'deepseek-v4-flash', modelName: 'deepseek-v4-flash', contextWindow: 128000, maxOutput: 8192 },
-              { modelId: 'deepseek-v3.2', modelName: 'deepseek-v3.2', contextWindow: 64000, maxOutput: 8192 },
-            ],
-          },
-          {
-            providerId: 'builtin:zai-coding-plan',
-            providerName: 'ZAI - Coding Plan',
-            enabled: false,
-            models: [{ modelId: 'glm-5.1', modelName: 'glm-5.1' }],
-          },
-        ],
+        providers: JSON.parse(JSON.stringify(mockModelProviders())),
       }
     case 'getUsage':
       // mock：27.9% 上下文使用率（与真实场景接近）

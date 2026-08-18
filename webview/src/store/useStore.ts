@@ -111,6 +111,8 @@ interface StoreState {
   currentModel: { modelId: string; providerId: string } | null
   /** 已为该会话下发过 setModel（避免每次 messages 刷新重复下发）*/
   modelAppliedForSession: string | null
+  /** 已选模型因清单变更失效被清除（防 inferCurrentModel 按模型名反查到别的 provider 复活；用户重选/切会话后复位）*/
+  modelInvalidated: boolean
 
   // 运行时设置（session/read → settings：思考级别 + 权限模式）
   /** 思考级别（available 因模型而异，服务端权威）*/
@@ -166,6 +168,8 @@ interface StoreState {
   modelManageError: string | null
   /** 实际读取的 config.json 路径（随 dataBaseDir 重定向，展示/打开用）*/
   modelConfigPath: string | null
+  /** 正在切换启用状态的 providerId（开关 loading + 防重复点击）*/
+  modelTogglingId: string | null
   mcpLogsLoading: boolean
 
   // 用量明细曲线（model-usage / tool-usage）
@@ -231,6 +235,8 @@ interface StoreState {
   loadMcpLogs: () => void
   /** 拉取模型管理清单（设置视图「模型」条目，config.json 只读结构）*/
   loadModelManage: () => void
+  /** 切换 provider 启用/禁用（写 config.json enabled 字段，回包 modelToggled）*/
+  toggleModelProvider: (providerId: string, enabled: boolean) => void
   /** 设置用量明细时间范围并重拉 model/tool 曲线 */
   setUsageRange: (range: UsageRange) => void
   /** 设置自定义日期范围并重拉 */
@@ -321,6 +327,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   models: [],
   currentModel: null,
+  modelInvalidated: false,
   modelAppliedForSession: null,
   thoughtLevel: null,
   currentMode: null,
@@ -353,6 +360,7 @@ export const useStore = create<StoreState>((set, get) => ({
   modelManageLoading: false,
   modelManageError: null,
   modelConfigPath: null,
+  modelTogglingId: null,
   modelUsage: null,
   toolUsage: null,
   usageRange: '7d',
@@ -377,7 +385,10 @@ export const useStore = create<StoreState>((set, get) => ({
     console.log(`[store] 初始化完成，连接=${inJcef ? 'JCEF' : 'mock'}，workspace=${ws || '(空)'}`)
 
     // IDE 广播：envSave 保存成功后多标签同步最新环境状态（Panel broadcastEnvStatus）
-    window.onEnvStatusChanged = (status: EnvStatus) => set({ envStatus: status })
+    // node 测试环境（vitest）无 window，跳过注册
+    if (typeof window !== 'undefined') {
+      window.onEnvStatusChanged = (status: EnvStatus) => set({ envStatus: status })
+    }
 
     get().checkEnv()
     get().loadSessions()
@@ -400,6 +411,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set({
       currentSessionId: session.sessionId,
       currentWorkspacePath: workspacePath,
+      modelInvalidated: false, // 切会话后按新会话消息推断模型是合理行为，解除失效锁定
       messages: [],
       loadingMessages: true,
       streaming: false,
@@ -616,7 +628,7 @@ export const useStore = create<StoreState>((set, get) => ({
     // 记忆当前选择（persist 通道），切换会话后仍显示；无会话（懒创建待命态）也先记忆，
     // 会话建立后由 applyModelIfReady 真正下发（见 createSession 响应处理）
     setPersisted('zcode.currentModel', JSON.stringify({ modelId, providerId }))
-    set({ currentModel: { modelId, providerId } })
+    set({ currentModel: { modelId, providerId }, modelInvalidated: false })
     // 待命态切模型：级别集随模型变化，按新模型重 hydrate（无缓存的模型 → 选择器隐藏）
     get().hydrateThoughtLevelStandby()
     const sid = get().currentSessionId
@@ -767,6 +779,12 @@ export const useStore = create<StoreState>((set, get) => ({
   loadModelManage: () => {
     set({ modelManageLoading: true, modelManageError: null })
     sendToJava({ op: 'modelManageList' })
+  },
+
+  toggleModelProvider: (providerId, enabled) => {
+    if (get().modelTogglingId) return
+    set({ modelTogglingId: providerId, modelManageError: null })
+    sendToJava({ op: 'modelToggleProvider', providerId, enabled })
   },
 
   setUsageRange: (range) => {
@@ -1375,6 +1393,7 @@ function handleResponse(
         mcpChecking: false,
         mcpLogsLoading: false,
         modelManageLoading: false,
+        modelTogglingId: null,
         ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null } : {}),
       })
       console.error('[store] Java 错误:', msg.message)
@@ -1413,6 +1432,17 @@ function handleResponse(
 
     case 'models':
       set({ models: msg.models })
+      // 模型清单变更后（设置页禁用 provider / Zcode 侧增删模型），已选模型若已不在
+      // 列表 → 取消选择，下拉回占位提示让用户重新选；persist 记忆一并清除（防下次水合复活）。
+      // modelInvalidated 同时置位：挡住下方 inferCurrentModel——它按消息 footer 的模型名
+      // 反查第一个同 modelId 的 provider，会把"体验套餐 GLM-5.3"复活成"个人套餐 GLM-5.3"
+      {
+        const cur = get().currentModel
+        if (cur && !msg.models.some((m) => m.modelId === cur.modelId && m.providerId === cur.providerId)) {
+          removePersisted('zcode.currentModel')
+          set({ currentModel: null, modelInvalidated: true })
+        }
+      }
       // 恢复记忆的模型选择（如仍在列表里）
       try {
         const saved = getPersisted('zcode.currentModel')
@@ -1423,8 +1453,9 @@ function handleResponse(
           }
         }
       } catch { /* ignore */ }
-      // persist 无记忆时，从已有消息推断（models 刚加载，messages 推断可能因缺 providerId 失败）
-      if (!get().currentModel) {
+      // persist 无记忆时，从已有消息推断（models 刚加载，messages 推断可能因缺 providerId 失败）；
+      // 失效清除过的选择不再推断（等用户重选）
+      if (!get().modelInvalidated && !get().currentModel) {
         const inferred = inferCurrentModel(get().messages, msg.models)
         if (inferred) set({ currentModel: inferred })
       }
@@ -1438,7 +1469,7 @@ function handleResponse(
       break
 
     case 'modelSet':
-      set({ currentModel: { modelId: msg.modelId, providerId: msg.providerId } })
+      set({ currentModel: { modelId: msg.modelId, providerId: msg.providerId }, modelInvalidated: false })
       // 切换模型后立即刷新用量，圆环 size 随新模型窗口更新（不用等下次对话结束）
       setTimeout(() => get().loadUsage(), 500)
       // 级别集随模型变化（off/high/max ↔ enabled/off），重拉 settings（current 由服务端校准）
@@ -1555,7 +1586,21 @@ function handleResponse(
         modelManageError: msg.error ?? null,
         modelConfigPath: msg.configPath ?? null,
       })
+      // 设置页模型清单到达 → 输入框下拉同步（用户诉求：管理页刷新/切换后下拉跟着变，
+      // 不再只在启动时拉一次）。走 listModels 保持口径与 case 'models' 既有逻辑复用
+      get().loadModels()
       break
+
+    case 'modelToggled': {
+      // provider 启用/禁用写回成功（changes 含互斥联动项）：本地更新 + 重拉下拉
+      const byId = new Map(msg.changes.map((c) => [c.providerId, c.enabled]))
+      const providers = get().modelProviders?.map((p) =>
+        byId.has(p.providerId) ? { ...p, enabled: byId.get(p.providerId)! } : p,
+      )
+      set({ modelProviders: providers ?? null, modelTogglingId: null })
+      get().loadModels()
+      break
+    }
 
     case 'mcpServerTools': {
       const prevTools = get().mcpToolsByServer

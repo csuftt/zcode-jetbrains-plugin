@@ -637,6 +637,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "deleteSession" -> handleDeleteSession(msg)
                         "listModels" -> handleListModels(msg)
                         "modelManageList" -> handleModelManageList(msg)
+                        "modelToggleProvider" -> handleModelToggleProvider(msg)
                         "setModel" -> handleSetModel(msg)
                         "getSettings" -> handleGetSettings(msg)
                         "setThoughtLevel" -> handleSetThoughtLevel(msg)
@@ -1470,6 +1471,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
+    /**
+     * 内置套餐类型（UI 徽章用）：两个内置套餐显示名相同（BigModel - Coding Plan），
+     * 靠 providerId 区分——coding-plan=个人套餐、start-plan=体验套餐。
+     */
+    private fun builtinPlanOf(providerId: String): String? = when (providerId) {
+        "builtin:bigmodel-coding-plan" -> "personal"
+        "builtin:bigmodel-start-plan" -> "trial"
+        else -> null
+    }
+
     /** op=listModels — 读取 config.json 的 provider 注册表，返回可切换的模型列表 */
     private fun handleListModels(msg: JsonObject): JsonObject {
         // 路径跟随 dataBaseDir 迁移（setting.json 重定向后旧位置是冻结快照），与环境检测同一来源
@@ -1498,6 +1509,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (!enabled) return@mapNotNull null
             val options = pv["options"]?.jsonObject ?: return@mapNotNull null
             val baseURL = options["baseURL"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            // apiKey 缺失 = 无效配置（GUI 残留的未完成 provider），直接过滤；
+            // 同模型多 provider 变体各自保留——旧的跨 provider 去重兜底随本过滤一并移除
+            val apiKey = options["apiKey"]?.jsonPrimitive?.contentOrNull
+            if (apiKey.isNullOrBlank()) return@mapNotNull null
             val providerName = pv["name"]?.jsonPrimitive?.content ?: providerId
             val modelsObj = pv["models"]?.jsonObject ?: return@mapNotNull null
             modelsObj.mapNotNull { (modelId, modelEl) ->
@@ -1509,13 +1524,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 buildJsonObject {
                     put("providerId", providerId)
                     put("providerName", providerName)
+                    builtinPlanOf(providerId)?.let { put("plan", it) }
                     put("modelId", modelId)
                     put("modelName", modelName)
                     limit?.get("context")?.jsonPrimitive?.content?.toLongOrNull()?.let { put("contextWindow", it) }
                     limit?.get("output")?.jsonPrimitive?.content?.toLongOrNull()?.let { put("maxOutput", it) }
                 }
             }
-        }.flatten().distinctBy { it["modelId"]?.jsonPrimitive?.content })  // 跨 provider 按 modelId 去重（同模型多个 provider 变体只留第一个）
+        }.flatten())
         log.info("listModels 返回 ${models.size} 个模型（${providers.size} 个 provider）")
         return buildJsonObject {
             put("op", "models")
@@ -1524,10 +1540,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * op=modelManageList — 设置页「模型管理」只读清单。
+     * op=modelManageList — 设置页「模型管理」清单（支持启用/禁用切换）。
      *
-     * 与 listModels（聊天切换用）的差异：不跨 provider 去重、不滤 disabled（返回 enabled 标记）、
-     * 保留无 baseURL 的 provider；configPath 一并返回供前端展示与「打开配置文件」。
+     * 与 listModels（聊天切换用）的差异：不去重、不滤 disabled（返回 enabled 标记）、
+     * 保留无 baseURL 的 provider；共同口径：apiKey 缺失的无效 provider 一律过滤。
+     * configPath 一并返回供前端展示与「打开配置文件」。
      * 路径同样走 Credentials.defaultConfigPath() 跟随 dataBaseDir 迁移。
      */
     private fun handleModelManageList(msg: JsonObject): JsonObject {
@@ -1548,12 +1565,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
             null
         } ?: return emptyResult()
 
-        val providerArr = JsonArray(providers.map { (providerId, providerEl) ->
+        val providerArr = JsonArray(providers.mapNotNull { (providerId, providerEl) ->
             val pv = providerEl.jsonObject
+            val options = pv["options"]?.jsonObject
+            // apiKey 缺失 = 无效配置（与聊天下拉 listModels 同口径），管理页同样不展示
+            val apiKey = options?.get("apiKey")?.jsonPrimitive?.contentOrNull
+            if (apiKey.isNullOrBlank()) return@mapNotNull null
             // enabled 缺省视为启用（与 listModels/额度查询口径一致）
             val enabled = pv["enabled"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: true
             val providerName = pv["name"]?.jsonPrimitive?.contentOrNull ?: providerId
-            val baseURL = pv["options"]?.jsonObject?.get("baseURL")?.jsonPrimitive?.contentOrNull
+            val baseURL = options?.get("baseURL")?.jsonPrimitive?.contentOrNull
             val models = JsonArray(pv["models"]?.jsonObject?.map { (modelId, modelEl) ->
                 val modelObj = modelEl.jsonObject
                 val modelName = modelObj["name"]?.jsonPrimitive?.contentOrNull ?: modelId
@@ -1568,6 +1589,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             buildJsonObject {
                 put("providerId", providerId)
                 put("providerName", providerName)
+                builtinPlanOf(providerId)?.let { put("plan", it) }
                 put("enabled", enabled)
                 baseURL?.let { put("baseURL", it) }
                 put("models", models)
@@ -1579,6 +1601,96 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("op", "modelManage")
             put("configPath", configPath.toString())
             put("providers", providerArr)
+        }
+    }
+
+    /**
+     * op=modelToggleProvider — 设置页切换 provider 启用/禁用，写回 config.json。
+     *
+     * 写回策略（config.json 是含凭证的关键文件，比 cli/config.json 更谨慎）：
+     * 仅改 provider.<id>.enabled 字段，其余节点 LinkedHashMap 保序原样保留；
+     * 写前备份 .bak，tmp + Files.move 原子替换，失败时从备份回滚。
+     * 内置套餐互斥（对齐 Zcode 客户端）：启用任一 builtin: 套餐时，其余内置套餐一并
+     * 禁用；回包 changes 携带全部实际变更项，前端按数组刷新。
+     * 禁用后 CLI 下次发现生效；进行中的会话不受影响。
+     */
+    private fun handleModelToggleProvider(msg: JsonObject): JsonObject {
+        val providerId = msg["providerId"]?.jsonPrimitive?.contentOrNull
+            ?: return errorResponse("缺少 providerId")
+        val enabled = msg["enabled"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
+            ?: return errorResponse("缺少 enabled")
+
+        val configPath = Credentials.defaultConfigPath()
+        if (!java.nio.file.Files.isRegularFile(configPath)) {
+            return errorResponse("config.json 不存在: $configPath")
+        }
+        val file = configPath.toFile()
+        val root = try {
+            json.parseToJsonElement(file.readText(Charsets.UTF_8)).jsonObject
+        } catch (e: Exception) {
+            log.warn("解析 config.json 失败: ${e.message}")
+            return errorResponse("解析 config.json 失败")
+        }
+        val providersObj = root["provider"]?.let { runCatching { it.jsonObject }.getOrNull() }
+        if (providersObj == null || providersObj[providerId] == null) {
+            return errorResponse("provider 不存在: $providerId")
+        }
+
+        // 变更集：目标 provider + （启用内置套餐时）其余内置套餐联动禁用（互斥）
+        data class Change(val id: String, val newEnabled: Boolean)
+        val changes = mutableListOf(Change(providerId, enabled))
+        val mutexOthers = enabled && providerId.startsWith("builtin:")
+        if (mutexOthers) {
+            providersObj.keys.forEach { id ->
+                if (id != providerId && id.startsWith("builtin:") &&
+                    (providersObj[id]!!.jsonObject["enabled"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: true)
+                ) {
+                    changes.add(Change(id, false))
+                }
+            }
+        }
+
+        // 仅替换各目标 provider 的 enabled 字段，其余内容（含顺序）原样保留
+        val newProviders = JsonObject(LinkedHashMap<String, kotlinx.serialization.json.JsonElement>(providersObj.size).apply {
+            providersObj.forEach { (k, v) ->
+                val change = changes.find { it.id == k }
+                put(k, if (change != null) buildJsonObject {
+                    v.jsonObject.forEach { (pk, pv) -> if (pk != "enabled") put(pk, pv) }
+                    put("enabled", change.newEnabled)
+                } else v)
+            }
+        })
+        val newRoot = buildJsonObject {
+            root.forEach { (k, v) -> put(k, if (k == "provider") newProviders else v) }
+        }
+
+        val pretty = Json { prettyPrint = true }
+        val bak = java.nio.file.Path.of(file.parentFile.absolutePath, file.name + ".bak")
+        try {
+            // 备份 → 写 tmp → 原子替换；替换失败从备份恢复
+            java.nio.file.Files.copy(configPath, bak, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            val tmp = java.nio.file.Path.of(file.parentFile.absolutePath, file.name + ".tmp")
+            tmp.toFile().writeText(pretty.encodeToString(JsonObject.serializer(), newRoot), Charsets.UTF_8)
+            try {
+                java.nio.file.Files.move(tmp, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: Exception) {
+                java.nio.file.Files.move(bak, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                throw e
+            }
+            val changeDesc = changes.joinToString(", ") { c -> c.id + "=" + c.newEnabled }
+            log.info("modelToggleProvider: $changeDesc 已写回 $configPath")
+        } catch (e: Exception) {
+            log.warn("写回 config.json 失败: ${e.message}")
+            return errorResponse("写回失败: ${e.message}")
+        }
+        return buildJsonObject {
+            put("op", "modelToggled")
+            put("changes", JsonArray(changes.map { c ->
+                buildJsonObject {
+                    put("providerId", c.id)
+                    put("enabled", c.newEnabled)
+                }
+            }))
         }
     }
 

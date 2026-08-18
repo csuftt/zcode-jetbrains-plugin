@@ -10,6 +10,15 @@
   "empty": "モデルが設定されていません",
   "emptyHint": "Zcode クライアントでモデルを設定するか、設定ファイルを編集して更新してください",
   "errorLoad": "読み込みに失敗しました：{{error}}",
+  "plan": {
+    "personal": "個人プラン",
+    "trial": "体験プラン"
+  },
+  "section": {
+    "builtin": "内蔵プラン",
+    "builtinHint": "同時に有効化できるのは 1 つだけです。新しいプランを有効化すると他の内蔵プランは自動的に無効化されます",
+    "custom": "カスタムプロバイダー"
+  },
   "providerDisabled": "無効",
   "providerNoModels": "このプロバイダーにモデルはありません",
   "modelsCount": "{{count}} 件のモデル",
@@ -17,6 +26,8 @@
   "contextTitle": "コンテキストウィンドウ（limit.context）",
   "outputBadge": "出力 {{size}}",
   "outputTitle": "最大出力（limit.output）",
+  "disableHint": "このプロバイダーを無効化（config.json に書き込み、チャットのモデルドロップダウンに即時反映）",
+  "enableHint": "このプロバイダーを有効化（config.json に書き込み、チャットのモデルドロップダウンに即時反映）",
   "deleteTitle": "モデル削除",
   "dialog": {
     "addTitle": "モデル追加",

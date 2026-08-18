@@ -172,3 +172,26 @@ body {
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
+
+/* ===== 内置套餐徽章（PlanBadge）：同名内置套餐靠徽章区分个人/体验 ===== */
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-transform: none; /* 组标题 uppercase 不适用于中文徽章 */
+  letter-spacing: normal;
+
+  &.personal {
+    background: rgba(0, 127, 212, 0.12);
+    color: var(--accent-primary, #007fd4);
+  }
+  &.trial {
+    background: rgba(255, 152, 0, 0.15);
+    color: var(--status-warning, #ff9800);
+  }
+}

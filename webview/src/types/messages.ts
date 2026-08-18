@@ -171,8 +171,10 @@ export type JavaRequest =
   | { op: 'listFiles'; query: string }
   | { op: 'listCommands'; query?: string }
   | { op: 'listModels' }
-  /** 设置页「模型管理」只读清单（不去重/不滤 disabled，带 configPath）*/
+  /** 设置页「模型管理」清单（apiKey 缺失的无效 provider 已过滤，带 configPath）*/
   | { op: 'modelManageList' }
+  /** 切换 provider 启用/禁用（Kotlin 备份+原子写回 config.json 的 enabled 字段）*/
+  | { op: 'modelToggleProvider'; providerId: string; enabled: boolean }
   | { op: 'setModel'; sessionId: string; modelId: string; providerId: string }
   | { op: 'getSettings'; sessionId: string }
   | { op: 'setThoughtLevel'; sessionId: string; thoughtLevel: string }
@@ -215,6 +217,8 @@ export type JavaRequest =
 export interface ModelOption {
   providerId: string
   providerName: string
+  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验 */
+  plan?: 'personal' | 'trial'
   modelId: string
   modelName: string
   /** 上下文窗口大小（config.json limit.context），如 GLM-5.2=1000000 / GLM-5-Turbo=204800 */
@@ -235,6 +239,8 @@ export interface ModelManageModel {
 export interface ModelManageProvider {
   providerId: string
   providerName: string
+  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验 */
+  plan?: 'personal' | 'trial'
   baseURL?: string
   enabled: boolean
   models: ModelManageModel[]
@@ -471,6 +477,8 @@ export type JavaResponse =
   | { op: 'filesToInput'; refs: string[] }
   | { op: 'models'; models: ModelOption[] }
   | { op: 'modelManage'; configPath?: string; providers: ModelManageProvider[]; error?: string }
+  /** 切换回包：changes 含全部实际变更（启用内置套餐时其余内置套餐联动禁用，互斥）*/
+  | { op: 'modelToggled'; changes: { providerId: string; enabled: boolean }[] }
   | { op: 'modelSet'; sessionId: string; modelId: string; providerId: string }
   | { op: 'settings'; sessionId: string; mode: { current?: string }; thoughtLevel: ThoughtLevelInfo }
   | { op: 'thoughtLevelSet'; sessionId: string; thoughtLevel: string }

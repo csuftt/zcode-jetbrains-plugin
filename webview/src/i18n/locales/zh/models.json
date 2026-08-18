@@ -10,6 +10,15 @@
   "empty": "未配置任何模型",
   "emptyHint": "请前往 Zcode 客户端配置模型，或编辑配置文件后刷新",
   "errorLoad": "读取失败：{{error}}",
+  "plan": {
+    "personal": "个人套餐",
+    "trial": "体验套餐"
+  },
+  "section": {
+    "builtin": "内置套餐",
+    "builtinHint": "同时只能启用一个，启用新套餐会自动停用其他内置套餐",
+    "custom": "自定义供应商"
+  },
   "providerDisabled": "已禁用",
   "providerNoModels": "该供应商未配置模型",
   "modelsCount": "{{count}} 个模型",
@@ -17,6 +26,8 @@
   "contextTitle": "上下文窗口（limit.context）",
   "outputBadge": "输出 {{size}}",
   "outputTitle": "最大输出（limit.output）",
+  "disableHint": "禁用该供应商（写回 config.json，聊天模型下拉立即同步）",
+  "enableHint": "启用该供应商（写回 config.json，聊天模型下拉立即同步）",
   "deleteTitle": "删除模型",
   "dialog": {
     "addTitle": "新增模型",

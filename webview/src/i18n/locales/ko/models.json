@@ -10,6 +10,15 @@
   "empty": "구성된 모델이 없습니다",
   "emptyHint": "Zcode 클라이언트에서 모델을 구성하거나 설정 파일을 편집한 후 새로 고치세요",
   "errorLoad": "불러오기 실패: {{error}}",
+  "plan": {
+    "personal": "개인 플랜",
+    "trial": "체험 플랜"
+  },
+  "section": {
+    "builtin": "내장 플랜",
+    "builtinHint": "동시에 하나만 활성화할 수 있으며, 새 플랜을 활성화하면 다른 내장 플랜이 자동 비활성화됩니다",
+    "custom": "사용자 지정 공급자"
+  },
   "providerDisabled": "비활성화됨",
   "providerNoModels": "이 공급자에는 모델이 없습니다",
   "modelsCount": "모델 {{count}}개",
@@ -17,6 +26,8 @@
   "contextTitle": "컨텍스트 윈도우(limit.context)",
   "outputBadge": "출력 {{size}}",
   "outputTitle": "최대 출력(limit.output)",
+  "disableHint": "이 공급자 비활성화(config.json에 기록, 채팅 모델 드롭다운 즉시 동기화)",
+  "enableHint": "이 공급자 활성화(config.json에 기록, 채팅 모델 드롭다운 즉시 동기화)",
   "deleteTitle": "모델 삭제",
   "dialog": {
     "addTitle": "모델 추가",

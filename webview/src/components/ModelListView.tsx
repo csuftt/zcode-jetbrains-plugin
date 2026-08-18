@@ -1,10 +1,11 @@
 /**
- * 模型列表面板（设置页「模型」条目，参考 cc-gui ProviderList 的只读展示模式）
+ * 模型列表面板（设置页「模型」条目，参考 cc-gui ProviderList 的展示模式）
  *
  * 数据：modelManageList（Kotlin 端读 config.json——路径走 Credentials.defaultConfigPath()
- *       跟随 dataBaseDir 迁移；不去重/不滤 disabled，全量 provider→models 结构）
- * 交互：纯查看；「新增模型」与行内「删除」点击后弹 ConfirmDialog 引导前往 Zcode
- *       配置（含「打开配置文件」快捷入口），插件内不写配置文件。
+ *       跟随 dataBaseDir 迁移；apiKey 缺失的无效 provider 过滤，不去重、disabled 标记返回）
+ * 交互：provider 行内启用/禁用切换（modelToggleProvider 备份+原子写回 config.json，
+ *       成功后输入框下拉经 loadModels 同步刷新）；「新增模型」与行内「删除」点击后弹
+ *       ConfirmDialog 引导前往 Zcode 配置（含「打开配置文件」快捷入口）。
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -12,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { sendToJava } from '@/ipc/bridge'
 import { ConfirmDialog } from './ConfirmDialog'
+import { PlanBadge } from './PlanBadge'
 import type { ModelManageModel, ModelManageProvider } from '@/types/messages'
 import '../styles/model-list-view.less'
 
@@ -65,20 +67,65 @@ function ModelRow({ model, onDelete }: { model: ModelManageModel; onDelete: () =
   )
 }
 
-/** provider 分组卡片：头部（名称/ID/禁用徽章/baseURL/计数）+ 模型行列表 */
+/**
+ * provider 分组卡片：头部（选择控件/名称/套餐徽章/ID/禁用徽章/baseURL/计数）+ 模型行列表。
+ * radio=true（内置套餐）：头部整行可点，单选互斥由后端写回（启用新套餐自动禁用其余内置套餐）；
+ * 否则（自定义供应商）：行内 toggle 开关，独立启停。
+ */
 function ProviderCard({
   provider,
+  radio = false,
   onDeleteModel,
 }: {
   provider: ModelManageProvider
+  radio?: boolean
   onDeleteModel: (provider: ModelManageProvider, model: ModelManageModel) => void
 }) {
   const { t } = useTranslation()
+  const modelTogglingId = useStore((s) => s.modelTogglingId)
+  const toggleModelProvider = useStore((s) => s.toggleModelProvider)
+  const toggling = modelTogglingId === provider.providerId
+
+  const handleToggle = () => {
+    if (!toggling) toggleModelProvider(provider.providerId, !provider.enabled)
+  }
+
   return (
     <div className={cx('model-list-view__provider', !provider.enabled && 'disabled')}>
-      <div className="model-list-view__provider-header">
+      <div
+        className={cx('model-list-view__provider-header', radio && 'selectable')}
+        onClick={radio ? handleToggle : undefined}
+      >
+        {radio ? (
+          <button
+            className={cx('model-list-view__radio', provider.enabled && 'on')}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleToggle()
+            }}
+            disabled={toggling}
+            title={provider.enabled ? t('models.disableHint') : t('models.enableHint')}
+          >
+            {toggling && <span className="codicon codicon-loading spin" />}
+          </button>
+        ) : (
+          <button
+            className={cx('model-list-view__toggle', provider.enabled && 'on')}
+            onClick={handleToggle}
+            disabled={toggling}
+            title={provider.enabled ? t('models.disableHint') : t('models.enableHint')}
+          >
+            <span
+              className={cx(
+                'codicon',
+                toggling ? 'codicon-loading spin' : provider.enabled ? 'codicon-check' : 'codicon-circle-slash',
+              )}
+            />
+          </button>
+        )}
         <span className={cx('codicon', provider.enabled ? 'codicon-server-environment' : 'codicon-server-process')} />
         <span className="model-list-view__provider-name">{provider.providerName}</span>
+        <PlanBadge plan={provider.plan} />
         <span className="model-list-view__provider-id" title={provider.providerId}>
           {provider.providerId}
         </span>
@@ -150,6 +197,14 @@ export function ModelListView() {
     setPendingAction(null)
   }
 
+  const handleDeleteModel = (provider: ModelManageProvider, model: ModelManageModel) => {
+    setPendingAction({
+      kind: 'delete',
+      providerName: provider.providerName,
+      modelName: model.modelName,
+    })
+  }
+
   return (
     <div className="model-list-view">
       <div className="model-list-view__toolbar">
@@ -216,19 +271,35 @@ export function ModelListView() {
         </div>
       ) : (
         <div className="model-list-view__list">
-          {visible.map((p) => (
-            <ProviderCard
-              key={p.providerId}
-              provider={p}
-              onDeleteModel={(provider, model) =>
-                setPendingAction({
-                  kind: 'delete',
-                  providerName: provider.providerName,
-                  modelName: model.modelName,
-                })
-              }
-            />
-          ))}
+          {/* 内置套餐区：单选互斥（启用新套餐自动禁用其余内置套餐，后端写回联动）*/}
+          {visible.some((p) => p.providerId.startsWith('builtin:')) && (
+            <div className="model-list-view__section">
+              <span className="model-list-view__section-title">{t('models.section.builtin')}</span>
+              <span className="model-list-view__section-hint">{t('models.section.builtinHint')}</span>
+            </div>
+          )}
+          {visible
+            .filter((p) => p.providerId.startsWith('builtin:'))
+            .map((p) => (
+              <ProviderCard
+                key={p.providerId}
+                provider={p}
+                radio
+                onDeleteModel={handleDeleteModel}
+              />
+            ))}
+
+          {/* 自定义供应商区：独立启停 */}
+          {visible.some((p) => !p.providerId.startsWith('builtin:')) && (
+            <div className="model-list-view__section">
+              <span className="model-list-view__section-title">{t('models.section.custom')}</span>
+            </div>
+          )}
+          {visible
+            .filter((p) => !p.providerId.startsWith('builtin:'))
+            .map((p) => (
+              <ProviderCard key={p.providerId} provider={p} onDeleteModel={handleDeleteModel} />
+            ))}
         </div>
       )}
 

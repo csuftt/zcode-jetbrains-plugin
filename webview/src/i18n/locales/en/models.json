@@ -10,6 +10,15 @@
   "empty": "No models configured",
   "emptyHint": "Configure models in the Zcode client, or edit the config file and refresh",
   "errorLoad": "Failed to load: {{error}}",
+  "plan": {
+    "personal": "Personal Plan",
+    "trial": "Trial Plan"
+  },
+  "section": {
+    "builtin": "Built-in Plans",
+    "builtinHint": "Only one can be enabled at a time; enabling a plan disables the others",
+    "custom": "Custom Providers"
+  },
   "providerDisabled": "Disabled",
   "providerNoModels": "No models configured for this provider",
   "modelsCount": "{{count}} models",
@@ -17,6 +26,8 @@
   "contextTitle": "Context window (limit.context)",
   "outputBadge": "out {{size}}",
   "outputTitle": "Max output (limit.output)",
+  "disableHint": "Disable this provider (writes config.json; chat model dropdown syncs immediately)",
+  "enableHint": "Enable this provider (writes config.json; chat model dropdown syncs immediately)",
   "deleteTitle": "Delete model",
   "dialog": {
     "addTitle": "Add Model",
