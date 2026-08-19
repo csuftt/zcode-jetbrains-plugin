@@ -122,6 +122,10 @@ cd webview && npm install && npm run build && npm run build:single && cd ..
 
 生产模式下插件会用内置 HttpServer（127.0.0.1 随机端口）serve 多文件产物——webview 拥有真实 origin 与 sourcemap，DevTools 中可直接看 TS/TSX 源码断点；server 启动失败时自动降级 singlefile 单文件加载。
 
+## 开发约定
+
+- **禁止强推 master**：CI 与发布流程都基于 master，不要用 `git push --force` / `-f` 改写已推送历史；需要修正时用 `git revert` 或追加新提交。GitHub 的分支保护（拒绝强推）需 Pro 或公开仓库，当前私有免费仓库未启用，靠本约定约束。
+
 ## 发布到 JetBrains Marketplace
 
 首次上架需在 plugins.jetbrains.com 网页手动完成；后续版本更新由 GitHub Actions 自动发布。
