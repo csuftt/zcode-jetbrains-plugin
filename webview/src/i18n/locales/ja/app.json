@@ -70,12 +70,13 @@
     "nodeMissing": "Node.js が見つかりません：{{detail}}",
     "nodeTooLow": "Node.js のバージョンが低すぎます（{{version}}、v{{min}}+ が必要）",
     "cliMissing": "ZCode CLI が見つかりません：{{detail}}",
-    "credentialsInvalid": "認証情報が無効または未設定です：{{detail}}",
     "recheck": "再チェック",
     "goSettings": "設定へ",
-    "browserHostTitle": "内蔵ブラウザホストに異常（AI ブラウザツールは使用不可、チャットへの影響なし）",
     "browserHostCefDown": "ブラウザデバッグチャネルが利用不可：JCEF は起動していますが CDP ポートに到達できません。IDE を再起動して復旧してください（再チェックで自動修復を試みます）",
-    "browserHostHandlerMissing": "ブラウザホストがプロトコルクライアントに登録されていません。「再チェック」で再登録します"
+    "browserHostHandlerMissing": "ブラウザホストがプロトコルクライアントに登録されていません。「再チェック」で再登録します",
+    "advisoryTitle": "実行環境の通知（チャットへの影響なし）",
+    "credsDegraded": "利用可能なモデル資格情報が見つかりません：ZCode クライアントを最新版にアップデートして再ログインするか、API キー型モデルを追加した後、「再検査」をクリックしてください",
+    "dismiss": "閉じる（機能に影響なし。IDE 再起動後も異常が残る場合は再表示されます）"
   },
   "envErrors": {
     "nodeNotFound": "PATH・一般的なインストール先・ログインシェルを検索済み。設定でパスを指定してください",
@@ -86,7 +87,7 @@
     "nodeExecFail": "実行できません（{{arg}}）",
     "cliFileNotFound": "zcode.cjs が存在しません：{{arg}}",
     "cliNotFound": "標準のインストール先に zcode.cjs が見つかりません。先に ZCode クライアントをインストールしてください",
-    "credsMissing": "設定ファイルが存在しません：{{arg}}。先に ZCode クライアントでログインしてください",
-    "credsInvalid": "設定ファイルが無効です：{{arg}}。ZCode クライアントで再ログインしてください"
+    "credsMissing": "設定ファイルが存在しません：{{arg}}（ZCode クライアントを最新版にアップデートして再ログイン、または API キー型モデルを追加後に再検査してください）",
+    "credsInvalid": "設定ファイルに利用可能な資格情報がありません：{{arg}}（アカウントログインの資格情報は暗号化保存。ZCode クライアントを最新版にアップデートして再ログイン、または API キー型モデルを追加後に再検査してください）"
   }
 }

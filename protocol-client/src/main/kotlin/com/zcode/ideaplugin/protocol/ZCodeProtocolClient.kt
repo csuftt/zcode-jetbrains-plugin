@@ -42,7 +42,8 @@ class ZCodeProtocolClient private constructor(
     private val stdout: BufferedReader,
     private val zcodePath: java.nio.file.Path,
     private val nodePath: String,
-    private val credentials: com.zcode.ideaplugin.protocol.ZCodeCredentials
+    /** 可空：config.json 无明文凭证（oauth 登录）时不注入 env，由 app-server 自身凭证链接管 */
+    private val credentials: com.zcode.ideaplugin.protocol.ZCodeCredentials?
 ) : AutoCloseable {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -126,15 +127,16 @@ class ZCodeProtocolClient private constructor(
          * 启动 ZCode app-server 子进程并连接
          *
          * @param zcodePath zcode.cjs 路径（默认自动探测）
-         * @param credentials 凭证（默认从 ~/.zcode/v2/config.json 读）
+         * @param credentials 凭证（默认从 ~/.zcode/v2/config.json 读；null = 无明文凭证，
+         *   不注入 env，app-server 用自身凭证链——cli/config.json 的 provider 注册）
          * @param nodePath node 可执行文件路径（默认从 PATH 找）
          */
         fun start(
             zcodePath: Path = ZCodeLocator.detect(),
-            credentials: ZCodeCredentials = Credentials.load(),
+            credentials: ZCodeCredentials? = Credentials.loadOrNull(),
             nodePath: String = findNode()
         ): ZCodeProtocolClient {
-            val env = (System.getenv() + credentials.toEnvMap()).toMutableMap()
+            val env = (System.getenv() + (credentials?.toEnvMap() ?: emptyMap())).toMutableMap()
 
             val pb = ProcessBuilder(nodePath, zcodePath.toString(), "app-server")
             pb.environment().clear()
@@ -747,7 +749,7 @@ class ZCodeProtocolClient private constructor(
 
         val pb = ProcessBuilder(args)
         pb.environment().clear()
-        pb.environment().putAll(credentials.toEnvMap())
+        pb.environment().putAll(credentials?.toEnvMap() ?: emptyMap())
         pb.redirectErrorStream(true)
 
         val proc = pb.start()
@@ -796,7 +798,7 @@ class ZCodeProtocolClient private constructor(
 
         val pb = ProcessBuilder(args)
         pb.environment().clear()
-        pb.environment().putAll(credentialsOverride?.toEnvMap() ?: credentials.toEnvMap())
+        pb.environment().putAll(credentialsOverride?.toEnvMap() ?: credentials?.toEnvMap() ?: emptyMap())
         pb.redirectErrorStream(false)
 
         val proc = pb.start()

@@ -625,7 +625,8 @@ function EnvironmentSettings() {
         </small>
       </section>
 
-      {/* 凭证状态（只读：由 ZCode 客户端登录生成，无配置入口） */}
+      {/* 凭证状态（只读：由 ZCode 客户端登录生成，无配置入口）。
+          无明文凭证（oauth 登录）不再是错误：对话走 ZCode 客户端登录态，仅辅助功能受限 */}
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">
           <span className="codicon codicon-key" />
@@ -634,13 +635,13 @@ function EnvironmentSettings() {
             <span
               className={cx(
                 'basic-settings__version-badge',
-                envStatus.credentials.ok ? 'is-ok' : 'is-error'
+                envStatus.credentials.ok ? 'is-ok' : 'is-warning'
               )}
               title={envStatus.credentials.path ?? undefined}
             >
               {envStatus.credentials.ok
                 ? t('settings.env.credentials.ok', { model: envStatus.credentials.model ?? '' })
-                : t('settings.env.credentials.invalid')}
+                : t('settings.env.credentials.degraded')}
             </span>
           )}
         </div>
@@ -650,9 +651,9 @@ function EnvironmentSettings() {
             <span className="basic-settings__config-path-text">{envStatus.credentials.path}</span>
           </div>
         )}
-        {!envStatus?.credentials.ok && envStatus?.credentials.error && (
+        {envStatus && !envStatus.credentials.ok && (
           <div className="basic-settings__version-warning">
-            <span className="codicon codicon-error" />
+            <span className="codicon codicon-warning" />
             <span>
               {envStatus.credentials.code
                 ? t(`app.envErrors.${envStatus.credentials.code}`, { arg: envStatus.credentials.path ?? '' })

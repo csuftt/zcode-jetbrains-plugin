@@ -120,8 +120,8 @@
     "credentials": {
       "label": "憑證狀態",
       "ok": "有效 · {{model}}",
-      "invalid": "未設定",
-      "hint": "憑證由 ZCode 用戶端登入產生（~/.zcode/v2/config.json），此頁僅顯示狀態"
+      "hint": "憑證由 ZCode 用戶端登入產生；帳號（oauth）登入的憑證為加密儲存，最新版用戶端登入會把可用憑證寫入 config.json。若此處提示無可用憑證，請升級用戶端並重新登入",
+      "degraded": "無可用憑證 · 待修復"
     }
   },
   "behavior": {

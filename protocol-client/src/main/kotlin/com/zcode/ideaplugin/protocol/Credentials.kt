@@ -37,35 +37,59 @@ object Credentials {
 
     /**
      * 从 ~/.zcode/v2/config.json 读凭证
-     * @throws IllegalStateException 配置缺失或无效
+     * @throws IllegalStateException 配置缺失或无效（仅展示用；主流程应改用 [loadOrNull] 降级）
      */
-    fun load(configPath: Path = defaultConfigPath()): ZCodeCredentials {
-        require(configPath.exists()) {
-            "ZCode 配置文件不存在：$configPath（请先用 ZCode 客户端登录一次）"
+    fun load(configPath: Path = defaultConfigPath()): ZCodeCredentials =
+        loadOrNull(configPath) ?: throw loadFailure(configPath)
+
+    /**
+     * [load] 的非抛出版本：读不到可用凭证返回 null。
+     *
+     * 凭证读取失败不再阻断插件启动（issue #4）：config.json 无可用凭证时调用方
+     * 降级处理（不注入凭证 env、经 EnvStatus 展示指引），而非报错拦死主流程。
+     */
+    fun loadOrNull(configPath: Path = defaultConfigPath()): ZCodeCredentials? {
+        if (!configPath.exists()) return null
+        return try {
+            val providers = json.parseToJsonElement(configPath.readText()).jsonObject["provider"]?.jsonObject
+                ?: return null
+            pickCredential(providers)
+        } catch (e: Exception) {
+            null
         }
+    }
 
-        val config = json.parseToJsonElement(configPath.readText()).jsonObject
-        val providers = config["provider"]?.jsonObject
-            ?: throw IllegalStateException("config.json 缺少 provider 字段")
-
-        // 找第一个 enabled + anthropic 的 provider
+    /** 在 provider 表里找首个 enabled + anthropic + baseURL/apiKey/model 均非空白的凭证 */
+    private fun pickCredential(providers: JsonObject): ZCodeCredentials? {
         for ((_, provider) in providers) {
             val pv = provider.jsonObject
-            val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: false
+            // enabled 缺省视为启用（与 RuntimeModels.isEnabledAnthropic 同口径）：config.json
+            // 存在无 enabled 字段但实际启用的自定义 provider（如 DeepSeek），若按不启用
+            // 跳过会误报"没有找到 enabled 的 anthropic provider"
+            val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: true
             val kind = pv["kind"]?.jsonPrimitive?.content ?: ""
             if (!enabled || kind != "anthropic") continue
 
             val options = pv["options"]?.jsonObject ?: continue
-            val baseURL = options["baseURL"]?.jsonPrimitive?.content ?: continue
-            val apiKey = options["apiKey"]?.jsonPrimitive?.content ?: continue
+            // 空白 apiKey（oauth 系 provider 的占位空串）与字段缺失同等对待：
+            // 旧逻辑 `?: continue` 只拦 null，空串会穿透成"自检通过但注入空 key"，
+            // 反而挡住 app-server 自身凭证链（resolveApiKey 的 env fallback 拿到空值）
+            val baseURL = options["baseURL"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
+            val apiKey = options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
 
             val modelsObj = pv["models"]?.jsonObject ?: continue
             val model = modelsObj.keys.firstOrNull() ?: continue
 
             return ZCodeCredentials(model = model, baseURL = baseURL, apiKey = apiKey)
         }
+        return null
+    }
 
-        throw IllegalStateException("config.json 没有找到 enabled 的 anthropic provider")
+    /** [load] 失败异常：文件缺失保留 credsMissing 语义（IllegalArgumentException），其余 credsInvalid */
+    private fun loadFailure(configPath: Path): RuntimeException = if (!configPath.exists()) {
+        IllegalArgumentException("ZCode 配置文件不存在：$configPath（请用 ZCode 客户端登录，或升级客户端到最新版后重新登录）")
+    } else {
+        IllegalStateException("config.json 没有找到可用的凭证（请在 ZCode 客户端重新登录，或添加 API Key 型模型）")
     }
 
     /**

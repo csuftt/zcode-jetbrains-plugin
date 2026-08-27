@@ -100,4 +100,81 @@ class CredentialsPathTest {
         val p = Credentials.defaultConfigPath()
         assertTrue(p.isRegularFile(), "应解析到存在的 config.json: $p（跟随 dataBaseDir 或默认位置）")
     }
+
+    // ============ loadOrNull（issue #4 凭证降级） ============
+
+    /** 在默认位置写 config.json（providers JSON 文本） */
+    private fun givenConfig(providersJson: String) {
+        Files.createDirectories(home.resolve(".zcode/v2"))
+        home.resolve(".zcode/v2/config.json").toFile().writeText("""{"provider": $providersJson}""")
+    }
+
+    private val enabledProvider = """
+        {"p1": {"enabled": true, "kind": "anthropic",
+          "options": {"baseURL": "https://example.com/api", "apiKey": "sk-test"},
+          "models": {"GLM-5.3": {}}}}
+    """.trimIndent()
+
+    @Test
+    fun `loadOrNull 读到 enabled anthropic provider`() {
+        givenConfig(enabledProvider)
+        val c = Credentials.loadOrNull(Credentials.configPathFor(home.toString()))
+        assertEquals("sk-test", c?.apiKey)
+        assertEquals("GLM-5.3", c?.model)
+    }
+
+    @Test
+    fun `loadOrNull 空串 apiKey 跳过而非穿透`() {
+        // oauth 系 provider 的占位空串：旧行为会穿透成"读到 apiKey= 空凭证"，
+        // 注入空 ANTHROPIC_API_KEY 反而挡住 app-server 自身凭证链
+        givenConfig("""
+            {"p1": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": ""},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        assertEquals(null, Credentials.loadOrNull(Credentials.configPathFor(home.toString())))
+    }
+
+    @Test
+    fun `loadOrNull 空白 baseURL 同样跳过`() {
+        givenConfig("""
+            {"p1": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "  ", "apiKey": "sk-test"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        assertEquals(null, Credentials.loadOrNull(Credentials.configPathFor(home.toString())))
+    }
+
+    @Test
+    fun `enabled 字段缺失视为启用（与 RuntimeModels 同口径）`() {
+        // config.json 存在无 enabled 字段但实际启用的自定义 provider（如 DeepSeek）：
+        // 旧逻辑按不启用跳过会误报"没有找到 enabled 的 anthropic provider"
+        givenConfig("""
+            {"p-custom": {"kind": "anthropic",
+              "options": {"baseURL": "https://deepseek.example/anthropic", "apiKey": "sk-custom"},
+              "models": {"deepseek-v4": {}}}}
+        """.trimIndent())
+        val c = Credentials.loadOrNull(Credentials.configPathFor(home.toString()))
+        assertEquals("sk-custom", c?.apiKey, "enabled 缺失的 provider 应视为启用")
+    }
+
+    @Test
+    fun `loadOrNull 文件缺失或结构无效返回 null 不抛`() {
+        assertEquals(null, Credentials.loadOrNull(home.resolve("none/config.json")))
+        givenConfig("{}") // 无 provider 节
+        assertEquals(null, Credentials.loadOrNull(Credentials.configPathFor(home.toString())))
+    }
+
+    @Test
+    fun `load 文件缺失抛 IllegalArgumentException 保留 credsMissing 语义`() {
+        val e = kotlin.runCatching { Credentials.load(home.resolve("none/config.json")) }.exceptionOrNull()
+        assertTrue(e is IllegalArgumentException, "文件缺失应为 credsMissing 语义: $e")
+    }
+
+    @Test
+    fun `load 无可用 provider 抛 IllegalStateException`() {
+        givenConfig(enabledProvider.replace("\"enabled\": true", "\"enabled\": false"))
+        val e = kotlin.runCatching { Credentials.load(Credentials.configPathFor(home.toString())) }.exceptionOrNull()
+        assertTrue(e is IllegalStateException && e !is IllegalArgumentException, "结构无效应为 credsInvalid 语义: $e")
+    }
 }

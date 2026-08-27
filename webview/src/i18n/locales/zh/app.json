@@ -70,12 +70,13 @@
     "nodeMissing": "Node.js 未找到：{{detail}}",
     "nodeTooLow": "Node.js 版本过低（{{version}}，需要 v{{min}}+）",
     "cliMissing": "ZCode CLI 未找到：{{detail}}",
-    "credentialsInvalid": "凭证未配置或无效：{{detail}}",
     "recheck": "重新检测",
     "goSettings": "去设置",
-    "browserHostTitle": "内嵌浏览器宿主异常（AI 浏览器工具不可用，不影响对话）",
     "browserHostCefDown": "浏览器调试通道不可用：JCEF 已启动但 CDP 端口不可达，请重启 IDE 恢复（重新检测会尝试自动修复）",
-    "browserHostHandlerMissing": "浏览器宿主未注册到协议客户端，点「重新检测」自动补注册"
+    "browserHostHandlerMissing": "浏览器宿主未注册到协议客户端，点「重新检测」自动补注册",
+    "advisoryTitle": "运行环境提示（对话功能不受影响）",
+    "credsDegraded": "未找到可用的模型凭证：请将 ZCode 客户端升级到最新版并重新登录（或在客户端添加 API Key 型模型），然后点「重新检测」",
+    "dismiss": "关闭提示（不影响功能，重启 IDE 后若仍异常会再次提示）"
   },
   "envErrors": {
     "nodeNotFound": "已尝试 PATH、常见安装位置与登录 shell，请在设置中配置路径",
@@ -86,8 +87,8 @@
     "nodeExecFail": "无法执行（{{arg}}）",
     "cliFileNotFound": "zcode.cjs 不存在：{{arg}}",
     "cliNotFound": "未在标准安装位置找到 zcode.cjs，请确认已安装 ZCode 客户端",
-    "credsMissing": "配置文件不存在：{{arg}}，请先用 ZCode 客户端登录一次",
-    "credsInvalid": "配置文件无效：{{arg}}，请用 ZCode 客户端重新登录"
+    "credsMissing": "配置文件不存在：{{arg}}（请将 ZCode 客户端升级到最新版并重新登录，或添加 API Key 型模型后重新检测）",
+    "credsInvalid": "配置文件无可用凭证：{{arg}}（oauth 登录凭证为加密存储；请将 ZCode 客户端升级到最新版并重新登录，或添加 API Key 型模型后重新检测）"
   },
   "permissionApproval": {
     "title": "工具执行审批",

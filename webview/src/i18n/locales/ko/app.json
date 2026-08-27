@@ -70,12 +70,13 @@
     "nodeMissing": "Node.js를 찾을 수 없음: {{detail}}",
     "nodeTooLow": "Node.js 버전이 너무 낮음 ({{version}}, v{{min}}+ 필요)",
     "cliMissing": "ZCode CLI를 찾을 수 없음: {{detail}}",
-    "credentialsInvalid": "자격 증명이 없거나 유효하지 않음: {{detail}}",
     "recheck": "다시 검사",
     "goSettings": "설정 열기",
-    "browserHostTitle": "내장 브라우저 호스트 문제 (AI 브라우저 도구 사용 불가, 대화에는 영향 없음)",
     "browserHostCefDown": "브라우저 디버그 채널 사용 불가: JCEF가 실행 중이지만 CDP 포트에 연결할 수 없습니다. IDE를 재시작하여 복구하세요(다시 검사 시 자동 복구 시도)",
-    "browserHostHandlerMissing": "브라우저 호스트가 프로토콜 클라이언트에 등록되지 않았습니다. \"다시 검사\"를 눌러 재등록하세요"
+    "browserHostHandlerMissing": "브라우저 호스트가 프로토콜 클라이언트에 등록되지 않았습니다. \"다시 검사\"를 눌러 재등록하세요",
+    "advisoryTitle": "런타임 알림(채팅 영향 없음)",
+    "credsDegraded": "사용 가능한 모델 자격 증명을 찾을 수 없습니다: ZCode 클라이언트를 최신 버전으로 업그레이드하고 다시 로그인하거나(또는 API 키형 모델 추가) \"재검사\"를 클릭하세요",
+    "dismiss": "닫기(기능에 영향 없음, IDE 재시작 후에도 비정상이면 다시 표시됨)"
   },
   "envErrors": {
     "nodeNotFound": "PATH, 일반 설치 위치, 로그인 셸 검색 완료. 설정에서 경로를 지정하세요",
@@ -86,7 +87,7 @@
     "nodeExecFail": "실행 실패({{arg}})",
     "cliFileNotFound": "zcode.cjs가 존재하지 않습니다: {{arg}}",
     "cliNotFound": "표준 설치 위치에서 zcode.cjs를 찾을 수 없습니다. 먼저 ZCode 클라이언트를 설치하세요",
-    "credsMissing": "설정 파일이 존재하지 않습니다: {{arg}}. 먼저 ZCode 클라이언트로 로그인하세요",
-    "credsInvalid": "설정 파일이 유효하지 않습니다: {{arg}}. ZCode 클라이언트로 다시 로그인하세요"
+    "credsMissing": "구성 파일이 없습니다: {{arg}}(ZCode 클라이언트를 최신 버전으로 업그레이드하고 다시 로그인하거나 API 키형 모델을 추가한 후 재검사하세요)",
+    "credsInvalid": "구성 파일에 사용 가능한 자격 증명이 없습니다: {{arg}}(계정 로그인 자격 증명은 암호화 저장됩니다. ZCode 클라이언트를 최신 버전으로 업그레이드하고 다시 로그인하거나 API 키형 모델을 추가한 후 재검사하세요)"
   }
 }
