@@ -53,6 +53,11 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.awt.BorderLayout
+import java.awt.datatransfer.DataFlavor
+import java.awt.dnd.DropTarget
+import java.awt.dnd.DropTargetAdapter
+import java.awt.dnd.DropTargetDropEvent
+import java.io.File
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -124,6 +129,8 @@ class ZCodeToolWindowPanel(
     private var disposed = false
     // 主题监听连接（dispose 时断开）
     private var themeBusConn: com.intellij.util.messages.MessageBusConnection? = null
+    // OS 文件拖入拦截（AWT DropTarget 挂 JBCefBrowser.component，dispose 时显式 removeComponent）
+    private var fileDropTarget: DropTarget? = null
 
     // ============ 会话内嵌浏览器（AI browser-use 同屏观察用）============
     // 浏览器作为聊天 webview 的右侧分栏，AI 导航时无需切标签页——对齐 ZCode 桌面端
@@ -336,6 +343,8 @@ class ZCodeToolWindowPanel(
         lazyPlaceholder?.let { remove(it) }
         lazyPlaceholder = null
         add(jbCefBrowser.component, BorderLayout.CENTER)
+        // OS 文件拖入拦截：必须在 component 加入面板后才挂（否则 Swing DnD 无目标组件）
+        registerFileDropTarget()
         log.info("JCEF panel initialized")
     }
 
@@ -399,6 +408,68 @@ class ZCodeToolWindowPanel(
                 pushTheme()
             }
         )
+    }
+
+    /**
+     * 注册 OS 文件拖入拦截（AWT DropTarget 路径）
+     *
+     * 路径来源 AWT [DataFlavor.javaFileListFlavor] → `List<File>` → 100% 真绝对路径
+     * （不依赖 CefDragHandler.getFileNames 的 native 行为；OS 拖动时 transferable 已含完整路径，
+     * 与 JBCefBrowser 是否 OSR / remote 无关——windowed 模式稳定）。
+     *
+     * 触发后复用现有 `filesToInput` 推送链路（与 [handlePickFiles] / [com.zcode.ideaplugin.action.SendFileToInputAction] 同 op），
+     * 前端 InputBox 监听器自动接住加 chip。
+     *
+     * 挂载时机：`JBCefBrowser.component` 已加入面板之后（`initJcef()` 末），否则 Swing DnD 无目标组件。
+     * 多 tab：每个 panel 独立 JBCefBrowser 各挂各的——本 panel 只处理自己 webview 的拖入，
+     * 跨 tab 拖入由用户在目标 tab 内再次拖（与 SendFileToInputAction 走 activePanel 全局路由不同）。
+     */
+    private fun registerFileDropTarget() {
+        val comp = jbCefBrowser.component
+        fileDropTarget = DropTarget(comp, object : DropTargetAdapter() {
+            override fun drop(dtde: DropTargetDropEvent) {
+                try {
+                    // 用拖动源声明的动作（COPY / MOVE / LINK）而非硬编码——尊重 OS 端意图
+                    dtde.acceptDrop(dtde.dropAction)
+                    val t = dtde.transferable
+                    if (!t.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                        dtde.dropComplete(false)
+                        return
+                    }
+                    // AWT DataFlavor.javaFileListFlavor 在 JDK 11+ 标 @Deprecated 警告但仍可用，
+                    // 返回类型是 Any!，需要强转 + 空兜底
+                    val files: List<File> = runCatching {
+                        @Suppress("UNCHECKED_CAST")
+                        t.getTransferData(DataFlavor.javaFileListFlavor) as List<File>
+                    }.getOrElse { emptyList() }
+                    if (files.isEmpty()) {
+                        // 空列表 = 接受但无内容，告诉 OS 成功（避免 macOS Finder 残影）
+                        dtde.dropComplete(true)
+                        return
+                    }
+                    // 与 FileRefs.toRef 同款格式（不走 FileRefs 因为这里是 java.io.File 不是 VirtualFile，
+                    // 语义上等价但来源不同——AWT 没有 presentableUrl 概念）
+                    val refs = files.map<File, String> { f ->
+                        val p = f.absolutePath
+                        val withSlash = if (f.isDirectory && !p.endsWith("/")) "$p/" else p
+                        "@$withSlash"
+                    }
+                    log.info("[fileDrop] intercepted ${refs.size} file(s): ${refs.take(3)}")
+                    pushToWebview(buildJsonObject {
+                        put("op", "filesToInput")
+                        put("refs", JsonArray(refs.map { JsonPrimitive(it) }))
+                        // 标记来源让前端按心智分流：拖拽走内联 chip（与"粘贴完整路径"一致），
+                        // IDE 右键/附件按钮不带 source 字段走原逻辑（空输入框入顶部 chip 栏）
+                        put("source", "drag")
+                    })
+                    dtde.dropComplete(true)
+                } catch (e: Exception) {
+                    log.warn("[fileDrop] drop failed: ${e.message}")
+                    try { dtde.dropComplete(false) } catch (_: Exception) {}
+                }
+            }
+        })
+        log.info("[fileDrop] DropTarget registered")
     }
 
     /** 推送当前 IDE 主题给前端（通过 executeJavaScript 调 onIdeThemeChanged）*/
@@ -1398,6 +1469,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.warn("Failed to disconnect theme listener: ${e.message}")
         }
         try {
+            // DropTarget 解绑：AWT 公开 API 没有 removeComponent，
+            // 标准做法是置 null 释放引用，让 AWT 在 component dispose 时通过 removeNotify 自动清理 listener 闭包
+            // （JBR / JCEF 释放 jbCefBrowser 走 Disposer.dispose 会触发 component.removeNotify）
+            fileDropTarget = null
+        } catch (e: Exception) {
+            log.warn("Failed to release file drop target: ${e.message}")
+        }
+        try {
             if (::jsQuery.isInitialized) Disposer.dispose(jsQuery)
         } catch (e: Exception) {
             log.warn("Failed to release jsQuery: ${e.message}")
@@ -2198,10 +2277,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             return buildJsonObject { put("op", "filesPicked"); put("count", 0) }
         }
         // 目录尾加 /（与 SendFileToInputAction 一致，前端 FileRef 靠它判定目录图标）
-        val refs = picked.map { f ->
-            val p = f.presentableUrl ?: f.path
-            if (f.isDirectory && !p.endsWith("/")) "$p/" else p
-        }.map { "@$it" }
+        val refs = FileRefs.toRefs(picked, presentable = true)
         log.info("${refs.size} attachment(s) selected: $refs")
         // 复用 filesToInput 推送链路（InputBox 已监听，自动加入 fileRefs chips）
         pushToWebview(buildJsonObject {

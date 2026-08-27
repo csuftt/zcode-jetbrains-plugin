@@ -748,6 +748,17 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         // refs 形如 "@C:\abs\path" / "@C:\abs\path#L10-20"，存入时去掉 @ 前缀
         const clean = msg.refs.map((r) => (r.startsWith('@') ? r.slice(1) : r))
         const el = editorRef.current
+        // OS 拖拽（source='drag'）：走内联 chip——和"粘贴完整路径"同款视觉与
+        // 序列化逻辑，引用与正文的上下文顺序保留在文本流中。空输入框时 chip
+        // 插在首位，insertChipAtCursor 自动补空格并把光标移到 chip 后可继续打字。
+        // 其他来源（IDE 右键 / 附件按钮）保持原状：输入框已有内容时插内联；
+        // 空输入框时挂顶部 chip 栏。
+        const isDrag = msg.source === 'drag'
+        if (isDrag && el && clean.length > 0) {
+          for (const p of clean) insertChipAtCursor(el, p)
+          setHasText(!!el.textContent?.trim())
+          return
+        }
         // 输入框已有内容：引用与正文有上下文关系 → 内联插到当前光标后（chip 形态），
         // 不再挂到顶部 chip 栏
         if (clean.length > 0 && el && el.textContent?.trim()) {

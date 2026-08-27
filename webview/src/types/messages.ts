@@ -744,7 +744,7 @@ export type JavaResponse =
   | { op: 'ideTheme'; isDark: boolean }
   | { op: 'files'; files: string[] }
   | { op: 'commands'; commands: SlashCommand[] }
-  | { op: 'filesToInput'; refs: string[] }
+  | { op: 'filesToInput'; refs: string[]; source?: 'drag' | 'menu' | 'picker' }
   | { op: 'models'; models: ModelOption[] }
   | { op: 'modelManage'; configPath?: string; providers: ModelManageProvider[]; error?: string }
   /** 切换回包：changes 含全部实际变更（启用内置套餐时其余内置套餐联动禁用，互斥）*/

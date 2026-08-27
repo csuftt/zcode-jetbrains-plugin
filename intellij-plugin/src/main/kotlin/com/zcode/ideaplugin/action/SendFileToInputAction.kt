@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.wm.ToolWindowManager
 import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.ZCodeIcons
+import com.zcode.ideaplugin.ui.FileRefs
 import com.zcode.ideaplugin.zCodeService
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -38,11 +39,7 @@ class SendFileToInputAction : AnAction(
         val files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY) ?: return
         if (files.isEmpty()) return
 
-        // 文件夹路径末尾加 /（前端据此区分图标：folder vs file）
-        val refs = files.map { f ->
-            if (f.isDirectory) "@${f.path}/" else "@${f.path}"
-        }
-        pushRefs(project, refs)
+        pushRefs(project, FileRefs.toRefs(files.toList()))
     }
 }
 

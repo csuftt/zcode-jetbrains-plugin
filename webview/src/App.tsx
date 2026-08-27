@@ -90,6 +90,23 @@ export default function App() {
     return () => document.removeEventListener('keydown', handler, true)
   }, [currentView])
 
+  // 全局拦 OS 文件拖入：避免 Chromium 默认行为把文件当 navigation 加载导致 webview 跳走
+  // IDE 侧 AWT DropTarget（ZCodeToolWindowPanel.registerFileDropTarget）已消费 OS 事件，
+  // 此处只补 webview 端"拖到非 InputBox 区域"的兜底
+  useEffect(() => {
+    const block = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    document.addEventListener('dragover', block)
+    document.addEventListener('drop', block)
+    return () => {
+      document.removeEventListener('dragover', block)
+      document.removeEventListener('drop', block)
+    }
+  }, [])
+
   // 轻量 toast（暂未支持提示）
   const [toast, setToast] = useState<string | null>(null)
   useEffect(() => {
