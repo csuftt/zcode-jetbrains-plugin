@@ -124,6 +124,48 @@ class ZCodeToolWindowPanel(
     @Volatile
     private var globalListenerRegistered = false
 
+    /**
+     * 会话级请求超时的忙窗口自愈重试（缺陷AB）：resume 恢复带中断回合的会话后
+     * app-server 有 ~1-2 分钟窗口期，subscribe/setModel/readSettings 集中超时且
+     * 窗口后自愈；失败后延迟重试跨过窗口，避免用户"一看报错就重启"永远撞在窗口内。
+     */
+    private val busyRetry = BusyRetryScheduler(
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "zcode-busy-retry").apply { isDaemon = true }
+        }
+    )
+
+    /** 协议请求超时（忙窗口内的典型失败形态；-32004 等永久错误不重试）*/
+    private fun isTimeoutEx(e: Exception): Boolean =
+        e is com.zcode.ideaplugin.protocol.ZCodeProtocolException &&
+            e.message?.startsWith("请求超时") == true
+
+    /**
+     * resume 同会话去重（缺陷AB 优先级编排①）：subscribe 与 messages 两条链路
+     * 并发打开同一会话时只排一次 resume 进服务端队列（坏会话每次 8.7s，直接省一半
+     * 队列头部）。失败不缓存、也不阻断调用方（旧语义：失败可能 already active，照常继续）
+     */
+    private val resumeDeduper = ResumeDeduper()
+
+    private fun resumeSessionDeduped(
+        client: com.zcode.ideaplugin.protocol.ZCodeProtocolClient,
+        sessionId: String,
+        workspacePath: String,
+    ) {
+        val ok = resumeDeduper.resumeOnce(sessionId) {
+            try {
+                val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
+                client.resume(sessionId, ws)
+                log.info("resume succeeded: $sessionId (workspace=$workspacePath)")
+                true
+            } catch (e: Exception) {
+                log.info("resume failed (may already be active): ${e.message}")
+                false
+            }
+        }
+        if (!ok) log.info("resume deduped-skip or failed, continuing: $sessionId")
+    }
+
     // ============ 释放状态 ============
     @Volatile
     private var disposed = false
@@ -1448,6 +1490,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (_: Exception) {}
         globalStreamListener = null
         globalStreamListenerClient = null
+        // 忙窗口重试随面板释放终止（daemon 线程兜底，仍显式停）
+        try {
+            busyRetry.shutdown()
+        } catch (_: Exception) {}
         try {
             // 内嵌浏览器是全局共享单例：只摘除挂载（还原 TW 宽度），实例交由 Service 释放
             if (embeddedSplit != null) {
@@ -2180,13 +2226,36 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.info("Model switched: $sessionId → $providerId/$modelId")
         } catch (e: Exception) {
             log.warn("Model switch failed: ${e.message}")
+            // 忙窗口超时（缺陷AB）：后台延迟重试，成功后补推 modelSet（前端据此落定切换/清在途标记）
+            if (isTimeoutEx(e)) scheduleSetModelBusyRetry(sessionId, modelId, providerId)
             return errorResponse("Model switch failed: ${e.message}")
         }
-        return buildJsonObject {
+        return modelSetResponse(sessionId, modelId, providerId)
+    }
+
+    /** setModel 应答/重试补推共用的响应构造 */
+    private fun modelSetResponse(sessionId: String, modelId: String, providerId: String): JsonObject =
+        buildJsonObject {
             put("op", "modelSet")
             put("sessionId", sessionId)
             put("modelId", modelId)
             put("providerId", providerId)
+        }
+
+    /** setModel 超时后的忙窗口重试：成功即补推 modelSet */
+    private fun scheduleSetModelBusyRetry(sessionId: String, modelId: String, providerId: String) {
+        busyRetry.schedule("setModel:$sessionId") {
+            try {
+                val client = project.zCodeService().getClient()
+                client.setModel(sessionId, modelId, providerId, buildRuntimeModel(providerId, modelId))
+                sendToJs(modelSetResponse(sessionId, modelId, providerId))
+                sendToJs(buildJsonObject { put("op", "busyRetryRecovered") })
+                log.info("busy-retry: setModel for $sessionId recovered → $providerId/$modelId")
+                true
+            } catch (e: Exception) {
+                log.info("busy-retry: setModel for $sessionId still failing: ${e.message}")
+                false
+            }
         }
     }
 
@@ -2201,16 +2270,37 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return errorResponse("缺少 sessionId")
         val client = project.zCodeService().getClient()
         return try {
-            val settings = client.readSettings(sessionId)
-            buildJsonObject {
-                put("op", "settings")
-                put("sessionId", sessionId)
-                put("mode", settings["mode"]?.jsonObject ?: JsonObject(emptyMap()))
-                put("thoughtLevel", settings["thoughtLevel"]?.jsonObject ?: JsonObject(emptyMap()))
-            }
+            settingsResponse(sessionId, client.readSettings(sessionId))
         } catch (e: Exception) {
             log.warn("Failed to read session settings: ${e.message}")
+            // 忙窗口超时（缺陷AB）：应答仍即时回错误，后台延迟重试，成功后补推 settings
+            if (isTimeoutEx(e)) scheduleSettingsBusyRetry(sessionId)
             errorResponse("读取设置失败: ${e.message}")
+        }
+    }
+
+    /** getSettings 应答/重试补推共用的响应构造（webview case 'settings' 不区分应答与推送）*/
+    private fun settingsResponse(sessionId: String, settings: JsonObject): JsonObject = buildJsonObject {
+        put("op", "settings")
+        put("sessionId", sessionId)
+        put("mode", settings["mode"]?.jsonObject ?: JsonObject(emptyMap()))
+        put("thoughtLevel", settings["thoughtLevel"]?.jsonObject ?: JsonObject(emptyMap()))
+    }
+
+    /** settings 读取超时后的忙窗口重试：成功即补推 settings（思考深度随权威级别集恢复）*/
+    private fun scheduleSettingsBusyRetry(sessionId: String) {
+        busyRetry.schedule("settings:$sessionId") {
+            try {
+                val client = project.zCodeService().getClient()
+                val resp = settingsResponse(sessionId, client.readSettings(sessionId))
+                sendToJs(resp)
+                sendToJs(buildJsonObject { put("op", "busyRetryRecovered") })
+                log.info("busy-retry: settings for $sessionId recovered")
+                true
+            } catch (e: Exception) {
+                log.info("busy-retry: settings for $sessionId still failing: ${e.message}")
+                false
+            }
         }
     }
 
@@ -2321,7 +2411,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         } catch (e: Exception) {
             log.warn("Failed to fetch context usage: ${e.message}")
-            errorResponse("获取用量失败: ${e.message}")
+            // P2 辅助数据失败静默降级（缺陷AB 优先级编排②）：不走 errorResponse——
+            // 那会在前端顶栏弹错并复位 streaming（忙窗口期间用量轮询失败曾把故障感知
+            // 放大三倍、还误伤流式显示）；前端 case 'usageError' 仅记日志。用量有
+            // 流式轮询/回合结束刷新等自愈路径，无需用户感知
+            buildJsonObject {
+                put("op", "usageError")
+                put("sessionId", sessionId)
+                put("message", e.message ?: "查询失败")
+            }
         }
     }
 
@@ -2494,13 +2592,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun resumeAndReadMessages(sessionId: String, workspacePath: String): JsonArray {
         val client = project.zCodeService().getClient()
-        try {
-            val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
-            client.resume(sessionId, ws)
-            log.info("resume succeeded: $sessionId (workspace=$workspacePath)")
-        } catch (e: Exception) {
-            log.info("resume failed (may already be active): ${e.message}")
-        }
+        // 同会话短窗去重（subscribe 链路可能刚 resume 过，见 resumeSessionDeduped）
+        resumeSessionDeduped(client, sessionId, workspacePath)
         val messages = client.messages(sessionId)
         // 用户图片 part 读回适配：type:"file" + zcode-artifact:// uri → 内置 server
         // 的 /zcode-image/ URL（<img> 可加载）。fail-soft，见 ImageArtifactMapper
@@ -2662,14 +2755,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
-        // subscribe 要求会话 active，先 resume
-        try {
-            val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
-            client.resume(sessionId, ws)
-            log.info("resume succeeded: $sessionId")
-        } catch (e: Exception) {
-            log.info("resume failed (may already be active): ${e.message}")
-        }
+        // subscribe 要求会话 active，先 resume（同会话短窗去重：messages 链路并发 resume 只排一次队）
+        resumeSessionDeduped(client, sessionId, workspacePath)
 
         // subscribe（全局监听器已在 app-server 层面接收所有事件）
         try {
@@ -2678,12 +2765,36 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.info("subscribe session $sessionId succeeded (events via global listener)")
         } catch (e: Exception) {
             log.error("subscribe session $sessionId failed", e)
+            // 忙窗口超时（缺陷AB）：应答仍即时回错误，后台延迟重试——事件流经全局监听器
+            // 转发，重试成功后无需额外通知（事件自然开始流动）
+            if (isTimeoutEx(e)) scheduleSubscribeBusyRetry(sessionId)
             return errorResponse("订阅失败: ${e.message}")
         }
 
         return buildJsonObject {
             put("op", "subscribed")
             put("sessionId", sessionId)
+        }
+    }
+
+    /**
+     * subscribe 超时后的忙窗口重试（缺陷AB）：重试成功只补记 subscribedSessions 并推
+     * busyRetryRecovered——事件流经全局监听器转发，成功后事件自然开始流动，无需补推。
+     */
+    private fun scheduleSubscribeBusyRetry(sessionId: String) {
+        busyRetry.schedule("subscribe:$sessionId") {
+            try {
+                if (sessionId in subscribedSessions) return@schedule true
+                val client = project.zCodeService().getClient()
+                client.subscribe(sessionId, onEvent = null)
+                subscribedSessions.add(sessionId)
+                sendToJs(buildJsonObject { put("op", "busyRetryRecovered") })
+                log.info("busy-retry: subscribe $sessionId recovered (events via global listener)")
+                true
+            } catch (e: Exception) {
+                log.info("busy-retry: subscribe $sessionId still failing: ${e.message}")
+                false
+            }
         }
     }
 
@@ -2717,14 +2828,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
-        // subscribe 要求会话 active，先 resume；运行中的子会话可能已 active，失败静默
-        try {
-            val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
-            client.resume(sessionId, ws)
-            log.info("subscribeChild: child session resumed $sessionId")
-        } catch (e: Exception) {
-            log.info("subscribeChild: resume failed (may already be active): ${e.message}")
-        }
+        // subscribe 要求会话 active，先 resume（同会话短窗去重）；运行中的子会话可能已 active，失败静默
+        resumeSessionDeduped(client, sessionId, workspacePath)
 
         return try {
             client.subscribe(sessionId, onEvent = null)

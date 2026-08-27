@@ -750,6 +750,10 @@ export type JavaResponse =
   /** 切换回包：changes 含全部实际变更（启用内置套餐时其余内置套餐联动禁用，互斥）*/
   | { op: 'modelToggled'; changes: { providerId: string; enabled: boolean }[] }
   | { op: 'modelSet'; sessionId: string; modelId: string; providerId: string }
+  /** Java 忙窗口重试成功通知（缺陷AB）：顶栏忙窗口提示据此清除 */
+  | { op: 'busyRetryRecovered' }
+  /** P2 用量查询失败静默降级（缺陷AB 编排②）：不弹错、不复位 streaming */
+  | { op: 'usageError'; sessionId: string; message: string }
   | { op: 'settings'; sessionId: string; mode: { current?: string }; thoughtLevel: ThoughtLevelInfo }
   | { op: 'thoughtLevelSet'; sessionId: string; thoughtLevel: string }
   | { op: 'modeSet'; sessionId: string; mode: string }

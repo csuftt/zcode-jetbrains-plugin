@@ -738,10 +738,9 @@ export const useStore = create<StoreState>((set, get) => ({
     // 切换会话时订阅事件流（带 workspacePath，Java 端 subscribe 前要先 resume 激活会话）
     sendToJava({ op: 'subscribe', sessionId: session.sessionId, workspacePath })
     sendToJava({ op: 'messages', sessionId: session.sessionId, workspacePath })
-    // 拉取该会话的子代理列表（历史会话也能在底部栏查看已完成子代理）
-    get().loadSubagents()
-    // 切会话后拉取上下文用量（圆环显示）
-    get().loadUsage()
+    // P2 让路（缺陷AB 优先级编排②）：用量/子代理不再与 P0 并发挤服务端会话队列，
+    // 改由 messages 首拉落地后补发（见 case 'messages'）——忙窗口期间 P0 未成功
+    // 则不补发，顶栏只剩一条"恢复中"提示
     // 拉取运行时设置（mode + 思考级别，级别列表随模型变化）
     get().loadSettings()
     // 会话切换后，把 persist 记忆的模型真正下发 setModel（见 models 响应里的 applyModelIfReady）
@@ -1886,7 +1885,15 @@ export function handleResponse(
         // messageId 与重拉后服务端 user 消息撞车时，AI delta 会叠进用户气泡（叠字）。
         // 丢弃——本轮 turn 结束还会再拉一次权威数据落地。
         if (get().streaming) break
+        // 打开会话的首拉标志（selectSession 置位、下方快照落地复位）：P2 补发依据
+        const firstFetch = get().loadingMessages
         applyMessagesSnapshot(msg, set, get)
+        // P2 让路（缺陷AB 编排②）：首拉落地（P0 完成）后补发用量/子代理——不与
+        // subscribe/messages 并发挤服务端会话队列；历史会话底部栏数据同样补齐
+        if (firstFetch) {
+          get().loadSubagents()
+          get().loadUsage()
+        }
         // 压缩回合结束后延迟的队列 flush 在此触发：摘要卡已随快照落地，排队消息
         // 再发出的新 turn 不会丢它（scheduleDeferredCompactFlush 的正路径）
         tryRunDeferredCompactFlush(msg.sessionId)
@@ -2014,12 +2021,19 @@ export function handleResponse(
       // 走到前端说明自愈失败——提示可操作文案；且跳过 flushQueue（服务端 prompt 状态
       // 未清前队列下一条大概率再撞，会连环报错，2026-08-20 实测）
       const promptRunning = /-32010|prompt is already running/i.test(msg.message)
+      // 会话级请求超时（缺陷AB 忙窗口）：resume 恢复带中断回合的会话时，app-server 对
+      // 该会话的请求全部排队约 1~2 分钟后自愈；Java 侧已对 subscribe/setModel/settings
+      // 延迟自动重试。追加指引防用户"一看报错就重启"（重启重新 resume 重新进窗口，
+      // 永远观察不到自愈——2026-08-27 用户 b5756ab4 四轮重启全超时、放置 100s 自愈实测）
+      const resumeBusy = /请求超时: session\//.test(msg.message)
       set({
         lastError: sessionInactive
           ? `${msg.message}；${i18n.t('app.sessionInactiveHint')}`
           : promptRunning
             ? `${msg.message}；${i18n.t('app.promptRunningHint')}`
-            : msg.message,
+            : resumeBusy
+              ? `${msg.message}；${i18n.t('app.resumeBusyHint')}`
+              : msg.message,
         // 环境前置检查失败（EnvCheckException/envSave 验证失败）：附带 envStatus 刷新提醒条
         ...(msg.envStatus ? { envStatus: msg.envStatus } : {}),
         envSaving: false,
@@ -2046,6 +2060,21 @@ export function handleResponse(
       // 错误清 streaming 后继续发队列下一条（排队意图明确；持续失败时用户可删队列项）；
       // -32010 例外：悬挂回合未清，队列再发必再撞
       if (!promptRunning) get().flushQueue()
+      break
+    }
+
+    case 'usageError': {
+      // P2 用量查询失败静默（缺陷AB 编排②）：不写 lastError、不复位 streaming——
+      // 用量有流式轮询/回合结束刷新自愈；Java 端已不再走 errorResponse
+      console.warn('[store] usage query failed:', msg.message)
+      break
+    }
+
+    case 'busyRetryRecovered': {
+      // Java 忙窗口重试成功（缺陷AB）：顶栏还挂着忙窗口提示时清除（只清本类提示，
+      // 其他错误不受影响；提示串里含 i18n key 的完整文案，按其子串识别）
+      const hint = i18n.t('app.resumeBusyHint')
+      if (get().lastError?.includes(hint)) set({ lastError: null })
       break
     }
 

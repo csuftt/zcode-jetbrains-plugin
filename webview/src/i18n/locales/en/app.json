@@ -8,6 +8,7 @@
   "sessionInactiveHint": "The session is inactive on the server (common after a CLI upgrade/restart); the plugin resumes it automatically and retries. If it still fails, reopen the session from the history list and send again",
   "streamLost": "No stream events for over a minute and no server-side progress; this turn was closed as interrupted. If the task is unfinished, send again (sessions resumed after a CLI upgrade/restart may not emit events)",
   "promptRunningHint": "The previous turn is still running and auto-stop failed. Try again later, or click Stop to end the current generation before sending",
+  "resumeBusyHint": "The session may still be resuming (the server needs ~1-2 minutes to digest a recovered interrupted turn); the plugin retries subscribing and settings automatically — do not restart the IDE. Thought-level and other settings return once recovered",
   "dialogCountdown": "{{time}} remaining",
   "dialogCountdownTitle": "If unanswered until timeout, the request is auto-declined and the dialog closes",
   "changelog": {
