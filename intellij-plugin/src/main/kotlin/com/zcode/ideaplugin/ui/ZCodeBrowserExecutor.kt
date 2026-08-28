@@ -157,6 +157,25 @@ class ZCodeBrowserExecutor(private val project: Project) {
             }
             return out
         }
+
+        /**
+         * 页内调试采集脚本正文（面板 onLoadStart 信箱注入与 executor evaluate 兜底
+         * 共用）。加载失败降级空串：注入跳过，evaluate 等命令不受影响。
+         */
+        @Volatile
+        private var cachedScript: String? = null
+
+        internal fun captureScript(): String {
+            cachedScript?.let { return it }
+            val s = try {
+                javaClass.getResourceAsStream("/debug-capture.js")?.readBytes()?.toString(Charsets.UTF_8)
+            } catch (_: Exception) {
+                null
+            } ?: ""
+            cachedScript = s
+            if (s.isBlank()) Logger.getInstance("ZCodePlugin").warn("[browser-use] debug-capture.js load failed")
+            return s
+        }
     }
 
     /** CDP 端点 base；不可达返回 null。优先 DevToolsActivePort 随机端口，兜底 9222 双栈探测 */
@@ -797,21 +816,13 @@ class ZCodeBrowserExecutor(private val project: Project) {
     // ============ 页面调试采集（console / 接口请求 / 未捕获异常）============
 
     /** 页内采集脚本（resources/debug-capture.js）：console/fetch/XHR 补丁 + __zcodeDebug 环形缓冲 */
-    private val CAPTURE_SCRIPT: String by lazy {
-        try {
-            javaClass.getResourceAsStream("/debug-capture.js")?.readBytes()?.toString(Charsets.UTF_8)
-        } catch (e: Exception) {
-            log.warn("[browser-use] debug-capture.js load failed: ${e.message}")
-            null
-        } ?: ""
-    }
+    private val CAPTURE_SCRIPT: String get() = captureScript()
 
     /**
-     * 确保目标 tab 的页面已挂调试采集（幂等）：探测 window.__zcodeDebug 缺失时注册
-     * Page.addScriptToEvaluateOnNewDocument（未来文档 document-start 自动采集）+
-     * 立即注入当前文档。采集脚本自身幂等且永不移除——绕开每命令建连模式下 remove
-     * 必报 Script not found 的坑（viewport 信箱同源问题，见面板 onLoadEnd 注释）。
-     * fail-soft：注入失败只影响调试采集，不影响 evaluate 本身。
+     * 确保目标 tab 的页面已挂调试采集（幂等）：探测 window.__zcodeDebug 缺失时立即注入
+     * 当前文档。跨文档采集由面板 onLoadStart 的 JCEF executeJavaScript 信箱注入负责
+     * （CDP addScriptToEvaluateOnNewDocument 注册随连接销毁——per-command 建连模式下
+     * 注册即失效，实测导航后新文档无采集）。fail-soft：注入失败不影响 evaluate 本身。
      */
     private fun ensureDebugCapture(tabId: String?) {
         val script = CAPTURE_SCRIPT
@@ -827,9 +838,8 @@ class ZCodeBrowserExecutor(private val project: Project) {
             )
             val present = probe["result"]?.jsonObject?.get("value")?.jsonPrimitive?.booleanOrNull ?: false
             if (!present) {
-                cdpCommandOn(wsUrl, "Page.addScriptToEvaluateOnNewDocument", buildJsonObject { put("source", script) })
                 cdpCommandOn(wsUrl, "Runtime.evaluate", buildJsonObject { put("expression", script) })
-                log.info("[browser-use] debug capture injected (tabId=$tabId)")
+                log.info("[browser-use] debug capture injected via evaluate fallback (tabId=$tabId)")
             }
         } catch (e: Exception) {
             log.info("[browser-use] debug capture inject skipped: ${e.javaClass.simpleName}: ${e.message}")

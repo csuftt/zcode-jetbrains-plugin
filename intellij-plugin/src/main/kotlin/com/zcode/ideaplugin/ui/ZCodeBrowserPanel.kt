@@ -93,10 +93,9 @@ class ZCodeBrowserPanel(
         @Volatile var lifecycle: String = "active",
     ) {
         /**
-         * 浏览器层 console 消息（onConsoleMessage 回调写入，JCEF 线程）。
-         * 只存非 console API 类消息（网络资源加载失败等）——console API 页内
-         * __zcodeDebug 补丁已全量结构化记录，重记只会重复。executor 在 AI 读取
-         * __zcodeDebug 时取走（drain）合入页面缓冲。
+         * 浏览器层 console 消息（onConsoleMessage 回调写入，JCEF 线程）。页内
+         * __zcodeDebug 补丁之外的兜底通道：注入竞态漏掉的启动输出、未捕获异常等。
+         * executor 在 AI 读取 __zcodeDebug 时取走（drain）合入页面缓冲。
          */
         val browserConsoleLines: MutableList<String> =
             java.util.Collections.synchronizedList(ArrayList<String>())
@@ -941,7 +940,20 @@ class ZCodeBrowserPanel(
                 }
             }
 
-            override fun onLoadStart(browser: CefBrowser?, frame: CefFrame?, transitionType: CefRequest.TransitionType?) {}
+            override fun onLoadStart(browser: CefBrowser?, frame: CefFrame?, transitionType: CefRequest.TransitionType?) {
+                // 调试采集信箱注入：文档创建即挂 __zcodeDebug（console/fetch/XHR 补丁），
+                // 赶在页面启动脚本输出之前。CDP addScriptToEvaluateOnNewDocument 注册随连接
+                // 销毁（per-command 建连模式下实测无效），故走 JCEF 原生 executeJavaScript；
+                // 脚本幂等，evaluate 兜底注入与本钩子重复执行无害
+                if (frame?.isMain == true) {
+                    val script = ZCodeBrowserExecutor.captureScript()
+                    if (script.isNotBlank()) {
+                        try {
+                            browser?.executeJavaScript(script, frame.url, 0)
+                        } catch (_: Exception) { /* 采集失败不影响页面 */ }
+                    }
+                }
+            }
             override fun onLoadEnd(browser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
                 // 自由尺寸激活时主框架导航完成即重注入信箱（文档重建丢样式；addScript 方案因
                 // CDP identifier per-connection 不可用——每命令建连 remove 必报 Script not found）
@@ -974,17 +986,18 @@ class ZCodeBrowserPanel(
             }
 
             /**
-             * 浏览器层 console 消息兜底采集：console API 已被页内 __zcodeDebug 补丁
-             * 全量记录，这里只留非 console API 类（source=network 的 "Failed to load
-             * resource: 404" 资源加载失败、CSP/security 等）——页内 JS 看不到这些。
-             * 容量 200 行，取走式消费（drainBrowserConsoleLines）。
+             * 浏览器层 console 消息兜底采集（JCEF 通道，页内 __zcodeDebug 之外的第二
+             * 视角）：覆盖 onLoadStart 注入竞态漏掉的启动输出、未捕获异常（带脚本 URL）
+             * 等；network 类 "Failed to load resource" 实测不回调（Chromium 仅在
+             * inspector attach 时生成该类消息）。console API 消息的 source 是脚本 URL
+             * （evaluate 中为空），无法与异常类区分，统一全收——dump() 默认不含本数组，
+             * 重复噪音可控。容量 200 行，取走式消费（drainBrowserConsoleLines）。
              */
             override fun onConsoleMessage(
                 browser: CefBrowser?, level: org.cef.CefSettings.LogSeverity?,
                 message: String?, source: String?, line: Int,
             ): Boolean {
                 if (message.isNullOrBlank()) return false
-                if (source == "console-api") return false // 页内补丁已记录，避免重复
                 synchronized(tab.browserConsoleLines) {
                     tab.browserConsoleLines.add(formatBrowserConsoleLine(level, message, source, line))
                     while (tab.browserConsoleLines.size > 200) tab.browserConsoleLines.removeAt(0)
