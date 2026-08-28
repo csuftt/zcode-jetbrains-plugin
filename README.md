@@ -137,6 +137,8 @@ graph LR
     CLI -.->|"browser-use 反向请求"| Plugin
 ```
 
+对 app-server 协议面（RPC 方法清单、V4 会话协议、反向请求、事件流、错误码）的整理见 [docs/zcode-appserver-protocol.md](docs/zcode-appserver-protocol.md)。
+
 
 ## 致谢
 
