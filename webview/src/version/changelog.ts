@@ -23,6 +23,74 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    "version": "0.2.6",
+    "date": "2026-08-28",
+    "zh": {
+      "sections": [
+        {
+          "title": "新增",
+          "items": [
+            "**应用用量统计**：设置 → 用量新增「应用用量」页签（默认打开）——基于本地会话数据聚合、不依赖 API Key，覆盖第三方模型（DeepSeek 等）；支持近 7 天 / 30 天 / 全部区间，含总 Token、请求次数、会话数等六项统计、每日 Token 曲线（Top 模型）、模型明细（第三方带徽章）与工具调用表。",
+            "**拖拽文件到输入框**：从系统拖文件进输入框自动转为文件 chip（与粘贴路径同款）。",
+            "**内置渠道命中方式徽章**：设置 → 模型的内置渠道卡片显示「客户端选中」（客户端当前选择生效）或「兜底生效」（所选渠道凭证不可用时自动回退），一眼看清生效渠道的来源。",
+            "**套餐用量查询凭证提示**：GLM 套餐用量页显示实际使用的查询凭证渠道，非订阅渠道时以警示色标注（数据口径可能不符）。"
+          ]
+        },
+        {
+          "title": "变更",
+          "items": [
+            "**内置渠道以 ZCode 客户端配置为准（只读）**：插件不再支持启停/切换内置渠道，同一时间只展示当前生效的一个内置渠道（其余内置渠道不再重复出现）；在客户端切换后回来刷新即可。",
+            "**对话凭证跟随客户端激活渠道**：插件注入的模型凭证跟随 ZCode 客户端当前选中渠道（API Key 模式 / 订阅套餐），避免\"按量 key 配套餐模型\"的计费错渠道。"
+          ]
+        },
+        {
+          "title": "修复",
+          "items": [
+            "**凭证缺失不再阻断启动（issue #4）**：config.json 中找不到可用凭证时插件直接报错拦死主流程；现在降级为环境提醒条提示补配（登录 ZCode 客户端或添加 API Key 型模型），其余功能不受影响。",
+            "**打开损坏会话时全部请求超时**：恢复坏会话触发 app-server 忙窗口后请求全部超时挂死；现在超时自动重试自愈，会话照常打开。",
+            "**切换渠道后思考深度消失**：渠道切换后模型名相同但渠道不同时，选中模型未重新兜底导致思考深度档位不渲染；现在自动迁移并重建。",
+            "**模型下拉空列表无法刷新**：无可用模型时下拉置灰点不开，只能去设置页刷新；现在可打开下拉并直接点「刷新模型列表」。",
+            "**输入历史写入失败（kvSave 单值过大）**：历史输入积累过多后发送消息报错；现在按预算自动从最旧裁剪。",
+            "**「重新检测」结果延迟**：环境检测可能吃到 30 秒缓存显示旧状态（如刚禁用渠道仍显示凭证正常）；现在每次点击都读取最新状态。",
+            "**套餐用量查询空凭证请求**：订阅 oauth 模式下查询会发出空 Authorization 头导致必然失败；现在跳过空 key 渠道改用有效回退凭证。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "**App usage stats**: A new \"App usage\" tab in Settings → Usage (opened by default) — aggregated from local session data with no API Key required, covering third-party models (DeepSeek etc.); supports 7-day / 30-day / all ranges, with six stat cards, a daily token chart (top models), a model table (with third-party badges) and a tool-call table.",
+            "**Drag files into the input box**: Files dragged from the OS into the input box automatically become file chips (same as pasted paths).",
+            "**Builtin channel resolution badge**: The builtin channel card in Settings → Models shows \"Client selected\" (the channel active in the ZCode client) or \"Fallback\" (auto-fallback when the selected channel has no valid credential), making the effective channel's origin clear at a glance.",
+            "**Plan usage credential hint**: The GLM plan usage page shows which provider's key was used for the query; non-subscription channels are highlighted with a warning color (data may not match)."
+          ]
+        },
+        {
+          "title": "Changed",
+          "items": [
+            "**Builtin channels now follow the ZCode client config (read-only)**: The plugin no longer toggles or switches builtin channels, and only the single active builtin channel is shown (no more duplicates); switch in the client, then refresh here.",
+            "**Conversation credentials follow the active client channel**: The injected model credential now follows the channel selected in the ZCode client (API Key mode / subscription plan), avoiding cross-channel billing mistakes."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "**Missing credentials no longer block startup (issue #4)**: The plugin used to fail hard when no usable credential was found in config.json; it now degrades to an environment notice prompting login to the ZCode client or adding an API Key provider, leaving other features intact.",
+            "**All requests timing out when opening a corrupted session**: Resuming a bad session triggered an app-server busy window where every request timed out; timeouts now retry automatically and the session opens normally.",
+            "**Thinking level lost after switching channels**: When the same model name existed on a different channel, the selected model wasn't re-resolved and the thinking level stopped rendering; it now migrates and rebuilds automatically.",
+            "**Model dropdown unusable when the list is empty**: With no available models the dropdown was greyed out and required the settings page to refresh; it now opens with an in-dropdown refresh action.",
+            "**Input history write failure (kvSave value too large)**: Sending messages failed after history accumulated beyond the storage limit; history is now pruned from the oldest within a budget.",
+            "**Stale \"re-check\" results**: Environment checks could serve a 30-second cache showing outdated state (e.g. credentials shown as fine right after disabling the provider); every explicit re-check now reads fresh state.",
+            "**Empty-credential plan usage requests**: In subscription oauth mode the usage query sent an empty Authorization header and always failed; blank-key channels are now skipped in favor of a valid fallback credential."
+          ]
+        }
+      ]
+    }
+  },
+  {
     "version": "0.2.5",
     "date": "2026-08-27",
     "zh": {
