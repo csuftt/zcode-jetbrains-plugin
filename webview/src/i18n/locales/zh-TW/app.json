@@ -8,6 +8,7 @@
   "sessionInactiveHint": "會話在伺服器端不活躍（CLI 升級或重啟後的新程序尚未啟用它），插件會自動恢復後重發；若仍失敗，請從歷史列表重新開啟該會話",
   "streamLost": "已超過 1 分鐘未收到任何串流事件且伺服器端無新進展，本輪按流中斷收尾；如任務未完成請重發（CLI 升級/重啟後恢復的會話可能不回發事件）",
   "promptRunningHint": "上一回合仍在執行且自動停止失敗，請稍後重試，或點擊停止按鈕結束當前生成後再傳送",
+  "resumeBusyHint": "會話可能正在恢復中（恢復中斷回合後伺服器約需 1~2 分鐘排隊消化），插件會自動重試訂閱與設定，請勿重啟 IDE；思考深度等設定將在恢復後自動回來",
   "dialogCountdown": "剩餘 {{time}}",
   "dialogCountdownTitle": "長時間未應答將逾時，自動視為拒絕並關閉彈窗",
   "changelog": {
@@ -70,12 +71,13 @@
     "nodeMissing": "Node.js 未找到：{{detail}}",
     "nodeTooLow": "Node.js 版本過低（{{version}}，需要 v{{min}}+）",
     "cliMissing": "ZCode CLI 未找到：{{detail}}",
-    "credentialsInvalid": "憑證未設定或無效：{{detail}}",
     "recheck": "重新檢測",
     "goSettings": "前往設定",
-    "browserHostTitle": "內嵌瀏覽器宿主異常（AI 瀏覽器工具不可用，不影響對話）",
     "browserHostCefDown": "瀏覽器除錯通道不可用：JCEF 已啟動但 CDP 連接埠不可達，請重新啟動 IDE 恢復（重新檢測會嘗試自動修復）",
-    "browserHostHandlerMissing": "瀏覽器宿主未註冊到協定用戶端，點「重新檢測」自動補註冊"
+    "browserHostHandlerMissing": "瀏覽器宿主未註冊到協定用戶端，點「重新檢測」自動補註冊",
+    "advisoryTitle": "執行環境提示（對話功能不受影響）",
+    "credsDegraded": "未找到可用的模型憑證：請將 ZCode 用戶端升級到最新版並重新登入（或在用戶端新增 API Key 型模型），然後點「重新檢測」",
+    "dismiss": "關閉提示（不影響功能，重啟 IDE 後若仍異常會再次提示）"
   },
   "envErrors": {
     "nodeNotFound": "已嘗試 PATH、常見安裝位置與登入 shell，請在設定中配置路徑",
@@ -86,7 +88,7 @@
     "nodeExecFail": "無法執行（{{arg}}）",
     "cliFileNotFound": "zcode.cjs 不存在：{{arg}}",
     "cliNotFound": "未在標準安裝位置找到 zcode.cjs，請確認已安裝 ZCode 用戶端",
-    "credsMissing": "設定檔不存在：{{arg}}，請先用 ZCode 用戶端登入一次",
-    "credsInvalid": "設定檔無效：{{arg}}，請用 ZCode 用戶端重新登入"
+    "credsMissing": "設定檔不存在：{{arg}}（請將 ZCode 用戶端升級到最新版並重新登入，或新增 API Key 型模型後重新檢測）",
+    "credsInvalid": "設定檔無可用憑證：{{arg}}（oauth 登入憑證為加密儲存；請將 ZCode 用戶端升級到最新版並重新登入，或新增 API Key 型模型後重新檢測）"
   }
 }

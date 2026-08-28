@@ -49,7 +49,7 @@ object McpToolsClient {
 
     private const val PROTOCOL_VERSION = "2025-06-18"
     private const val CLIENT_NAME = "zcode-idea-plugin"
-    private const val CLIENT_VERSION = "0.2.5"
+    private const val CLIENT_VERSION = "0.2.6"
     private const val DESC_MAX_LEN = 400
 
     /**

@@ -59,11 +59,12 @@ class ZCodeEnvCheckerTest {
     private fun okCred() = CredentialStatus(ok = true, model = "glm-4.7", error = null)
 
     @Test
-    fun `allOk 三件套齐备才为真`() {
+    fun `allOk 两件套齐备才为真`() {
         assertTrue(EnvStatus(okNode(), okCli(), okCred()).allOk)
         assertFalse(EnvStatus(okNode().copy(found = false), okCli(), okCred()).allOk)
         assertFalse(EnvStatus(okNode(), okCli().copy(found = false), okCred()).allOk)
-        assertFalse(EnvStatus(okNode(), okCli(), okCred().copy(ok = false)).allOk)
+        // 凭证降级（issue #4）：oauth 登录无明文 key 不再阻断启动（裸启走 app-server 自身凭证链）
+        assertTrue(EnvStatus(okNode(), okCli(), okCred().copy(ok = false)).allOk)
         // 版本过低 = node 不可用
         assertFalse(EnvStatus(okNode().copy(version = "v16.20.2", versionTooLow = true), okCli(), okCred()).allOk)
     }
@@ -127,8 +128,9 @@ class ZCodeEnvCheckerTest {
         val cliMissing = EnvStatus(okNode(), okCli().copy(found = false, error = "zcode.cjs 不存在"), okCred())
         assertTrue(ZCodeEnvChecker.firstProblem(cliMissing).contains("ZCode CLI"))
 
+        // 凭证降级后 firstProblem 不再有凭证分支：凭证失败不构成启动问题
         val credBad = EnvStatus(okNode(), okCli(), okCred().copy(ok = false, error = "配置文件不存在"))
-        assertTrue(ZCodeEnvChecker.firstProblem(credBad).contains("凭证"))
+        assertEquals("环境异常", ZCodeEnvChecker.firstProblem(credBad))
     }
 
     // ============ 存储注入 ============

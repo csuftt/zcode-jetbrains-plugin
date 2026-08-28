@@ -232,8 +232,9 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         client?.let { if (it.isAlive()) return it }
         return lock.withLock {
             client?.let { if (it.isAlive()) return it }
-            // 环境三件套（node/zcode.cjs/凭证）由 EnvChecker 解析：配置路径优先 → 自动探测；
-            // 失败抛 EnvCheckException（带 EnvStatus），Panel 层转成前端可识别的环境错误
+            // 环境检测（node/zcode.cjs/凭证）由 EnvChecker 解析：配置路径优先 → 自动探测；
+            // node/cli 失败抛 EnvCheckException（带 EnvStatus），Panel 层转成前端可识别的环境错误；
+            // 凭证失败降级（credentials=null 裸启，走 app-server 自身凭证链，issue #4）
             val env = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveForStart()
             val newClient = ZCodeProtocolClient.start(
                 zcodePath = env.zcodePath,

@@ -42,15 +42,15 @@ This project has exactly one goal: **use ZCode's core capabilities where you wri
 
 **Embedded browser** — the Header globe button expands a browser column to the right of the chat area: multiple tabs (globally shared, persist across sessions), back / forward / refresh / address bar / free-size viewport (DevTools device-toolbar style virtual screen) / DevTools / open externally; the plugin hosts the browser-use reverse protocol, so the AI can drive this browser — navigate, screenshot, execute JS, run playwright locators and CUA mouse/keyboard actions — with zero configuration
 
-**Runtime control** — model dropdown, permission mode (build / edit / plan / yolo) and thinking level (per model), adjustable; preselectable in the standby state (before a session exists), applied when the session is created; context-capacity ring (usage breakdown + cache hits), 5-hour / weekly quota queries
+**Runtime control** — model dropdown (builtin channels follow the active channel in the ZCode client; manual refresh inside the dropdown), permission mode (build / edit / plan / yolo) and thinking level (per model), adjustable; preselectable in the standby state (before a session exists), applied when the session is created; context-capacity ring (usage breakdown + cache hits), 5-hour / weekly quota queries
 
-**Settings center** — seven tabs: General (theme / font / language / custom colors + environment paths), Models (provider-grouped read-only list; paths follow data-directory migration; add/remove guides you to ZCode config with one-click open), Usage (quota cards + model/tool usage curves and detail tables), Memory (AGENTS.md instruction memory + auto memory, creatable when missing), Skills (global / project / plugin three-source scan, inline enable/disable), MCP (server list / tool list / connection logs), Other (input-history completion toggle and history management)
+**Settings center** — seven tabs: General (theme / font / language / custom colors + environment paths), Models (builtin channels follow the ZCode client config — only the active one is shown, annotated with how it was resolved: client-selected or fallback; third-party providers can be toggled; paths follow data-directory migration; add/remove guides you to ZCode config with one-click open), Usage (App usage: local session stats covering third-party models, 7-day / 30-day / all ranges; GLM plan usage: quota cards + model/tool usage curves and detail tables, with the queried credential source labeled), Memory (AGENTS.md instruction memory + auto memory, creatable when missing), Skills (global / project / plugin three-source scan, inline enable/disable), MCP (server list / tool list / connection logs), Other (input-history completion toggle and history management)
 
-**Environment check** — on startup verifies Node.js (≥18) / ZCode CLI / login credentials; on failure the top bar shows a notice with per-item fix entry points and a re-check button; paths can be configured manually and are auto-detected when left blank
+**Environment check** — on startup verifies Node.js (≥18) / ZCode CLI / login credentials; on failure the top bar shows a notice with per-item fix entry points and a re-check button (missing credentials no longer block startup — a hint is shown instead); paths can be configured manually and are auto-detected when left blank
 
 **IDE integration** — right-click a file in the project view / editor tab to send it, right-click selected code in the editor to send it to the input box (Ctrl+Alt+K), copy selection reference (path + line numbers); files, memory, skills, and MCP configs all open in the editor with one click
 
-**Input enhancements** — `@` file references (chip + completion; pasted absolute paths become chips), `/` skill invocation, long-paste collapsing, input-history browsing with prefix ghost completion (Tab to accept)
+**Input enhancements** — `@` file references (chip + completion; pasted absolute paths or files dragged from the OS become chips), `/` skill invocation, long-paste collapsing, input-history browsing with prefix ghost completion (Tab to accept)
 
 **Multi-language** — 简体中文 / English / 日本語 / 한국어 / 繁體中文, switches automatically with the IDE UI language
 
@@ -93,10 +93,10 @@ It is more than a built-in browser — the plugin implements the ZCode app-serve
 
 **Settings center**
 
-| General (theme / font / language / custom colors + environment paths) | Model management (provider-grouped read-only list / add-remove guides to ZCode config) |
+| General (theme / font / language / custom colors + environment paths) | Model management (builtin channel read-only + resolution badge / third-party toggles) |
 | :---: | :---: |
 | ![General settings](docs/screenshots/settings-basic.png) | ![Model management](docs/screenshots/settings-models.png) |
-| **Usage (quota cards / model & tool usage curves)** | **Memory (instruction / auto memory management)** |
+| **Usage (App usage: local session stats + third-party model details)** | **Memory (instruction / auto memory management)** |
 | ![Usage](docs/screenshots/settings-usage.png) | ![Memory](docs/screenshots/settings-memory.png) |
 | **Skills (three-source scan & enable management)** | **MCP (server list / tool list / connection logs)** |
 | ![Skills](docs/screenshots/settings-skills.png) | ![MCP](docs/screenshots/settings-mcp.png) |

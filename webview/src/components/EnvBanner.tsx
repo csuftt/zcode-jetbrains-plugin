@@ -2,8 +2,9 @@
  * 运行环境提醒条（主界面顶栏下方，仅异常时渲染）
  *
  * 两档：
- * - 阻断（allOk=false）：node / zcode.cjs / 凭证问题，插件暂不可用，warning 色；
- * - 建议（allOk=true 但 browserHost 异常）：AI 浏览器工具不可用、对话不受影响，info 色。
+ * - 阻断（allOk=false）：node / zcode.cjs 问题，插件暂不可用，warning 色；
+ * - 建议（allOk=true 但有 advisory 项）：凭证降级（对话走 ZCode 客户端登录态）、
+ *   AI 浏览器工具不可用等，均不影响对话，info 色。
  * 提供「去设置」（直达基础设置→环境子tab）与「重新检测」（后者会触发宿主自愈重探）。
  * 数据源：store envStatus（init checkEnv / envSave 重检 / IDE 广播 onEnvStatusChanged / error 附带）。
  */
@@ -19,7 +20,7 @@ interface Props {
   onGoSettings: () => void
 }
 
-/** 按优先级把异常环境转成可读问题列表（node → cli → 凭证） */
+/** 按优先级把异常环境转成可读问题列表（node → cli；凭证已降级为非阻断，不在此列） */
 function collectProblems(status: EnvStatus): { key: string; code?: string; arg?: string; text: string }[] {
   const problems: { key: string; code?: string; arg?: string; text: string }[] = []
   if (!status.node.found) {
@@ -30,15 +31,12 @@ function collectProblems(status: EnvStatus): { key: string; code?: string; arg?:
   if (!status.cli.found) {
     problems.push({ key: 'cli', code: status.cli.code, arg: status.cli.arg, text: status.cli.error || '' })
   }
-  if (!status.credentials.ok) {
-    problems.push({
-      key: 'credentials',
-      code: status.credentials.code,
-      arg: status.credentials.path ?? '',
-      text: status.credentials.error || '',
-    })
-  }
   return problems
+}
+
+/** 凭证降级告警（oauth 登录无明文 key 时对话改走 app-server 自身凭证链）；健康为 null */
+function credentialsAdvisory(status: EnvStatus): boolean {
+  return !status.credentials.ok
 }
 
 /** browserHost 非阻断告警（未探测/健康时为 null）；渲染只按 code 选文案 */
@@ -53,11 +51,19 @@ export function EnvBanner({ onGoSettings }: Props) {
   const envStatus = useStore((s) => s.envStatus)
   const checkEnv = useStore((s) => s.checkEnv)
   const [checking, setChecking] = useState(false)
+  // advisory 档（凭证降级/browserHost）会话内可手动关闭；阻断档（node/cli）不可关——
+  // 那是真不可用，关了用户更困惑。不持久化：重启 IDE 再提示一次（凭证仍异常时）
+  const [dismissed, setDismissed] = useState(false)
 
   if (!envStatus) return null
   const problems = envStatus.allOk ? [] : collectProblems(envStatus)
+  const credAdvisory = envStatus.allOk && credentialsAdvisory(envStatus)
   const hostWarning = envStatus.allOk ? browserHostProblem(envStatus) : null
-  if (problems.length === 0 && !hostWarning) return null
+  if (problems.length === 0 && !credAdvisory && !hostWarning) return null
+
+  // 阻断档沿用 warning 色；纯 advisory 档（凭证降级/browserHost）换 info 色（不吓用户，对话功能正常）
+  const advisory = problems.length === 0
+  if (advisory && dismissed) return null
 
   const handleRecheck = () => {
     if (checking) return
@@ -67,15 +73,12 @@ export function EnvBanner({ onGoSettings }: Props) {
     setTimeout(() => setChecking(false), 3000)
   }
 
-  // 阻断档沿用 warning 色；纯 browserHost 建议档换 info 色（不吓用户，对话功能正常）
-  const advisory = problems.length === 0
-
   return (
     <div className={`env-banner${advisory ? ' env-banner--advisory' : ''}`} role="alert">
       <span className={`codicon ${advisory ? 'codicon-info' : 'codicon-warning'} env-banner__icon`} />
       <div className="env-banner__content">
         <div className="env-banner__title">
-          {advisory ? t('app.envBanner.browserHostTitle') : t('app.envBanner.title')}
+          {advisory ? t('app.envBanner.advisoryTitle') : t('app.envBanner.title')}
         </div>
         <ul className="env-banner__problems">
           {problems.map((p) => {
@@ -89,10 +92,12 @@ export function EnvBanner({ onGoSettings }: Props) {
                 {p.key === 'nodeLow' &&
                   t('app.envBanner.nodeTooLow', { version: p.text, min: envStatus.node.minVersion })}
                 {p.key === 'cli' && t('app.envBanner.cliMissing', { detail })}
-                {p.key === 'credentials' && t('app.envBanner.credentialsInvalid', { detail })}
               </li>
             )
           })}
+          {credAdvisory && (
+            <li className="env-banner__problem">{t('app.envBanner.credsDegraded')}</li>
+          )}
           {hostWarning && (
             <li className="env-banner__problem">
               {hostWarning.code === 'browserHostCefDown'
@@ -111,6 +116,17 @@ export function EnvBanner({ onGoSettings }: Props) {
           <span className="codicon codicon-settings-gear" />
           {t('app.envBanner.goSettings')}
         </button>
+        {advisory && (
+          <button
+            type="button"
+            className="env-banner__btn"
+            onClick={() => setDismissed(true)}
+            title={t('app.envBanner.dismiss')}
+            aria-label={t('app.envBanner.dismiss')}
+          >
+            <span className="codicon codicon-close" />
+          </button>
+        )}
       </div>
     </div>
   )

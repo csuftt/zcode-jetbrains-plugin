@@ -95,8 +95,17 @@ data class EnvStatus(
     val credentials: CredentialStatus,
     val browserHost: BrowserHostStatus? = null,
 ) {
-    /** 三件套齐备即可启动 app-server；browserHost 是建议性检查，不计入 */
-    val allOk: Boolean get() = node.ok && cli.found && credentials.ok
+    /**
+     * node + zcode.cjs 就绪即可启动 app-server；browserHost 是建议性检查，不计入。
+     * 凭证（issue #4 后）同样不再阻断启动：config.json 无明文 apiKey 时降级裸启，
+     * 仅经 credentials 状态展示警告（用量查询等辅助功能受限）。注意裸启后 app-server
+     * 无法解析模型凭证（2026-08 实测 CLI 0.13.3：session/create 报 -32603 Model
+     * config is missing、resume 后 send 报 -32031 运行时模型不可用、oauth token 顶替
+     * ANTHROPIC_API_KEY 注入同样挂起），GUI 可裸跑是靠 desktop surface 的
+     * requestRuntimePreferences 反向链路，插件 headless 直启不具备——降级仅保住
+     * 「进程能起 + 列表能看」，对话需用户补配 API Key 型 provider。
+     */
+    val allOk: Boolean get() = node.ok && cli.found
 }
 
 /** getClient 启动前置检查失败：携带完整 EnvStatus 供前端渲染环境提醒条 */
@@ -106,7 +115,8 @@ class EnvCheckException(val status: EnvStatus, message: String) : IllegalStateEx
 data class EnvStartParams(
     val nodePath: String,
     val zcodePath: Path,
-    val credentials: ZCodeCredentials,
+    /** null = config.json 无明文凭证，裸启 app-server（对话不可用，见 EnvStatus.allOk 注释） */
+    val credentials: ZCodeCredentials?,
 )
 
 object ZCodeEnvChecker {
@@ -294,8 +304,8 @@ object ZCodeEnvChecker {
             val c = Credentials.load()
             CredentialStatus(ok = true, model = c.model, error = null, path = configPath)
         } catch (e: Exception) {
-            // Credentials.load：require(文件存在) 抛 IllegalArgumentException=未登录，
-            // 其余 IllegalStateException=配置结构无效
+            // Credentials.load：文件缺失抛 IllegalArgumentException（credsMissing），
+            // 其余 IllegalStateException（credsInvalid）。均不再阻断启动（见 EnvStatus.allOk）
             CredentialStatus(
                 ok = false, model = null, error = e.message ?: "凭证配置读取失败", path = configPath,
                 code = if (e is IllegalArgumentException) "credsMissing" else "credsInvalid",
@@ -347,7 +357,8 @@ object ZCodeEnvChecker {
 
     /**
      * app-server 启动三参（配置优先 → 自动探测）。
-     * @throws EnvCheckException 任一依赖不可用（携带完整 EnvStatus）
+     * 凭证读取失败不抛（loadOrNull → null = 裸启），仅 node/cli 不可用抛异常。
+     * @throws EnvCheckException node 或 zcode.cjs 不可用（携带完整 EnvStatus）
      */
     fun resolveForStart(): EnvStartParams {
         val s = check()
@@ -355,16 +366,15 @@ object ZCodeEnvChecker {
         return EnvStartParams(
             nodePath = s.node.path!!,
             zcodePath = Path.of(s.cli.path!!),
-            credentials = Credentials.load(),
+            credentials = Credentials.loadOrNull(),
         )
     }
 
-    /** 首个问题的可读描述（EnvCheckException 消息） */
+    /** 首个问题的可读描述（EnvCheckException 消息；凭证降级后不再出现凭证分支） */
     fun firstProblem(s: EnvStatus): String = when {
         !s.node.found -> "Node.js 不可用：${s.node.error ?: "未找到"}（可在设置 → 基础设置 → 环境中配置路径）"
         s.node.versionTooLow -> "Node.js 版本过低（${s.node.version}，需要 v$MIN_NODE_MAJOR_VERSION+），请在设置中配置更高版本的路径"
         !s.cli.found -> "ZCode CLI 不可用：${s.cli.error ?: "未找到"}（可在设置 → 基础设置 → 环境中配置 zcode.cjs 路径）"
-        !s.credentials.ok -> "凭证不可用：${s.credentials.error}"
         else -> "环境异常"
     }
 

@@ -19,6 +19,72 @@
     border-radius: 3px;
   }
 
+  &__main-tabs {
+    display: inline-flex;
+    gap: 4px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-primary);
+  }
+
+  &__main-tab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 5px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+    &.active {
+      background: var(--accent-primary, #3574f0);
+      color: #fff;
+    }
+  }
+
+  &__stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 8px;
+  }
+
+  &__stat {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+  }
+
+  &__stat-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  &__stat-value {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    font-size: 10px;
+    line-height: 16px;
+    border-radius: 4px;
+    color: var(--text-tertiary);
+    border: 1px solid var(--border-primary);
+    vertical-align: 1px;
+  }
+
   &__section {
     display: flex;
     flex-direction: column;
@@ -44,6 +110,16 @@
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
+  }
+
+  // 套餐用量查询凭证提示（回退链落到非订阅渠道时 is-foreign 变警示色）
+  &__cred-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+
+    &.is-foreign {
+      color: var(--status-warning);
+    }
   }
 
   &__icon-btn {

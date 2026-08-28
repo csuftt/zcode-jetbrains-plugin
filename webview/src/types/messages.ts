@@ -324,6 +324,7 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'pickFiles' }
   | { op: 'getUsage'; sessionId: string }
   | { op: 'getQuota' }
+  | { op: 'getAppUsage'; range: AppUsageRange }
   | { op: 'getModelUsage'; startTime: string; endTime: string }
   | { op: 'getToolUsage'; startTime: string; endTime: string }
   | { op: 'openFile'; filePath: string; line?: number }
@@ -408,6 +409,8 @@ export interface ModelManageProvider {
   providerName: string
   /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验 */
   plan?: 'personal' | 'trial'
+  /** 内置渠道命中方式：selected=客户端选中渠道生效；fallback=所选渠道凭证不可用回退首个可用内置 */
+  via?: 'selected' | 'fallback'
   baseURL?: string
   enabled: boolean
   models: ModelManageModel[]
@@ -750,6 +753,10 @@ export type JavaResponse =
   /** 切换回包：changes 含全部实际变更（启用内置套餐时其余内置套餐联动禁用，互斥）*/
   | { op: 'modelToggled'; changes: { providerId: string; enabled: boolean }[] }
   | { op: 'modelSet'; sessionId: string; modelId: string; providerId: string }
+  /** Java 忙窗口重试成功通知（缺陷AB）：顶栏忙窗口提示据此清除 */
+  | { op: 'busyRetryRecovered' }
+  /** P2 用量查询失败静默降级（缺陷AB 编排②）：不弹错、不复位 streaming */
+  | { op: 'usageError'; sessionId: string; message: string }
   | { op: 'settings'; sessionId: string; mode: { current?: string }; thoughtLevel: ThoughtLevelInfo }
   | { op: 'thoughtLevelSet'; sessionId: string; thoughtLevel: string }
   | { op: 'modeSet'; sessionId: string; mode: string }
@@ -758,9 +765,12 @@ export type JavaResponse =
   // activeTurnKind/activeTurnId：当前回合类型与 id（'compact' = 上下文压缩中，前端
   // 压缩状态条依据；turnId 供滞后读数比对——见 useStore case 'usage'）
   | { op: 'usage'; sessionId?: string; used: number; size: number; hitRate?: number; breakdown?: ContextBreakdownItem[]; activeTurnKind?: string; activeTurnId?: string }
-  | { op: 'quota'; data?: QuotaData | null; error?: string }
-  | { op: 'modelUsage'; data?: ModelUsageData | null; error?: string }
-  | { op: 'toolUsage'; data?: ToolUsageData | null; error?: string }
+  // providerId/providerName：monitor 三路 HTTP 实际取 key 的渠道（回退链不筛身份，
+  // 可能落到非 coding-plan 渠道，用量页据此提示数据口径）
+  | { op: 'quota'; data?: QuotaData | null; error?: string; providerId?: string; providerName?: string }
+  | { op: 'appUsage'; data?: AppUsageData | null; error?: string }
+  | { op: 'modelUsage'; data?: ModelUsageData | null; error?: string; providerId?: string; providerName?: string }
+  | { op: 'toolUsage'; data?: ToolUsageData | null; error?: string; providerId?: string; providerName?: string }
   | { op: 'fileOpened' }
   | { op: 'diffShown' }
   | { op: 'fileRefreshed' }
@@ -1028,4 +1038,54 @@ export interface ToolUsageData {
     totalUsageCount?: number
     usageCount?: number[]
   }[]
+}
+
+/** 应用用量时间范围（usage/stats 协议口径，无自定义区间）*/
+export type AppUsageRange = '7d' | '30d' | 'all'
+
+/** 应用用量汇总（usage/stats → summary；app-server 本地会话聚合，无 apiKey 依赖）*/
+export interface AppUsageSummary {
+  totalTokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  reasoningTokens?: number
+  cacheCreationTokens?: number
+  cacheReadTokens?: number
+  cacheHitRate?: number
+  totalSessions?: number
+  totalTurns?: number
+  toolCallCount?: number
+  toolErrorRate?: number
+  modelErrorRate?: number
+  avgTimeToFirstTokenMs?: number
+  activeDays?: number
+}
+
+/** 应用用量模型行（含第三方模型；share 为 0~1 占比）*/
+export interface AppModelUsage {
+  modelId?: string
+  totalTokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  requestCount?: number
+  share?: number
+}
+
+/** 应用用量工具行 */
+export interface AppToolUsage {
+  toolName?: string
+  callCount?: number
+  errorCount?: number
+  errorRate?: number
+}
+
+/** 应用用量数据（usage/stats → data）*/
+export interface AppUsageData {
+  range?: string
+  source?: string
+  generatedAt?: number
+  summary?: AppUsageSummary
+  models?: AppModelUsage[]
+  tools?: AppToolUsage[]
+  dailyModelUsage?: { date?: string; models?: { modelId?: string; totalTokens?: number }[] }[]
 }

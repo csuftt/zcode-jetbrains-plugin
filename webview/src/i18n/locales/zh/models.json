@@ -16,10 +16,11 @@
   },
   "vision": "视觉",
   "section": {
-    "builtin": "内置套餐",
-    "builtinHint": "同时只能启用一个，启用新套餐会自动停用其他内置套餐",
+    "builtin": "内置渠道",
+    "builtinHint": "以 ZCode 客户端配置为准，同一时间仅一个生效，切换请前往客户端",
     "custom": "自定义供应商"
   },
+  "builtinReadonlyHint": "内置渠道当前生效中（启停请在 ZCode 客户端操作）",
   "providerDisabled": "已禁用",
   "providerNoModels": "该供应商未配置模型",
   "modelsCount": "{{count}} 个模型",
@@ -37,5 +38,9 @@
     "deleteBody": "「{{name}}」（{{provider}}）由 Zcode 配置文件统一管理，插件内不直接删除。请在 Zcode 客户端的模型设置中删除，或编辑下方配置文件移除对应 provider models 节点中的条目；修改后回到此页刷新即可。",
     "openConfig": "打开配置文件",
     "dismiss": "知道了"
-  }
+  },
+  "viaSelected": "客户端选中",
+  "viaSelectedHint": "ZCode 客户端当前选中的渠道，权威生效",
+  "viaFallback": "兜底生效",
+  "viaFallbackHint": "客户端所选渠道凭证不可用，已回退到配置中首个可用的内置渠道"
 }

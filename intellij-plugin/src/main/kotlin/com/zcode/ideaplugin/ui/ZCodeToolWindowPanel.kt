@@ -124,6 +124,48 @@ class ZCodeToolWindowPanel(
     @Volatile
     private var globalListenerRegistered = false
 
+    /**
+     * 会话级请求超时的忙窗口自愈重试（缺陷AB）：resume 恢复带中断回合的会话后
+     * app-server 有 ~1-2 分钟窗口期，subscribe/setModel/readSettings 集中超时且
+     * 窗口后自愈；失败后延迟重试跨过窗口，避免用户"一看报错就重启"永远撞在窗口内。
+     */
+    private val busyRetry = BusyRetryScheduler(
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "zcode-busy-retry").apply { isDaemon = true }
+        }
+    )
+
+    /** 协议请求超时（忙窗口内的典型失败形态；-32004 等永久错误不重试）*/
+    private fun isTimeoutEx(e: Exception): Boolean =
+        e is com.zcode.ideaplugin.protocol.ZCodeProtocolException &&
+            e.message?.startsWith("请求超时") == true
+
+    /**
+     * resume 同会话去重（缺陷AB 优先级编排①）：subscribe 与 messages 两条链路
+     * 并发打开同一会话时只排一次 resume 进服务端队列（坏会话每次 8.7s，直接省一半
+     * 队列头部）。失败不缓存、也不阻断调用方（旧语义：失败可能 already active，照常继续）
+     */
+    private val resumeDeduper = ResumeDeduper()
+
+    private fun resumeSessionDeduped(
+        client: com.zcode.ideaplugin.protocol.ZCodeProtocolClient,
+        sessionId: String,
+        workspacePath: String,
+    ) {
+        val ok = resumeDeduper.resumeOnce(sessionId) {
+            try {
+                val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
+                client.resume(sessionId, ws)
+                log.info("resume succeeded: $sessionId (workspace=$workspacePath)")
+                true
+            } catch (e: Exception) {
+                log.info("resume failed (may already be active): ${e.message}")
+                false
+            }
+        }
+        if (!ok) log.info("resume deduped-skip or failed, continuing: $sessionId")
+    }
+
     // ============ 释放状态 ============
     @Volatile
     private var disposed = false
@@ -744,6 +786,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "pickFiles" -> handlePickFiles(msg)
                         "getUsage" -> handleGetUsage(msg)
                         "getQuota" -> handleGetQuota(msg)
+                        "getAppUsage" -> handleGetAppUsage(msg)
                         "getModelUsage" -> handleGetModelUsage(msg)
                         "getToolUsage" -> handleGetToolUsage(msg)
                         "openFile" -> handleOpenFile(msg)
@@ -985,9 +1028,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     // ============ 运行环境检测与配置（参考 cc-gui NodePathHandler）============
 
-    /** 环境三件套状态查询（30s 缓存，spawn node --version 不再重复探测） */
+    /** 环境三件套状态查询。显式检测一律 force 强刷（用户点「重新检测」期待最新磁盘
+     *  状态，吃 30s 缓存会出现"禁用渠道后检测仍正常、过一会才变缺失"的延迟假象；
+     *  spawn node --version 的探测成本仅在显式点击时发生，可接受）*/
     private fun handleCheckEnv(): JsonObject {
-        var status = com.zcode.ideaplugin.env.ZCodeEnvChecker.check()
+        var status = com.zcode.ideaplugin.env.ZCodeEnvChecker.check(force = true)
         // browserHost 非阻断告警的轻量自愈：仅 handlerMissing 可修（补注册后立即复测）。
         // cefDown 不做运行期自愈：探针报 cefDown 的前提是 JBCefApp 已起，此时杀
         // cef_server 会弄死现有 webview（restartStaleCefServerIfNeeded 的守卫即为此返回），
@@ -1448,6 +1493,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (_: Exception) {}
         globalStreamListener = null
         globalStreamListenerClient = null
+        // 忙窗口重试随面板释放终止（daemon 线程兜底，仍显式停）
+        try {
+            busyRetry.shutdown()
+        } catch (_: Exception) {}
         try {
             // 内嵌浏览器是全局共享单例：只摘除挂载（还原 TW 宽度），实例交由 Service 释放
             if (embeddedSplit != null) {
@@ -1732,17 +1781,26 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("models", JsonArray(emptyList()))
         }
 
+        val activeBuiltin = Credentials.effectiveBuiltinProviderId()
         val models = JsonArray(providers.mapNotNull { (providerId, providerEl) ->
             val pv = providerEl.jsonObject
             // enabled 缺省视为启用（config.json 现状：DeepSeek 无 enabled 字段但已启用）
             val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: true
+            // 内置渠道只展示一个：selectedKey 权威 + config 兜底（effectiveBuiltinProviderId，
+            // 解析失败/前缀变种时退首个 enabled 且凭证可用的内置），enabled 不代表激活
+            // ——API Key 渠道与订阅套餐可同时 enabled=true，全放出来会模型重复两份
+            if (providerId.startsWith("builtin:") && providerId != activeBuiltin) return@mapNotNull null
             if (!enabled) return@mapNotNull null
             val options = pv["options"]?.jsonObject ?: return@mapNotNull null
             val baseURL = options["baseURL"]?.jsonPrimitive?.content ?: return@mapNotNull null
-            // apiKey 缺失 = 无效配置（GUI 残留的未完成 provider），直接过滤；
-            // 同模型多 provider 变体各自保留——旧的跨 provider 去重兜底随本过滤一并移除
+            // apiKey 缺失的过滤对第三方与 API Key 渠道生效，仅订阅制套餐（两家
+            // coding-plan）凭 credentials.json 家族 token 兜底（调用期凭证由 oauth
+            // 解析，未来 key 不落盘时保住模型列表）；builtin:bigmodel/zai 等 API Key
+            // 渠道无 oauth 凭证链，空 key = 未配置，不兜底——否则列表显示可用而
+            // 凭据自检报无凭证，自相矛盾；GUI 残留未完成 provider 无 baseURL/models，
+            // 前置判据已拦
             val apiKey = options["apiKey"]?.jsonPrimitive?.contentOrNull
-            if (apiKey.isNullOrBlank()) return@mapNotNull null
+            if (apiKey.isNullOrBlank() && !Credentials.hasFamilyOAuthToken(providerId)) return@mapNotNull null
             val providerName = pv["name"]?.jsonPrimitive?.content ?: providerId
             val modelsObj = pv["models"]?.jsonObject ?: return@mapNotNull null
             modelsObj.mapNotNull { (modelId, modelEl) ->
@@ -1778,8 +1836,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /**
      * op=modelManageList — 设置页「模型管理」清单（支持启用/禁用切换）。
      *
-     * 与 listModels（聊天切换用）的差异：不去重、不滤 disabled（返回 enabled 标记）、
-     * 保留无 baseURL 的 provider；共同口径：apiKey 缺失的无效 provider 一律过滤。
+     * 与 listModels（聊天切换用）的差异：不去重、不滤 disabled 的第三方 provider
+     * （返回 enabled 标记供开关）；内置渠道只展示生效的那个（禁用不返回，启停
+     * 以 ZCode 客户端配置为准）。共同口径：apiKey 缺失的无效 provider 一律过滤。
      * configPath 一并返回供前端展示与「打开配置文件」。
      * 路径同样走 Credentials.defaultConfigPath() 跟随 dataBaseDir 迁移。
      */
@@ -1801,14 +1860,19 @@ if (!window.__ZCODE_LOG_HOOK__) {
             null
         } ?: return emptyResult()
 
+        val resolution = Credentials.builtinResolution()
+        val activeBuiltin = resolution.providerId
         val providerArr = JsonArray(providers.mapNotNull { (providerId, providerEl) ->
             val pv = providerEl.jsonObject
             val options = pv["options"]?.jsonObject
-            // apiKey 缺失 = 无效配置（与聊天下拉 listModels 同口径），管理页同样不展示
+            // apiKey 缺失的过滤对第三方与 API Key 渠道生效（仅订阅制套餐 oauth 兜底，
+            // 与聊天下拉 listModels 同口径）；内置渠道只展示一个（selectedKey 权威 +
+            // config 兜底，见 effectiveBuiltinProviderId）
             val apiKey = options?.get("apiKey")?.jsonPrimitive?.contentOrNull
-            if (apiKey.isNullOrBlank()) return@mapNotNull null
+            if (apiKey.isNullOrBlank() && !Credentials.hasFamilyOAuthToken(providerId)) return@mapNotNull null
             // enabled 缺省视为启用（与 listModels/额度查询口径一致）
             val enabled = pv["enabled"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: true
+            if (providerId.startsWith("builtin:") && providerId != activeBuiltin) return@mapNotNull null
             val providerName = pv["name"]?.jsonPrimitive?.contentOrNull ?: providerId
             val baseURL = options?.get("baseURL")?.jsonPrimitive?.contentOrNull
             val models = JsonArray(pv["models"]?.jsonObject?.map { (modelId, modelEl) ->
@@ -1830,6 +1894,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("providerId", providerId)
                 put("providerName", providerName)
                 builtinPlanOf(providerId)?.let { put("plan", it) }
+                // 命中方式：selected = 客户端选中渠道生效；fallback = 所选渠道凭证不可用，
+                // 回退 config 首个可用内置（前端据此显示徽章，兜底态提醒用户客户端选择失配）
+                if (providerId.startsWith("builtin:")) {
+                    put("via", if (resolution.viaSelected) "selected" else "fallback")
+                }
                 put("enabled", enabled)
                 baseURL?.let { put("baseURL", it) }
                 put("models", models)
@@ -1847,16 +1916,22 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /**
      * op=modelToggleProvider — 设置页切换 provider 启用/禁用，写回 config.json。
      *
+     * 仅对第三方/自定义 provider 开放：内置渠道（builtin: 前缀）的启停以 ZCode
+     * 客户端配置为准（客户端同一时间仅一个生效），插件代写 config 与客户端内存态
+     * 互相覆盖极易出状态错乱（0.2.6 实测反馈），改为只读展示，切换请求直接拒绝。
+     *
      * 写回策略（config.json 是含凭证的关键文件，比 cli/config.json 更谨慎）：
      * 仅改 provider.<id>.enabled 字段，其余节点 LinkedHashMap 保序原样保留；
      * 写前备份 .bak，tmp + Files.move 原子替换，失败时从备份回滚。
-     * 内置套餐互斥（对齐 Zcode 客户端）：启用任一 builtin: 套餐时，其余内置套餐一并
-     * 禁用；回包 changes 携带全部实际变更项，前端按数组刷新。
+     * 回包 changes 携带全部实际变更项，前端按数组刷新。
      * 禁用后 CLI 下次发现生效；进行中的会话不受影响。
      */
     private fun handleModelToggleProvider(msg: JsonObject): JsonObject {
         val providerId = msg["providerId"]?.jsonPrimitive?.contentOrNull
             ?: return errorResponse("缺少 providerId")
+        if (providerId.startsWith("builtin:")) {
+            return errorResponse("内置渠道以 ZCode 客户端配置为准，请在客户端切换后回来刷新")
+        }
         val enabled = msg["enabled"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
             ?: return errorResponse("缺少 enabled")
 
@@ -1876,19 +1951,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             return errorResponse("provider 不存在: $providerId")
         }
 
-        // 变更集：目标 provider + （启用内置套餐时）其余内置套餐联动禁用（互斥）
+        // 变更集：目标 provider 的 enabled 字段（内置互斥已随 builtin 只读化移除）
         data class Change(val id: String, val newEnabled: Boolean)
         val changes = mutableListOf(Change(providerId, enabled))
-        val mutexOthers = enabled && providerId.startsWith("builtin:")
-        if (mutexOthers) {
-            providersObj.keys.forEach { id ->
-                if (id != providerId && id.startsWith("builtin:") &&
-                    (providersObj[id]!!.jsonObject["enabled"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: true)
-                ) {
-                    changes.add(Change(id, false))
-                }
-            }
-        }
 
         // 仅替换各目标 provider 的 enabled 字段，其余内容（含顺序）原样保留
         val newProviders = JsonObject(LinkedHashMap<String, kotlinx.serialization.json.JsonElement>(providersObj.size).apply {
@@ -1919,6 +1984,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
             val changeDesc = changes.joinToString(", ") { c -> c.id + "=" + c.newEnabled }
             log.info("modelToggleProvider: $changeDesc written back to $configPath")
+            // 凭证可用性随 enabled 变化：失效环境检测缓存，30s TTL 内的自动路径不再报旧状态
+            com.zcode.ideaplugin.env.ZCodeEnvChecker.invalidate()
         } catch (e: Exception) {
             log.warn("Failed to write back config.json: ${e.message}")
             return errorResponse("写回失败: ${e.message}")
@@ -1962,18 +2029,24 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 端点：{baseDomain}/api/monitor/usage/quota/limit，Authorization: <apiKey>
      * 逻辑移植自 glm-plan-usage-idea 的 GlmUsageClient
      */
-    /** 额度查询凭证（baseDomain + 裸 apiKey），三路 monitor HTTP 共用 */
-    private data class QuotaCredentials(val baseDomain: String, val apiKey: String)
+    /** 额度查询凭证（baseDomain + 裸 apiKey + 来源渠道标识），三路 monitor HTTP 共用 */
+    private data class QuotaCredentials(
+        val baseDomain: String,
+        val apiKey: String,
+        /** 实际取 key 的 provider（回退链不筛身份，可能落到非 coding-plan 渠道，前端据此提示）*/
+        val providerId: String = "",
+        val providerName: String = "",
+    )
 
     /**
      * 从 config.json 读额度查询凭证（baseDomain + 裸 apiKey）。
      * 复用于 quota/limit、model-usage、tool-usage 三路 HTTP。
+     * 路径走 [Credentials.defaultConfigPath]（dataBaseDir 感知，与模型列表/env 注入同源）。
      * @return Pair(凭证?, 错误信息) —— 凭证非空即成功
      */
     private fun loadQuotaCredentials(): Pair<QuotaCredentials?, String> {
-        val configPath = System.getProperty("user.home") + "/.zcode/v2/config.json"
-        val configFile = java.io.File(configPath)
-        if (!configFile.exists()) return null to "config.json 不存在"
+        val configFile = Credentials.defaultConfigPath().toFile()
+        if (!configFile.exists()) return null to "config.json 不存在：$configFile"
         val providers = try {
             json.parseToJsonElement(configFile.readText()).jsonObject["provider"]?.jsonObject
         } catch (e: Exception) {
@@ -1983,22 +2056,29 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 找第一个有 apiKey 的启用 provider（优先 bigmodel-coding-plan）
         var baseURL: String? = null
         var apiKey: String? = null
+        var hitId = ""
+        var hitName = ""
         for ((providerId, providerEl) in providers) {
             val pv = providerEl.jsonObject
             val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: true
             if (!enabled) continue
             val options = pv["options"]?.jsonObject ?: continue
-            val url = options["baseURL"]?.jsonPrimitive?.content ?: continue
-            val key = options["apiKey"]?.jsonPrimitive?.content ?: continue
+            // 空白与缺失同等对待（与 credentialOf 同口径）：oauth 登录的 coding-plan 在
+            // config 里 apiKey 是占位空串，穿透会发出空 Authorization 头
+            val url = options["baseURL"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
+            val key = options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
+            val name = pv["name"]?.jsonPrimitive?.content ?: providerId
             // 优先 bigmodel-coding-plan，其他有 key 的也行
             if (providerId == "builtin:bigmodel-coding-plan") {
-                baseURL = url; apiKey = key; break
+                baseURL = url; apiKey = key; hitId = providerId; hitName = name; break
             }
-            if (baseURL == null) { baseURL = url; apiKey = key }
+            if (baseURL == null) { baseURL = url; apiKey = key; hitId = providerId; hitName = name }
         }
         if (baseURL == null || apiKey == null) {
             return null to "未找到带 apiKey 的启用 provider（oauth 模式不支持用量查询）"
         }
+        // 脱敏日志：用量凭证选了哪个渠道（回退链不筛身份，出现"数据口径不对"时先看这行）
+        log.info("quota credentials: provider=$hitId ($hitName) keyLen=${apiKey.length}")
 
         // baseDomain：取 scheme://host[:port]，丢弃 path（如 /api/anthropic）
         val baseDomain = try {
@@ -2008,7 +2088,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: Exception) {
             return null to "baseURL 格式非法: $baseURL"
         }
-        return QuotaCredentials(baseDomain, apiKey) to ""
+        return QuotaCredentials(baseDomain, apiKey, hitId, hitName) to ""
     }
 
     /** 用量查询的局部错误响应（带 op，不污染全局 error）*/
@@ -2043,6 +2123,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (resp.statusCode() != 200) return usageErrorResponse(op, "查询失败: HTTP ${resp.statusCode()}")
             buildJsonObject {
                 put("op", op)
+                put("providerId", creds.providerId)
+                put("providerName", creds.providerName)
                 val rawData = json.parseToJsonElement(resp.body()).jsonObject
                 rawData["data"]?.let { put("data", it) }
             }
@@ -2069,11 +2151,34 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (resp.statusCode() != 200) return usageErrorResponse("quota", "额度查询失败: HTTP ${resp.statusCode()}")
             buildJsonObject {
                 put("op", "quota")
+                put("providerId", creds.providerId)
+                put("providerName", creds.providerName)
                 val rawData = json.parseToJsonElement(resp.body()).jsonObject
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
             usageErrorResponse("quota", "额度查询异常: ${e.message}")
+        }
+    }
+
+    /**
+     * op=getAppUsage — 应用用量统计（app-server usage/stats，本地会话聚合）。
+     *
+     * 与 monitor 三路 HTTP 的区别：不依赖 config.json 的 apiKey，且覆盖第三方
+     * 模型（monitor 的 model-usage 只统计 bigmodel 网关侧 GLM 系）。
+     * range 仅支持 7d/30d/all（协议口径，无自定义区间），非法值回落 7d。
+     */
+    private fun handleGetAppUsage(msg: JsonObject): JsonObject {
+        val range = msg["range"]?.jsonPrimitive?.contentOrNull?.takeIf { it in setOf("7d", "30d", "all") } ?: "7d"
+        return try {
+            val client = project.zCodeService().getClient()
+            val data = client.usageStats(range)
+            buildJsonObject {
+                put("op", "appUsage")
+                put("data", data)
+            }
+        } catch (e: Exception) {
+            usageErrorResponse("appUsage", "应用用量查询异常: ${e.message}")
         }
     }
 
@@ -2180,13 +2285,36 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.info("Model switched: $sessionId → $providerId/$modelId")
         } catch (e: Exception) {
             log.warn("Model switch failed: ${e.message}")
+            // 忙窗口超时（缺陷AB）：后台延迟重试，成功后补推 modelSet（前端据此落定切换/清在途标记）
+            if (isTimeoutEx(e)) scheduleSetModelBusyRetry(sessionId, modelId, providerId)
             return errorResponse("Model switch failed: ${e.message}")
         }
-        return buildJsonObject {
+        return modelSetResponse(sessionId, modelId, providerId)
+    }
+
+    /** setModel 应答/重试补推共用的响应构造 */
+    private fun modelSetResponse(sessionId: String, modelId: String, providerId: String): JsonObject =
+        buildJsonObject {
             put("op", "modelSet")
             put("sessionId", sessionId)
             put("modelId", modelId)
             put("providerId", providerId)
+        }
+
+    /** setModel 超时后的忙窗口重试：成功即补推 modelSet */
+    private fun scheduleSetModelBusyRetry(sessionId: String, modelId: String, providerId: String) {
+        busyRetry.schedule("setModel:$sessionId") {
+            try {
+                val client = project.zCodeService().getClient()
+                client.setModel(sessionId, modelId, providerId, buildRuntimeModel(providerId, modelId))
+                sendToJs(modelSetResponse(sessionId, modelId, providerId))
+                sendToJs(buildJsonObject { put("op", "busyRetryRecovered") })
+                log.info("busy-retry: setModel for $sessionId recovered → $providerId/$modelId")
+                true
+            } catch (e: Exception) {
+                log.info("busy-retry: setModel for $sessionId still failing: ${e.message}")
+                false
+            }
         }
     }
 
@@ -2201,16 +2329,37 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return errorResponse("缺少 sessionId")
         val client = project.zCodeService().getClient()
         return try {
-            val settings = client.readSettings(sessionId)
-            buildJsonObject {
-                put("op", "settings")
-                put("sessionId", sessionId)
-                put("mode", settings["mode"]?.jsonObject ?: JsonObject(emptyMap()))
-                put("thoughtLevel", settings["thoughtLevel"]?.jsonObject ?: JsonObject(emptyMap()))
-            }
+            settingsResponse(sessionId, client.readSettings(sessionId))
         } catch (e: Exception) {
             log.warn("Failed to read session settings: ${e.message}")
+            // 忙窗口超时（缺陷AB）：应答仍即时回错误，后台延迟重试，成功后补推 settings
+            if (isTimeoutEx(e)) scheduleSettingsBusyRetry(sessionId)
             errorResponse("读取设置失败: ${e.message}")
+        }
+    }
+
+    /** getSettings 应答/重试补推共用的响应构造（webview case 'settings' 不区分应答与推送）*/
+    private fun settingsResponse(sessionId: String, settings: JsonObject): JsonObject = buildJsonObject {
+        put("op", "settings")
+        put("sessionId", sessionId)
+        put("mode", settings["mode"]?.jsonObject ?: JsonObject(emptyMap()))
+        put("thoughtLevel", settings["thoughtLevel"]?.jsonObject ?: JsonObject(emptyMap()))
+    }
+
+    /** settings 读取超时后的忙窗口重试：成功即补推 settings（思考深度随权威级别集恢复）*/
+    private fun scheduleSettingsBusyRetry(sessionId: String) {
+        busyRetry.schedule("settings:$sessionId") {
+            try {
+                val client = project.zCodeService().getClient()
+                val resp = settingsResponse(sessionId, client.readSettings(sessionId))
+                sendToJs(resp)
+                sendToJs(buildJsonObject { put("op", "busyRetryRecovered") })
+                log.info("busy-retry: settings for $sessionId recovered")
+                true
+            } catch (e: Exception) {
+                log.info("busy-retry: settings for $sessionId still failing: ${e.message}")
+                false
+            }
         }
     }
 
@@ -2321,7 +2470,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         } catch (e: Exception) {
             log.warn("Failed to fetch context usage: ${e.message}")
-            errorResponse("获取用量失败: ${e.message}")
+            // P2 辅助数据失败静默降级（缺陷AB 优先级编排②）：不走 errorResponse——
+            // 那会在前端顶栏弹错并复位 streaming（忙窗口期间用量轮询失败曾把故障感知
+            // 放大三倍、还误伤流式显示）；前端 case 'usageError' 仅记日志。用量有
+            // 流式轮询/回合结束刷新等自愈路径，无需用户感知
+            buildJsonObject {
+                put("op", "usageError")
+                put("sessionId", sessionId)
+                put("message", e.message ?: "查询失败")
+            }
         }
     }
 
@@ -2494,13 +2651,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun resumeAndReadMessages(sessionId: String, workspacePath: String): JsonArray {
         val client = project.zCodeService().getClient()
-        try {
-            val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
-            client.resume(sessionId, ws)
-            log.info("resume succeeded: $sessionId (workspace=$workspacePath)")
-        } catch (e: Exception) {
-            log.info("resume failed (may already be active): ${e.message}")
-        }
+        // 同会话短窗去重（subscribe 链路可能刚 resume 过，见 resumeSessionDeduped）
+        resumeSessionDeduped(client, sessionId, workspacePath)
         val messages = client.messages(sessionId)
         // 用户图片 part 读回适配：type:"file" + zcode-artifact:// uri → 内置 server
         // 的 /zcode-image/ URL（<img> 可加载）。fail-soft，见 ImageArtifactMapper
@@ -2662,14 +2814,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
-        // subscribe 要求会话 active，先 resume
-        try {
-            val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
-            client.resume(sessionId, ws)
-            log.info("resume succeeded: $sessionId")
-        } catch (e: Exception) {
-            log.info("resume failed (may already be active): ${e.message}")
-        }
+        // subscribe 要求会话 active，先 resume（同会话短窗去重：messages 链路并发 resume 只排一次队）
+        resumeSessionDeduped(client, sessionId, workspacePath)
 
         // subscribe（全局监听器已在 app-server 层面接收所有事件）
         try {
@@ -2678,12 +2824,36 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.info("subscribe session $sessionId succeeded (events via global listener)")
         } catch (e: Exception) {
             log.error("subscribe session $sessionId failed", e)
+            // 忙窗口超时（缺陷AB）：应答仍即时回错误，后台延迟重试——事件流经全局监听器
+            // 转发，重试成功后无需额外通知（事件自然开始流动）
+            if (isTimeoutEx(e)) scheduleSubscribeBusyRetry(sessionId)
             return errorResponse("订阅失败: ${e.message}")
         }
 
         return buildJsonObject {
             put("op", "subscribed")
             put("sessionId", sessionId)
+        }
+    }
+
+    /**
+     * subscribe 超时后的忙窗口重试（缺陷AB）：重试成功只补记 subscribedSessions 并推
+     * busyRetryRecovered——事件流经全局监听器转发，成功后事件自然开始流动，无需补推。
+     */
+    private fun scheduleSubscribeBusyRetry(sessionId: String) {
+        busyRetry.schedule("subscribe:$sessionId") {
+            try {
+                if (sessionId in subscribedSessions) return@schedule true
+                val client = project.zCodeService().getClient()
+                client.subscribe(sessionId, onEvent = null)
+                subscribedSessions.add(sessionId)
+                sendToJs(buildJsonObject { put("op", "busyRetryRecovered") })
+                log.info("busy-retry: subscribe $sessionId recovered (events via global listener)")
+                true
+            } catch (e: Exception) {
+                log.info("busy-retry: subscribe $sessionId still failing: ${e.message}")
+                false
+            }
         }
     }
 
@@ -2717,14 +2887,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
-        // subscribe 要求会话 active，先 resume；运行中的子会话可能已 active，失败静默
-        try {
-            val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
-            client.resume(sessionId, ws)
-            log.info("subscribeChild: child session resumed $sessionId")
-        } catch (e: Exception) {
-            log.info("subscribeChild: resume failed (may already be active): ${e.message}")
-        }
+        // subscribe 要求会话 active，先 resume（同会话短窗去重）；运行中的子会话可能已 active，失败静默
+        resumeSessionDeduped(client, sessionId, workspacePath)
 
         return try {
             client.subscribe(sessionId, onEvent = null)

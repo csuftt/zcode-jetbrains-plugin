@@ -57,9 +57,10 @@ describe('BashCommandGroupCard 后台任务标识', () => {
     )
     // 头部：后台运行中 2 个
     expect(screen.getByText('后台运行中 2 个')).toBeTruthy()
-    // 两行各自的徽标 + 独立计时（30 秒 / 60 秒→分钟格式；徽标与时间同一 span）
-    expect(screen.getByText('后台运行中 30.0 秒')).toBeTruthy()
-    expect(screen.getByText('后台运行中 1 分 0 秒')).toBeTruthy()
+    // 两行各自的徽标 + 独立计时（30 秒 / 60 秒→分钟格式；徽标与时间同一 span）。
+    // 耗时按真实时间计算，setState 到渲染间流逝几十毫秒会把 30.0 变 30.x——按正则匹配
+    expect(screen.getByText(/^后台运行中 30\.\d 秒$/)).toBeTruthy()
+    expect(screen.getByText(/^后台运行中 1 分 0 秒$/)).toBeTruthy()
   })
 
   it('只一行匹配 → 该行徽标 + 计时，另一行保持 ✓，头部计数 1', () => {
@@ -72,7 +73,7 @@ describe('BashCommandGroupCard 后台任务标识', () => {
       />,
     )
     expect(screen.getByText('后台运行中 1 个')).toBeTruthy()
-    expect(screen.getByText('后台运行中 10.0 秒')).toBeTruthy()
+    expect(screen.getByText(/^后台运行中 10\.\d 秒$/)).toBeTruthy()
     expect(screen.getByText('✓')).toBeTruthy()
   })
 

@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput } from '@/types/messages'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, looksLikeQuotaError } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import i18n from '@/i18n/config'
@@ -240,6 +240,8 @@ interface StoreState {
   quotaLoading: boolean
   /** quota 上次成功拉取时间戳（圆环 popover 缓存 TTL 用）*/
   quotaFetchedAt: number
+  /** monitor HTTP 实际取 key 的渠道（用量页提示数据口径；成功响应携带）*/
+  usageProvider: { id: string; name: string } | null
 
   // 记忆文件（设置视图「记忆」条目，Kotlin 端固定清单扫描）
   memoryFiles: MemoryFileInfo[] | null
@@ -314,6 +316,12 @@ interface StoreState {
   customEnd: string | null
   /** 用量查询局部错误（凭证/HTTP 失败，不污染全局 lastError）*/
   usageError: string | null
+
+  // 应用用量（usage/stats：app-server 本地聚合，含第三方模型，无 apiKey 依赖）
+  appUsage: AppUsageData | null
+  appUsageRange: AppUsageRange
+  /** 应用用量查询局部错误（app-server 不可达/协议错误）*/
+  appUsageError: string | null
 
   // AskUserQuestion 弹窗（deadlineMs = Java 侧应答超时时刻，弹窗倒计时用；旧链路可缺省）
   askUser: { requestId: string; toolName: string; questions: import('@/types/messages').AskUserQuestion[]; deadlineMs?: number } | null
@@ -429,6 +437,10 @@ interface StoreState {
   setUsageDates: (start: string, end: string) => void
   /** 按当前 usageRange 拉取 model-usage + tool-usage */
   loadUsageData: () => void
+  /** 设置应用用量时间范围并重拉 usage/stats */
+  setAppUsageRange: (range: AppUsageRange) => void
+  /** 拉取应用用量（usage/stats，app-server 本地聚合）*/
+  loadAppUsage: () => void
   /** 清除错误（错误栏关闭按钮）*/
   clearError: () => void
   /** 设置 EnvBanner「去设置」的跳转意图（BasicSettingsView 消费后清除）*/
@@ -546,6 +558,7 @@ export const useStore = create<StoreState>((set, get) => ({
   quota: null,
   quotaLoading: false,
   quotaFetchedAt: 0,
+  usageProvider: null,
   memoryFiles: null,
   memoryLoading: false,
   memoryCreatingPath: null,
@@ -588,6 +601,9 @@ export const useStore = create<StoreState>((set, get) => ({
   customStart: null,
   customEnd: null,
   usageError: null,
+  appUsage: null,
+  appUsageRange: '7d',
+  appUsageError: null,
 
   init: () => {
     if (bridgeInitialized) return
@@ -738,10 +754,9 @@ export const useStore = create<StoreState>((set, get) => ({
     // 切换会话时订阅事件流（带 workspacePath，Java 端 subscribe 前要先 resume 激活会话）
     sendToJava({ op: 'subscribe', sessionId: session.sessionId, workspacePath })
     sendToJava({ op: 'messages', sessionId: session.sessionId, workspacePath })
-    // 拉取该会话的子代理列表（历史会话也能在底部栏查看已完成子代理）
-    get().loadSubagents()
-    // 切会话后拉取上下文用量（圆环显示）
-    get().loadUsage()
+    // P2 让路（缺陷AB 优先级编排②）：用量/子代理不再与 P0 并发挤服务端会话队列，
+    // 改由 messages 首拉落地后补发（见 case 'messages'）——忙窗口期间 P0 未成功
+    // 则不补发，顶栏只剩一条"恢复中"提示
     // 拉取运行时设置（mode + 思考级别，级别列表随模型变化）
     get().loadSettings()
     // 会话切换后，把 persist 记忆的模型真正下发 setModel（见 models 响应里的 applyModelIfReady）
@@ -1289,6 +1304,16 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ modelUsage: null, toolUsage: null, usageError: null })
     sendToJava({ op: 'getModelUsage', startTime: start, endTime: end })
     sendToJava({ op: 'getToolUsage', startTime: start, endTime: end })
+  },
+
+  setAppUsageRange: (range) => {
+    set({ appUsageRange: range })
+    get().loadAppUsage()
+  },
+
+  loadAppUsage: () => {
+    set({ appUsage: null, appUsageError: null })
+    sendToJava({ op: 'getAppUsage', range: get().appUsageRange })
   },
 
   clearError: () => set({ lastError: null }),
@@ -1886,7 +1911,15 @@ export function handleResponse(
         // messageId 与重拉后服务端 user 消息撞车时，AI delta 会叠进用户气泡（叠字）。
         // 丢弃——本轮 turn 结束还会再拉一次权威数据落地。
         if (get().streaming) break
+        // 打开会话的首拉标志（selectSession 置位、下方快照落地复位）：P2 补发依据
+        const firstFetch = get().loadingMessages
         applyMessagesSnapshot(msg, set, get)
+        // P2 让路（缺陷AB 编排②）：首拉落地（P0 完成）后补发用量/子代理——不与
+        // subscribe/messages 并发挤服务端会话队列；历史会话底部栏数据同样补齐
+        if (firstFetch) {
+          get().loadSubagents()
+          get().loadUsage()
+        }
         // 压缩回合结束后延迟的队列 flush 在此触发：摘要卡已随快照落地，排队消息
         // 再发出的新 turn 不会丢它（scheduleDeferredCompactFlush 的正路径）
         tryRunDeferredCompactFlush(msg.sessionId)
@@ -2014,12 +2047,19 @@ export function handleResponse(
       // 走到前端说明自愈失败——提示可操作文案；且跳过 flushQueue（服务端 prompt 状态
       // 未清前队列下一条大概率再撞，会连环报错，2026-08-20 实测）
       const promptRunning = /-32010|prompt is already running/i.test(msg.message)
+      // 会话级请求超时（缺陷AB 忙窗口）：resume 恢复带中断回合的会话时，app-server 对
+      // 该会话的请求全部排队约 1~2 分钟后自愈；Java 侧已对 subscribe/setModel/settings
+      // 延迟自动重试。追加指引防用户"一看报错就重启"（重启重新 resume 重新进窗口，
+      // 永远观察不到自愈——2026-08-27 用户 b5756ab4 四轮重启全超时、放置 100s 自愈实测）
+      const resumeBusy = /请求超时: session\//.test(msg.message)
       set({
         lastError: sessionInactive
           ? `${msg.message}；${i18n.t('app.sessionInactiveHint')}`
           : promptRunning
             ? `${msg.message}；${i18n.t('app.promptRunningHint')}`
-            : msg.message,
+            : resumeBusy
+              ? `${msg.message}；${i18n.t('app.resumeBusyHint')}`
+              : msg.message,
         // 环境前置检查失败（EnvCheckException/envSave 验证失败）：附带 envStatus 刷新提醒条
         ...(msg.envStatus ? { envStatus: msg.envStatus } : {}),
         envSaving: false,
@@ -2046,6 +2086,21 @@ export function handleResponse(
       // 错误清 streaming 后继续发队列下一条（排队意图明确；持续失败时用户可删队列项）；
       // -32010 例外：悬挂回合未清，队列再发必再撞
       if (!promptRunning) get().flushQueue()
+      break
+    }
+
+    case 'usageError': {
+      // P2 用量查询失败静默（缺陷AB 编排②）：不写 lastError、不复位 streaming——
+      // 用量有流式轮询/回合结束刷新自愈；Java 端已不再走 errorResponse
+      console.warn('[store] usage query failed:', msg.message)
+      break
+    }
+
+    case 'busyRetryRecovered': {
+      // Java 忙窗口重试成功（缺陷AB）：顶栏还挂着忙窗口提示时清除（只清本类提示，
+      // 其他错误不受影响；提示串里含 i18n key 的完整文案，按其子串识别）
+      const hint = i18n.t('app.resumeBusyHint')
+      if (get().lastError?.includes(hint)) set({ lastError: null })
       break
     }
 
@@ -2142,10 +2197,16 @@ export function handleResponse(
           // 模型）——推断得出且仍在列表则直接选上（下拉有勾选），推不出才保持空占位。
           // persist 不写回：兜底是运行态显示，用户主动选择才记忆。
           const inferred = inferCurrentModel(get().messages, msg.models)
-          const valid = inferred &&
-              msg.models.some((m) => m.modelId === inferred.modelId && m.providerId === inferred.providerId)
-            ? inferred
-            : null
+          // 同名跨渠道迁移：推断的 provider 已不在列表（客户端切换 API Key 渠道 ↔
+          // 订阅套餐，模型名相同）时，按 modelId 迁移到新渠道的同名模型落位，随后的
+          // setModel 落定让 settings 链路重建思考深度——否则下拉空占位、思考深度
+          // 消失，须手动重选（0.2.6 渠道切换实测反馈）
+          const hit = inferred
+            ? msg.models.find(
+                (m) => m.modelId === inferred.modelId && m.providerId === inferred.providerId,
+              ) ?? msg.models.find((m) => m.modelId === inferred.modelId)
+            : undefined
+          const valid = hit ? { modelId: hit.modelId, providerId: hit.providerId } : null
           // 思考深度联动失效：级别集按模型而异（off/high/max ↔ enabled/off），旧模型的
           // info 残留会让选择器在兜底模型上展示/下发非法级别（-32603）。清掉后待命态走
           // 下方 hydrateThoughtLevelStandby、有会话由 setModel 切换落定后的 settings
@@ -2305,7 +2366,23 @@ export function handleResponse(
         // 用户只看到错误文案，无法判断是否刚尝试过拉取
         set({ quota: null, quotaLoading: false, usageError: msg.error, quotaFetchedAt: Date.now() })
       } else {
-        set({ quota: msg.data ?? null, quotaLoading: false, usageError: null, quotaFetchedAt: Date.now() })
+        set({
+          quota: msg.data ?? null,
+          quotaLoading: false,
+          usageError: null,
+          quotaFetchedAt: Date.now(),
+          ...(msg.providerId && {
+            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+          }),
+        })
+      }
+      break
+
+    case 'appUsage':
+      if (msg.error) {
+        set({ appUsage: null, appUsageError: msg.error })
+      } else {
+        set({ appUsage: msg.data ?? null, appUsageError: null })
       }
       break
 
@@ -2458,7 +2535,12 @@ export function handleResponse(
       if (msg.error) {
         set({ modelUsage: null, usageError: msg.error })
       } else {
-        set({ modelUsage: msg.data ?? null })
+        set({
+          modelUsage: msg.data ?? null,
+          ...(msg.providerId && {
+            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+          }),
+        })
       }
       break
 
@@ -2466,7 +2548,12 @@ export function handleResponse(
       if (msg.error) {
         set({ toolUsage: null, usageError: msg.error })
       } else {
-        set({ toolUsage: msg.data ?? null })
+        set({
+          toolUsage: msg.data ?? null,
+          ...(msg.providerId && {
+            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+          }),
+        })
       }
       break
   }

@@ -42,7 +42,8 @@ class ZCodeProtocolClient private constructor(
     private val stdout: BufferedReader,
     private val zcodePath: java.nio.file.Path,
     private val nodePath: String,
-    private val credentials: com.zcode.ideaplugin.protocol.ZCodeCredentials
+    /** 可空：config.json 无明文凭证（oauth 登录）时不注入 env，由 app-server 自身凭证链接管 */
+    private val credentials: com.zcode.ideaplugin.protocol.ZCodeCredentials?
 ) : AutoCloseable {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -126,15 +127,16 @@ class ZCodeProtocolClient private constructor(
          * 启动 ZCode app-server 子进程并连接
          *
          * @param zcodePath zcode.cjs 路径（默认自动探测）
-         * @param credentials 凭证（默认从 ~/.zcode/v2/config.json 读）
+         * @param credentials 凭证（默认从 ~/.zcode/v2/config.json 读；null = 无明文凭证，
+         *   不注入 env，app-server 用自身凭证链——cli/config.json 的 provider 注册）
          * @param nodePath node 可执行文件路径（默认从 PATH 找）
          */
         fun start(
             zcodePath: Path = ZCodeLocator.detect(),
-            credentials: ZCodeCredentials = Credentials.load(),
+            credentials: ZCodeCredentials? = Credentials.loadOrNull(),
             nodePath: String = findNode()
         ): ZCodeProtocolClient {
-            val env = (System.getenv() + credentials.toEnvMap()).toMutableMap()
+            val env = (System.getenv() + (credentials?.toEnvMap() ?: emptyMap())).toMutableMap()
 
             val pb = ProcessBuilder(nodePath, zcodePath.toString(), "app-server")
             pb.environment().clear()
@@ -747,7 +749,7 @@ class ZCodeProtocolClient private constructor(
 
         val pb = ProcessBuilder(args)
         pb.environment().clear()
-        pb.environment().putAll(credentials.toEnvMap())
+        pb.environment().putAll(credentials?.toEnvMap() ?: emptyMap())
         pb.redirectErrorStream(true)
 
         val proc = pb.start()
@@ -796,7 +798,7 @@ class ZCodeProtocolClient private constructor(
 
         val pb = ProcessBuilder(args)
         pb.environment().clear()
-        pb.environment().putAll(credentialsOverride?.toEnvMap() ?: credentials.toEnvMap())
+        pb.environment().putAll(credentialsOverride?.toEnvMap() ?: credentials?.toEnvMap() ?: emptyMap())
         pb.redirectErrorStream(false)
 
         val proc = pb.start()
@@ -1049,6 +1051,19 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * usage/stats — 应用用量统计（app-server 本地会话聚合，非 HTTP）。
+     *
+     * 覆盖 zcode 经手的全部模型（含第三方直连，monitor 的 model-usage 只统计
+     * bigmodel 网关侧 GLM 系），不依赖任何 apiKey。range 仅支持 7d/30d/all。
+     */
+    fun usageStats(range: String, timeoutMs: Long = 15000): JsonObject {
+        val params = buildJsonObject { put("range", range) }
+        val r = requestWithRetry("usage/stats", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+        r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * session/read → 提取 runtime（含 contextUsage + 可能的 breakdown 构成明细）
      * 返回完整 runtime JsonObject，调用者按需提取 contextUsage / breakdown 子字段。
      * 需要会话处于 active 状态（subscribe/resume 后即可）。
@@ -1060,8 +1075,6 @@ class ZCodeProtocolClient private constructor(
         r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
         val runtime = r["result"]?.jsonObject?.get("runtime")?.jsonObject
             ?: return JsonObject(emptyMap())
-        // 诊断：确认 runtime 完整结构（是否包含 breakdown 构成明细）
-        println("[DIAG-CTX] runtime keys=${runtime.keys} json=${LogRedactor.redact(runtime.toString()).take(2000)}")
         return runtime
     }
 
