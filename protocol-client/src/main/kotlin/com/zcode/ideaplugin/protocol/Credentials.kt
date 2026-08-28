@@ -74,11 +74,26 @@ object Credentials {
      *   "preset:builtin:bigmodel"（取末段即 providerId）
      * - modelProviderFamilyModes：家族当前模式（apiKey / 订阅），仅供展示参考
      *
+     * setting.json 恒在 home 入口不随 dataBaseDir 迁移（dataBaseDir 与激活态同文件）；
+     * 迁移后 config.json 的兄弟目录没有 setting.json，激活态仍须回 home 入口读。
+     *
      * @return 激活的 providerId；未登录内置渠道 / setting 缺失 / 结构不符返回 null
      */
-    fun activeBuiltinProviderId(configPath: Path = defaultConfigPath()): String? {
-        val settingPath = configPath.resolveSibling("setting.json")
-        if (!settingPath.exists()) return null
+    fun activeBuiltinProviderId(configPath: Path = defaultConfigPath()): String? =
+        activeBuiltinProviderId(
+            configPath,
+            System.getProperty("user.home")?.let { h -> Path.of(h, ".zcode", "v2", "setting.json") },
+        )
+
+    /**
+     * 双候选 setting.json：config.json 兄弟目录（未迁移场景同目录）优先；不存在则回
+     * [entrySetting]（生产 = home 入口；单测注入 fake home）。回退前须过 [ownsConfig]
+     * 归属校验，防止读到与本 config 无关的 setting（单测 fake home 与真实机器并存）。
+     */
+    internal fun activeBuiltinProviderId(configPath: Path, entrySetting: Path?): String? {
+        val settingPath = configPath.resolveSibling("setting.json").takeIf { it.exists() }
+            ?: entrySetting?.takeIf { it.exists() && ownsConfig(it, configPath) }
+        if (settingPath == null) return null
         return try {
             val st = json.parseToJsonElement(settingPath.readText()).jsonObject
             val selected = st["modelProviderFamilySelectedKeys"]?.jsonObject ?: return null
@@ -264,9 +279,12 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     }
 
     /** 读 setting.json 的 dataBaseDir；未配置/文件缺失/解析失败均返回 null（按未配置处理） */
-    private fun readDataBaseDir(home: String): String? {
+    private fun readDataBaseDir(home: String): String? =
+        dataBaseDirOf(Path.of(home, ".zcode", "v2", "setting.json"))
+
+    /** 从指定 setting.json 读 dataBaseDir（[readDataBaseDir] 的按文件版本） */
+    private fun dataBaseDirOf(setting: Path): String? {
         return try {
-            val setting = Path.of(home, ".zcode", "v2", "setting.json")
             if (!setting.isRegularFile()) return null
             val dir = json.parseToJsonElement(setting.readText()).jsonObject["dataBaseDir"]
                 ?.jsonPrimitive?.content?.trim()
@@ -275,6 +293,21 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
             // setting.json 是 GUI 高频写文件，可能撞上写一半的瞬间；失败即回退旧位置
             null
         }
+    }
+
+    /**
+     * 入口 setting 是否"拥有"该 config：其 dataBaseDir 指向 config 所在根（未配置
+     * dataBaseDir 时即 setting 同目录的 config）。setting.json 恒在 home 入口不随
+     * dataBaseDir 迁移，迁移后激活态只能从入口读；但回退前必须确认这份入口 setting
+     * 确实管辖当前 config，否则单测（fake home）会误采信真实机器的激活态。
+     */
+    private fun ownsConfig(entrySetting: Path, configPath: Path): Boolean = try {
+        val dir = dataBaseDirOf(entrySetting)
+        val expected = if (dir.isNullOrBlank()) entrySetting.resolveSibling("config.json")
+        else Path.of(dir, ".zcode", "v2", "config.json")
+        expected.normalize() == configPath.normalize()
+    } catch (e: Exception) {
+        false
     }
 }
 

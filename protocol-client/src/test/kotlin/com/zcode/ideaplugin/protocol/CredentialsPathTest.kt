@@ -362,6 +362,33 @@ class CredentialsPathTest {
     }
 
     @Test
+    fun `dataBaseDir 迁移后激活态从 home 入口 setting 解析`() {
+        // 2026-08-28 G 盘迁移实测：setting.json 恒在 home 入口（与 dataBaseDir 同文件），
+        // config.json 迁到新位置后其兄弟目录没有 setting.json——兄弟缺席须回 home 入口读，
+        // 否则权威链判空误走兜底（模型列表碰巧相同，但命中方式徽章与解析路径都错）
+        val newRoot = home.resolve("newroot")
+        val escaped = newRoot.toString().replace("\\", "\\\\")
+        givenSetting(dataBaseDir = null, content = """
+            {"dataBaseDir": "$escaped",
+             "modelProviderFamilySelectedKeys": {"bigmodel": "coding-plan:builtin:bigmodel-coding-plan"},
+             "providerFamilyDomain": "bigmodel"}
+        """.trimIndent())
+        val newConfig = newRoot.resolve(".zcode/v2/config.json")
+        Files.createDirectories(newConfig.parent)
+        newConfig.toFile().writeText("""
+            {"builtin:bigmodel-coding-plan": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": "sk-plan"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        val cfg = Credentials.configPathFor(home.toString())
+        assertEquals(newConfig, cfg) // 重定向生效：此时 cfg 兄弟目录无 setting.json
+        assertEquals(
+            "builtin:bigmodel-coding-plan",
+            Credentials.activeBuiltinProviderId(cfg, home.resolve(".zcode/v2/setting.json")),
+        )
+    }
+
+    @Test
     fun `resolution 权威命中标记 viaSelected`() {
         givenConfig("""
             {"builtin:zai": {"enabled": true, "kind": "anthropic",
