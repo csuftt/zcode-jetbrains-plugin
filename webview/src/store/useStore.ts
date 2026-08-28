@@ -1096,7 +1096,17 @@ export const useStore = create<StoreState>((set, get) => ({
     const models = get().models
     if (models.length === 0) return
     const exists = models.some((m) => m.modelId === saved!.modelId && m.providerId === saved!.providerId)
-    if (!exists) return
+    if (!exists) {
+      // 记忆的模型已不在可选列表（典型：体验套餐 captcha 门控渠道被后端过滤，或配置已删）：
+      // 兜底个人套餐首选、其次列表首个，并回写记忆——否则会话静默跑在服务端默认模型上、
+      // 选择器空占位（2026-08-28 体验套餐过滤定案）
+      const fb = models.find((m) => m.plan === 'personal') ?? models[0]
+      const fallback = { modelId: fb.modelId, providerId: fb.providerId }
+      setPersisted('zcode.currentModel', JSON.stringify(fallback))
+      set({ currentModel: fallback, modelAppliedForSession: sessionId, modelSwitchInFlightAt: Date.now() })
+      sendToJava({ op: 'setModel', sessionId, modelId: fallback.modelId, providerId: fallback.providerId })
+      return
+    }
     set({ currentModel: saved, modelAppliedForSession: sessionId })
     // 标记切换在途：期间到达的 settings 级别部分计算于旧模型（modelSet 响应时清除）
     set({ modelSwitchInFlightAt: Date.now() })
@@ -2336,7 +2346,16 @@ export function handleResponse(
       if (get().modelPendingSwitch?.sessionId === msg.sessionId) {
         set({ modelPendingSwitch: null, modelSwitchPrevModel: null, lastNotice: null })
       }
-      set({ lastError: msg.message })
+      // 即时切换失败路径回滚选中态（此前停在目标模型上，勾选与实际不符）；延迟路径
+      // modelSetPending 已回滚，prev 与 currentModel 相同，再回滚是无操作。
+      // captchaGated（体验套餐 zcode-plan 网关渠道被 Java 入口拦截）映射本地化文案
+      const prev = get().modelSwitchPrevModel
+      set({
+        modelSwitchInFlightAt: null,
+        modelSwitchPrevModel: null,
+        ...(prev ? { currentModel: prev } : {}),
+        lastError: msg.reason === 'captchaGated' ? i18n.t('app.modelCaptchaGated') : msg.message,
+      })
       break
     }
 

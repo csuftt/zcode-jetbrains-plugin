@@ -413,6 +413,9 @@ export interface ModelManageProvider {
   plan?: 'personal' | 'trial'
   /** 内置渠道命中方式：selected=客户端选中渠道生效；fallback=所选渠道凭证不可用回退首个可用内置 */
   via?: 'selected' | 'fallback'
+  /** 兜底原因（via=fallback 时）：captchaGated=客户端所选渠道是体验套餐(zcode-plan 网关)
+   *  被门控排除，徽章换"体验套餐无法使用"专属文案，区分于凭证失效 */
+  viaReason?: 'captchaGated'
   baseURL?: string
   enabled: boolean
   models: ModelManageModel[]
@@ -757,8 +760,9 @@ export type JavaResponse =
   | { op: 'modelSet'; sessionId: string; modelId: string; providerId: string }
   /** 回合中切换挂起（缺陷AC）：Java 挂起目标模型等回合结束补发，前端回滚选中态并提示 */
   | { op: 'modelSetPending'; sessionId: string; modelId: string; providerId: string }
-  /** 挂起的切换补发失败（回合结束后重试仍报错）：清除提示并告警 */
-  | { op: 'modelSetFailed'; sessionId: string; modelId: string; providerId: string; message: string }
+  /** 挂起的切换补发失败（回合结束后重试仍报错）：清除提示并告警；
+   *  reason=captchaGated = 体验套餐(zcode-plan 网关)渠道被入口拦截，前端映射本地化文案 */
+  | { op: 'modelSetFailed'; sessionId: string; modelId: string; providerId: string; message: string; reason?: 'captchaGated' }
   /** 挂起的延迟切换已撤销（cancelModelSwitch 回执）*/
   | { op: 'modelSwitchCancelled'; sessionId: string }
   /** Java 忙窗口重试成功通知（缺陷AB）：顶栏忙窗口提示据此清除 */

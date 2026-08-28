@@ -121,17 +121,31 @@ function ProviderCard({
             />
           </button>
         )}
-        {builtin && provider.via && (
-          <span
-            className={cx(
-              'model-list-view__provider-via',
-              provider.via === 'fallback' && 'is-fallback',
-            )}
-            title={provider.via === 'fallback' ? t('models.viaFallbackHint') : t('models.viaSelectedHint')}
-          >
-            {provider.via === 'fallback' ? t('models.viaFallback') : t('models.viaSelected')}
-          </span>
-        )}
+        {builtin && provider.via && (() => {
+          // 兜底原因细分：captchaGated（体验套餐被门控排除）换专属文案，区分于凭证失效
+          const captchaFallback = provider.via === 'fallback' && provider.viaReason === 'captchaGated'
+          const viaText = captchaFallback
+            ? t('models.viaFallbackCaptcha')
+            : provider.via === 'fallback'
+              ? t('models.viaFallback')
+              : t('models.viaSelected')
+          const viaTitle = captchaFallback
+            ? t('models.viaFallbackCaptchaHint')
+            : provider.via === 'fallback'
+              ? t('models.viaFallbackHint')
+              : t('models.viaSelectedHint')
+          return (
+            <span
+              className={cx(
+                'model-list-view__provider-via',
+                provider.via === 'fallback' && 'is-fallback',
+              )}
+              title={viaTitle}
+            >
+              {viaText}
+            </span>
+          )
+        })()}
         <span className={cx('codicon', provider.enabled ? 'codicon-server-environment' : 'codicon-server-process')} />
         <span className="model-list-view__provider-name">{provider.providerName}</span>
         <PlanBadge plan={provider.plan} />

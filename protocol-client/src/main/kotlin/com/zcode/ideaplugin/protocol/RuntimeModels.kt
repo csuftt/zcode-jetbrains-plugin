@@ -22,6 +22,25 @@ object RuntimeModels {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
+     * zcode-plan 网关渠道判定（体验套餐 builtin:bigmodel-start-plan 等）。
+     *
+     * 该网关（baseURL 含 zcode-plan，如 https://zcode.z.ai/api/v1/zcode-plan/anthropic）
+     * 的模型请求强制携带阿里云滑块人机验证 param（x-aliyun-captcha-verify-param，由宿主
+     * 经滑块 UI 获取，zcode.cjs 只读不写），且回合 prepare 阶段向宿主发反向请求
+     * interaction/requestProviderRuntimeHeaders 索取（2026-08-28 实测定性）。插件宿主
+     * 无法完成滑块验证，此类渠道整体不可用：模型列表过滤 + 切换拒绝——用户在 ZCode
+     * 客户端自用体验套餐，插件走个人套餐/ApiKey 渠道，互不干扰。
+     */
+    fun isCaptchaGatedBaseUrl(baseURL: String): Boolean = baseURL.lowercase().contains("zcode-plan")
+
+    /** 按 providerId 查 config.json 判定（provider 缺失/无 baseURL = 不门控）*/
+    fun isCaptchaGatedProvider(providerId: String, configPath: Path = Credentials.defaultConfigPath()): Boolean {
+        val pv = readProviders(configPath)?.get(providerId)?.jsonObject ?: return false
+        val baseURL = pv["options"]?.jsonObject?.get("baseURL")?.jsonPrimitive?.contentOrNull ?: return false
+        return isCaptchaGatedBaseUrl(baseURL)
+    }
+
+    /**
      * 取第一个 enabled 的 anthropic provider（与 Credentials.load 同一选取规则，
      * 即 app-server 启动时 ZCODE_MODEL 环境变量的来源），构造其第一个模型的 runtimeModel。
      *
@@ -33,7 +52,9 @@ object RuntimeModels {
             val pv = try { providerEl.jsonObject } catch (e: Exception) { continue }
             if (!isEnabledAnthropic(pv)) continue
             val options = pv["options"]?.jsonObject ?: continue
-            if (options["baseURL"]?.jsonPrimitive?.contentOrNull == null) continue
+            val baseURL = options["baseURL"]?.jsonPrimitive?.contentOrNull ?: continue
+            // 体验套餐(zcode-plan 网关)渠道不作默认（-32031 恢复兜底不落门控渠道）
+            if (isCaptchaGatedBaseUrl(baseURL)) continue
             val modelId = pv["models"]?.jsonObject?.keys?.firstOrNull() ?: continue
             return build(providerId, modelId, pv)
         }

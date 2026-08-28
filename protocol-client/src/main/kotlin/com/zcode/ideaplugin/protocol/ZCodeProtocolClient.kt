@@ -327,6 +327,17 @@ class ZCodeProtocolClient private constructor(
                 })
             }
         }
+        // 体验套餐(zcode-plan 网关)模型请求前的运行时 headers 刷新（携带滑块验证 param）。
+        // 插件无法完成人机验证，如实应答 headersApplied=false：服务端在 prepare 阶段
+        // 快速失败，errorMessage 原文进入 turn.failed detail（2026-08-28 实测）——替代
+        // 此前落入 -32601 兜底的 ZodError 校验崩溃（用户只见 "Model request failed."）
+        else if (method == "interaction/requestProviderRuntimeHeaders") {
+            respondToServer(id, buildJsonObject {
+                put("headersApplied", false)
+                put("errorMessage", "host plugin cannot provide captcha verify param " +
+                    "(zcode-plan gateway requires human verification; switch to a non-zcode-plan model)")
+            })
+        }
         // 宿主浏览器反向请求（browser-use）：异步执行——navigate/screenshot 可能秒级耗时，
         // 与 requestUserInput 同理禁止阻塞 reader 线程
         else if (method == "interaction/browserList") {

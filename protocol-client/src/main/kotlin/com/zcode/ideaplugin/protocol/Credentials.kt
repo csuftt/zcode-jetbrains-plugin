@@ -120,9 +120,11 @@ object Credentials {
  * 生效内置渠道解析结果。
  * providerId=null：无可用内置渠道；viaSelected=true：selectedKey 权威命中，
  * false：兜底链命中（客户端所选渠道凭证不可用，回退 config 首个可用内置）。
+ * selectedGated=true：客户端所选渠道是体验套餐(zcode-plan 网关)被门控排除，
+ * 兜底原因区分于凭证失效（设置页徽章据此展示"体验套餐无法使用"）。
  * 设置页据此展示命中方式徽章。
  */
-data class BuiltinResolution(val providerId: String?, val viaSelected: Boolean)
+data class BuiltinResolution(val providerId: String?, val viaSelected: Boolean, val selectedGated: Boolean = false)
 
 /**
  * 展示用的有效内置 provider（selectedKey 权威 + config 兜底）。
@@ -131,6 +133,9 @@ data class BuiltinResolution(val providerId: String?, val viaSelected: Boolean)
  * 它；解析失败/不匹配/指向的渠道凭证已失效（如在客户端选着 API Key 方式但把
  * key 删了）→ 取 config 里首个 enabled 且凭证可用（apiKey 非空或家族 oauth
  * token）的内置 provider；都没有 → null（无内置渠道可展示）。
+ * 体验套餐(zcode-plan 网关)渠道在可用判定中整体排除（滑块人机验证插件无法
+ * 代答）：客户端选中它时插件自动兜底其他内置渠道，模型列表/模型管理/额度/
+ * 启动凭证全部走真实使用的兜底渠道（2026-08-28 用户定案）。
  */
 fun effectiveBuiltinProviderId(configPath: Path = defaultConfigPath()): String? =
     builtinResolution(configPath).providerId
@@ -147,19 +152,27 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
         ) {
             return BuiltinResolution(active, true)
         }
+        // 兜底原因标注：激活渠道存在但被门控排除（体验套餐）≠ 凭证失效
+        val selectedGated = active != null && providers[active]?.jsonObject?.let { pv ->
+            val b = pv["options"]?.jsonObject?.get("baseURL")?.jsonPrimitive?.content
+            b != null && RuntimeModels.isCaptchaGatedBaseUrl(b)
+        } == true
         val fallback = providers.keys.firstOrNull { id ->
             id.startsWith("builtin:") && isBuiltinUsable(id, providers[id]!!.jsonObject, configPath)
         }
-        BuiltinResolution(fallback, false)
+        return BuiltinResolution(fallback, false, selectedGated)
     } catch (e: Exception) {
         BuiltinResolution(null, false)
     }
 }
 
-    /** 内置 provider 可用判定：enabled（缺省视为启用）且 apiKey 非空或有家族 oauth token */
+    /** 内置 provider 可用判定：enabled（缺省视为启用）且 apiKey 非空或有家族 oauth token；
+     *  体验套餐(zcode-plan 网关)渠道整体排除（滑块验证插件无法代答，见 [BuiltinResolution]） */
     private fun isBuiltinUsable(providerId: String, pv: JsonObject, configPath: Path): Boolean {
         val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: true
         if (!enabled) return false
+        val baseURL = pv["options"]?.jsonObject?.get("baseURL")?.jsonPrimitive?.content
+        if (baseURL != null && RuntimeModels.isCaptchaGatedBaseUrl(baseURL)) return false
         val apiKey = pv["options"]?.jsonObject?.get("apiKey")?.jsonPrimitive?.content
         return !apiKey.isNullOrBlank() || hasFamilyOAuthToken(providerId, configPath)
     }
@@ -177,6 +190,9 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
         // 旧逻辑 `?: continue` 只拦 null，空串会穿透成"自检通过但注入空 key"，
         // 反而挡住 app-server 自身凭证链（resolveApiKey 的 env fallback 拿到空值）
         val baseURL = options["baseURL"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return null
+        // 体验套餐(zcode-plan 网关)渠道不作为凭证来源：env 注入的 key 必须是插件
+        // 实际可用的兜底渠道，否则 app-server 默认模型落在门控渠道上每回合必失败
+        if (RuntimeModels.isCaptchaGatedBaseUrl(baseURL)) return null
         val apiKey = options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return null
         val model = pv["models"]?.jsonObject?.keys?.firstOrNull() ?: return null
         return ZCodeCredentials(model = model, baseURL = baseURL, apiKey = apiKey)

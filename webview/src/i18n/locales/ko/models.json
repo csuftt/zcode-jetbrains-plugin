@@ -41,5 +41,7 @@
   "viaSelected": "클라이언트 선택",
   "viaSelectedHint": "ZCode 클라이언트에서 현재 선택한 채널(권한 있음)",
   "viaFallback": "폴백 적용",
-  "viaFallbackHint": "클라이언트가 선택한 채널에 유효한 자격증명이 없어 첫 번째 사용 가능한 내장 채널로 대체되었습니다"
+  "viaFallbackHint": "클라이언트가 선택한 채널에 유효한 자격증명이 없어 첫 번째 사용 가능한 내장 채널로 대체되었습니다",
+  "viaFallbackCaptcha": "체험 플랜 사용 불가",
+  "viaFallbackCaptchaHint": "체험 플랜 채널은 CAPTCHA(슬라이더) 인증이 필요하여 플러그인으로는 완료할 수 없습니다. 첫 번째 사용 가능한 내장 채널(개인 플랜/API 키)로 대체되었습니다"
 }

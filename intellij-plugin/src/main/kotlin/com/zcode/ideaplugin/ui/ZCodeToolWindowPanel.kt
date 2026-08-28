@@ -1806,6 +1806,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("models", JsonArray(emptyList()))
         }
 
+        // activeBuiltin 来自 Credentials.builtinResolution：体验套餐(zcode-plan 网关)
+        // 渠道在解析层整体排除——客户端选中它时自动兜底首个非门控内置（个人套餐/
+        // API Key），模型列表/模型管理/额度/启动凭证全部跟随真实使用的兜底渠道
         val activeBuiltin = Credentials.effectiveBuiltinProviderId()
         val models = JsonArray(providers.mapNotNull { (providerId, providerEl) ->
             val pv = providerEl.jsonObject
@@ -1818,6 +1821,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (!enabled) return@mapNotNull null
             val options = pv["options"]?.jsonObject ?: return@mapNotNull null
             val baseURL = options["baseURL"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            // 体验套餐(zcode-plan 网关)渠道整体不进聊天可选列表（滑块人机验证插件无法
+            // 代答，见 handleSetModel 入口拦截）；设置页模型管理不受此限（可见性信息）
+            if (com.zcode.ideaplugin.protocol.RuntimeModels.isCaptchaGatedBaseUrl(baseURL)) return@mapNotNull null
             // apiKey 缺失的过滤对第三方与 API Key 渠道生效，仅订阅制套餐（两家
             // coding-plan）凭 credentials.json 家族 token 兜底（调用期凭证由 oauth
             // 解析，未来 key 不落盘时保住模型列表）；builtin:bigmodel/zai 等 API Key
@@ -1900,6 +1906,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (providerId.startsWith("builtin:") && providerId != activeBuiltin) return@mapNotNull null
             val providerName = pv["name"]?.jsonPrimitive?.contentOrNull ?: providerId
             val baseURL = options?.get("baseURL")?.jsonPrimitive?.contentOrNull
+            // 体验套餐(zcode-plan 网关)渠道在模型管理页同样不展示（滑块验证插件无法
+            // 代答，插件里彻底隐形；聊天下拉已在 listModels 过滤，builtin 门控渠道
+            // 也到不了这里——activeBuiltin 解析层已排除）
+            if (baseURL != null &&
+                com.zcode.ideaplugin.protocol.RuntimeModels.isCaptchaGatedBaseUrl(baseURL)
+            ) return@mapNotNull null
             val models = JsonArray(pv["models"]?.jsonObject?.map { (modelId, modelEl) ->
                 val modelObj = modelEl.jsonObject
                 val modelName = modelObj["name"]?.jsonPrimitive?.contentOrNull ?: modelId
@@ -1920,9 +1932,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("providerName", providerName)
                 builtinPlanOf(providerId)?.let { put("plan", it) }
                 // 命中方式：selected = 客户端选中渠道生效；fallback = 所选渠道凭证不可用，
-                // 回退 config 首个可用内置（前端据此显示徽章，兜底态提醒用户客户端选择失配）
+                // 回退 config 首个可用内置（前端据此显示徽章，兜底态提醒用户客户端选择失配）；
+                // viaReason=captchaGated = 所选渠道是体验套餐被门控排除（前端换"体验套餐
+                // 无法使用"专属文案，区分于凭证失效）
                 if (providerId.startsWith("builtin:")) {
                     put("via", if (resolution.viaSelected) "selected" else "fallback")
+                    if (!resolution.viaSelected && resolution.selectedGated) put("viaReason", "captchaGated")
                 }
                 put("enabled", enabled)
                 baseURL?.let { put("baseURL", it) }
@@ -2091,6 +2106,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             // 空白与缺失同等对待（与 credentialOf 同口径）：oauth 登录的 coding-plan 在
             // config 里 apiKey 是占位空串，穿透会发出空 Authorization 头
             val url = options["baseURL"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
+            // 体验套餐(zcode-plan 网关)渠道跳过：插件对门控渠道整体隐形（列表/管理/凭证
+            // 同口径），额度永远反映实际使用的兜底渠道（2026-08-28 用户定案）
+            if (com.zcode.ideaplugin.protocol.RuntimeModels.isCaptchaGatedBaseUrl(url)) continue
             val key = options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
             val name = pv["name"]?.jsonPrimitive?.content ?: providerId
             // 优先 bigmodel-coding-plan，其他有 key 的也行
@@ -2298,6 +2316,20 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return errorResponse("缺少 modelId")
         val providerId = msg["providerId"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 providerId")
+        // 体验套餐(zcode-plan 网关)渠道需滑块人机验证，插件宿主无法提供 verify param，
+        // 切过去回合必失败（2026-08-28 定性，docs/internal/bugs-regressions）。入口直接
+        // 拒绝并带 reason=captchaGated（前端映射本地化文案），不进延迟切换/忙重试队列
+        if (com.zcode.ideaplugin.protocol.RuntimeModels.isCaptchaGatedProvider(providerId)) {
+            log.warn("Model switch rejected: $providerId is captcha-gated (zcode-plan gateway)")
+            return buildJsonObject {
+                put("op", "modelSetFailed")
+                put("sessionId", sessionId)
+                put("modelId", modelId)
+                put("providerId", providerId)
+                put("reason", "captchaGated")
+                put("message", "captcha-gated provider: $providerId (zcode-plan gateway requires human verification)")
+            }
+        }
         // 回合进行中：挂起切换，回合结束后异步补发（见 streamingTurns 注释）。
         // 前端收到 modelSetPending 后回滚选中态并提示"本轮结束后生效"，补发成功再落定
         if (sessionId in streamingTurns) return deferModelSwitch(sessionId, modelId, providerId)

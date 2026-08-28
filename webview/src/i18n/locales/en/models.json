@@ -42,5 +42,7 @@
   "viaSelected": "Client selected",
   "viaSelectedHint": "The channel currently selected in the ZCode client (authoritative)",
   "viaFallback": "Fallback",
-  "viaFallbackHint": "The client-selected channel has no valid credential; fell back to the first usable builtin channel"
+  "viaFallbackHint": "The client-selected channel has no valid credential; fell back to the first usable builtin channel",
+  "viaFallbackCaptcha": "Trial plan unavailable",
+  "viaFallbackCaptchaHint": "The trial-plan channel requires CAPTCHA (slider) verification, which the plugin cannot complete; fell back to the first usable builtin channel (personal plan / API key)"
 }

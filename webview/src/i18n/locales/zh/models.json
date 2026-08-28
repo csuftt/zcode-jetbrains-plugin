@@ -42,5 +42,7 @@
   "viaSelected": "客户端选中",
   "viaSelectedHint": "ZCode 客户端当前选中的渠道，权威生效",
   "viaFallback": "兜底生效",
-  "viaFallbackHint": "客户端所选渠道凭证不可用，已回退到配置中首个可用的内置渠道"
+  "viaFallbackHint": "客户端所选渠道凭证不可用，已回退到配置中首个可用的内置渠道",
+  "viaFallbackCaptcha": "体验套餐无法使用",
+  "viaFallbackCaptchaHint": "体验套餐渠道需人机验证（滑块），插件无法代为完成，已兜底到配置中首个可用的内置渠道（个人套餐/API Key）"
 }

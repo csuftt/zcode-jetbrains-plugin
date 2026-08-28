@@ -402,6 +402,40 @@ class CredentialsPathTest {
     }
 
     @Test
+    fun `resolution 客户端选中门控渠道时兜底并标记 selectedGated`() {
+        // 体验套餐(zcode-plan 网关)在解析层整体排除：客户端切到体验套餐时插件自动
+        // 兜底首个非门控内置（个人套餐/API Key），selectedGated 供徽章区分兜底原因
+        givenConfig("""
+            {"builtin:bigmodel-start-plan": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://zcode.z.ai/api/v1/zcode-plan/anthropic", "apiKey": "jwt"},
+              "models": {"GLM-5.3-Flash": {}}},
+             "builtin:bigmodel": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": "sk-apikey"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        givenSelection("""{"bigmodel": "coding-plan:builtin:bigmodel-start-plan"}""", "bigmodel")
+        val r = Credentials.builtinResolution(Credentials.configPathFor(home.toString()))
+        assertEquals("builtin:bigmodel", r.providerId)
+        assertEquals(false, r.viaSelected)
+        assertEquals(true, r.selectedGated)
+    }
+
+    @Test
+    fun `loadOrNull 门控激活渠道时凭证取自兜底渠道`() {
+        givenConfig("""
+            {"builtin:bigmodel-start-plan": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://zcode.z.ai/api/v1/zcode-plan/anthropic", "apiKey": "jwt"},
+              "models": {"GLM-5.3-Flash": {}}},
+             "builtin:bigmodel": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": "sk-apikey"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        givenSelection("""{"bigmodel": "coding-plan:builtin:bigmodel-start-plan"}""", "bigmodel")
+        val creds = Credentials.loadOrNull(Credentials.configPathFor(home.toString()))
+        assertEquals("sk-apikey", creds?.apiKey)
+    }
+
+    @Test
     fun `resolution 兜底命中标记非 viaSelected`() {
         // 客户端选着订阅渠道但凭证不可用（空 key 无 token）→ 兜底到 API Key 渠道
         givenConfig("""
