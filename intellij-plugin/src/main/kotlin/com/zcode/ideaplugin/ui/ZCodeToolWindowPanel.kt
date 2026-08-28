@@ -2461,6 +2461,22 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.warn("Failed to read session settings: ${e.message}")
             // 忙窗口超时（缺陷AB）：应答仍即时回错误，后台延迟重试，成功后补推 settings
             if (isTimeoutEx(e)) scheduleSettingsBusyRetry(sessionId)
+            // 冷会话（-32004 Session is not active）：跨进程会话（其他客户端创建的/
+            // CLI 重启后的新进程）在本进程尚未激活，启动恢复上次会话时必撞。与
+            // resumeAndReadMessages 同款自愈——resume 激活后重读一次（错误文案里
+            // 承诺的"自动恢复后重发"在此落地；resumeSessionDeduped 与并发 messages
+            // 链路共用一次 resume）
+            val coldSession = e.message?.let {
+                it.contains("-32004") || it.contains("Session is not active", ignoreCase = true)
+            } == true
+            if (coldSession) {
+                try {
+                    resumeSessionDeduped(client, sessionId, effectiveWorkspacePath(msg))
+                    return settingsResponse(sessionId, client.readSettings(sessionId))
+                } catch (e2: Exception) {
+                    log.warn("settings read still failing after cold-session resume: ${e2.message}")
+                }
+            }
             errorResponse("读取设置失败: ${e.message}")
         }
     }
