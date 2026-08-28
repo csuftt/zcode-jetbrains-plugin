@@ -956,6 +956,31 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * v4/command {type:"stop"} — V4 会话协议的一等停止命令（官方客户端同款），
+     * 调运行时原语 stopActiveForegroundExecution，立即终止在途回合。
+     * 升级通道（缺陷AD重审）：0.16.x 的 legacy session/stop 静默失效，本方法实测
+     * 40ms 终止且 legacy 事件流收到真实收尾帧；老版本 CLI 无 v4 面时报 -32601
+     * （此时 session/stop 本就原生生效）。
+     *
+     * @return 应答 result（含 status: accepted/noop 等，仅日志用）
+     */
+    fun stopForegroundViaV4(sessionId: String, timeoutMs: Long = 8000): JsonObject {
+        val params = buildJsonObject {
+            put("commandId", "stop-${java.util.UUID.randomUUID()}")
+            put("clientId", "zcode-idea-plugin")
+            put("sessionId", sessionId)
+            put("type", "stop")
+            put("payload", buildJsonObject { })
+            put("issuedAt", System.currentTimeMillis())
+            put("connectionId", "zcode-idea-plugin")
+            put("clientMode", "desktop-continuous")
+        }
+        val r = request("v4/command", params, timeoutMs)
+        r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * session/cancelBackgroundTask — 取消子代理/后台任务（taskId = agentId）。
      * 作用于主会话（须 active）；runtime 按 taskType 分发——local_agent 走
      * subagentPort.stopTask（前台子代理也能停），bash 后台任务走 abort。

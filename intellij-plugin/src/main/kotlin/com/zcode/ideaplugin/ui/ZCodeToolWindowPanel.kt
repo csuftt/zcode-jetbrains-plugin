@@ -154,9 +154,10 @@ class ZCodeToolWindowPanel(
     // 在途回合下一轮请求即死（缺陷AC）；②该窗口内不注册 runtimeModel，切到未注册
     // 模型直接 -32603 Unsupported model。插件侧统一防护：回合中收到 setModel 只挂起，
     // turn.completed/failed 后异步补发（此时注册+切换均正常，实测验证）。
-    /** 回合进行中的会话（turn.started 进、turn.completed/failed 出），延迟切换的判断依据 */
-    private val streamingSessions: MutableSet<String> =
-        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    /** 回合进行中的会话 → turnId（turn.started 进、turn.completed/failed 出；null=事件没带 turnId）。
+     *  延迟切换与停止升级（缺陷AD重审：V4 升级的回合 id 守卫）两个状态机共用的判据 */
+    private val streamingTurns: MutableMap<String, String?> =
+        java.util.Collections.synchronizedMap(HashMap<String, String?>())
 
     /** 每会话挂起的延迟切换目标（重复点击只保留最新；补发成功或失败后清除）*/
     private data class PendingModelSwitch(val modelId: String, val providerId: String)
@@ -2297,9 +2298,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return errorResponse("缺少 modelId")
         val providerId = msg["providerId"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 providerId")
-        // 回合进行中：挂起切换，回合结束后异步补发（见 streamingSessions 注释）。
+        // 回合进行中：挂起切换，回合结束后异步补发（见 streamingTurns 注释）。
         // 前端收到 modelSetPending 后回滚选中态并提示"本轮结束后生效"，补发成功再落定
-        if (sessionId in streamingSessions) return deferModelSwitch(sessionId, modelId, providerId)
+        if (sessionId in streamingTurns) return deferModelSwitch(sessionId, modelId, providerId)
         val client = project.zCodeService().getClient()
         try {
             // 带 runtimeModel：服务端先把 provider 注册进 workspace（绕过"可选模型"校验）
@@ -2313,7 +2314,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: Exception) {
             // 竞态兜底：请求下发瞬间回合刚开始（turn.started 未及到达），-32603 同样
             // 转延迟切换——回合结束后补发重试会给出真实结果（真不支持则报 modelSetFailed）
-            if (isUnsupportedModelEx(e) && sessionId in streamingSessions) {
+            if (isUnsupportedModelEx(e) && sessionId in streamingTurns) {
                 return deferModelSwitch(sessionId, modelId, providerId)
             }
             log.warn("Model switch failed: ${e.message}")
@@ -2382,7 +2383,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         }
                         // 补发瞬间新回合已开跑：继续挂起等下一轮回合结束（putIfAbsent 保住期间
                         // 用户更新过的目标，不覆盖）
-                        isUnsupportedModelEx(e) && sessionId in streamingSessions -> {
+                        isUnsupportedModelEx(e) && sessionId in streamingTurns -> {
                             log.info("deferred model switch re-deferred (new turn): $sessionId")
                             pendingModelSwitches.putIfAbsent(sessionId, pending)
                             return@Thread
@@ -2432,7 +2433,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             } catch (e: Exception) {
                 // 重试期间回合开跑（或目标模型未注册）：撞 -32603 时转延迟切换，
                 // 由回合结束的 applyPendingModelSwitch 补发，本重试链终止（不重复下发）
-                if (isUnsupportedModelEx(e) && sessionId in streamingSessions) {
+                if (isUnsupportedModelEx(e) && sessionId in streamingTurns) {
                     pendingModelSwitches.putIfAbsent(sessionId, PendingModelSwitch(modelId, providerId))
                     log.info("busy-retry: setModel for $sessionId re-deferred (turn in flight)")
                     true
@@ -3062,12 +3063,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 多标签隔离：只推本面板订阅过的会话（其他标签的事件由各自的监听器推送）
         if (sessionId !in subscribedSessions) return
 
-        // 回合生命周期 → 延迟切模型状态机（缺陷AC：见 streamingSessions 注释）。
+        // 回合生命周期 → 延迟切模型状态机（缺陷AC：见 streamingTurns 注释）。
         // 覆盖本面板订阅的全部会话（切模型只在当前会话触发，但当前会话一定已订阅）
         when (event.type) {
-            "turn.started" -> streamingSessions.add(sessionId)
+            "turn.started" -> streamingTurns[sessionId] = event.turnId
             "turn.completed", "turn.failed" -> {
-                val wasStreaming = streamingSessions.remove(sessionId)
+                val wasStreaming = streamingTurns.containsKey(sessionId)
+                streamingTurns.remove(sessionId)
                 if (wasStreaming) applyPendingModelSwitch(sessionId)
             }
         }
@@ -3169,16 +3171,20 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 停止当前 turn（session/stop） */
+    /**
+     * 停止当前 turn：簿记就地处理后挂停止序列线程（缺陷AD重审定案：V4 优先），
+     * op=stopped 立即返回，前端 stopped 应答已复位等待态。
+     * 挂起的延迟切模型不取消：停止只中止回合，模型选择是独立意图——终止帧
+     * （真实/合成）到达后 applyPendingModelSwitch 照常落地所选模型。
+     */
     private fun handleStop(msg: JsonObject): JsonObject {
         val sessionId = msg["sessionId"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 sessionId")
-        val client = project.zCodeService().getClient()
         try {
-            client.stop(sessionId)
-            log.info("Stopping current turn of session $sessionId")
             // 手动打断不触发对话结束提醒（30s 内该会话的收尾事件被跳过）
             project.zCodeService().markManualStop(sessionId)
+            scheduleStopSequence(sessionId)
+            log.info("stop requested: $sessionId")
         } catch (e: Exception) {
             log.warn("stop failed: ${e.message}")
             return errorResponse("停止失败: ${e.message}")
@@ -3188,6 +3194,79 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("sessionId", sessionId)
         }
     }
+
+    /**
+     * 停止序列（缺陷AD重审定案：V4 优先，老版本自动回退）：
+     * v4 stop 先发（官方客户端同款运行时原语，diag 实测 0.16.1/0.16.5 均 ~40ms
+     * 杀死在途回合）→ 失败（仅老到没有 v4 面的 CLI 会 -32601）→ 回退 session/stop
+     * （那些版本上原生生效）。
+     * 2s 验证：真实终止帧已到则簿记已被事件流清掉、直接收工；仍无帧时分两种——
+     * v4 已受理 = 流式期引擎不发 legacy 帧（合成收口正确）；v4 未受理 = 两个通道都
+     * 没杀掉回合，补射一次 v4（新版回归期 session/stop 是空操作），再 2s 仍无帧才
+     * 合成；补射仍失败则放弃（回合自然结束，绝不给活回合合成完成帧）。
+     * 回合 id 守卫：验证时发现已是新回合（用户新发）则不动作，防误杀。
+     */
+    private fun scheduleStopSequence(sessionId: String) {
+        if (!streamingTurns.containsKey(sessionId)) return // 空闲态点停止：无在途回合，不动作
+        val stoppedTurnId = streamingTurns[sessionId] // 可为 null（事件没带 turnId）
+        Thread({
+            if (disposed) return@Thread
+            try {
+                val client = project.zCodeService().getClient()
+                var v4Accepted = false
+                try {
+                    val r = client.stopForegroundViaV4(sessionId)
+                    v4Accepted = true
+                    log.info("stop sequence: v4 stop accepted for $sessionId (status=${r["status"]})")
+                } catch (e: Exception) {
+                    // 老版本 CLI 无 v4 面（-32601）或其他错误：回退 session/stop（老 CLI 原生生效）
+                    log.info("stop sequence: v4 stop unavailable/failed (${e.message}), falling back to session/stop")
+                    try {
+                        client.stop(sessionId)
+                    } catch (e2: Exception) {
+                        log.warn("stop sequence: session/stop also failed: ${e2.message}")
+                    }
+                }
+                // 2s 验证：真实终止帧（工具期 v4 / 老版本原生路径）此时已到并清了簿记
+                Thread.sleep(2000)
+                if (stillSameTurn(sessionId, stoppedTurnId) && !v4Accepted) {
+                    // 两个通道都没生效：补射一次 v4（幂等），给新版回归期一个二次机会
+                    try {
+                        val r = client.stopForegroundViaV4(sessionId)
+                        v4Accepted = true
+                        log.info("stop sequence: v4 stop retry accepted for $sessionId (status=${r["status"]})")
+                    } catch (e: Exception) {
+                        log.warn("stop sequence: v4 stop retry also failed (${e.message}), giving up")
+                        return@Thread // 回合自然结束，不合成
+                    }
+                    Thread.sleep(2000)
+                }
+                if (!stillSameTurn(sessionId, stoppedTurnId)) return@Thread // 已终止或已是新回合
+                log.warn("stop sequence: no terminal frame after stop, synthesizing turn.completed: $sessionId")
+                pushStreamEvent(
+                    sessionId,
+                    com.zcode.ideaplugin.protocol.model.SessionEvent(
+                        type = com.zcode.ideaplugin.protocol.model.EventTypes.TURN_COMPLETED,
+                        seq = -1,
+                        sessionId = sessionId,
+                        timestamp = System.currentTimeMillis(),
+                        traceId = null,
+                        turnId = stoppedTurnId,
+                        deliveryKind = null,
+                        payload = buildJsonObject { put("synthetic", true) }
+                    )
+                )
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }, "zcode-stop-sequence").apply { isDaemon = true }.start()
+    }
+
+    /** 回合仍处于被停止的那个回合（存在且 turnId 未变）；已终止或用户新开回合则为 false */
+    private fun stillSameTurn(sessionId: String, stoppedTurnId: String?): Boolean =
+        synchronized(streamingTurns) {
+            streamingTurns.containsKey(sessionId) && streamingTurns[sessionId] == stoppedTurnId
+        }
 
     private fun errorResponse(msg: String): JsonObject = buildJsonObject {
         put("op", "error")

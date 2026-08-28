@@ -2032,7 +2032,14 @@ export function handleResponse(
 
     case 'subscribed':
     case 'subscribedChild': // 子会话订阅 ack（事件流随 subscribeChild op 建立后自然到达）
+      break
+
     case 'stopped':
+      // 停止应答：立即复位等待态，不等终止帧（缺陷AD重审：V4 stop 流式期引擎不发
+      // legacy 终止帧，面板合成帧/真实帧后到均幂等）。刻意不 flushQueue：停止意图=只收当前回合
+      if (msg.sessionId === get().currentSessionId) {
+        set({ streaming: false, streamingMessageId: null, waitingSince: null, compacting: false })
+      }
       break
 
     case 'newSession':

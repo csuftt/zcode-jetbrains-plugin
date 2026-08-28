@@ -67,9 +67,20 @@ export function elapsedDesc(startMs: number, now: number = Date.now()): string {
   return formatDuration(now - startMs)
 }
 
-/** 时间戳转 HH:MM（消息时间戳显示） */
-export function clockTime(ts: number): string {
+/**
+ * 消息时间戳：今天 HH:mm / 今年非今天 MM-DD HH:mm / 跨年 YYYY-MM-DD HH:mm
+ * （历史会话里只显示时分会分不清是哪天的，按自然日区分）
+ */
+export function clockTime(ts: number, now: number = Date.now()): string {
   if (!ts) return ''
   const d = new Date(ts)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const n = new Date(now)
+  const sameDay =
+    d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()
+  if (sameDay) return hm
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  if (d.getFullYear() === n.getFullYear()) return `${mm}-${dd} ${hm}`
+  return `${d.getFullYear()}-${mm}-${dd} ${hm}`
 }
