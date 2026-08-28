@@ -753,6 +753,10 @@ export type JavaResponse =
   /** 切换回包：changes 含全部实际变更（启用内置套餐时其余内置套餐联动禁用，互斥）*/
   | { op: 'modelToggled'; changes: { providerId: string; enabled: boolean }[] }
   | { op: 'modelSet'; sessionId: string; modelId: string; providerId: string }
+  /** 回合中切换挂起（缺陷AC）：Java 挂起目标模型等回合结束补发，前端回滚选中态并提示 */
+  | { op: 'modelSetPending'; sessionId: string; modelId: string; providerId: string }
+  /** 挂起的切换补发失败（回合结束后重试仍报错）：清除提示并告警 */
+  | { op: 'modelSetFailed'; sessionId: string; modelId: string; providerId: string; message: string }
   /** Java 忙窗口重试成功通知（缺陷AB）：顶栏忙窗口提示据此清除 */
   | { op: 'busyRetryRecovered' }
   /** P2 用量查询失败静默降级（缺陷AB 编排②）：不弹错、不复位 streaming */

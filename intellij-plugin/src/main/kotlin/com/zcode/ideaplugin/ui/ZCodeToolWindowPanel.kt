@@ -141,6 +141,29 @@ class ZCodeToolWindowPanel(
             e.message?.startsWith("请求超时") == true
 
     /**
+     * 模型不在服务端注册表（-32603 Unsupported model）。回合进行中 setModel 不消费
+     * runtimeModel 注册（2026-08-28 实测），未注册模型在该窗口内必然撞此错——
+     * 与超时不同，它出现在"回合刚起"的竞态里时可以转延迟切换而非报错。
+     */
+    private fun isUnsupportedModelEx(e: Exception): Boolean =
+        e is com.zcode.ideaplugin.protocol.ZCodeProtocolException &&
+            (e.code == -32603 || e.message?.contains("Unsupported model") == true)
+
+    // ============ 回合中延迟切模型（缺陷AC + -32603 变体，2026-08-28）============
+    // 回合流式期间 session/setModel 有两个服务端坑：①立即生效会 dispose 旧签名器，
+    // 在途回合下一轮请求即死（缺陷AC）；②该窗口内不注册 runtimeModel，切到未注册
+    // 模型直接 -32603 Unsupported model。插件侧统一防护：回合中收到 setModel 只挂起，
+    // turn.completed/failed 后异步补发（此时注册+切换均正常，实测验证）。
+    /** 回合进行中的会话（turn.started 进、turn.completed/failed 出），延迟切换的判断依据 */
+    private val streamingSessions: MutableSet<String> =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** 每会话挂起的延迟切换目标（重复点击只保留最新；补发成功或失败后清除）*/
+    private data class PendingModelSwitch(val modelId: String, val providerId: String)
+
+    private val pendingModelSwitches = java.util.concurrent.ConcurrentHashMap<String, PendingModelSwitch>()
+
+    /**
      * resume 同会话去重（缺陷AB 优先级编排①）：subscribe 与 messages 两条链路
      * 并发打开同一会话时只排一次 resume 进服务端队列（坏会话每次 8.7s，直接省一半
      * 队列头部）。失败不缓存、也不阻断调用方（旧语义：失败可能 already active，照常继续）
@@ -2273,6 +2296,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return errorResponse("缺少 modelId")
         val providerId = msg["providerId"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 providerId")
+        // 回合进行中：挂起切换，回合结束后异步补发（见 streamingSessions 注释）。
+        // 前端收到 modelSetPending 后回滚选中态并提示"本轮结束后生效"，补发成功再落定
+        if (sessionId in streamingSessions) return deferModelSwitch(sessionId, modelId, providerId)
         val client = project.zCodeService().getClient()
         try {
             // 带 runtimeModel：服务端先把 provider 注册进 workspace（绕过"可选模型"校验）
@@ -2284,12 +2310,86 @@ if (!window.__ZCODE_LOG_HOOK__) {
             client.setModel(sessionId, modelId, providerId, runtimeModel)
             log.info("Model switched: $sessionId → $providerId/$modelId")
         } catch (e: Exception) {
+            // 竞态兜底：请求下发瞬间回合刚开始（turn.started 未及到达），-32603 同样
+            // 转延迟切换——回合结束后补发重试会给出真实结果（真不支持则报 modelSetFailed）
+            if (isUnsupportedModelEx(e) && sessionId in streamingSessions) {
+                return deferModelSwitch(sessionId, modelId, providerId)
+            }
             log.warn("Model switch failed: ${e.message}")
             // 忙窗口超时（缺陷AB）：后台延迟重试，成功后补推 modelSet（前端据此落定切换/清在途标记）
             if (isTimeoutEx(e)) scheduleSetModelBusyRetry(sessionId, modelId, providerId)
             return errorResponse("Model switch failed: ${e.message}")
         }
         return modelSetResponse(sessionId, modelId, providerId)
+    }
+
+    /** 挂起回合中的切换并应答 modelSetPending（前端回滚选中态、显示延迟提示）*/
+    private fun deferModelSwitch(sessionId: String, modelId: String, providerId: String): JsonObject {
+        pendingModelSwitches[sessionId] = PendingModelSwitch(modelId, providerId)
+        log.info("Model switch deferred (turn in flight): $sessionId → $providerId/$modelId")
+        return buildJsonObject {
+            put("op", "modelSetPending")
+            put("sessionId", sessionId)
+            put("modelId", modelId)
+            put("providerId", providerId)
+        }
+    }
+
+    /**
+     * 回合结束（completed/failed）后补发挂起的切换。事件在协议读线程上到达，
+     * setModel 是带重试的阻塞 RPC，须另起线程避免卡住事件流。
+     *
+     * -32603 短时重试（3 次 × 1.5s）：服务端 runtime 清算滞后于 turn.completed 下发
+     * （实测偶发——事件已到、锁未放，立即补发撞 -32603；稍候即恢复）。
+     */
+    private fun applyPendingModelSwitch(sessionId: String) {
+        val pending = pendingModelSwitches.remove(sessionId) ?: return
+        Thread({
+            if (disposed) return@Thread
+            var unsupportedAttempts = 0
+            while (true) {
+                try {
+                    val client = project.zCodeService().getClient()
+                    client.setModel(sessionId, pending.modelId, pending.providerId, buildRuntimeModel(pending.providerId, pending.modelId))
+                    sendToJs(modelSetResponse(sessionId, pending.modelId, pending.providerId))
+                    log.info("deferred model switch applied: $sessionId → ${pending.providerId}/${pending.modelId}")
+                    return@Thread
+                } catch (e: Exception) {
+                    when {
+                        // 忙窗口超时（缺陷AB）：走既有忙重试，成功会补推 modelSet
+                        isTimeoutEx(e) -> {
+                            log.info("deferred model switch hit busy window: $sessionId (${e.message})")
+                            scheduleSetModelBusyRetry(sessionId, pending.modelId, pending.providerId)
+                            return@Thread
+                        }
+                        // 补发瞬间新回合已开跑：继续挂起等下一轮回合结束（putIfAbsent 保住期间
+                        // 用户更新过的目标，不覆盖）
+                        isUnsupportedModelEx(e) && sessionId in streamingSessions -> {
+                            log.info("deferred model switch re-deferred (new turn): $sessionId")
+                            pendingModelSwitches.putIfAbsent(sessionId, pending)
+                            return@Thread
+                        }
+                        // 回合锁清算滞后：稍候重试
+                        isUnsupportedModelEx(e) && unsupportedAttempts < 3 -> {
+                            unsupportedAttempts++
+                            log.info("deferred model switch retry #$unsupportedAttempts (server lock lag): $sessionId")
+                            runCatching { Thread.sleep(1500) }
+                        }
+                        else -> {
+                            log.warn("deferred model switch failed: $sessionId (${e.message})")
+                            sendToJs(buildJsonObject {
+                                put("op", "modelSetFailed")
+                                put("sessionId", sessionId)
+                                put("modelId", pending.modelId)
+                                put("providerId", pending.providerId)
+                                put("message", "Model switch failed: ${e.message}")
+                            })
+                            return@Thread
+                        }
+                    }
+                }
+            }
+        }, "zcode-deferred-setmodel").apply { isDaemon = true }.start()
     }
 
     /** setModel 应答/重试补推共用的响应构造 */
@@ -2312,8 +2412,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 log.info("busy-retry: setModel for $sessionId recovered → $providerId/$modelId")
                 true
             } catch (e: Exception) {
-                log.info("busy-retry: setModel for $sessionId still failing: ${e.message}")
-                false
+                // 重试期间回合开跑（或目标模型未注册）：撞 -32603 时转延迟切换，
+                // 由回合结束的 applyPendingModelSwitch 补发，本重试链终止（不重复下发）
+                if (isUnsupportedModelEx(e) && sessionId in streamingSessions) {
+                    pendingModelSwitches.putIfAbsent(sessionId, PendingModelSwitch(modelId, providerId))
+                    log.info("busy-retry: setModel for $sessionId re-deferred (turn in flight)")
+                    true
+                } else {
+                    log.info("busy-retry: setModel for $sessionId still failing: ${e.message}")
+                    false
+                }
             }
         }
     }
@@ -2935,6 +3043,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (disposed) return
         // 多标签隔离：只推本面板订阅过的会话（其他标签的事件由各自的监听器推送）
         if (sessionId !in subscribedSessions) return
+
+        // 回合生命周期 → 延迟切模型状态机（缺陷AC：见 streamingSessions 注释）。
+        // 覆盖本面板订阅的全部会话（切模型只在当前会话触发，但当前会话一定已订阅）
+        when (event.type) {
+            "turn.started" -> streamingSessions.add(sessionId)
+            "turn.completed", "turn.failed" -> {
+                val wasStreaming = streamingSessions.remove(sessionId)
+                if (wasStreaming) applyPendingModelSwitch(sessionId)
+            }
+        }
 
         // 本标签当前会话的 turn 生命周期 → 标签「●」生成中状态
         if (sessionId == currentSessionId) {

@@ -81,6 +81,36 @@ body {
     }
   }
 
+  /* 信息条（延迟切模型等非错误提示）：与 error-bar 同构，warning 配色 */
+  &__notice-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: color-mix(in srgb, var(--status-warning) 22%, var(--bg-primary));
+    color: var(--status-warning);
+    font-size: 12px;
+    border-top: 1px solid color-mix(in srgb, var(--status-warning) 35%, transparent);
+    flex-shrink: 0;
+
+    > span:first-child {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* 复用 error-bar 的关闭按钮，配色换 warning */
+    .app__error-close {
+      color: var(--status-warning);
+
+      &:hover {
+        background: color-mix(in srgb, var(--status-warning) 15%, transparent);
+      }
+    }
+  }
+
   &__error-close {
     flex-shrink: 0;
     display: inline-flex;

@@ -40,10 +40,10 @@ export default function App() {
   const { t } = useTranslation()
   const {
     sessions, currentSessionId,
-    messages, loadingMessages, streaming, streamingMessageId, waitingSince, lastError, compacting,
+    messages, loadingMessages, streaming, streamingMessageId, waitingSince, lastError, lastNotice, compacting,
     askUser, exitPlanApproval, permissionRequest, currentModel,
     init, loadSessions, selectSession, resetToNewSession, stopStreaming, sendMessage,
-    clearError,
+    clearError, clearNotice,
     renameSession, setModel,
     archivedSessions, archivedLoading, loadArchivedSessions, archiveSession, restoreSession,
   } = useStore()
@@ -255,6 +255,15 @@ export default function App() {
 
         {currentView === 'settings' && <SettingsView onBack={() => setCurrentView('chat')} />}
       </div>
+
+      {lastNotice && (
+        <div className="app__notice-bar">
+          <span>⏳ {lastNotice}</span>
+          <button className="app__error-close" onClick={clearNotice} aria-label={t('app.errorCloseAria')}>
+            <span className="codicon codicon-close" />
+          </button>
+        </div>
+      )}
 
       {lastError && (
         <div className="app__error-bar">

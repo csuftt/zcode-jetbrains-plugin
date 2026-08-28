@@ -226,6 +226,12 @@ interface StoreState {
   thoughtLevelAppliedForSession: string | null
   /** setModel 已发出、modelSet 未回的时间戳（期间到达的 settings 级别部分计算于旧模型，不可信；超时视为不在途）*/
   modelSwitchInFlightAt: number | null
+  /** 回合中切换被 Java 挂起（缺陷AC延迟切换）：显示"本轮结束后生效"提示，补发 modelSet/modelSetFailed 清除 */
+  modelPendingSwitch: { sessionId: string; modelId: string; providerId: string } | null
+  /** 切换前模型（modelSetPending 回滚选中态用；modelSet/modelSetFailed 清除）*/
+  modelSwitchPrevModel: { modelId: string; providerId: string } | null
+  /** 信息条（区别于 lastError 的非错误提示：延迟切模型等），modelSet/modelSetFailed/切会话清除 */
+  lastNotice: string | null
   /** createSession 级别补发被推迟暂存的级别（等 modelSet 落定后按新模型下发，防 -32603 竞态）*/
   pendingThoughtLevel: string | null
 
@@ -443,6 +449,7 @@ interface StoreState {
   loadAppUsage: () => void
   /** 清除错误（错误栏关闭按钮）*/
   clearError: () => void
+  clearNotice: () => void
   /** 设置 EnvBanner「去设置」的跳转意图（BasicSettingsView 消费后清除）*/
   setPendingSettingsSection: (section: 'env' | 'agents' | null) => void
   /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
@@ -552,6 +559,9 @@ export const useStore = create<StoreState>((set, get) => ({
   prePlanMode: null,
   thoughtLevelAppliedForSession: null,
   modelSwitchInFlightAt: null,
+  modelPendingSwitch: null,
+  modelSwitchPrevModel: null,
+  lastNotice: null,
   pendingThoughtLevel: null,
   contextUsage: null,
   contextBreakdown: null,
@@ -723,6 +733,9 @@ export const useStore = create<StoreState>((set, get) => ({
       currentSessionId: session.sessionId,
       currentWorkspacePath: workspacePath,
       modelInvalidated: false, // 切会话后按新会话消息推断模型是合理行为，解除失效锁定
+      modelPendingSwitch: null, // 旧会话的延迟切换提示不带到新会话（补发 modelSet 有 sessionId 守卫）
+      modelSwitchPrevModel: null,
+      lastNotice: null,
       messages: [],
       loadingMessages: true,
       streaming: false,
@@ -1041,7 +1054,8 @@ export const useStore = create<StoreState>((set, get) => ({
     // 记忆当前选择（persist 通道），切换会话后仍显示；无会话（懒创建待命态）也先记忆，
     // 会话建立后由 applyModelIfReady 真正下发（见 createSession 响应处理）
     setPersisted('zcode.currentModel', JSON.stringify({ modelId, providerId }))
-    set({ currentModel: { modelId, providerId }, modelInvalidated: false })
+    // 暂存翻转前模型：回合中切换会被 Java 挂起（modelSetPending），届时回滚选中态
+    set({ currentModel: { modelId, providerId }, modelInvalidated: false, modelSwitchPrevModel: get().currentModel })
     // 待命态切模型：级别集随模型变化，按新模型重 hydrate（无缓存的模型 → 选择器隐藏）
     get().hydrateThoughtLevelStandby()
     const sid = get().currentSessionId
@@ -1317,6 +1331,8 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   clearError: () => set({ lastError: null }),
+
+  clearNotice: () => set({ lastNotice: null }),
 
   setPendingSettingsSection: (section) => set({ pendingSettingsSection: section }),
 
@@ -2255,11 +2271,17 @@ export function handleResponse(
       get().hydrateThoughtLevelStandby()
       break
 
-    case 'modelSet':
+    case 'modelSet': {
+      // 延迟切换的补发可能晚到数分钟（挂起期间用户已切走会话）：目标会话不是当前
+      // 会话时丢弃，避免旧会话的模型翻转污染当前会话显示与级别缓存
+      if (msg.sessionId && msg.sessionId !== get().currentSessionId) break
       set({
         currentModel: { modelId: msg.modelId, providerId: msg.providerId },
         modelInvalidated: false,
         modelSwitchInFlightAt: null, // 切换已落定，新到达的 settings 可信
+        modelPendingSwitch: null, // 延迟切换落定（缺陷AC），清提示与回滚暂存
+        modelSwitchPrevModel: null,
+        lastNotice: null,
       })
       // 切换模型后立即刷新用量，圆环 size 随新模型窗口更新（不用等下次对话结束）
       setTimeout(() => get().loadUsage(), 500)
@@ -2267,6 +2289,31 @@ export function handleResponse(
       // 该响应还会消费下方暂存的级别（权威校验，见 case 'settings'）
       setTimeout(() => get().loadSettings(), 500)
       break
+    }
+
+    case 'modelSetPending': {
+      // 回合中切换被 Java 挂起（缺陷AC）：回滚选中态到切换前模型（口径统一——显示的
+      // 就是服务端实际在用的模型），挂起目标驱动提示条；persist 记忆保持目标值
+      // （新会话/重开时按目标模型应用）。在途标记清除：服务端仍在旧模型上，期间到达
+      // 的 settings 计算于旧模型＝显示模型，级别反而可信
+      const prev = get().modelSwitchPrevModel
+      set({
+        currentModel: prev ?? get().currentModel,
+        modelSwitchInFlightAt: null,
+        modelPendingSwitch: { sessionId: msg.sessionId, modelId: msg.modelId, providerId: msg.providerId },
+        lastNotice: i18n.t('app.modelSwitchDeferred', { model: msg.modelId }),
+      })
+      break
+    }
+
+    case 'modelSetFailed': {
+      // 挂起的切换回合结束后补发仍失败（真不支持/会话已死等）：清提示并走通用错误展示
+      if (get().modelPendingSwitch?.sessionId === msg.sessionId) {
+        set({ modelPendingSwitch: null, modelSwitchPrevModel: null, lastNotice: null })
+      }
+      set({ lastError: msg.message })
+      break
+    }
 
     case 'settings': {
       // 过期的 settings 响应（切会话竞态）直接丢弃
