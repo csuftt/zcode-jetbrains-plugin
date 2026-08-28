@@ -227,7 +227,7 @@ class ZCodeBrowserExecutor(private val project: Project) {
             "getState" to "当前页面状态（url/title/viewport）",
             "snapshot" to "页面可交互元素快照",
             "screenshot" to "页面截图（PNG base64）",
-            "evaluate" to "在页面执行 JS 表达式",
+            "evaluate" to "在页面执行 JS 表达式；调试缓冲 window.__zcodeDebug 可读最近的 console 输出/接口请求(fetch、XHR，含请求响应体)/未捕获异常/资源加载失败——用 window.__zcodeDebug.dump() 取摘要，dump({level:'error'}) 只看错误",
             "click" to "点击元素或坐标",
             "fill" to "填充输入框（React 受控兼容）",
             "type" to "键入文本（可先聚焦 ref）",
@@ -794,6 +794,74 @@ class ZCodeBrowserExecutor(private val project: Project) {
     private fun jsString(s: String): String =
         Json.encodeToString(JsonPrimitive.serializer(), JsonPrimitive(s))
 
+    // ============ 页面调试采集（console / 接口请求 / 未捕获异常）============
+
+    /** 页内采集脚本（resources/debug-capture.js）：console/fetch/XHR 补丁 + __zcodeDebug 环形缓冲 */
+    private val CAPTURE_SCRIPT: String by lazy {
+        try {
+            javaClass.getResourceAsStream("/debug-capture.js")?.readBytes()?.toString(Charsets.UTF_8)
+        } catch (e: Exception) {
+            log.warn("[browser-use] debug-capture.js load failed: ${e.message}")
+            null
+        } ?: ""
+    }
+
+    /**
+     * 确保目标 tab 的页面已挂调试采集（幂等）：探测 window.__zcodeDebug 缺失时注册
+     * Page.addScriptToEvaluateOnNewDocument（未来文档 document-start 自动采集）+
+     * 立即注入当前文档。采集脚本自身幂等且永不移除——绕开每命令建连模式下 remove
+     * 必报 Script not found 的坑（viewport 信箱同源问题，见面板 onLoadEnd 注释）。
+     * fail-soft：注入失败只影响调试采集，不影响 evaluate 本身。
+     */
+    private fun ensureDebugCapture(tabId: String?) {
+        val script = CAPTURE_SCRIPT
+        if (script.isBlank()) return
+        try {
+            val wsUrl = findPanelTargetWs(tabId, ensurePanel = false) ?: return
+            val probe = cdpCommandOn(
+                wsUrl, "Runtime.evaluate",
+                buildJsonObject {
+                    put("expression", "!!(window.__zcodeDebug&&window.__zcodeDebug.v===1)")
+                    put("returnByValue", true)
+                },
+            )
+            val present = probe["result"]?.jsonObject?.get("value")?.jsonPrimitive?.booleanOrNull ?: false
+            if (!present) {
+                cdpCommandOn(wsUrl, "Page.addScriptToEvaluateOnNewDocument", buildJsonObject { put("source", script) })
+                cdpCommandOn(wsUrl, "Runtime.evaluate", buildJsonObject { put("expression", script) })
+                log.info("[browser-use] debug capture injected (tabId=$tabId)")
+            }
+        } catch (e: Exception) {
+            log.info("[browser-use] debug capture inject skipped: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
+    /**
+     * 读取 __zcodeDebug 的表达式求值前，把 Java 侧捕获的浏览器层消息（网络资源
+     * 加载失败等非 console API 消息）合入页面缓冲 browserMsgs——同一次 evaluate
+     * 内先 push 再求值，零竞态。不读 __zcodeDebug 的表达式原样返回，语义不动。
+     */
+    private fun withBrowserConsole(tabId: String?, expression: String): String {
+        if (!expression.contains("__zcodeDebug")) return expression
+        val msgs = drainBrowserConsoleLines(tabId)
+        if (msgs.isEmpty()) return expression
+        val arr = Json.encodeToString(JsonArray.serializer(), JsonArray(msgs.map { JsonPrimitive(it) }))
+        return "(function(){try{var a=window.__zcodeDebug&&window.__zcodeDebug.browserMsgs;if(a){" +
+            "var m=$arr;for(var i=0;i<m.length;i++)if(a.indexOf(m[i])<0)a.push(m[i]);}}catch(e){}" +
+            "return (${expression});})()"
+    }
+
+    /** 取走浏览器层 console 消息（面板按 tab 缓冲；EDT 上做 tab 路由）*/
+    private fun drainBrowserConsoleLines(tabId: String?): List<String> {
+        var msgs: List<String> = emptyList()
+        try {
+            SwingUtilities.invokeAndWait {
+                findExistingBrowserPanel()?.let { msgs = it.drainBrowserConsoleLines(tabId) }
+            }
+        } catch (_: Exception) {}
+        return msgs
+    }
+
     // ============ CDP 命令实现 ============
 
     private fun cmdScreenshot(command: JsonObject): JsonObject {
@@ -813,11 +881,13 @@ class ZCodeBrowserExecutor(private val project: Project) {
     }
 
     private fun cmdEvaluate(command: JsonObject): JsonObject {
+        val tabId = command["tabId"]?.jsonPrimitive?.contentOrNull
         val expression = command["expression"]?.jsonPrimitive?.contentOrNull
             ?: throw RuntimeException("evaluate 缺少 expression")
+        ensureDebugCapture(tabId)
         val value = cdpEvaluateValue(
-            command["tabId"]?.jsonPrimitive?.contentOrNull,
-            "(async()=>{ try { const r = await (${expression}); return {ok:true, value:r}; } catch(e) { return {ok:false, error:String(e)}; } })()",
+            tabId,
+            "(async()=>{ try { const r = await (${withBrowserConsole(tabId, expression)}); return {ok:true, value:r}; } catch(e) { return {ok:false, error:String(e)}; } })()",
             awaitPromise = true,
         )
         val obj = value as? JsonObject
@@ -2038,7 +2108,9 @@ class ZCodeBrowserExecutor(private val project: Project) {
         val kind = action["expressionKind"]?.jsonPrimitive?.contentOrNull ?: "string"
         val timeout = pwTimeoutMs(action)
         val argJson = action["arg"]?.let { Json.encodeToString(JsonElement.serializer(), it) } ?: "null"
-        val call = if (kind == "function") "(${expression})(${argJson})" else "(${expression})"
+        ensureDebugCapture(tabId)
+        val call0 = if (kind == "function") "(${expression})(${argJson})" else "(${expression})"
+        val call = withBrowserConsole(tabId, call0)
         val value = cdpEvaluateValue(
             tabId,
             "(async function(){var p=Promise.resolve().then(function(){return " + call + ";});" +

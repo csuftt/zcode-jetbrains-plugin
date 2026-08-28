@@ -61,6 +61,24 @@ class ZCodeBrowserPanel(
 
         /** JS 对话框挂起超时：AI 未处理时自动 dismiss，防页面永久卡死 */
         private const val DIALOG_TIMEOUT_MS = 120_000L
+
+        /**
+         * 浏览器层 console 消息格式化（onConsoleMessage 兜底采集用；console-api 类
+         * 已在调用方过滤——页内 __zcodeDebug 补丁已全量记录）。
+         */
+        internal fun formatBrowserConsoleLine(
+            level: org.cef.CefSettings.LogSeverity?, message: String, source: String?, line: Int,
+        ): String {
+            val lv = when (level) {
+                org.cef.CefSettings.LogSeverity.LOGSEVERITY_ERROR,
+                org.cef.CefSettings.LogSeverity.LOGSEVERITY_FATAL,
+                -> "error"
+                org.cef.CefSettings.LogSeverity.LOGSEVERITY_WARNING -> "warn"
+                else -> "info"
+            }
+            val src = source?.takeIf { it.isNotBlank() }?.let { " ($it${if (line > 0) ":$line" else ""})" } ?: ""
+            return "[$lv] $message$src"
+        }
     }
 
     /** 一个逻辑 tab = 一个独立 JBCefBrowser（browser-use 协议 tab 的真实载体）*/
@@ -73,7 +91,16 @@ class ZCodeBrowserPanel(
         @Volatile var canGoForward: Boolean = false,
         /** 生命周期标记（协议 active/deliverable/handoff；仅标记不改变可控性，对齐官方 tab-cleanup 语义）*/
         @Volatile var lifecycle: String = "active",
-    )
+    ) {
+        /**
+         * 浏览器层 console 消息（onConsoleMessage 回调写入，JCEF 线程）。
+         * 只存非 console API 类消息（网络资源加载失败等）——console API 页内
+         * __zcodeDebug 补丁已全量结构化记录，重记只会重复。executor 在 AI 读取
+         * __zcodeDebug 时取走（drain）合入页面缓冲。
+         */
+        val browserConsoleLines: MutableList<String> =
+            java.util.Collections.synchronizedList(ArrayList<String>())
+    }
 
     /** tab 概要快照（executor 组协议响应用；全部字段 EDT 读取）*/
     internal class TabSnapshot(
@@ -945,6 +972,25 @@ class ZCodeBrowserPanel(
                     if (tabs.size > 1) rebuildTabStrip()
                 }
             }
+
+            /**
+             * 浏览器层 console 消息兜底采集：console API 已被页内 __zcodeDebug 补丁
+             * 全量记录，这里只留非 console API 类（source=network 的 "Failed to load
+             * resource: 404" 资源加载失败、CSP/security 等）——页内 JS 看不到这些。
+             * 容量 200 行，取走式消费（drainBrowserConsoleLines）。
+             */
+            override fun onConsoleMessage(
+                browser: CefBrowser?, level: org.cef.CefSettings.LogSeverity?,
+                message: String?, source: String?, line: Int,
+            ): Boolean {
+                if (message.isNullOrBlank()) return false
+                if (source == "console-api") return false // 页内补丁已记录，避免重复
+                synchronized(tab.browserConsoleLines) {
+                    tab.browserConsoleLines.add(formatBrowserConsoleLine(level, message, source, line))
+                    while (tab.browserConsoleLines.size > 200) tab.browserConsoleLines.removeAt(0)
+                }
+                return false
+            }
         }, browser.cefBrowser)
 
         // JS 对话框接管：返回 true（不弹原生框），挂起等 AI 的 handleDialog。
@@ -1305,6 +1351,20 @@ class ZCodeBrowserPanel(
     }
 
     internal fun activeTabId(): String? = activeTab?.id
+
+    /**
+     * 取走 tab 的浏览器层 console 消息（网络资源加载失败等非 console API 类），
+     * 供 executor 在 AI 读取 __zcodeDebug 时合入页面缓冲 browserMsgs。取走即清空。
+     */
+    internal fun drainBrowserConsoleLines(tabId: String?): List<String> {
+        val tab = if (tabId != null) tabs.firstOrNull { it.id == tabId } ?: return emptyList()
+        else activeTab ?: tabs.firstOrNull() ?: return emptyList()
+        synchronized(tab.browserConsoleLines) {
+            val out = ArrayList(tab.browserConsoleLines)
+            tab.browserConsoleLines.clear()
+            return out
+        }
+    }
 
     /** 解析 tab（null/失配 → 当前激活 tab；用于协议命令的 tabId 路由）*/
     internal fun browserOf(tabId: String?): JBCefBrowser? {
