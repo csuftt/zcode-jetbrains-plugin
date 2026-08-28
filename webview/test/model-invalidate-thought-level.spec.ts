@@ -102,6 +102,26 @@ describe('模型失效与思考深度联动', () => {
     expect(s.thoughtLevelAppliedForSession).toBeNull()
   })
 
+  it('失效 + 同名跨渠道（API Key 渠道切订阅套餐）：迁移到新渠道同名模型并下发 setModel', () => {
+    // 客户端切渠道后旧 provider（p-old）整体下架，模型名 glm 不变：消息推断按旧
+    // providerID 匹配不到 → 按 modelId 迁移到新渠道（p-new），否则下拉空占位、
+    // 思考深度消失须手动重选（0.2.6 渠道切换实测反馈）
+    seed([assistantMsg('glm', 'p-old')])
+    dispatch({
+      op: 'models',
+      models: [{ providerId: 'p-new', providerName: 'NewPlan', modelId: 'glm', modelName: 'GLM' }],
+    })
+    const s = useStore.getState()
+    expect(s.currentModel).toEqual({ modelId: 'glm', providerId: 'p-new' })
+    expect(s.modelInvalidated).toBe(true)
+    expect(s.thoughtLevel).toBeNull()
+    expect(
+      sentRequests.some(
+        (r) => r.op === 'setModel' && r.modelId === 'glm' && r.providerId === 'p-new',
+      ),
+    ).toBe(true)
+  })
+
   it('模型健在：thoughtLevel 不受 models 响应影响', () => {
     seed([assistantMsg('qwen', 'pq')])
     dispatch({ op: 'models', models: [{ providerId: 'pq', providerName: 'Q', modelId: 'qwen', modelName: 'Qwen' }] })

@@ -8,6 +8,40 @@
     "empty": "利用枠データなし",
     "resetAt": "リセット {{time}}"
   },
+  "plan": {
+    "tab": "GLM プラン利用量",
+    "credHint": "照会キー：{{name}}",
+    "credForeign": "照会キー：{{name}}（サブスクリプション以外のためデータが一致しない可能性があります）"
+  },
+  "app": {
+    "tab": "アプリ利用量",
+    "title": "アプリ利用量",
+    "source": "ローカルセッション統計 · サードパーティモデル含む",
+    "range": {
+      "all": "全期間"
+    },
+    "stat": {
+      "totalTokens": "合計 Token",
+      "requests": "リクエスト数",
+      "sessions": "セッション数",
+      "turns": "ターン数",
+      "cacheHit": "キャッシュヒット率",
+      "activeDays": "稼働日数"
+    },
+    "model": {
+      "title": "日別 Token 推移",
+      "tableTitle": "モデル内訳",
+      "colCalls": "リクエスト数",
+      "colShare": "構成比"
+    },
+    "tool": {
+      "title": "ツール呼び出し",
+      "colName": "ツール",
+      "colCalls": "呼び出し回数",
+      "colErrRate": "エラー率"
+    },
+    "thirdParty": "サードパーティ"
+  },
   "detail": "利用明細",
   "range": {
     "today": "当日",

@@ -47,40 +47,133 @@ object Credentials {
      *
      * 凭证读取失败不再阻断插件启动（issue #4）：config.json 无可用凭证时调用方
      * 降级处理（不注入凭证 env、经 EnvStatus 展示指引），而非报错拦死主流程。
+     *
+     * env 注入的 key 跟随客户端激活渠道（[activeBuiltinProviderId]，setting.json
+     * 的 selectedKey）——config.json 的 enabled 不代表激活（API Key 渠道与订阅套餐
+     * 可同时 enabled=true），若按 JSON 顺序挑首个 enabled 渠道，会出现"按量 key
+     * 配套餐模型"的计费错渠道。
      */
     fun loadOrNull(configPath: Path = defaultConfigPath()): ZCodeCredentials? {
         if (!configPath.exists()) return null
         return try {
             val providers = json.parseToJsonElement(configPath.readText()).jsonObject["provider"]?.jsonObject
                 ?: return null
-            pickCredential(providers)
+            pickCredential(providers, effectiveBuiltinProviderId(configPath))
         } catch (e: Exception) {
             null
         }
     }
 
-    /** 在 provider 表里找首个 enabled + anthropic + baseURL/apiKey/model 均非空白的凭证 */
-    private fun pickCredential(providers: JsonObject): ZCodeCredentials? {
+    /**
+     * 客户端当前激活的内置 provider（ZCode 客户端模型渠道的权威信号）。
+     *
+     * 激活态不在 config.json 的 enabled（那只表示"已配置可用"，API Key 渠道与订阅
+     * 套餐可同时 enabled=true），而在 setting.json：
+     * - providerFamilyDomain：当前活跃家族（bigmodel / zai）
+     * - modelProviderFamilySelectedKeys：各家族选中的 provider，形如
+     *   "preset:builtin:bigmodel"（取末段即 providerId）
+     * - modelProviderFamilyModes：家族当前模式（apiKey / 订阅），仅供展示参考
+     *
+     * @return 激活的 providerId；未登录内置渠道 / setting 缺失 / 结构不符返回 null
+     */
+    fun activeBuiltinProviderId(configPath: Path = defaultConfigPath()): String? {
+        val settingPath = configPath.resolveSibling("setting.json")
+        if (!settingPath.exists()) return null
+        return try {
+            val st = json.parseToJsonElement(settingPath.readText()).jsonObject
+            val selected = st["modelProviderFamilySelectedKeys"]?.jsonObject ?: return null
+            if (selected.isEmpty()) return null
+            // 用 content 与本文件其余读取一致（contentOrNull 与同包两个 file-private
+            // 扩展同名冲突）；这些 setting 值均为普通字符串，不存在时 ?. 短路
+            val domainRaw = st["providerFamilyDomain"]?.jsonPrimitive?.content
+            val domain = domainRaw?.takeIf { dom -> dom.isNotBlank() }
+            val rawEntry = domain?.let { selected[it] } ?: selected.values.firstOrNull()
+            val raw = rawEntry?.jsonPrimitive?.content?.trim()
+            if (raw.isNullOrBlank()) return null
+            // selectedKey 形如 "<mode>:<providerId>"（实测 preset:builtin:bigmodel =
+            // API Key 模式、coding-plan:builtin:bigmodel-coding-plan = 订阅模式）；
+            // providerId 自身含冒号（builtin: 前缀），只能按已知 mode 前缀剥，不能按
+            // 冒号切末段
+            val providerId = raw.removePrefix("preset:").removePrefix("coding-plan:")
+            providerId.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+/**
+ * 生效内置渠道解析结果。
+ * providerId=null：无可用内置渠道；viaSelected=true：selectedKey 权威命中，
+ * false：兜底链命中（客户端所选渠道凭证不可用，回退 config 首个可用内置）。
+ * 设置页据此展示命中方式徽章。
+ */
+data class BuiltinResolution(val providerId: String?, val viaSelected: Boolean)
+
+/**
+ * 展示用的有效内置 provider（selectedKey 权威 + config 兜底）。
+ *
+ * 兜底链：selectedKey 解析出的 id 在 config provider 表中存在且凭证可用 → 用
+ * 它；解析失败/不匹配/指向的渠道凭证已失效（如在客户端选着 API Key 方式但把
+ * key 删了）→ 取 config 里首个 enabled 且凭证可用（apiKey 非空或家族 oauth
+ * token）的内置 provider；都没有 → null（无内置渠道可展示）。
+ */
+fun effectiveBuiltinProviderId(configPath: Path = defaultConfigPath()): String? =
+    builtinResolution(configPath).providerId
+
+/** [effectiveBuiltinProviderId] 的完整解析结果（含命中方式），见 [BuiltinResolution] */
+fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution {
+    if (!configPath.exists()) return BuiltinResolution(null, false)
+    return try {
+        val providers = json.parseToJsonElement(configPath.readText()).jsonObject["provider"]?.jsonObject
+            ?: return BuiltinResolution(null, false)
+        val active = activeBuiltinProviderId(configPath)
+        if (active != null && providers[active] != null &&
+            isBuiltinUsable(active, providers[active]!!.jsonObject, configPath)
+        ) {
+            return BuiltinResolution(active, true)
+        }
+        val fallback = providers.keys.firstOrNull { id ->
+            id.startsWith("builtin:") && isBuiltinUsable(id, providers[id]!!.jsonObject, configPath)
+        }
+        BuiltinResolution(fallback, false)
+    } catch (e: Exception) {
+        BuiltinResolution(null, false)
+    }
+}
+
+    /** 内置 provider 可用判定：enabled（缺省视为启用）且 apiKey 非空或有家族 oauth token */
+    private fun isBuiltinUsable(providerId: String, pv: JsonObject, configPath: Path): Boolean {
+        val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: true
+        if (!enabled) return false
+        val apiKey = pv["options"]?.jsonObject?.get("apiKey")?.jsonPrimitive?.content
+        return !apiKey.isNullOrBlank() || hasFamilyOAuthToken(providerId, configPath)
+    }
+
+    /** 单个 provider 节点转凭证：enabled + anthropic + baseURL/apiKey/model 非空白才可用 */
+    private fun credentialOf(pv: JsonObject): ZCodeCredentials? {
+        // enabled 缺省视为启用（与 RuntimeModels.isEnabledAnthropic 同口径）：config.json
+        // 存在无 enabled 字段但实际启用的自定义 provider（如 DeepSeek），若按不启用
+        // 跳过会误报"没有找到 enabled 的 anthropic provider"
+        val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: true
+        val kind = pv["kind"]?.jsonPrimitive?.content ?: ""
+        if (!enabled || kind != "anthropic") return null
+        val options = pv["options"]?.jsonObject ?: return null
+        // 空白 apiKey（oauth 系 provider 的占位空串）与字段缺失同等对待：
+        // 旧逻辑 `?: continue` 只拦 null，空串会穿透成"自检通过但注入空 key"，
+        // 反而挡住 app-server 自身凭证链（resolveApiKey 的 env fallback 拿到空值）
+        val baseURL = options["baseURL"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return null
+        val apiKey = options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return null
+        val model = pv["models"]?.jsonObject?.keys?.firstOrNull() ?: return null
+        return ZCodeCredentials(model = model, baseURL = baseURL, apiKey = apiKey)
+    }
+
+    /** 在 provider 表里找凭证：优先激活渠道，回退首个 enabled + anthropic 完整凭证 */
+    private fun pickCredential(providers: JsonObject, activeProviderId: String? = null): ZCodeCredentials? {
+        activeProviderId?.let { id ->
+            providers[id]?.let { credentialOf(it.jsonObject) }?.let { return it }
+        }
         for ((_, provider) in providers) {
-            val pv = provider.jsonObject
-            // enabled 缺省视为启用（与 RuntimeModels.isEnabledAnthropic 同口径）：config.json
-            // 存在无 enabled 字段但实际启用的自定义 provider（如 DeepSeek），若按不启用
-            // 跳过会误报"没有找到 enabled 的 anthropic provider"
-            val enabled = pv["enabled"]?.jsonPrimitive?.content?.toBoolean() ?: true
-            val kind = pv["kind"]?.jsonPrimitive?.content ?: ""
-            if (!enabled || kind != "anthropic") continue
-
-            val options = pv["options"]?.jsonObject ?: continue
-            // 空白 apiKey（oauth 系 provider 的占位空串）与字段缺失同等对待：
-            // 旧逻辑 `?: continue` 只拦 null，空串会穿透成"自检通过但注入空 key"，
-            // 反而挡住 app-server 自身凭证链（resolveApiKey 的 env fallback 拿到空值）
-            val baseURL = options["baseURL"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
-            val apiKey = options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
-
-            val modelsObj = pv["models"]?.jsonObject ?: continue
-            val model = modelsObj.keys.firstOrNull() ?: continue
-
-            return ZCodeCredentials(model = model, baseURL = baseURL, apiKey = apiKey)
+            credentialOf(provider.jsonObject)?.let { return it }
         }
         return null
     }
@@ -132,6 +225,34 @@ object Credentials {
             ZCodeCredentials(model = modelId, baseURL = baseURL, apiKey = apiKey)
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /**
+     * 订阅制套餐 provider 的 oauth 凭证兜底判定（模型可用性口径用）。
+     *
+     * 兜底仅限两家 coding-plan：订阅制的调用期凭证由 app-server 从 credentials.json
+     * 的家族 access_token 解析，config.json 无明文 apiKey 依然可用（未来 key 改为
+     * 运行时换取不落盘时靠此口径保住模型列表）。API Key 渠道（builtin:bigmodel /
+     * builtin:zai）设计上就是手填 key，无 oauth 凭证链，空 key = 未配置，不兜底
+     * ——否则列表显示可用而凭据自检报无凭证，自相矛盾（0.2.6 实测反馈）。第三方
+     * provider（DeepSeek 等）同样仅凭明文 apiKey 判定。
+     *
+     * credentials.json 与 config.json 同目录（跟随 dataBaseDir 迁移）。
+     */
+    fun hasFamilyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): Boolean {
+        val tokenKey = when (providerId) {
+            "builtin:bigmodel-coding-plan" -> "oauth:bigmodel:access_token"
+            "builtin:zai-coding-plan" -> "oauth:zai:access_token"
+            else -> return false
+        }
+        val credFile = configPath.resolveSibling("credentials.json")
+        if (!credFile.exists()) return false
+        return try {
+            json.parseToJsonElement(credFile.readText()).jsonObject[tokenKey]
+                ?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } != null
+        } catch (e: Exception) {
+            false
         }
     }
 

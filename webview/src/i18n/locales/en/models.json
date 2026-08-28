@@ -16,10 +16,11 @@
   },
   "vision": "Vision",
   "section": {
-    "builtin": "Built-in Plans",
-    "builtinHint": "Only one can be enabled at a time; enabling a plan disables the others",
+    "builtin": "Built-in Channels",
+    "builtinHint": "Follows the ZCode client config; only one is active at a time — switch in the client",
     "custom": "Custom Providers"
   },
+  "builtinReadonlyHint": "Built-in channel active (enable/disable in the ZCode client)",
   "providerDisabled": "Disabled",
   "providerNoModels": "No models configured for this provider",
   "modelsCount": "{{count}} models",
@@ -37,5 +38,9 @@
     "deleteBody": "\"{{name}}\" ({{provider}}) is managed by the Zcode config file and cannot be deleted in this plugin. Delete it in the Zcode client model settings, or remove its entry from the provider models node in the config file below; refresh this page after changes.",
     "openConfig": "Open Config File",
     "dismiss": "Got it"
-  }
+  },
+  "viaSelected": "Client selected",
+  "viaSelectedHint": "The channel currently selected in the ZCode client (authoritative)",
+  "viaFallback": "Fallback",
+  "viaFallbackHint": "The client-selected channel has no valid credential; fell back to the first usable builtin channel"
 }

@@ -698,6 +698,7 @@ function mockModelProviders(): import('../types/messages').ModelManageProvider[]
         providerId: 'builtin:bigmodel-coding-plan',
         providerName: 'BigModel - Coding Plan',
         plan: 'personal',
+        via: 'selected',
         baseURL: 'https://open.bigmodel.cn/api/anthropic',
         enabled: true,
         models: [
@@ -753,19 +754,14 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
         ],
       }
     case 'modelToggleProvider': {
-      // mock：启用内置套餐时模拟互斥联动（真实链路备份+原子写回 config.json）
+      // mock：与生产同口径——内置渠道只读（启停以 ZCode 客户端为准），拒绝写回；
+      // 第三方/自定义就地翻转（模拟 config.json 写回后的读取结果）
+      if (req.providerId.startsWith('builtin:')) {
+        return { op: 'error', message: '内置渠道以 ZCode 客户端配置为准，请在客户端切换后回来刷新' }
+      }
       const changes: { providerId: string; enabled: boolean }[] = [
         { providerId: req.providerId, enabled: req.enabled },
       ]
-      if (req.enabled && req.providerId.startsWith('builtin:')) {
-        const cur = mockModelProviders()
-        cur.forEach((p) => {
-          if (p.providerId !== req.providerId && p.providerId.startsWith('builtin:') && p.enabled) {
-            changes.push({ providerId: p.providerId, enabled: false })
-          }
-        })
-      }
-      // mock 状态就地翻转（模拟 config.json 写回后的读取结果）
       mockModelProviders().forEach((p) => {
         const c = changes.find((x) => x.providerId === p.providerId)
         if (c) p.enabled = c.enabled
@@ -773,20 +769,24 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       return { op: 'modelToggled', changes }
     }
     case 'modelManageList':
-      // 模拟设置页「模型管理」的全量 provider→models 结构（含 disabled + 套餐标记，验收展示与切换；
-      // mockModelProviders 可变，切换写回后重新读取反映变更）
+      // 模拟设置页「模型管理」结构（与生产同口径：内置渠道只返回生效的，第三方含
+      // disabled 标记；mockModelProviders 可变，第三方切换写回后重新读取反映变更）
       return {
         op: 'modelManage',
         configPath: 'C:\\Users\\dev\\.zcode\\v2\\config.json',
-        providers: JSON.parse(JSON.stringify(mockModelProviders())),
+        providers: JSON.parse(
+          JSON.stringify(mockModelProviders().filter((p) => !p.providerId.startsWith('builtin:') || p.enabled)),
+        ),
       }
     case 'getUsage':
       // mock：27.9% 上下文使用率（与真实场景接近）
       return { op: 'usage', sessionId: req.sessionId, used: 278937, size: 1000000, hitRate: 0.988 }
     case 'getQuota':
-      // mock：额度数据（5小时 86% / 每周 64%）
+      // mock：额度数据（5小时 86% / 每周 64%）；provider* 模拟订阅渠道凭证提示
       return {
         op: 'quota',
+        providerId: 'builtin:bigmodel-coding-plan',
+        providerName: 'BigModel - Coding Plan',
         data: {
           level: 'Max',
           limits: [
@@ -795,11 +795,44 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
           ],
         },
       }
+    case 'getAppUsage': {
+      // mock：应用用量（usage/stats 本地聚合；含第三方模型，验证徽章与曲线对齐）
+      return {
+        op: 'appUsage',
+        data: {
+          range: req.range,
+          source: 'agent-db',
+          generatedAt: Date.now(),
+          summary: {
+            totalTokens: 2856000, inputTokens: 2712000, outputTokens: 144000,
+            cacheHitRate: 0.962, totalSessions: 18, totalTurns: 142,
+            toolCallCount: 556, activeDays: 7,
+          },
+          models: [
+            { modelId: 'GLM-5.2', totalTokens: 1980000, inputTokens: 1880000, outputTokens: 100000, requestCount: 96, share: 0.693 },
+            { modelId: 'deepseek-v4-flash', totalTokens: 876000, inputTokens: 832000, outputTokens: 44000, requestCount: 46, share: 0.307 },
+          ],
+          tools: [
+            { toolName: 'Bash', callCount: 148, errorCount: 3, errorRate: 0.02 },
+            { toolName: 'Read', callCount: 312, errorCount: 0, errorRate: 0 },
+            { toolName: 'Edit', callCount: 96, errorCount: 2, errorRate: 0.021 },
+          ],
+          dailyModelUsage: [
+            { date: '2026-08-21', models: [{ modelId: 'GLM-5.2', totalTokens: 420000 }, { modelId: 'deepseek-v4-flash', totalTokens: 130000 }] },
+            { date: '2026-08-22', models: [{ modelId: 'GLM-5.2', totalTokens: 510000 }] },
+            { date: '2026-08-23', models: [{ modelId: 'GLM-5.2', totalTokens: 380000 }, { modelId: 'deepseek-v4-flash', totalTokens: 260000 }] },
+            { date: '2026-08-24', models: [{ modelId: 'GLM-5.2', totalTokens: 670000 }, { modelId: 'deepseek-v4-flash', totalTokens: 486000 }] },
+          ],
+        },
+      }
+    }
     case 'getModelUsage': {
       // mock：模型用量曲线（2 模型 × 8 时间点）
       const xt = ['2026-08-13 09:00', '2026-08-13 12:00', '2026-08-13 15:00', '2026-08-13 18:00', '2026-08-13 21:00', '2026-08-14 00:00', '2026-08-14 09:00', '2026-08-14 12:00']
       return {
         op: 'modelUsage',
+        providerId: 'builtin:bigmodel-coding-plan',
+        providerName: 'BigModel - Coding Plan',
         data: {
           granularity: 'hourly',
           x_time: xt,
@@ -820,6 +853,8 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       const xt = ['2026-08-13 09:00', '2026-08-13 12:00', '2026-08-13 15:00', '2026-08-13 18:00', '2026-08-13 21:00', '2026-08-14 00:00', '2026-08-14 09:00', '2026-08-14 12:00']
       return {
         op: 'toolUsage',
+        providerId: 'builtin:bigmodel-coding-plan',
+        providerName: 'BigModel - Coding Plan',
         data: {
           granularity: 'hourly',
           x_time: xt,

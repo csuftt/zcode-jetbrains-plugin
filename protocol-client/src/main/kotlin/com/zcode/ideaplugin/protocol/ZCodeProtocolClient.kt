@@ -1051,6 +1051,19 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * usage/stats — 应用用量统计（app-server 本地会话聚合，非 HTTP）。
+     *
+     * 覆盖 zcode 经手的全部模型（含第三方直连，monitor 的 model-usage 只统计
+     * bigmodel 网关侧 GLM 系），不依赖任何 apiKey。range 仅支持 7d/30d/all。
+     */
+    fun usageStats(range: String, timeoutMs: Long = 15000): JsonObject {
+        val params = buildJsonObject { put("range", range) }
+        val r = requestWithRetry("usage/stats", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+        r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * session/read → 提取 runtime（含 contextUsage + 可能的 breakdown 构成明细）
      * 返回完整 runtime JsonObject，调用者按需提取 contextUsage / breakdown 子字段。
      * 需要会话处于 active 状态（subscribe/resume 后即可）。
@@ -1062,8 +1075,6 @@ class ZCodeProtocolClient private constructor(
         r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
         val runtime = r["result"]?.jsonObject?.get("runtime")?.jsonObject
             ?: return JsonObject(emptyMap())
-        // 诊断：确认 runtime 完整结构（是否包含 breakdown 构成明细）
-        println("[DIAG-CTX] runtime keys=${runtime.keys} json=${LogRedactor.redact(runtime.toString()).take(2000)}")
         return runtime
     }
 

@@ -209,39 +209,18 @@
     color: var(--text-muted);
   }
 
-  /* 单选圆点（内置套餐）：选中 = accent 实心点；与 toggle 区分单选语义 */
-  &__radio {
+  /* 生效徽章位（内置渠道只读展示）：绿色 pass 图标占据原开关位，与 toggle 对齐 */
+  &__provider-active {
     flex-shrink: 0;
     width: 16px;
     height: 16px;
-    border-radius: 50%;
-    border: 1.5px solid var(--border-primary);
-    background: transparent;
-    cursor: pointer;
-    padding: 0;
-    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: border-color 0.15s;
 
-    &.on {
-      border-color: var(--accent-primary, #007fd4);
-      &::after {
-        content: '';
-        position: absolute;
-        inset: 3px;
-        border-radius: 50%;
-        background: var(--accent-primary, #007fd4);
-      }
-    }
-    &:disabled {
-      cursor: default;
-      opacity: 0.7;
-    }
     .codicon {
-      font-size: 12px;
-      color: var(--text-tertiary);
+      font-size: 16px;
+      color: var(--status-success, #369650);
     }
   }
 
@@ -328,15 +307,6 @@
     border-bottom: 1px solid var(--border-primary);
     min-width: 0;
 
-    /* 单选卡（内置套餐）：整行可点选中，hover 提示可交互 */
-    &.selectable {
-      cursor: pointer;
-
-      &:hover {
-        background: var(--bg-hover);
-      }
-    }
-
     > .codicon {
       flex-shrink: 0;
       font-size: 15px;
@@ -360,6 +330,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 220px;
+  }
+
+  // 内置渠道命中方式徽章：selected=客户端选中生效（绿）；fallback=兜底生效（警示色）
+  &__provider-via {
+    flex-shrink: 0;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    border: 1px solid var(--color-success);
+    color: var(--color-success);
+
+    &.is-fallback {
+      border-color: var(--status-warning);
+      color: var(--status-warning);
+    }
   }
 
   &__provider-off {

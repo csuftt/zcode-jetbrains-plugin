@@ -8,6 +8,40 @@
     "empty": "No quota data",
     "resetAt": "Resets {{time}}"
   },
+  "plan": {
+    "tab": "GLM Plan Usage",
+    "credHint": "Credential: {{name}}",
+    "credForeign": "Credential: {{name}} (not the subscription channel, data may not match)"
+  },
+  "app": {
+    "tab": "App Usage",
+    "title": "App Usage",
+    "source": "Local session stats · incl. third-party models",
+    "range": {
+      "all": "All"
+    },
+    "stat": {
+      "totalTokens": "Total Tokens",
+      "requests": "Requests",
+      "sessions": "Sessions",
+      "turns": "Turns",
+      "cacheHit": "Cache Hit",
+      "activeDays": "Active Days"
+    },
+    "model": {
+      "title": "Daily Token Trend",
+      "tableTitle": "Model Breakdown",
+      "colCalls": "Requests",
+      "colShare": "Share"
+    },
+    "tool": {
+      "title": "Tool Calls",
+      "colName": "Tool",
+      "colCalls": "Calls",
+      "colErrRate": "Error Rate"
+    },
+    "thirdParty": "3rd-party"
+  },
   "detail": "Usage details",
   "range": {
     "today": "Today",

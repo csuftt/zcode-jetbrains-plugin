@@ -15,10 +15,11 @@
     "trial": "体験プラン"
   },
   "section": {
-    "builtin": "内蔵プラン",
-    "builtinHint": "同時に有効化できるのは 1 つだけです。新しいプランを有効化すると他の内蔵プランは自動的に無効化されます",
+    "builtin": "内蔵チャネル",
+    "builtinHint": "ZCode クライアントの設定に従います。同時に有効なのは 1 つだけです。切り替えはクライアントで行ってください",
     "custom": "カスタムプロバイダー"
   },
+  "builtinReadonlyHint": "内蔵チャネルが有効です（有効/無効の切り替えは ZCode クライアントで）",
   "providerDisabled": "無効",
   "providerNoModels": "このプロバイダーにモデルはありません",
   "modelsCount": "{{count}} 件のモデル",
@@ -36,5 +37,9 @@
     "deleteBody": "「{{name}}」（{{provider}}）は Zcode 設定ファイルで一元管理されており、プラグイン内では削除できません。Zcode クライアントのモデル設定で削除するか、下記設定ファイルの該当 provider models ノードからエントリを削除してください。変更後、このページを更新すると反映されます。",
     "openConfig": "設定ファイルを開く",
     "dismiss": "閉じる"
-  }
+  },
+  "viaSelected": "クライアント選択",
+  "viaSelectedHint": "ZCode クライアントで現在選択されているチャネル（権威）",
+  "viaFallback": "フォールバック",
+  "viaFallbackHint": "クライアント選択のチャネルに有効な資格情報がないため、最初に利用可能な内蔵チャネルにフォールバックしました"
 }

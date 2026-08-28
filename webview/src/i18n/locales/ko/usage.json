@@ -8,6 +8,40 @@
     "empty": "할당량 데이터 없음",
     "resetAt": "리셋 {{time}}"
   },
+  "plan": {
+    "tab": "GLM 플랜 사용량",
+    "credHint": "조회 자격증명: {{name}}",
+    "credForeign": "조회 자격증명: {{name}} (구독 채널이 아니라 데이터가 다를 수 있음)"
+  },
+  "app": {
+    "tab": "앱 사용량",
+    "title": "앱 사용량",
+    "source": "로컬 세션 통계 · 서드파티 모델 포함",
+    "range": {
+      "all": "전체"
+    },
+    "stat": {
+      "totalTokens": "총 Token",
+      "requests": "요청 수",
+      "sessions": "세션 수",
+      "turns": "턴 수",
+      "cacheHit": "캐시 적중률",
+      "activeDays": "활동 일수"
+    },
+    "model": {
+      "title": "일별 Token 추이",
+      "tableTitle": "모델 상세",
+      "colCalls": "요청 수",
+      "colShare": "비중"
+    },
+    "tool": {
+      "title": "도구 호출",
+      "colName": "도구",
+      "colCalls": "호출 수",
+      "colErrRate": "오류율"
+    },
+    "thirdParty": "서드파티"
+  },
   "detail": "사용량 상세",
   "range": {
     "today": "오늘",

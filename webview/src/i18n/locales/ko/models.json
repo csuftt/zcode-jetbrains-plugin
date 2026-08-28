@@ -15,10 +15,11 @@
     "trial": "체험 플랜"
   },
   "section": {
-    "builtin": "내장 플랜",
-    "builtinHint": "동시에 하나만 활성화할 수 있으며, 새 플랜을 활성화하면 다른 내장 플랜이 자동 비활성화됩니다",
+    "builtin": "내장 채널",
+    "builtinHint": "ZCode 클라이언트 설정을 따르며 동시에 하나만 활성화됩니다. 전환은 클라이언트에서 진행하세요",
     "custom": "사용자 지정 공급자"
   },
+  "builtinReadonlyHint": "내장 채널 활성 상태(활성/비활성 전환은 ZCode 클라이언트에서)",
   "providerDisabled": "비활성화됨",
   "providerNoModels": "이 공급자에는 모델이 없습니다",
   "modelsCount": "모델 {{count}}개",
@@ -36,5 +37,9 @@
     "deleteBody": "\"{{name}}\"({{provider}})은(는) Zcode 설정 파일로 일괄 관리되며 플러그인에서 직접 삭제할 수 없습니다. Zcode 클라이언트의 모델 설정에서 삭제하거나, 아래 설정 파일의 해당 provider models 노드에서 항목을 제거하세요. 변경 후 이 페이지를 새로 고치면 반영됩니다.",
     "openConfig": "설정 파일 열기",
     "dismiss": "확인"
-  }
+  },
+  "viaSelected": "클라이언트 선택",
+  "viaSelectedHint": "ZCode 클라이언트에서 현재 선택한 채널(권한 있음)",
+  "viaFallback": "폴백 적용",
+  "viaFallbackHint": "클라이언트가 선택한 채널에 유효한 자격증명이 없어 첫 번째 사용 가능한 내장 채널로 대체되었습니다"
 }

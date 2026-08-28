@@ -29,6 +29,12 @@ const COMPLETION_ENABLED_KEY = 'zcode-history-completion-enabled'
 const MAX_HISTORY_ITEMS = 200
 /** 单条历史文本长度上限：超长内容（粘贴的日志/大段代码）不纳入历史，避免撑爆 kvSave 单值阈值（IDE 侧 64KB）*/
 const MAX_INPUT_HISTORY_TEXT_LENGTH = 2000
+/**
+ * 单值序列化预算：条数裁剪（200 × 2000 字符）理论上限仍可达数百 KB，counts/
+ * timestamps 又随旧条目键残留无限膨胀（0.2.6 实测 timestamps 撑爆 64KB 导致
+ * kvSave 整批被拒、发送报错）。写入前按预算从最旧端裁条目，三份数据同步 GC。
+ */
+const MAX_KV_VALUE_LENGTH = 48 * 1024
 const INVISIBLE_CHARS_RE = /[\u200B-\u200D\uFEFF]/g
 
 /** 设置页展示/管理用条目（cc-gui HistoryItem 同构）*/
@@ -132,6 +138,27 @@ function saveTimestamps(timestamps: Record<string, string>): void {
   }
 }
 
+/**
+ * 三份数据统一持久化：历史按序列化预算从最旧端裁条目，counts/timestamps 同步
+ * GC（只保留裁后历史仍存在的键）——旧逻辑历史数组裁 200 条但两个 Record 的键
+ * 永不清理，长期使用后单值超 kvSave 64KB 阈值整批被拒。
+ */
+function persistHistory(
+  items: string[],
+  counts: Record<string, number>,
+  timestamps: Record<string, string>,
+): void {
+  let next = items.slice(-MAX_HISTORY_ITEMS)
+  while (next.length > 0 && JSON.stringify(next).length > MAX_KV_VALUE_LENGTH) {
+    next = next.slice(1)
+  }
+  const live = new Set(next)
+  memoryHistory = next
+  saveHistory(next)
+  saveCounts(Object.fromEntries(Object.entries(counts).filter(([k]) => live.has(k))))
+  saveTimestamps(Object.fromEntries(Object.entries(timestamps).filter(([k]) => live.has(k))))
+}
+
 /** 幽灵补全最少输入长度（cc-gui minQueryLength 同款：输 2 字符才触发）*/
 const MIN_SUGGESTION_QUERY = 2
 
@@ -190,13 +217,11 @@ export function loadHistoryWithImportance(): HistoryItem[] {
 /** 删除单条（连带清理计数与时间戳；memoryHistory 同步，输入框导航立即感知）*/
 export function deleteHistoryItem(text: string): void {
   const next = loadHistory().filter((item) => item !== text)
-  saveHistory(next)
   const counts = loadCounts()
   delete counts[text]
-  saveCounts(counts)
   const timestamps = loadTimestamps()
   delete timestamps[text]
-  saveTimestamps(timestamps)
+  persistHistory(next, counts, timestamps)
 }
 
 /** 清空全部历史 */
@@ -216,14 +241,11 @@ export function addHistoryItem(text: string, importance: number = 1): void {
   const clean = text.replace(INVISIBLE_CHARS_RE, '').trim()
   if (!clean) return
   if (clean.length > MAX_INPUT_HISTORY_TEXT_LENGTH) return
-  const next = [...loadHistory().filter((item) => item !== clean), clean].slice(-MAX_HISTORY_ITEMS)
-  saveHistory(next)
   const counts = loadCounts()
   counts[clean] = Math.max(1, Math.floor(importance))
-  saveCounts(counts)
   const timestamps = loadTimestamps()
   timestamps[clean] = new Date().toISOString()
-  saveTimestamps(timestamps)
+  persistHistory([...loadHistory().filter((item) => item !== clean), clean], counts, timestamps)
 }
 
 /** 编辑一条：改文本时迁移计数/时间戳，与既有条目撞名时计数取较大、时间取较新 */
@@ -252,10 +274,8 @@ export function updateHistoryItem(oldText: string, newText: string, importance: 
     const newer = [timestamps[oldText], timestamps[clean]].filter(Boolean).sort().pop()
     if (newer) timestamps[clean] = newer
     delete timestamps[oldText]
-    saveHistory(items.slice(-MAX_HISTORY_ITEMS))
   }
-  saveCounts(counts)
-  saveTimestamps(timestamps)
+  persistHistory(items, counts, timestamps)
 }
 
 /** 清除低重要度（importance ≤ threshold）条目，返回删除条数 */
@@ -275,9 +295,7 @@ export function clearLowImportanceHistory(threshold: number = 1): number {
     }
   }
   if (deleted > 0) {
-    saveHistory(keep)
-    saveCounts(counts)
-    saveTimestamps(timestamps)
+    persistHistory(keep, counts, timestamps)
   }
   return deleted
 }
@@ -295,20 +313,14 @@ export function useInputHistory({ getTextContent, setText }: Options) {
     const clean = text.replace(INVISIBLE_CHARS_RE, '').trim()
     if (!clean) return
     if (clean.length > MAX_INPUT_HISTORY_TEXT_LENGTH) return // 超长内容不纳入历史
-    const next = [...loadHistory().filter((item) => item !== clean), clean].slice(
-      -MAX_HISTORY_ITEMS,
-    )
-    memoryHistory = next
     historyIndexRef.current = -1
     draftRef.current = ''
     try {
-      setPersisted(HISTORY_STORAGE_KEY, JSON.stringify(next))
       const counts = loadCounts()
       counts[clean] = (counts[clean] || 0) + 1
-      setPersisted(COUNTS_STORAGE_KEY, JSON.stringify(counts))
       const timestamps = loadTimestamps()
       timestamps[clean] = new Date().toISOString()
-      setPersisted(TIMESTAMPS_STORAGE_KEY, JSON.stringify(timestamps))
+      persistHistory([...loadHistory().filter((item) => item !== clean), clean], counts, timestamps)
     } catch {
       // 存储禁用/写满时静默降级为仅内存历史
     }

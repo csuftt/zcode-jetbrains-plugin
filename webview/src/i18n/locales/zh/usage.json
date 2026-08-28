@@ -8,6 +8,40 @@
     "empty": "暂无额度数据",
     "resetAt": "重置 {{time}}"
   },
+  "plan": {
+    "tab": "GLM 套餐用量",
+    "credHint": "查询凭证：{{name}}",
+    "credForeign": "查询凭证：{{name}}（非订阅渠道，数据可能不符）"
+  },
+  "app": {
+    "tab": "应用用量",
+    "title": "应用用量",
+    "source": "本地会话统计 · 含第三方模型",
+    "range": {
+      "all": "全部"
+    },
+    "stat": {
+      "totalTokens": "总 Token",
+      "requests": "请求次数",
+      "sessions": "会话数",
+      "turns": "回合数",
+      "cacheHit": "缓存命中率",
+      "activeDays": "活跃天数"
+    },
+    "model": {
+      "title": "每日 Token 曲线",
+      "tableTitle": "模型明细",
+      "colCalls": "请求数",
+      "colShare": "占比"
+    },
+    "tool": {
+      "title": "工具调用",
+      "colName": "工具",
+      "colCalls": "调用次数",
+      "colErrRate": "错误率"
+    },
+    "thirdParty": "第三方"
+  },
   "detail": "用量明细",
   "range": {
     "today": "当日",

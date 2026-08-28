@@ -97,9 +97,13 @@ data class EnvStatus(
 ) {
     /**
      * node + zcode.cjs 就绪即可启动 app-server；browserHost 是建议性检查，不计入。
-     * 凭证（issue #4 后）同样不再阻断：oauth 登录的凭证为加密存储，config.json 无
-     * 明文 apiKey 时降级裸启（app-server 自身凭证链可接管，实测对话正常），仅经
-     * credentials 状态展示警告（用量查询等辅助功能受限）。
+     * 凭证（issue #4 后）同样不再阻断启动：config.json 无明文 apiKey 时降级裸启，
+     * 仅经 credentials 状态展示警告（用量查询等辅助功能受限）。注意裸启后 app-server
+     * 无法解析模型凭证（2026-08 实测 CLI 0.13.3：session/create 报 -32603 Model
+     * config is missing、resume 后 send 报 -32031 运行时模型不可用、oauth token 顶替
+     * ANTHROPIC_API_KEY 注入同样挂起），GUI 可裸跑是靠 desktop surface 的
+     * requestRuntimePreferences 反向链路，插件 headless 直启不具备——降级仅保住
+     * 「进程能起 + 列表能看」，对话需用户补配 API Key 型 provider。
      */
     val allOk: Boolean get() = node.ok && cli.found
 }
@@ -111,7 +115,7 @@ class EnvCheckException(val status: EnvStatus, message: String) : IllegalStateEx
 data class EnvStartParams(
     val nodePath: String,
     val zcodePath: Path,
-    /** null = config.json 无明文凭证（oauth 登录），裸启由 app-server 自身凭证链接管 */
+    /** null = config.json 无明文凭证，裸启 app-server（对话不可用，见 EnvStatus.allOk 注释） */
     val credentials: ZCodeCredentials?,
 )
 

@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput } from '@/types/messages'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, looksLikeQuotaError } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import i18n from '@/i18n/config'
@@ -240,6 +240,8 @@ interface StoreState {
   quotaLoading: boolean
   /** quota 上次成功拉取时间戳（圆环 popover 缓存 TTL 用）*/
   quotaFetchedAt: number
+  /** monitor HTTP 实际取 key 的渠道（用量页提示数据口径；成功响应携带）*/
+  usageProvider: { id: string; name: string } | null
 
   // 记忆文件（设置视图「记忆」条目，Kotlin 端固定清单扫描）
   memoryFiles: MemoryFileInfo[] | null
@@ -314,6 +316,12 @@ interface StoreState {
   customEnd: string | null
   /** 用量查询局部错误（凭证/HTTP 失败，不污染全局 lastError）*/
   usageError: string | null
+
+  // 应用用量（usage/stats：app-server 本地聚合，含第三方模型，无 apiKey 依赖）
+  appUsage: AppUsageData | null
+  appUsageRange: AppUsageRange
+  /** 应用用量查询局部错误（app-server 不可达/协议错误）*/
+  appUsageError: string | null
 
   // AskUserQuestion 弹窗（deadlineMs = Java 侧应答超时时刻，弹窗倒计时用；旧链路可缺省）
   askUser: { requestId: string; toolName: string; questions: import('@/types/messages').AskUserQuestion[]; deadlineMs?: number } | null
@@ -429,6 +437,10 @@ interface StoreState {
   setUsageDates: (start: string, end: string) => void
   /** 按当前 usageRange 拉取 model-usage + tool-usage */
   loadUsageData: () => void
+  /** 设置应用用量时间范围并重拉 usage/stats */
+  setAppUsageRange: (range: AppUsageRange) => void
+  /** 拉取应用用量（usage/stats，app-server 本地聚合）*/
+  loadAppUsage: () => void
   /** 清除错误（错误栏关闭按钮）*/
   clearError: () => void
   /** 设置 EnvBanner「去设置」的跳转意图（BasicSettingsView 消费后清除）*/
@@ -546,6 +558,7 @@ export const useStore = create<StoreState>((set, get) => ({
   quota: null,
   quotaLoading: false,
   quotaFetchedAt: 0,
+  usageProvider: null,
   memoryFiles: null,
   memoryLoading: false,
   memoryCreatingPath: null,
@@ -588,6 +601,9 @@ export const useStore = create<StoreState>((set, get) => ({
   customStart: null,
   customEnd: null,
   usageError: null,
+  appUsage: null,
+  appUsageRange: '7d',
+  appUsageError: null,
 
   init: () => {
     if (bridgeInitialized) return
@@ -1288,6 +1304,16 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ modelUsage: null, toolUsage: null, usageError: null })
     sendToJava({ op: 'getModelUsage', startTime: start, endTime: end })
     sendToJava({ op: 'getToolUsage', startTime: start, endTime: end })
+  },
+
+  setAppUsageRange: (range) => {
+    set({ appUsageRange: range })
+    get().loadAppUsage()
+  },
+
+  loadAppUsage: () => {
+    set({ appUsage: null, appUsageError: null })
+    sendToJava({ op: 'getAppUsage', range: get().appUsageRange })
   },
 
   clearError: () => set({ lastError: null }),
@@ -2171,10 +2197,16 @@ export function handleResponse(
           // 模型）——推断得出且仍在列表则直接选上（下拉有勾选），推不出才保持空占位。
           // persist 不写回：兜底是运行态显示，用户主动选择才记忆。
           const inferred = inferCurrentModel(get().messages, msg.models)
-          const valid = inferred &&
-              msg.models.some((m) => m.modelId === inferred.modelId && m.providerId === inferred.providerId)
-            ? inferred
-            : null
+          // 同名跨渠道迁移：推断的 provider 已不在列表（客户端切换 API Key 渠道 ↔
+          // 订阅套餐，模型名相同）时，按 modelId 迁移到新渠道的同名模型落位，随后的
+          // setModel 落定让 settings 链路重建思考深度——否则下拉空占位、思考深度
+          // 消失，须手动重选（0.2.6 渠道切换实测反馈）
+          const hit = inferred
+            ? msg.models.find(
+                (m) => m.modelId === inferred.modelId && m.providerId === inferred.providerId,
+              ) ?? msg.models.find((m) => m.modelId === inferred.modelId)
+            : undefined
+          const valid = hit ? { modelId: hit.modelId, providerId: hit.providerId } : null
           // 思考深度联动失效：级别集按模型而异（off/high/max ↔ enabled/off），旧模型的
           // info 残留会让选择器在兜底模型上展示/下发非法级别（-32603）。清掉后待命态走
           // 下方 hydrateThoughtLevelStandby、有会话由 setModel 切换落定后的 settings
@@ -2334,7 +2366,23 @@ export function handleResponse(
         // 用户只看到错误文案，无法判断是否刚尝试过拉取
         set({ quota: null, quotaLoading: false, usageError: msg.error, quotaFetchedAt: Date.now() })
       } else {
-        set({ quota: msg.data ?? null, quotaLoading: false, usageError: null, quotaFetchedAt: Date.now() })
+        set({
+          quota: msg.data ?? null,
+          quotaLoading: false,
+          usageError: null,
+          quotaFetchedAt: Date.now(),
+          ...(msg.providerId && {
+            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+          }),
+        })
+      }
+      break
+
+    case 'appUsage':
+      if (msg.error) {
+        set({ appUsage: null, appUsageError: msg.error })
+      } else {
+        set({ appUsage: msg.data ?? null, appUsageError: null })
       }
       break
 
@@ -2487,7 +2535,12 @@ export function handleResponse(
       if (msg.error) {
         set({ modelUsage: null, usageError: msg.error })
       } else {
-        set({ modelUsage: msg.data ?? null })
+        set({
+          modelUsage: msg.data ?? null,
+          ...(msg.providerId && {
+            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+          }),
+        })
       }
       break
 
@@ -2495,7 +2548,12 @@ export function handleResponse(
       if (msg.error) {
         set({ toolUsage: null, usageError: msg.error })
       } else {
-        set({ toolUsage: msg.data ?? null })
+        set({
+          toolUsage: msg.data ?? null,
+          ...(msg.providerId && {
+            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+          }),
+        })
       }
       break
   }

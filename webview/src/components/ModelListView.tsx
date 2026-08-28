@@ -2,10 +2,12 @@
  * 模型列表面板（设置页「模型」条目，参考 cc-gui ProviderList 的展示模式）
  *
  * 数据：modelManageList（Kotlin 端读 config.json——路径走 Credentials.defaultConfigPath()
- *       跟随 dataBaseDir 迁移；apiKey 缺失的无效 provider 过滤，不去重、disabled 标记返回）
- * 交互：provider 行内启用/禁用切换（modelToggleProvider 备份+原子写回 config.json，
- *       成功后输入框下拉经 loadModels 同步刷新）；「新增模型」与行内「删除」点击后弹
- *       ConfirmDialog 引导前往 Zcode 配置（含「打开配置文件」快捷入口）。
+ *       跟随 dataBaseDir 迁移；apiKey 缺失的无效 provider 过滤；内置渠道只返回生效的）
+ * 交互：内置渠道只读展示（启停以 ZCode 客户端配置为准，插件不代写 config——客户端
+ *       与插件两个写者互相覆盖易出状态错乱）；第三方 provider 行内启用/禁用切换
+ *       （modelToggleProvider 备份+原子写回 config.json，成功后输入框下拉经
+ *       loadModels 同步刷新）；「新增模型」与行内「删除」点击后弹 ConfirmDialog
+ *       引导前往 Zcode 配置（含「打开配置文件」快捷入口）。
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -73,17 +75,17 @@ function ModelRow({ model, onDelete }: { model: ModelManageModel; onDelete: () =
 }
 
 /**
- * provider 分组卡片：头部（选择控件/名称/套餐徽章/ID/禁用徽章/baseURL/计数）+ 模型行列表。
- * radio=true（内置套餐）：头部整行可点，单选互斥由后端写回（启用新套餐自动禁用其余内置套餐）；
- * 否则（自定义供应商）：行内 toggle 开关，独立启停。
+ * provider 分组卡片：头部（选择控件/名称/套餐徽章/ID/状态徽章/baseURL/计数）+ 模型行列表。
+ * builtin=true（内置渠道）：只读展示当前生效的渠道（状态徽章），启停以 ZCode 客户端
+ * 配置为准，插件不代写；否则（自定义供应商）：行内 toggle 开关，独立启停。
  */
 function ProviderCard({
   provider,
-  radio = false,
+  builtin = false,
   onDeleteModel,
 }: {
   provider: ModelManageProvider
-  radio?: boolean
+  builtin?: boolean
   onDeleteModel: (provider: ModelManageProvider, model: ModelManageModel) => void
 }) {
   const { t } = useTranslation()
@@ -97,24 +99,15 @@ function ProviderCard({
 
   return (
     <div className={cx('model-list-view__provider', !provider.enabled && 'disabled')}>
-      <div
-        className={cx('model-list-view__provider-header', radio && 'selectable')}
-        onClick={radio ? handleToggle : undefined}
-      >
-        {radio ? (
-          <button
-            className={cx('model-list-view__radio', provider.enabled && 'on')}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleToggle()
-            }}
-            disabled={toggling}
-            title={provider.enabled ? t('models.disableHint') : t('models.enableHint')}
+      <div className="model-list-view__provider-header">
+        {builtin ? (
+          <span
+            className="model-list-view__provider-active"
+            title={t('models.builtinReadonlyHint')}
           >
-            {toggling && <span className="codicon codicon-loading spin" />}
-          </button>
-        ) : (
-          <button
+            <span className="codicon codicon-pass-filled" />
+          </span>
+        ) : (          <button
             className={cx('model-list-view__toggle', provider.enabled && 'on')}
             onClick={handleToggle}
             disabled={toggling}
@@ -127,6 +120,17 @@ function ProviderCard({
               )}
             />
           </button>
+        )}
+        {builtin && provider.via && (
+          <span
+            className={cx(
+              'model-list-view__provider-via',
+              provider.via === 'fallback' && 'is-fallback',
+            )}
+            title={provider.via === 'fallback' ? t('models.viaFallbackHint') : t('models.viaSelectedHint')}
+          >
+            {provider.via === 'fallback' ? t('models.viaFallback') : t('models.viaSelected')}
+          </span>
         )}
         <span className={cx('codicon', provider.enabled ? 'codicon-server-environment' : 'codicon-server-process')} />
         <span className="model-list-view__provider-name">{provider.providerName}</span>
@@ -276,7 +280,7 @@ export function ModelListView() {
         </div>
       ) : (
         <div className="model-list-view__list">
-          {/* 内置套餐区：单选互斥（启用新套餐自动禁用其余内置套餐，后端写回联动）*/}
+          {/* 内置渠道区：只读展示生效渠道（启停以 ZCode 客户端配置为准，禁用不展示）*/}
           {visible.some((p) => p.providerId.startsWith('builtin:')) && (
             <div className="model-list-view__section">
               <span className="model-list-view__section-title">{t('models.section.builtin')}</span>
@@ -289,7 +293,7 @@ export function ModelListView() {
               <ProviderCard
                 key={p.providerId}
                 provider={p}
-                radio
+                builtin
                 onDeleteModel={handleDeleteModel}
               />
             ))}

@@ -538,6 +538,14 @@
   letter-spacing: 0.3px;
 }
 
+/* 下拉空态提示（无模型时下拉仍可开，配合底部刷新按钮拉新——置灰会死锁刷新入口）*/
+.selector-dropdown-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+
 /* 下拉底部刷新行：Zcode 客户端改了模型配置后无需切设置页即可拉新。
    sticky 吸底：下拉是 300px 滚动容器，不吸底时模型多会把入口滚出视口 */
 .selector-dropdown-refresh {

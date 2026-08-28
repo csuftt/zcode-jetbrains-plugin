@@ -131,7 +131,7 @@ export function ModelSelect({ currentModel, onSelect, disabled = false }: Props)
         className="selector-button"
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
-        disabled={disabled || models.length === 0}
+        disabled={disabled}
         onMouseEnter={() => {
           if (!open) setHovered(true)
         }}
@@ -169,8 +169,13 @@ export function ModelSelect({ currentModel, onSelect, disabled = false }: Props)
           document.body,
         )}
 
-      {open && models.length > 0 && (
+      {open && (
         <div className="selector-dropdown">
+          {groups.length === 0 && (
+            /* 空态不可禁按钮/不渲染下拉：用户在 Zcode 客户端改完配置回来要能点
+               刷新拉新（下拉是刷新入口，置灰会死锁——只能去设置页刷）*/
+            <div className="selector-dropdown-empty">{t('models.emptyHint')}</div>
+          )}
           {groups.map(([providerId, items]) => (
             <div key={providerId} className="selector-dropdown-group">
               <div className="selector-dropdown-group-title">
