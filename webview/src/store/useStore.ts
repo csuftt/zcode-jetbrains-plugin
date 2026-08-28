@@ -1051,6 +1051,24 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setModel: (modelId, providerId) => {
+    const cur = get().currentModel
+    // 目标=当前生效模型（含挂起回滚后的显示模型）：语义是取消延迟切换（用户反悔路径）
+    // ——本地清挂起与提示、persist 归位生效模型，并通知 Java 撤掉补发目标（否则回合
+    // 结束仍会把已放弃的目标模型真切上去）。空闲态点当前模型=纯 no-op，同样不发 setModel
+    if (cur && cur.modelId === modelId && cur.providerId === providerId) {
+      const hadPending = !!get().modelPendingSwitch
+      setPersisted('zcode.currentModel', JSON.stringify({ modelId, providerId }))
+      set({
+        modelInvalidated: false,
+        modelSwitchInFlightAt: null,
+        modelPendingSwitch: null,
+        modelSwitchPrevModel: null,
+        lastNotice: null,
+      })
+      const sid = get().currentSessionId
+      if (hadPending && sid) sendToJava({ op: 'cancelModelSwitch', sessionId: sid })
+      return
+    }
     // 记忆当前选择（persist 通道），切换会话后仍显示；无会话（懒创建待命态）也先记忆，
     // 会话建立后由 applyModelIfReady 真正下发（见 createSession 响应处理）
     setPersisted('zcode.currentModel', JSON.stringify({ modelId, providerId }))
@@ -2314,6 +2332,13 @@ export function handleResponse(
       set({ lastError: msg.message })
       break
     }
+
+    case 'modelSwitchCancelled':
+      // 取消回执（本地已先行清理）：兜底再清一次挂起与提示
+      if (get().modelPendingSwitch?.sessionId === msg.sessionId) {
+        set({ modelPendingSwitch: null, modelSwitchPrevModel: null, lastNotice: null })
+      }
+      break
 
     case 'settings': {
       // 过期的 settings 响应（切会话竞态）直接丢弃

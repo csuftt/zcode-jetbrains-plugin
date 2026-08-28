@@ -318,6 +318,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 切换 provider 启用/禁用（Kotlin 备份+原子写回 config.json 的 enabled 字段）*/
   | { op: 'modelToggleProvider'; providerId: string; enabled: boolean }
   | { op: 'setModel'; sessionId: string; modelId: string; providerId: string }
+  /** 撤销回合中挂起的延迟切换（用户在等待期重新选回生效模型）*/
+  | { op: 'cancelModelSwitch'; sessionId: string }
   | { op: 'getSettings'; sessionId: string }
   | { op: 'setThoughtLevel'; sessionId: string; thoughtLevel: string }
   | { op: 'setMode'; sessionId: string; mode: string }
@@ -757,6 +759,8 @@ export type JavaResponse =
   | { op: 'modelSetPending'; sessionId: string; modelId: string; providerId: string }
   /** 挂起的切换补发失败（回合结束后重试仍报错）：清除提示并告警 */
   | { op: 'modelSetFailed'; sessionId: string; modelId: string; providerId: string; message: string }
+  /** 挂起的延迟切换已撤销（cancelModelSwitch 回执）*/
+  | { op: 'modelSwitchCancelled'; sessionId: string }
   /** Java 忙窗口重试成功通知（缺陷AB）：顶栏忙窗口提示据此清除 */
   | { op: 'busyRetryRecovered' }
   /** P2 用量查询失败静默降级（缺陷AB 编排②）：不弹错、不复位 streaming */

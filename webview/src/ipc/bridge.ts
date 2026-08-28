@@ -885,6 +885,9 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
         modelId: req.modelId,
         providerId: req.providerId,
       }
+    case 'cancelModelSwitch':
+      // mock：回取消回执（本地状态已先行清理）
+      return { op: 'modelSwitchCancelled', sessionId: req.sessionId }
     case 'getSettings':
       // mock：GLM-5.2 三档 + yolo 模式（真实结构见 session/read → settings）
       return {

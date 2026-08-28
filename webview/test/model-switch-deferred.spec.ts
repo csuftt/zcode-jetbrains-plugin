@@ -132,4 +132,32 @@ describe('回合中延迟切模型（缺陷AC）', () => {
     const s = useStore.getState()
     expect(s.currentModel).toEqual({ modelId: 'qwen3.7-plus', providerId: 'p2' })
   })
+
+  it('挂起期间切回生效模型：取消挂起与提示，发 cancelModelSwitch 不发 setModel', () => {
+    useStore.getState().setModel(FLASH.modelId, FLASH.providerId)
+    pushResponse({ op: 'modelSetPending', sessionId: SID, ...FLASH })
+    expect(useStore.getState().lastNotice).toBeTruthy()
+    sentRequests.length = 0
+    // 用户反悔：重新选回生效模型 GLM-5.3
+    useStore.getState().setModel(GLM.modelId, GLM.providerId)
+    const s = useStore.getState()
+    // 挂起/提示/暂存全部清除，persist 归位生效模型（防重开走 Flash）
+    expect(s.modelPendingSwitch).toBeNull()
+    expect(s.modelSwitchPrevModel).toBeNull()
+    expect(s.lastNotice).toBeNull()
+    expect(JSON.parse(localStorage.getItem('zcode.currentModel')!)).toEqual(GLM)
+    // 通知 Java 撤补发（不撤回合结束会真切上去）；不发 setModel
+    expect(sentRequests.map((r) => r.op)).toEqual(['cancelModelSwitch'])
+    expect(sentRequests[0]).toMatchObject({ op: 'cancelModelSwitch', sessionId: SID })
+    // Java 回执兜底清理（无副作用）
+    pushResponse({ op: 'modelSwitchCancelled', sessionId: SID })
+    expect(useStore.getState().modelPendingSwitch).toBeNull()
+  })
+
+  it('空闲态点当前模型：纯 no-op，不发任何请求', () => {
+    sentRequests.length = 0
+    useStore.getState().setModel(GLM.modelId, GLM.providerId)
+    expect(sentRequests).toEqual([])
+    expect(useStore.getState().currentModel).toEqual(GLM)
+  })
 })

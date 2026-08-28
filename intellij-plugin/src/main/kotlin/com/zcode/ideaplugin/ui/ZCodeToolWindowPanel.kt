@@ -803,6 +803,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "modelManageList" -> handleModelManageList(msg)
                         "modelToggleProvider" -> handleModelToggleProvider(msg)
                         "setModel" -> handleSetModel(msg)
+                        "cancelModelSwitch" -> handleCancelModelSwitch(msg)
                         "getSettings" -> handleGetSettings(msg)
                         "setThoughtLevel" -> handleSetThoughtLevel(msg)
                         "setMode" -> handleSetMode(msg)
@@ -2332,6 +2333,23 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("sessionId", sessionId)
             put("modelId", modelId)
             put("providerId", providerId)
+        }
+    }
+
+    /**
+     * op=cancelModelSwitch — 用户在等待期重新选回生效模型，撤销挂起的延迟切换。
+     * 不撤的话回合结束 applyPendingModelSwitch 会把用户已放弃的目标模型真切上去。
+     */
+    private fun handleCancelModelSwitch(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val removed = pendingModelSwitches.remove(sessionId)
+        if (removed != null) {
+            log.info("deferred model switch cancelled: $sessionId (was ${removed.providerId}/${removed.modelId})")
+        }
+        return buildJsonObject {
+            put("op", "modelSwitchCancelled")
+            put("sessionId", sessionId)
         }
     }
 
