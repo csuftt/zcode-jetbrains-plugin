@@ -23,6 +23,48 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    "version": "0.2.7",
+    "date": "2026-08-28",
+    "zh": {
+      "sections": [
+        {
+          "title": "修复",
+          "items": [
+            "**新版 ZCode CLI 下停止按钮失效**：CLI 0.16.5+ 的兼容性问题导致点停止后回合继续跑，只能等它自然结束；现在停止改走官方 V4 协议通道，毫秒级生效、会话立即可复用，旧版 CLI 自动回退原有停止方式。",
+            "**回合进行中切换模型会打断回合**：此前回合中切模型会直接杀掉当前回合（或报错不生效）；现在延迟到回合结束后自动补发生效，等待期间重新选回当前模型可取消切换。",
+            "**停止会误取消待切换的模型**：模型切换等待期间点停止，切换会被连带取消而一直用旧模型；现在停止只结束当前回合，待切换的模型照常落地。",
+            "**启动时弹出「读取设置失败 [-32004]」**：ZCode CLI 升级或重启后打开插件，冷会话读取设置可能报错弹横幅；现在自动恢复会话后重读，横幅不再出现。"
+          ]
+        },
+        {
+          "title": "变更",
+          "items": [
+            "**回合时间显示日期**：主界面回合时间此前只显示「时:分」，翻看跨天的历史会话时难以分辨是哪天的；现在非当天的回合显示「月-日 时:分」，跨年再加上年份。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "title": "Fixed",
+          "items": [
+            "**Stop button ineffective on the new ZCode CLI**: A regression in CLI 0.16.5+ let the turn keep running after clicking Stop until it finished on its own. Stop now goes through the official V4 protocol channel — it takes effect within milliseconds and the session is immediately reusable; older CLI versions automatically fall back to the previous stop method.",
+            "**Switching models mid-turn interrupted the turn**: Previously switching models during a running turn killed the turn outright (or failed to apply). The switch is now deferred and applied automatically when the turn ends; picking the current model again during the wait cancels it.",
+            "**Stop accidentally cancelled a pending model switch**: Clicking Stop while a model switch was waiting to apply used to cancel the switch and keep the old model. Stop now only ends the current turn — the pending switch still lands.",
+            "**\"Failed to read settings [-32004]\" banner at startup**: After a ZCode CLI upgrade or restart, reading settings for a cold session could fail and show a banner. The session is now auto-resumed and re-read; the banner no longer appears."
+          ]
+        },
+        {
+          "title": "Changed",
+          "items": [
+            "**Round timestamps now include the date**: Round times in the chat previously showed only \"HH:mm\", which was confusing when browsing sessions from earlier days. Rounds not from today now show \"MM-DD HH:mm\" (plus the year when it differs)."
+          ]
+        }
+      ]
+    }
+  },
+  {
     "version": "0.2.6",
     "date": "2026-08-28",
     "zh": {

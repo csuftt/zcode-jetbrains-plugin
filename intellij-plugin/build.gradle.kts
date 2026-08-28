@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.zcode.ideaplugin"
-version = "0.2.6"
+version = "0.2.7"
 
 // 从仓库根 CHANGELOG.md 提取「最新一个版本块」（## 标题到下一个 ## 之前），
 // 输出中英双语并列的 HTML：中文段在前（主用户群），<h3>English</h3> 分隔后接英文段
