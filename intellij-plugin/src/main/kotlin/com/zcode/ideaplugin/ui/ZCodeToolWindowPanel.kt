@@ -3340,11 +3340,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun handleStop(msg: JsonObject): JsonObject {
         val sessionId = msg["sessionId"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 sessionId")
+        // 前端账本里仍在跑的后台 bash 任务（exec_ id），随 stop 一并连带中止
+        val extraTaskIds = msg["taskIds"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
         try {
             // 手动打断不触发对话结束提醒（30s 内该会话的收尾事件被跳过）
             project.zCodeService().markManualStop(sessionId)
-            scheduleStopSequence(sessionId)
-            log.info("stop requested: $sessionId")
+            scheduleStopSequence(sessionId, extraTaskIds)
+            log.info("stop requested: $sessionId (extraTaskIds=$extraTaskIds)")
         } catch (e: Exception) {
             log.warn("stop failed: ${e.message}")
             return errorResponse("停止失败: ${e.message}")
@@ -3365,8 +3370,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 没杀掉回合，补射一次 v4（新版回归期 session/stop 是空操作），再 2s 仍无帧才
      * 合成；补射仍失败则放弃（回合自然结束，绝不给活回合合成完成帧）。
      * 回合 id 守卫：验证时发现已是新回合（用户新发）则不动作，防误杀。
+     *
+     * 连带中止后台任务（对齐官方客户端 stop 预期）：v4/legacy stop 只 abort 前台回合
+     * （zcode.cjs edn/k9r 实证），后台化的子代理与 bash 任务设计上会存活。停完回合后
+     * 立即取消——运行中子代理经 session/subagents 权威枚举（taskId=agentId，zcode.cjs
+     * nDi 实证按 taskId 匹配），bash 后台任务 id 由前端账本随 stop 带上来；两类统一走
+     * session/cancelBackgroundTask（runtime 按 taskType 分发：local_agent→subagentPort.
+     * stopTask，local_bash→abort）。已随回合终止的任务取消返回 alreadyTerminal，幂等无害。
      */
-    private fun scheduleStopSequence(sessionId: String) {
+    private fun scheduleStopSequence(sessionId: String, extraTaskIds: List<String> = emptyList()) {
         if (!streamingTurns.containsKey(sessionId)) return // 空闲态点停止：无在途回合，不动作
         val stoppedTurnId = streamingTurns[sessionId] // 可为 null（事件没带 turnId）
         Thread({
@@ -3387,6 +3399,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         log.warn("stop sequence: session/stop also failed: ${e2.message}")
                     }
                 }
+                cancelRunningBackgroundTasks(client, sessionId, extraTaskIds)
                 // 2s 验证：真实终止帧（工具期 v4 / 老版本原生路径）此时已到并清了簿记
                 Thread.sleep(2000)
                 if (stillSameTurn(sessionId, stoppedTurnId) && !v4Accepted) {
@@ -3427,6 +3440,41 @@ if (!window.__ZCODE_LOG_HOOK__) {
         synchronized(streamingTurns) {
             streamingTurns.containsKey(sessionId) && streamingTurns[sessionId] == stoppedTurnId
         }
+
+    /**
+     * 连带中止运行中的后台任务：session/subagents 枚举 running 子代理（agentId 优先，
+     * 缺失兜底 toolCallId——id 不匹配时服务端返回 background_task_not_found，无害），
+     * 加上前端账本带上来的 bash 后台任务 id，逐个 session/cancelBackgroundTask。
+     * fail-soft：任一失败只记日志，不影响停止序列后续验证与合成收口。
+     */
+    private fun cancelRunningBackgroundTasks(
+        client: com.zcode.ideaplugin.protocol.ZCodeProtocolClient,
+        sessionId: String,
+        extraTaskIds: List<String>,
+    ) {
+        val taskIds = LinkedHashSet(extraTaskIds)
+        try {
+            val data = client.subagents(sessionId)
+            val running = data["running"]?.jsonArray ?: JsonArray(emptyList())
+            for (item in running) {
+                val obj = item.jsonObject
+                val taskId = obj["agentId"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["toolCallId"]?.jsonPrimitive?.contentOrNull
+                    ?: continue
+                taskIds.add(taskId)
+            }
+        } catch (e: Exception) {
+            log.warn("stop sequence: subagents query failed, cancel only frontend task ids: ${e.message}")
+        }
+        for (taskId in taskIds) {
+            try {
+                val r = client.cancelBackgroundTask(sessionId, taskId)
+                log.info("stop sequence: background task cancelled: $sessionId/$taskId (result=$r)")
+            } catch (e: Exception) {
+                log.warn("stop sequence: background task cancel failed: $sessionId/$taskId (${e.message})")
+            }
+        }
+    }
 
     private fun errorResponse(msg: String): JsonObject = buildJsonObject {
         put("op", "error")

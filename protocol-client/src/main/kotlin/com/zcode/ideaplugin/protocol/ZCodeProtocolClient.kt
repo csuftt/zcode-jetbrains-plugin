@@ -564,7 +564,11 @@ class ZCodeProtocolClient private constructor(
             println("[ZCodeProtocolClient] listSessions alt-form query failed, keep primary only: ${e.message?.take(120)}")
             emptyList()
         }
-        return primary + alt.filter { it.sessionId !in primaryIds }
+        // 并集必须按 updatedAt 重排：两查各自按时间倒序返回，直接拼接会把补查命中的
+        // 会话整段垫到列表尾部（历史列表表现为"不按时间倒序"）。sortedWith 稳定排序，
+        // 同时间戳保持服务端原序
+        return (primary + alt.filter { it.sessionId !in primaryIds })
+            .sortedWith(compareByDescending { it.updatedAt })
     }
 
     private fun listSessionsOnce(

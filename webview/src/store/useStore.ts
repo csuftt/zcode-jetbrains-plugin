@@ -1091,7 +1091,13 @@ export const useStore = create<StoreState>((set, get) => ({
   stopStreaming: () => {
     const sid = get().currentSessionId
     if (!sid) return
-    sendToJava({ op: 'stop', sessionId: sid })
+    // 连带中止后台任务（对齐官方客户端 stop 行为）：账本里仍在跑的后台 bash 任务
+    // （exec_ id，无 endedAt）随 stop 一并交给 Java 侧 cancelBackgroundTask；
+    // 运行中子代理由 Java 侧经 session/subagents 权威枚举，不依赖前端账本
+    const runningTaskIds = Object.values(get().backgroundTasks)
+      .filter((t) => !t.endedAt)
+      .map((t) => t.id)
+    sendToJava({ op: 'stop', sessionId: sid, taskIds: runningTaskIds.length ? runningTaskIds : undefined })
   },
 
   removeQueuedMessage: (id) => {
@@ -1892,6 +1898,9 @@ export function handleResponse(
       const serverIds = new Set(merged.map((s) => s.sessionId))
       const staleLocal = get().sessions.filter((s) => !serverIds.has(s.sessionId))
       if (staleLocal.length) merged.push(...staleLocal)
+      // 时间倒序统一收口：服务端快照整体有序，但本地的补插项（staleLocal 追加在尾、
+      // 乐观新建插在头）会破坏全局顺序 → 按更新时间倒序重排（稳定排序，同时间戳保持原序）
+      merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
       set({ sessions: merged, provisionalTitles: nextProvisionals })
 
       // 会话恢复（仅多标签体系）：仅当标签有注入的初始会话（重启恢复）且会话仍存在时选中它。

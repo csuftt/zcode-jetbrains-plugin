@@ -310,7 +310,7 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'subscribe'; sessionId: string; workspacePath?: string }
   /** 订阅子代理会话事件流（实时归约前提；不改当前会话/标签状态，见 Java handleSubscribeChild）*/
   | { op: 'subscribeChild'; sessionId: string; workspacePath?: string }
-  | { op: 'stop'; sessionId: string }
+  | { op: 'stop'; sessionId: string; /** 连带中止的后台任务 id（exec_ bash 任务，账本仍在跑的）；子代理由 Java 侧权威枚举 */ taskIds?: string[] }
   | { op: 'getIdeTheme' }
   | { op: 'listFiles'; query: string }
   | { op: 'listCommands'; query?: string }
