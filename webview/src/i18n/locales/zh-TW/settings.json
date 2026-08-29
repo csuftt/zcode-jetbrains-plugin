@@ -144,7 +144,14 @@
     "enhanceModel": {
       "title": "潤色模型",
       "followSession": "跟隨會話模型",
-      "invalidHint": "所選模型已失效，潤色時將回退預設模型"
+      "invalidHint": "所選模型已失效，潤色時將回退預設模型"    },
+    "turnCollapseTitle": "對話摺疊",
+    "turnCollapseEnabled": {
+      "title": "自動摺疊執行過程",
+      "desc": "完成的對話輪預設只顯示最終結論，點「執行過程」摺疊列查看完整過程",
+      "hint": "預設開啟；會話內搜尋時摺疊的輪次會暫時展開以便定位",
+      "onHint": "點擊開啟自動摺疊",
+      "offHint": "點擊關閉自動摺疊（完整展開）"
     }
   }
 }

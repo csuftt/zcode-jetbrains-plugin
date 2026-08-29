@@ -144,7 +144,14 @@
     "enhanceModel": {
       "title": "Enhance model",
       "followSession": "Follow session model",
-      "invalidHint": "Selected model is unavailable; enhancement falls back to the default model"
+      "invalidHint": "Selected model is unavailable; enhancement falls back to the default model"    },
+    "turnCollapseTitle": "Conversation collapse",
+    "turnCollapseEnabled": {
+      "title": "Auto-collapse execution process",
+      "desc": "Completed turns show only the final answer; click the \"Execution process\" bar to view the full process",
+      "hint": "On by default; collapsed turns expand temporarily during in-session search",
+      "onHint": "Enable auto-collapse",
+      "offHint": "Disable auto-collapse (fully expand)"
     }
   }
 }

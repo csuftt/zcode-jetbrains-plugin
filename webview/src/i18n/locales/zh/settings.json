@@ -144,7 +144,14 @@
     "enhanceModel": {
       "title": "润色模型",
       "followSession": "跟随会话模型",
-      "invalidHint": "所选模型已失效，润色时将回退默认模型"
+      "invalidHint": "所选模型已失效，润色时将回退默认模型"    },
+    "turnCollapseTitle": "对话折叠",
+    "turnCollapseEnabled": {
+      "title": "自动折叠执行过程",
+      "desc": "完成的对话轮默认只显示最终结论，点「执行过程」折叠栏查看完整过程",
+      "hint": "默认开启；会话内搜索时折叠的轮次会临时展开以便定位",
+      "onHint": "点击开启自动折叠",
+      "offHint": "点击关闭自动折叠（完整展开）"
     }
   }
 }

@@ -144,7 +144,14 @@
     "enhanceModel": {
       "title": "개선 모델",
       "followSession": "세션 모델 따르기",
-      "invalidHint": "선택한 모델이 더 이상 없어 개선 시 기본 모델로 대체됩니다"
+      "invalidHint": "선택한 모델이 더 이상 없어 개선 시 기본 모델로 대체됩니다"    },
+    "turnCollapseTitle": "대화 접기",
+    "turnCollapseEnabled": {
+      "title": "실행 과정 자동 접기",
+      "desc": "완료된 턴에는 최종 답변만 표시됩니다. 「실행 과정」 막대를 클릭하면 전체 과정이 표시됩니다",
+      "hint": "기본값: 켜짐. 세션 내 검색 시 접힌 턴은 일시적으로 펼쳐집니다",
+      "onHint": "자동 접기 켜기",
+      "offHint": "자동 접기 끄기(모두 펼치기)"
     }
   }
 }

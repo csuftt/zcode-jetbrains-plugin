@@ -35,6 +35,8 @@ import { FileToolGroupCard } from './FileToolGroupCard'
 import { groupParts } from '@/utils/groupParts'
 import { isAgentNotification, isCompactSummaryMessage, findTimelinePart } from '@/utils/parseNotification'
 import { clockTime, formatDuration } from '@/utils/time'
+import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
+import { KV_HYDRATED_EVENT } from '@/utils/persist'
 import { useTick } from '@/hooks/useTick'
 import { CompactionSummaryCard } from './CompactionSummaryCard'
 import { TimelineSeparator } from './TimelineSeparator'
@@ -283,6 +285,25 @@ function turnCollapseInfo(parts: MessagePart[]): { lastTextIdx: number; collapsi
   return { lastTextIdx, collapsible: parts.slice(0, lastTextIdx).some(visible) }
 }
 
+/**
+ * 「自动折叠执行过程」配置读取。挂载即读（设置视图切换重挂 ChatView 已覆盖
+ * 改设置后的回显）；KV 水合事件兜底启动竞态（水合前读到默认值），storage
+ * 事件兜底多标签同步。
+ */
+function useAutoCollapseConfig(): boolean {
+  const [auto, setAuto] = useState(() => readTurnCollapseConfig().autoCollapse)
+  useEffect(() => {
+    const refresh = () => setAuto(readTurnCollapseConfig().autoCollapse)
+    window.addEventListener(KV_HYDRATED_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener(KV_HYDRATED_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [])
+  return auto
+}
+
 /** assistant 消息：左对齐，满宽 markdown + 工具卡片 + 思考 */
 function AssistantBubble({
   message,
@@ -316,9 +337,13 @@ function AssistantBubble({
   const units = useMemo(() => groupParts(parts), [parts])
 
   // 完成轮折叠（流式期间全渲染，turn 结束起默认只留结论）；
+  // 「自动折叠执行过程」设置控制默认态，手动点折叠栏的意图优先于设置；
   // 搜索面板激活时强制展开，保 TreeWalker 能扫到过程文本
   const { lastTextIdx, collapsible } = useMemo(() => turnCollapseInfo(parts), [parts])
-  const [expanded, setExpanded] = useState(false)
+  const autoCollapse = useAutoCollapseConfig()
+  const [manualExpand, setManualExpand] = useState<boolean | null>(null)
+  // 设置开 → 默认收起；手动点击过的意图（非 null）优先于设置默认值
+  const expanded = manualExpand ?? !autoCollapse
   const collapsed = collapsible && !streaming && !expanded && !searchActive
   // 折叠栏概览的轮次耗时：服务端权威值（completed - created）；重拉窗口缺 completed 就不显示
   const processMs =
@@ -334,7 +359,7 @@ function AssistantBubble({
             parts={parts}
             collapsed={collapsed}
             durationMs={processMs}
-            onToggle={() => setExpanded((v) => !v)}
+            onToggle={() => setManualExpand(!expanded)}
           />
         )}
         {collapsed ? (

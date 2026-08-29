@@ -5,6 +5,8 @@
  *   - 非流式的完整轮默认折叠：只渲染最终结论（最后一个 text part），执行过程不进 DOM
  *   - 折叠栏在结论上方（用户消息之后）：「执行过程 · 思考 N 次 · N 个工具 · 耗时」概览条，
  *     点击展开/收起；展开后折叠栏仍在顶部，随时可收起
+ *   - 「自动折叠执行过程」设置（默认开，utils/turnCollapseConfig）：关 → 轮次默认
+ *     完整展开，仍可点折叠栏手动收起；手动点击意图优先于设置
  *   - searchActive（搜索面板打开）→ 强制展开，保 TreeWalker 扫到/定位到过程文本
  *   - 不折叠情形：流式中 / 无 text 结论（纯工具轮）/ 结论后有可见 part（被停止回合以 tool 收尾）
  *   - step-start/step-finish 边界标记不构成过程内容
@@ -18,10 +20,14 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 
 vi.mock('@/ipc/bridge', () => ({
   sendToJava: () => {},
+  // setPersisted → scheduleKvFlush 首行调 isInJcef()，缺导出会 TypeError
+  isInJcef: () => false,
+  onMessage: () => () => {},
 }))
 
 import '@/i18n/config'
 import { MessageBubble } from '@/components/MessageBubble'
+import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
 import type { ZCodeMessage, MessagePart, ToolPart } from '@/types/messages'
 
 function toolPart(callID: string, tool = 'Read'): ToolPart {
@@ -60,8 +66,20 @@ function processBar(): HTMLElement {
 }
 
 describe('完成轮折叠', () => {
+  /** 此环境 jsdom 的 window.localStorage 是无方法的空壳对象，装内存实现供 persist 通道用 */
+  const memStore = new Map<string, string>()
   beforeEach(() => {
     window.HTMLElement.prototype.scrollIntoView = () => {}
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => (memStore.has(k) ? memStore.get(k)! : null),
+        setItem: (k: string, v: string) => void memStore.set(k, String(v)),
+        removeItem: (k: string) => void memStore.delete(k),
+        clear: () => void memStore.clear(),
+      },
+    })
+    memStore.clear()
   })
   afterEach(cleanup)
 
@@ -108,6 +126,30 @@ describe('完成轮折叠', () => {
     const bar = processBar()
     expect(bar.textContent).toContain('思考 1 次')
     expect(bar.textContent).toContain('2 个工具')
+  })
+
+  it('设置关闭自动折叠：轮次默认完整展开，点折叠栏仍可手动收起', () => {
+    memStore.set('zcode.turnCollapse.config', JSON.stringify({ autoCollapse: false }))
+    // 组件读同一 persist 通道（内存 localStorage），直写即可（readTurnCollapseConfig 无缓存）
+    expect(readTurnCollapseConfig().autoCollapse).toBe(false)
+    render(<MessageBubble message={assistantMsg([toolPart('t1'), { type: 'text', text: CONCLUSION }])} />)
+    expect(toolCardCount()).toBeGreaterThan(0)
+    expect(screen.getByText(CONCLUSION)).toBeTruthy()
+    // 折叠栏仍在：手动收起入口
+    expect(processBar().querySelector('.codicon-chevron-down')).toBeTruthy()
+    fireEvent.click(processBar())
+    expect(toolCardCount()).toBe(0)
+    fireEvent.click(processBar())
+    expect(toolCardCount()).toBeGreaterThan(0)
+  })
+
+  it('手动点击意图优先于设置：关自动折叠后先收起再展开，来回切换一致', () => {
+    memStore.set('zcode.turnCollapse.config', JSON.stringify({ autoCollapse: false }))
+    render(<MessageBubble message={assistantMsg([toolPart('t1'), { type: 'text', text: CONCLUSION }])} />)
+    fireEvent.click(processBar())
+    expect(toolCardCount()).toBe(0)
+    // 结论始终在 DOM
+    expect(screen.getByText(CONCLUSION)).toBeTruthy()
   })
 
   it('searchActive 强制展开：过程进 DOM，保搜索 TreeWalker 可扫', () => {
