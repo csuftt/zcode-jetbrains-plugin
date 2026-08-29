@@ -1265,9 +1265,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
           >
             <span className="codicon codicon-attach" />
           </button>
-          <ContextRing />
-          <AgentSelect onManage={onOpenAgentSettings} disabled={disabled} />
-          {/* 定时任务（日历）：最右对齐（发送按钮正上方）；角标=待执行任务总数 */}
+          {/* 定时任务（日历）：上下文圆环左侧排列；角标=待执行任务总数 */}
           <div className="schedule-entry">
             <button
               className="context-tool-btn"
@@ -1280,6 +1278,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
             </button>
             {scheduledCount > 0 && <span className="schedule-entry__badge">{scheduledCount}</span>}
           </div>
+          <ContextRing />
+          <AgentSelect onManage={onOpenAgentSettings} disabled={disabled} />
           {/* 定时任务弹窗挂在附件栏（topbar）内：底部锚在附件栏顶部之上，不遮输入框编辑区；
               原生日历向下展开不会被 webview 顶部裁切 */}
           {scheduleOpen && (

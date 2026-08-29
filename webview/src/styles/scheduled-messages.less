@@ -134,7 +134,6 @@
 // 附件栏日历入口：推到 topbar 最右（发送按钮正上方）；角标=待执行任务总数
 .schedule-entry {
   position: relative;
-  margin-left: auto;
   display: inline-flex;
 
   &__badge {
@@ -156,10 +155,10 @@
 }
 
 // 时间选择弹层：挂在附件栏（input-box-topbar）内、底部锚在其顶部之上——
-// 不遮输入框编辑区；日历入口在最右，弹窗随之右对齐（topbar 自身 position:relative）
+// 不遮输入框编辑区；入口在左侧组，弹窗左对齐贴主界面左边（topbar 自身 position:relative）
 .schedule-popover {
   position: absolute;
-  right: 8px;
+  left: 8px;
   bottom: calc(100% + 6px);
   z-index: 30;
   width: 460px;
