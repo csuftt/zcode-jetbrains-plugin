@@ -8,7 +8,9 @@
  *   - 「自动折叠执行过程」设置（默认开，utils/turnCollapseConfig）：关 → 轮次默认
  *     完整展开，仍可点折叠栏手动收起；手动点击意图优先于设置
  *   - searchActive（搜索面板打开）→ 强制展开，保 TreeWalker 扫到/定位到过程文本
- *   - 不折叠情形：流式中 / 无 text 结论（纯工具轮）/ 结论后有可见 part（被停止回合以 tool 收尾）
+ *   - 不折叠情形：流式中 / 无 text 结论（纯工具轮）
+ *   - 结论之后挂的收尾动作（总结后再调的工具/思考，含被停止回合的尾部 tool）：
+ *     不阻断折叠——折的是结论之前的过程，尾部单元保留在结论之后渲染，折叠栏计数只含结论前过程
  *   - step-start/step-finish 边界标记不构成过程内容
  *
  * 工具卡过程存在性以 .tool-card DOM 计数判定（ToolCallCard 渲染的是
@@ -173,11 +175,37 @@ describe('完成轮折叠', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('被停止的回合以 tool 收尾（结论后有可见 part）：不折叠', () => {
-    render(<MessageBubble message={assistantMsg([{ type: 'text', text: CONCLUSION }, toolPart('t1')])} />)
-    expect(toolCardCount()).toBeGreaterThan(0)
+  it('结论后挂收尾动作（总结后再调工具）：折前面的过程，尾部工具保留在结论后', () => {
+    render(<MessageBubble message={assistantMsg([
+      toolPart('t1'),
+      { type: 'text', text: CONCLUSION },
+      toolPart('t2', 'mcp__node_repl__js'),
+    ])} />)
+    // 折叠栏出现（此前的「无干净结论不折叠」规则已放宽）
+    expect(processBar()).toBeTruthy()
     expect(screen.getByText(CONCLUSION)).toBeTruthy()
-    expect(processBar()).toBeNull()
+    // 过程折进折叠栏（t1 不在 DOM），尾部收尾工具保留可见（t2 在结论后）
+    expect(toolCardCount()).toBe(1)
+    // 概览只统计结论之前的过程（1 个工具，不含尾部收尾）
+    expect(processBar().textContent).toContain('1 个工具')
+    // 尾部工具卡在结论之后（content 的最后一个可见子块）
+    const contentChildren = [...document.querySelector('.msg__content')!.children].filter(
+      (el) => el.classList.contains('tool-card') || el.textContent!.includes(CONCLUSION),
+    )
+    expect(contentChildren.length).toBe(2)
+    expect(contentChildren[0].textContent).toContain(CONCLUSION)
+    expect(contentChildren[1].classList.contains('tool-card')).toBe(true)
+  })
+
+  it('被停止的回合同样折叠：折过程、半截结论当结论展示，尾部未完工具保留', () => {
+    render(<MessageBubble message={assistantMsg([
+      { type: 'reasoning', text: '想一想' },
+      { type: 'text', text: MID_TEXT },
+      toolPart('t1'),
+    ])} />)
+    expect(processBar()).toBeTruthy()
+    expect(screen.getByText(MID_TEXT)).toBeTruthy()
+    expect(toolCardCount()).toBe(1)
   })
 
   it('step 边界标记不构成过程内容：标记夹结论 = 无过程可折叠', () => {

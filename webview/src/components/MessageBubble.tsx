@@ -32,7 +32,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { AgentNotificationCard } from './AgentNotificationCard'
 import { BashCommandGroupCard } from './BashCommandGroupCard'
 import { FileToolGroupCard } from './FileToolGroupCard'
-import { groupParts } from '@/utils/groupParts'
+import { groupParts, type PartRenderUnit } from '@/utils/groupParts'
 import { isAgentNotification, isCompactSummaryMessage, findTimelinePart } from '@/utils/parseNotification'
 import { clockTime, formatDuration } from '@/utils/time'
 import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
@@ -263,10 +263,10 @@ function UserTextPreviewDialog({
 /**
  * 完成轮折叠判定（对齐官方客户端：已完成轮默认只展示最终结论，点「已工作 X」展开过程）。
  *
- * 「最终结论」= 最后一个 text part，且需同时满足：
- *   - 结论之后没有其他可见 part（被停止的回合以 tool 收尾 = 无干净结论，不折叠）
- *   - 结论之前存在可见过程（reasoning/tool/中间 text/图），否则无可折叠内容
- * 折叠态只渲染结论，过程不进 DOM（性能收益 + 老会话减负）；
+ * 「最终结论」= 最后一个 text part；结论之前存在可见过程（reasoning/tool/中间 text/图）
+ * 即可折叠。结论之后可能挂收尾动作（模型总结后又做的工具调用/思考，如收纳浏览器面板）——
+ * 不阻断折叠，保留在结论之后渲染（折的是结论之前的过程）。
+ * 折叠态只渲染结论+尾部，过程不进 DOM（性能收益 + 老会话减负）；
  * 会话内搜索靠 searchActive 强制展开兜底（与 UserBubble 长文折叠同策略）。
  */
 const PROCESS_TYPES: ReadonlySet<string> = new Set(['text', 'reasoning', 'tool', 'image', 'file'])
@@ -280,9 +280,7 @@ function turnCollapseInfo(parts: MessagePart[]): { lastTextIdx: number; collapsi
     }
   }
   if (lastTextIdx < 0) return { lastTextIdx, collapsible: false }
-  const visible = (p: MessagePart) => PROCESS_TYPES.has(p.type)
-  if (parts.slice(lastTextIdx + 1).some(visible)) return { lastTextIdx, collapsible: false }
-  return { lastTextIdx, collapsible: parts.slice(0, lastTextIdx).some(visible) }
+  return { lastTextIdx, collapsible: parts.slice(0, lastTextIdx).some((p) => PROCESS_TYPES.has(p.type)) }
 }
 
 /**
@@ -335,16 +333,47 @@ function AssistantBubble({
   // 连续 Bash 命令聚组（cc-gui groupBlocks 规则）：压缩批量命令的消息区长度。
   // 分组保留原始 part 下标，reasoning 自动展开/流式判定的 index 语义不变
   const units = useMemo(() => groupParts(parts), [parts])
+  const renderUnit = (unit: PartRenderUnit) =>
+    unit.kind === 'toolGroup' ? (
+      unit.group === 'bash' ? (
+        <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} />
+      ) : (
+        <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} />
+      )
+    ) : (
+      <PartRenderer
+        key={unit.index}
+        part={unit.part}
+        // reasoning 自动展开：是最后一个 reasoning + 后面还没有正文
+        autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
+        streaming={!!streaming && unit.index === lastPartIdx}
+      />
+    )
 
   // 完成轮折叠（流式期间全渲染，turn 结束起默认只留结论）；
   // 「自动折叠执行过程」设置控制默认态，手动点折叠栏的意图优先于设置；
-  // 搜索面板激活时强制展开，保 TreeWalker 能扫到过程文本
+  // 搜索面板激活时强制展开，保 TreeWalker 能扫到过程文本。
+  // 折的是结论之前的过程；结论之后挂的收尾动作（工具/思考）不折，保留在结论后面
   const { lastTextIdx, collapsible } = useMemo(() => turnCollapseInfo(parts), [parts])
   const autoCollapse = useAutoCollapseConfig()
   const [manualExpand, setManualExpand] = useState<boolean | null>(null)
   // 设置开 → 默认收起；手动点击过的意图（非 null）优先于设置默认值
   const expanded = manualExpand ?? !autoCollapse
   const collapsed = collapsible && !streaming && !expanded && !searchActive
+  // 折叠栏概览只统计结论之前的过程（尾部收尾动作不折，不计数）
+  const processParts = useMemo(
+    () => (collapsible ? parts.slice(0, lastTextIdx) : parts),
+    [collapsible, lastTextIdx, parts],
+  )
+  // 折叠态下保留的尾部单元：整组/单个 part 全部落在结论之后（工具组是连续同类
+  // tool 的极大游程，text 不在其中，不会出现跨越结论的组）
+  const tailUnits = useMemo(
+    () =>
+      collapsible
+        ? units.filter((u) => (u.kind === 'toolGroup' ? u.startIndex : u.index) > lastTextIdx)
+        : [],
+    [collapsible, lastTextIdx, units],
+  )
   // 折叠栏概览的轮次耗时：服务端权威值（completed - created）；重拉窗口缺 completed 就不显示
   const processMs =
     collapsible && info.time?.created && info.time.completed
@@ -356,32 +385,19 @@ function AssistantBubble({
       <div className="msg__content">
         {collapsible && !streaming && (
           <TurnProcessBar
-            parts={parts}
+            parts={processParts}
             collapsed={collapsed}
             durationMs={processMs}
             onToggle={() => setManualExpand(!expanded)}
           />
         )}
         {collapsed ? (
-          <MarkdownBlock markdown={(parts[lastTextIdx] as TextPart).text} />
+          <>
+            <MarkdownBlock markdown={(parts[lastTextIdx] as TextPart).text} />
+            {tailUnits.map(renderUnit)}
+          </>
         ) : (
-          units.map((unit) =>
-            unit.kind === 'toolGroup' ? (
-              unit.group === 'bash' ? (
-                <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} />
-              ) : (
-                <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} />
-              )
-            ) : (
-              <PartRenderer
-                key={unit.index}
-                part={unit.part}
-                // reasoning 自动展开：是最后一个 reasoning + 后面还没有正文
-                autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
-                streaming={!!streaming && unit.index === lastPartIdx}
-              />
-            ),
-          )
+          units.map(renderUnit)
         )}
       </div>
       <MessageFooter info={info} time={time} streaming={streaming} />
