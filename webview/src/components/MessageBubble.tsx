@@ -16,8 +16,9 @@
  * 规划文档第二节第 3 点（工具分组）：连续同类 tool part 合并成一个组（cc-gui 规则）。
  *
  * 完成轮折叠（对齐官方客户端）：非流式的完整轮默认只渲染最终结论（最后一个 text），
- * 执行过程不进 DOM；点击底部「⏱ 已工作 X」展开/收起。搜索面板打开时强制展开
- * 全部过程（searchActive），保会话内搜索 TreeWalker 能扫到/定位到过程文本。
+ * 执行过程不进 DOM；结论上方渲染「执行过程」折叠栏（概览：思考/工具计数 + 轮次耗时），
+ * 点击展开/收起。搜索面板打开时强制展开全部过程（searchActive），
+ * 保会话内搜索 TreeWalker 能扫到/定位到过程文本。
  */
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -293,8 +294,7 @@ function AssistantBubble({
   time: string
   streaming?: boolean
   searchActive?: boolean
-}) {
-  const { info, parts } = message
+}) {  const { info, parts } = message
   // 找最后一个 reasoning part
   const lastReasoningIdx = (() => {
     for (let i = parts.length - 1; i >= 0; i--) {
@@ -320,10 +320,23 @@ function AssistantBubble({
   const { lastTextIdx, collapsible } = useMemo(() => turnCollapseInfo(parts), [parts])
   const [expanded, setExpanded] = useState(false)
   const collapsed = collapsible && !streaming && !expanded && !searchActive
+  // 折叠栏概览的轮次耗时：服务端权威值（completed - created）；重拉窗口缺 completed 就不显示
+  const processMs =
+    collapsible && info.time?.created && info.time.completed
+      ? info.time.completed - info.time.created
+      : null
 
   return (
     <div className="msg msg--assistant">
       <div className="msg__content">
+        {collapsible && !streaming && (
+          <TurnProcessBar
+            parts={parts}
+            collapsed={collapsed}
+            durationMs={processMs}
+            onToggle={() => setExpanded((v) => !v)}
+          />
+        )}
         {collapsed ? (
           <MarkdownBlock markdown={(parts[lastTextIdx] as TextPart).text} />
         ) : (
@@ -346,15 +359,40 @@ function AssistantBubble({
           )
         )}
       </div>
-      <MessageFooter
-        info={info}
-        time={time}
-        streaming={streaming}
-        toggleable={collapsible}
-        expanded={expanded}
-        onToggle={collapsible ? () => setExpanded((v) => !v) : undefined}
-      />
+      <MessageFooter info={info} time={time} streaming={streaming} />
     </div>
+  )
+}
+
+/**
+ * 完成轮折叠栏（对齐官方客户端位置：用户消息之后、最终结论之前）：
+ * 「▸ 执行过程 · 思考 N 次 · N 个工具 · X 分 Y 秒」概览条，点击展开/收起执行过程。
+ * 展开后条仍在过程顶部，随时可收起——不需要滚到消息底部找按钮。
+ */
+function TurnProcessBar({
+  parts,
+  collapsed,
+  durationMs,
+  onToggle,
+}: {
+  parts: MessagePart[]
+  collapsed: boolean
+  durationMs: number | null
+  onToggle: () => void
+}) {
+  const { t } = useTranslation()
+  const tools = parts.reduce((n, p) => (p.type === 'tool' ? n + 1 : n), 0)
+  const thoughts = parts.reduce((n, p) => (p.type === 'reasoning' ? n + 1 : n), 0)
+  const items: string[] = []
+  if (thoughts > 0) items.push(t('chat.message.processThoughts', { count: thoughts }))
+  if (tools > 0) items.push(t('chat.message.processTools', { count: tools }))
+  if (durationMs != null) items.push(formatDuration(durationMs))
+  return (
+    <button type="button" className="msg__process-bar" onClick={onToggle}>
+      <span className={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`} aria-hidden="true" />
+      <span className="msg__process-bar-label">{t('chat.message.processLabel')}</span>
+      {items.length > 0 && <span className="msg__process-bar-meta">{items.join(' · ')}</span>}
+    </button>
   )
 }
 
@@ -413,26 +451,8 @@ function collectUserText(parts: MessagePart[]): string {
  *   - 流式中：⏱ 工作中 X 秒（每秒跳动，起点 = 消息 created 即 turn.started）
  *   - 已完成：⏱ 已工作 X 分 Y 秒（completed - created，服务端权威值）
  *   - turn 结束 → 重拉消息之间有短暂窗口缺 completed，用最后一次跳动值冻结过渡
- *
- * 完成轮折叠入口（toggleable）：耗时从 span 变按钮（chevron 提示可点），
- * 点击展开/收起该轮执行过程，对齐官方客户端「已工作 10 分 33 秒」交互。
  */
-function MessageFooter({
-  info,
-  time,
-  streaming,
-  toggleable,
-  expanded,
-  onToggle,
-}: {
-  info: ZCodeMessage['info']
-  time: string
-  streaming?: boolean
-  /** 完成轮可折叠：耗时变为展开/收起执行过程的按钮 */
-  toggleable?: boolean
-  expanded?: boolean
-  onToggle?: () => void
-}) {
+function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; time: string; streaming?: boolean }) {
   const { t } = useTranslation()
   const tokens = info.tokens
   const model = info.modelID
@@ -458,21 +478,11 @@ function MessageFooter({
     <div className="msg__footer">
       <span className="msg__footer-time">{time}</span>
       {model && <span className="msg__footer-model">{model}</span>}
-      {durationMs != null && (toggleable && !working ? (
-        <button
-          type="button"
-          className="msg__footer-duration msg__footer-duration--toggleable"
-          onClick={onToggle}
-          title={expanded ? t('chat.message.processHide') : t('chat.message.processShow')}
-        >
-          <span className={`codicon codicon-chevron-${expanded ? 'down' : 'right'}`} aria-hidden="true" />
-          ⏱ {t('chat.message.worked')} {formatDuration(durationMs)}
-        </button>
-      ) : (
+      {durationMs != null && (
         <span className={`msg__footer-duration${working ? ' msg__footer-duration--working' : ''}`}>
           ⏱ {working ? t('chat.message.working') : t('chat.message.worked')} {formatDuration(durationMs)}
         </span>
-      ))}
+      )}
       {tokens && (
         <span className="msg__footer-tokens">
           💡 {tokens.input.toLocaleString()} in / {tokens.output.toLocaleString()} out
