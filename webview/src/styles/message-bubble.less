@@ -150,13 +150,36 @@
     border-radius: 3px;
   }
 
-  /* 轮次耗时（⏱ 工作中/已工作 X 秒），流式中随秒跳动 */
+  /* 轮次耗时（⏱ 工作中/已工作 X 秒），流式中随秒跳动。
+     完成轮折叠入口：耗时从 span 变按钮（chevron + hover 提亮），点击展开/收起执行过程 */
   &__footer-duration {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
     color: var(--text-tertiary);
     font-variant-numeric: tabular-nums; /* 等宽数字，跳动时不抖动 */
+    cursor: default;
+    text-align: left;
+
+    > .codicon {
+      font-size: 12px;
+    }
 
     &--working {
       color: var(--color-message-role-assistant);
+    }
+
+    &--toggleable {
+      cursor: pointer;
+
+      &:hover {
+        color: var(--text-secondary);
+      }
     }
   }
 

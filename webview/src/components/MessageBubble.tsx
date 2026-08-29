@@ -14,6 +14,10 @@
  *   step-start / step-finish → 不渲染（边界标记）
  *
  * 规划文档第二节第 3 点（工具分组）：连续同类 tool part 合并成一个组（cc-gui 规则）。
+ *
+ * 完成轮折叠（对齐官方客户端）：非流式的完整轮默认只渲染最终结论（最后一个 text），
+ * 执行过程不进 DOM；点击底部「⏱ 已工作 X」展开/收起。搜索面板打开时强制展开
+ * 全部过程（searchActive），保会话内搜索 TreeWalker 能扫到/定位到过程文本。
  */
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -87,7 +91,7 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
       />
     )
   }
-  return <AssistantBubble message={message} time={time} streaming={streaming} />
+  return <AssistantBubble message={message} time={time} streaming={streaming} searchActive={searchActive} />
 })
 
 /**
@@ -253,8 +257,43 @@ function UserTextPreviewDialog({
   )
 }
 
+/**
+ * 完成轮折叠判定（对齐官方客户端：已完成轮默认只展示最终结论，点「已工作 X」展开过程）。
+ *
+ * 「最终结论」= 最后一个 text part，且需同时满足：
+ *   - 结论之后没有其他可见 part（被停止的回合以 tool 收尾 = 无干净结论，不折叠）
+ *   - 结论之前存在可见过程（reasoning/tool/中间 text/图），否则无可折叠内容
+ * 折叠态只渲染结论，过程不进 DOM（性能收益 + 老会话减负）；
+ * 会话内搜索靠 searchActive 强制展开兜底（与 UserBubble 长文折叠同策略）。
+ */
+const PROCESS_TYPES: ReadonlySet<string> = new Set(['text', 'reasoning', 'tool', 'image', 'file'])
+
+function turnCollapseInfo(parts: MessagePart[]): { lastTextIdx: number; collapsible: boolean } {
+  let lastTextIdx = -1
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (parts[i].type === 'text') {
+      lastTextIdx = i
+      break
+    }
+  }
+  if (lastTextIdx < 0) return { lastTextIdx, collapsible: false }
+  const visible = (p: MessagePart) => PROCESS_TYPES.has(p.type)
+  if (parts.slice(lastTextIdx + 1).some(visible)) return { lastTextIdx, collapsible: false }
+  return { lastTextIdx, collapsible: parts.slice(0, lastTextIdx).some(visible) }
+}
+
 /** assistant 消息：左对齐，满宽 markdown + 工具卡片 + 思考 */
-function AssistantBubble({ message, time, streaming }: { message: ZCodeMessage; time: string; streaming?: boolean }) {
+function AssistantBubble({
+  message,
+  time,
+  streaming,
+  searchActive,
+}: {
+  message: ZCodeMessage
+  time: string
+  streaming?: boolean
+  searchActive?: boolean
+}) {
   const { info, parts } = message
   // 找最后一个 reasoning part
   const lastReasoningIdx = (() => {
@@ -276,28 +315,45 @@ function AssistantBubble({ message, time, streaming }: { message: ZCodeMessage; 
   // 分组保留原始 part 下标，reasoning 自动展开/流式判定的 index 语义不变
   const units = useMemo(() => groupParts(parts), [parts])
 
+  // 完成轮折叠（流式期间全渲染，turn 结束起默认只留结论）；
+  // 搜索面板激活时强制展开，保 TreeWalker 能扫到过程文本
+  const { lastTextIdx, collapsible } = useMemo(() => turnCollapseInfo(parts), [parts])
+  const [expanded, setExpanded] = useState(false)
+  const collapsed = collapsible && !streaming && !expanded && !searchActive
+
   return (
     <div className="msg msg--assistant">
       <div className="msg__content">
-        {units.map((unit) =>
-          unit.kind === 'toolGroup' ? (
-            unit.group === 'bash' ? (
-              <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} />
+        {collapsed ? (
+          <MarkdownBlock markdown={(parts[lastTextIdx] as TextPart).text} />
+        ) : (
+          units.map((unit) =>
+            unit.kind === 'toolGroup' ? (
+              unit.group === 'bash' ? (
+                <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} />
+              ) : (
+                <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} />
+              )
             ) : (
-              <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} />
-            )
-          ) : (
-            <PartRenderer
-              key={unit.index}
-              part={unit.part}
-              // reasoning 自动展开：是最后一个 reasoning + 后面还没有正文
-              autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
-              streaming={!!streaming && unit.index === lastPartIdx}
-            />
-          ),
+              <PartRenderer
+                key={unit.index}
+                part={unit.part}
+                // reasoning 自动展开：是最后一个 reasoning + 后面还没有正文
+                autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
+                streaming={!!streaming && unit.index === lastPartIdx}
+              />
+            ),
+          )
         )}
       </div>
-      <MessageFooter info={info} time={time} streaming={streaming} />
+      <MessageFooter
+        info={info}
+        time={time}
+        streaming={streaming}
+        toggleable={collapsible}
+        expanded={expanded}
+        onToggle={collapsible ? () => setExpanded((v) => !v) : undefined}
+      />
     </div>
   )
 }
@@ -357,8 +413,26 @@ function collectUserText(parts: MessagePart[]): string {
  *   - 流式中：⏱ 工作中 X 秒（每秒跳动，起点 = 消息 created 即 turn.started）
  *   - 已完成：⏱ 已工作 X 分 Y 秒（completed - created，服务端权威值）
  *   - turn 结束 → 重拉消息之间有短暂窗口缺 completed，用最后一次跳动值冻结过渡
+ *
+ * 完成轮折叠入口（toggleable）：耗时从 span 变按钮（chevron 提示可点），
+ * 点击展开/收起该轮执行过程，对齐官方客户端「已工作 10 分 33 秒」交互。
  */
-function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; time: string; streaming?: boolean }) {
+function MessageFooter({
+  info,
+  time,
+  streaming,
+  toggleable,
+  expanded,
+  onToggle,
+}: {
+  info: ZCodeMessage['info']
+  time: string
+  streaming?: boolean
+  /** 完成轮可折叠：耗时变为展开/收起执行过程的按钮 */
+  toggleable?: boolean
+  expanded?: boolean
+  onToggle?: () => void
+}) {
   const { t } = useTranslation()
   const tokens = info.tokens
   const model = info.modelID
@@ -384,11 +458,21 @@ function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; 
     <div className="msg__footer">
       <span className="msg__footer-time">{time}</span>
       {model && <span className="msg__footer-model">{model}</span>}
-      {durationMs != null && (
+      {durationMs != null && (toggleable && !working ? (
+        <button
+          type="button"
+          className="msg__footer-duration msg__footer-duration--toggleable"
+          onClick={onToggle}
+          title={expanded ? t('chat.message.processHide') : t('chat.message.processShow')}
+        >
+          <span className={`codicon codicon-chevron-${expanded ? 'down' : 'right'}`} aria-hidden="true" />
+          ⏱ {t('chat.message.worked')} {formatDuration(durationMs)}
+        </button>
+      ) : (
         <span className={`msg__footer-duration${working ? ' msg__footer-duration--working' : ''}`}>
           ⏱ {working ? t('chat.message.working') : t('chat.message.worked')} {formatDuration(durationMs)}
         </span>
-      )}
+      ))}
       {tokens && (
         <span className="msg__footer-tokens">
           💡 {tokens.input.toLocaleString()} in / {tokens.output.toLocaleString()} out

@@ -23,6 +23,8 @@
     "emptyText": "(空)",
     "working": "工作中",
     "worked": "已工作",
+    "processShow": "檢視執行過程",
+    "processHide": "收合執行過程",
     "cachePercent": "快取 {{percent}}%",
     "viewFull": "查看全文（{{lines}} 行 · {{count}} 字元）",
     "fullTextTitle": "使用者訊息全文（{{lines}} 行 · {{count}} 字元）",

@@ -23,6 +23,8 @@
     "emptyText": "(비어 있음)",
     "working": "작업 중",
     "worked": "작업 완료",
+    "processShow": "실행 과정 보기",
+    "processHide": "실행 과정 접기",
     "cachePercent": "캐시 {{percent}}%",
     "viewFull": "전체 보기({{lines}}줄 · {{count}}자)",
     "fullTextTitle": "사용자 메시지 전체({{lines}}줄 · {{count}}자)",

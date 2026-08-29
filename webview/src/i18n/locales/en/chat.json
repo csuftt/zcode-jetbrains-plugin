@@ -23,6 +23,8 @@
     "emptyText": "(empty)",
     "working": "Working",
     "worked": "Worked",
+    "processShow": "View execution process",
+    "processHide": "Hide execution process",
     "cachePercent": "Cache {{percent}}%",
     "viewFull": "View full text ({{lines}} lines · {{count}} chars)",
     "fullTextTitle": "Full user message ({{lines}} lines · {{count}} chars)",

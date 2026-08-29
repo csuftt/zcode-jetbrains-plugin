@@ -23,6 +23,8 @@
     "emptyText": "（空）",
     "working": "処理中",
     "worked": "処理済み",
+    "processShow": "実行過程を表示",
+    "processHide": "実行過程を折りたたむ",
     "cachePercent": "キャッシュ {{percent}}%",
     "viewFull": "全文を見る（{{lines}} 行・{{count}} 文字）",
     "fullTextTitle": "ユーザーメッセージ全文（{{lines}} 行・{{count}} 文字）",
