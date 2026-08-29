@@ -108,6 +108,35 @@ export interface QueuedMessage {
   /** 图片附件（随消息透传 session/send attachments）*/
   attachments?: ImageAttachmentInput[]
   queuedAt: number
+  /** 定时消息来源标记（fireAt 原值）：切会话丢弃队列时回退挂起而非静默丢 */
+  scheduledFireAt?: number
+  /** 定时消息的执行模型（随队列透传；可空=跟随会话当前模型）*/
+  scheduledProviderId?: string
+  scheduledModelId?: string
+}
+
+/** 定时消息（会话内指定时间执行的提示词；权威列表在 Java 侧，此处为镜像）*/
+export interface ScheduledMessageItem {
+  id: string
+  sessionId: string
+  workspacePath: string
+  text: string
+  /** 计划执行时间（epoch ms 绝对值）*/
+  fireAt: number
+  createdAt: number
+  /** 切会话回退的挂起项：永不自动发，卡片呈「已过期」态等用户手动决定 */
+  hold?: boolean
+  /** 执行模型（可空=跟随会话当前模型；执行时清单里不存在则默认兜底）*/
+  providerId?: string
+  modelId?: string
+}
+
+/** 已发定时消息记录（真发后 Java 留存；服务端消息不带定时标记，渲染时按此匹配补徽标）*/
+export interface ScheduledFiredRecord {
+  sessionId: string
+  text: string
+  fireAt: number
+  firedAt: number
 }
 
 /** 后台任务账本：key = 触发任务的 toolCallId（同一回合并发多个后台任务互不覆盖）。
@@ -141,6 +170,10 @@ interface StoreState {
   pendingFirstMessage: string | null
   /** 懒创建暂存的首条消息的图片附件（与 pendingFirstMessage 同生命周期）*/
   pendingFirstAttachments: ImageAttachmentInput[] | null
+  /** 懒创建暂存首条消息的定时标记（定时消息在待命态触发懒创建时随行，徽标穿透）*/
+  pendingFirstScheduledFireAt: number | null
+  /** 待命态定时任务暂存：创建确认时先把会话建好（真实 sid 归属，防空串态跨标签串显），建好自动落库 */
+  pendingScheduleCreation: { text: string; fireAt: number; providerId?: string; modelId?: string } | null
   /** 已归档会话（回收站视图，独立于 sessions；用户进入「已归档」tab 时拉取）*/
   archivedSessions: SessionInfo[]
   /** 已归档列表加载中（tab 切换/归档后刷新的 loading 态）*/
@@ -205,6 +238,12 @@ interface StoreState {
   backgroundTasks: BackgroundTaskMap
   /** 排队消息（streaming 中 Enter 入队，回合结束自动发队头）*/
   queuedMessages: QueuedMessage[]
+  /** 定时消息（全量镜像，UI 按 currentSessionId 过滤；权威列表在 Java 侧）*/
+  scheduledMessages: ScheduledMessageItem[]
+  /** 已发定时消息记录（Java 持久化镜像）：历史重拉/重启后按 sessionId+text 匹配补「定时执行」徽标 */
+  firedHistory: ScheduledFiredRecord[]
+  /** 已应用的最大 scheduledList 快照 ts（旧快照后到直接丢弃，防并发广播乱序把已移除项复活回镜像）*/
+  lastScheduledListTs: number
 
   // 模型切换（config.json provider 注册表）
   models: ModelOption[]
@@ -355,8 +394,10 @@ interface StoreState {
   init: () => void
   loadSessions: () => void
   selectSession: (session: SessionInfo) => void
-  sendMessage: (text: string, attachments?: ImageAttachmentInput[]) => void
+  sendMessage: (text: string, attachments?: ImageAttachmentInput[], opts?: { scheduledFireAt?: number; scheduledProviderId?: string; scheduledModelId?: string }) => void
   createSession: () => void
+  /** 待命态定时任务：先把会话建好再落库（归属唯一化），createSession 响应后自动 scheduledCreate */
+  createSessionForSchedule: (text: string, fireAt: number, providerId?: string, modelId?: string) => void
   /** 「新建会话」按钮：重置为无会话待命态（延迟创建），首条消息触发建会话 */
   resetToNewSession: () => void
   deleteSession: (sessionId: string) => void
@@ -489,6 +530,12 @@ interface StoreState {
   sendQueuedNow: (id: string) => void
   /** 回合结束（streaming→false）后自动发送队头 */
   flushQueue: () => void
+  /** 立即执行定时消息：乐观移除卡片；本面板正看该会话则直接走受理路径发送，否则交 Java 分派（可能开标签/直发）*/
+  sendScheduledNow: (id: string) => void
+  /** 取消定时消息：乐观移除卡片 + Java 幂等移除 */
+  cancelScheduled: (id: string) => void
+  /** 切会话丢弃队列前的回退：定时来源的排队消息交还 Java 侧挂起（防静默丢失）*/
+  requeueScheduledQueuesFor: (oldSessionId: string | null) => void
   /**
    * 计划审批「意见式继续规划」的反馈消息插入。意见应答（answer≠approve 反馈式拒绝）
    * 服务端回合不终止：反馈被合成 user 消息插入 transcript，AI 的后续输出仍在同一
@@ -515,6 +562,8 @@ export const useStore = create<StoreState>((set, get) => ({
   creatingSession: false,
   pendingFirstMessage: null,
   pendingFirstAttachments: null,
+  pendingFirstScheduledFireAt: null,
+  pendingScheduleCreation: null,
   archivedSessions: [],
   archivedLoading: false,
 
@@ -544,6 +593,9 @@ export const useStore = create<StoreState>((set, get) => ({
   compacting: false,
   backgroundTasks: {},
   queuedMessages: [],
+  scheduledMessages: [],
+  firedHistory: [],
+  lastScheduledListTs: 0,
   askUser: null,
   exitPlanApproval: null,
   permissionRequest: null,
@@ -666,6 +718,8 @@ export const useStore = create<StoreState>((set, get) => ({
       // 拉取反向请求挂起状态：页面刷新/重载会错过 Java 的 askUserPending 广播，
       // 看门狗豁免标志（askUserPendingActive）需重新同步
       sendToJava({ op: 'askUserPendingState' })
+      // 定时消息列表水合（页面刷新/重载会错过 Java 广播）
+      sendToJava({ op: 'scheduledList' })
       get().checkEnv()
       get().loadSessions()
       get().loadModels()
@@ -694,6 +748,8 @@ export const useStore = create<StoreState>((set, get) => ({
         console.log(`[store] 桥就绪（轮询 ${bridgeRetries}×50ms），workspace=${ws || '(空)'}`)
         // 冷启动就绪同样拉取挂起状态（广播可能在桥注入前已错过）
         sendToJava({ op: 'askUserPendingState' })
+        // 定时消息列表水合（同上）
+        sendToJava({ op: 'scheduledList' })
         get().checkEnv()
         get().loadSessions()
         get().loadModels()
@@ -725,6 +781,8 @@ export const useStore = create<StoreState>((set, get) => ({
     // 且 streaming 被复位后重拉的 messages 响应不再被丢弃，全量替换会抹掉
     // 流式中的 assistant 消息（断流/叠字），重发 subscribe 还会打扰运行中的回合
     if (session.sessionId === get().currentSessionId) return
+    // 切走前回退：队列里定时来源的消息交还 Java 挂起（不随队列丢弃，见 requeueScheduledQueuesFor）
+    get().requeueScheduledQueuesFor(get().currentSessionId)
     // 服务端活跃信号绑定会话：切走后旧会话 usage 响应被丢弃，信号一并清空
     // （新会话的 loadUsage 会重新建立；防残留信号豁免新会话的判死判定）
     serverActiveTurnId = null
@@ -776,7 +834,7 @@ export const useStore = create<StoreState>((set, get) => ({
     get().applyModelIfReady(session.sessionId)
   },
 
-  sendMessage: (text, attachments?) => {
+  sendMessage: (text, attachments?, opts?) => {
     if (!text.trim() && !attachments?.length) return
     const sid = get().currentSessionId
     // 懒创建：无会话（新标签 / 会话被删）时首条消息先触发建会话，createSession 响应后
@@ -791,6 +849,7 @@ export const useStore = create<StoreState>((set, get) => ({
         lastError: null,
         pendingFirstMessage: text,
         pendingFirstAttachments: attachments ?? null,
+        pendingFirstScheduledFireAt: opts?.scheduledFireAt ?? null,
       })
       // creatingSession 由 createSession 内部置位（其防重入守卫据此拦截重复请求）
       get().createSession()
@@ -806,6 +865,8 @@ export const useStore = create<StoreState>((set, get) => ({
             text,
             ...(attachments?.length ? { attachments } : {}),
             queuedAt: Date.now(),
+            ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
+            ...(opts?.scheduledModelId ? { scheduledProviderId: opts.scheduledProviderId, scheduledModelId: opts.scheduledModelId } : {}),
           },
         ],
       }))
@@ -832,16 +893,28 @@ export const useStore = create<StoreState>((set, get) => ({
     // 确保已订阅（规格书 §4：先 subscribe 再 send，否则丢事件）
     sendToJava({ op: 'subscribe', sessionId: sid, workspacePath: get().currentWorkspacePath })
     // 发送（附带 currentModel：-32031 恢复时用用户选择的 provider 而非默认 provider，
-    // 避免重装后既有会话 resume 恢复时被静默切到个人套餐导致显示与实际不符）
+    // 避免重装后既有会话 resume 恢复时被静默切到个人套餐导致显示与实际不符）。
+    // 定时消息指定了执行模型且清单里仍存在 → 覆盖；已下架（清单查不到）→ 默认兜底（currentModel）
     const cm = get().currentModel
+    const schedModel = opts?.scheduledModelId
+      ? get().models.find((m) => m.modelId === opts.scheduledModelId)
+      : undefined
+    const sendModel = schedModel
+      ? { providerId: schedModel.providerId, modelId: schedModel.modelId }
+      : cm
     sendToJava({
       op: 'send',
       sessionId: sid,
       text,
       workspacePath: get().currentWorkspacePath,
-      ...(cm ? { providerId: cm.providerId, modelId: cm.modelId } : {}),
+      ...(sendModel ? { providerId: sendModel.providerId, modelId: sendModel.modelId } : {}),
       ...(attachments?.length ? { attachments } : {}),
     })
+    // 定时消息真发上报：Java 记入已发历史（持久化），历史重拉/重启后按 sessionId+text
+    // 匹配补「定时执行」徽标——服务端消息本身不带任何定时标记
+    if (opts?.scheduledFireAt != null) {
+      sendToJava({ op: 'scheduledFired', sessionId: sid, text, fireAt: opts.scheduledFireAt })
+    }
 
     // 本地把用户消息立即加入列表（不等 reload，体验更快）；
     // 图片附件同时以 image part 乐观展示（dataUrl 直连渲染）
@@ -851,6 +924,8 @@ export const useStore = create<StoreState>((set, get) => ({
         time: { created: Date.now() },
         id: `local_u_${Date.now()}`,
         sessionID: sid,
+        // 定时消息徽标（定时 HH:mm 执行）；历史重拉为服务端权威数据，不带此标记（预期）
+        ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
       },
       parts: [
         ...(attachments ?? []).map((a) => ({
@@ -932,17 +1007,28 @@ export const useStore = create<StoreState>((set, get) => ({
     sendToJava({ op: 'createSession', workspacePath: get().projectPath })
   },
 
+  createSessionForSchedule: (text, fireAt, providerId?, modelId?) => {
+    // 待命态定时任务先建会话：空串 sessionId 的待命项在所有新标签都可见、无法区分归属，
+    // 也没有可跳转的会话。建会话拿到真实 sid 后由 createSession 响应落库 scheduledCreate，
+    // 任务从此绑定唯一会话（当前标签同时变为该会话的宿主标签）
+    if (get().creatingSession) return
+    set({ pendingScheduleCreation: { text, fireAt, ...(providerId && modelId ? { providerId, modelId } : {}) } })
+    get().createSession()
+  },
+
   resetToNewSession: () => {
     // 「新建会话」按钮延迟创建（对齐新标签）：不立即建会话，重置为无会话待命态，
     // 首条消息再触发懒建会话（见 sendMessage）。旧会话保留在历史列表可切回；
     // 旧会话的流式事件被 handleStreamBatch/Event 的 currentSessionId 过滤拦截，
     // 不会串扰待命态。clearTabSession 让 Java 侧同步清 TabState 绑定 + 标签 tooltip
     //（否则重启恢复会绑回旧会话）
+    get().requeueScheduledQueuesFor(get().currentSessionId)
     set({
       currentSessionId: null,
       creatingSession: false,
       pendingFirstMessage: null,
       pendingFirstAttachments: null,
+      pendingFirstScheduledFireAt: null,
       messages: [],
       loadingMessages: false,
       streaming: false,
@@ -1016,15 +1102,73 @@ export const useStore = create<StoreState>((set, get) => ({
       get().stopStreaming()
     } else {
       set({ queuedMessages: q.filter((m) => m.id !== id) })
-      get().sendMessage(target.text, target.attachments)
+      // 立即发送保持定时语义（徽标+指定执行模型），否则 queued 的定时消息在这里会丢标记
+      get().sendMessage(target.text, target.attachments, target.scheduledFireAt != null
+        ? {
+            scheduledFireAt: target.scheduledFireAt,
+            ...(target.scheduledModelId ? { scheduledProviderId: target.scheduledProviderId, scheduledModelId: target.scheduledModelId } : {}),
+          }
+        : undefined)
     }
+  },
+
+  sendScheduledNow: (id) => {
+    const item = get().scheduledMessages.find((m) => m.id === id)
+    if (!item) return
+    // 乐观移除：点击即消失，不等 Java 广播（多面板/多线程广播乱序曾致卡片残留）
+    set({ scheduledMessages: get().scheduledMessages.filter((m) => m.id !== id) })
+    if (item.sessionId && get().currentSessionId === item.sessionId) {
+      // 本面板正看该会话：直接走受理路径发送（与到点受理同一段代码，sendMessage 内部
+      // 含 scheduledFired 上报），并 ack 让 Java 移除待发项——不再发 scheduledSendNow
+      // （那会再走一轮 Java 分派推送，本面板二次受理导致重复发送）
+      get().sendMessage(item.text, undefined, {
+        scheduledFireAt: item.fireAt,
+        ...(item.modelId ? { scheduledProviderId: item.providerId, scheduledModelId: item.modelId } : {}),
+      })
+      sendToJava({ op: 'scheduledDueAck', id: item.id })
+    } else {
+      // 会话在别的标签/未打开：交 Java 分派（findPanelForSession 推送或开标签/直发兜底）
+      sendToJava({ op: 'scheduledSendNow', id: item.id })
+    }
+  },
+
+  cancelScheduled: (id) => {
+    // 乐观移除 + Java 幂等移除（不存在/已处理按成功应答）
+    set({ scheduledMessages: get().scheduledMessages.filter((m) => m.id !== id) })
+    sendToJava({ op: 'scheduledCancel', id })
   },
 
   flushQueue: () => {
     if (get().streaming || get().queuedMessages.length === 0) return
     const [next, ...rest] = get().queuedMessages
     set({ queuedMessages: rest })
-    get().sendMessage(next.text, next.attachments)
+    get().sendMessage(next.text, next.attachments, next.scheduledFireAt != null
+      ? {
+          scheduledFireAt: next.scheduledFireAt,
+          ...(next.scheduledModelId ? { scheduledProviderId: next.scheduledProviderId, scheduledModelId: next.scheduledModelId } : {}),
+        }
+      : undefined)
+  },
+
+  /**
+   * 切会话丢弃队列前的回退：定时来源的排队消息交还 Java 侧挂起（hold=true 不自动发），
+   * 用户切回该会话时卡片呈「已过期」态，手动决定立即执行/重新定时——
+   * 否则定时消息会因随手切 tab 被队列丢弃语义无声吞掉
+   */
+  requeueScheduledQueuesFor: (oldSessionId) => {
+    if (!oldSessionId) return
+    const olds = get().queuedMessages.filter((m) => m.scheduledFireAt != null)
+    if (olds.length === 0) return
+    olds.forEach((m) => {
+      sendToJava({
+        op: 'scheduledRequeue',
+        sessionId: oldSessionId,
+        workspacePath: get().currentWorkspacePath,
+        text: m.text,
+        fireAt: m.scheduledFireAt!,
+        ...(m.scheduledModelId ? { providerId: m.scheduledProviderId, modelId: m.scheduledModelId } : {}),
+      })
+    })
   },
 
   renameSession: (sessionId, title) => {
@@ -1770,6 +1914,9 @@ export function handleResponse(
       const sid = msg.sessionId
       const pendingFirst = get().pendingFirstMessage
       const pendingFirstAttachments = get().pendingFirstAttachments
+      const pendingFirstFireAt = get().pendingFirstScheduledFireAt
+      // 待命态定时任务暂存（createSessionForSchedule 置入）同样须在 set 清空前取出
+      const pendingSchedule = get().pendingScheduleCreation
       // 待命态预选值（currentMode/thoughtLevel 无会话时的本地记录），下方 set 复位前捕获
       const preselectedMode = get().currentMode
       const standbyThought = get().thoughtLevel
@@ -1781,6 +1928,8 @@ export function handleResponse(
           creatingSession: false,
           pendingFirstMessage: null,
           pendingFirstAttachments: null,
+          pendingFirstScheduledFireAt: null,
+          pendingScheduleCreation: null,
           messages: [],
           loadingMessages: false,
           streaming: false,
@@ -1831,27 +1980,51 @@ export function handleResponse(
         })
         // 订阅新会话（Java 端 handleSubscribe 内部会先 resume 激活）
         sendToJava({ op: 'subscribe', sessionId: sid, workspacePath: ws })
-        // 新会话也按记忆模型下发 setModel（等 models 就绪，由 applyModelIfReady 内部判断）
-        get().applyModelIfReady(sid)
+        // 待命态定时任务落库：会话已建好，任务绑定真实 sid（归属唯一化）
+        if (pendingSchedule) {
+          sendToJava({
+            op: 'scheduledCreate',
+            sessionId: sid,
+            workspacePath: ws,
+            text: pendingSchedule.text,
+            fireAt: pendingSchedule.fireAt,
+            ...(pendingSchedule.modelId ? { providerId: pendingSchedule.providerId, modelId: pendingSchedule.modelId } : {}),
+          })
+        }
+        // 新会话也按记忆模型下发 setModel（等 models 就绪，由 applyModelIfReady 内部判断）。
+        // 懒创建首条消息在途时跳过独立 setModel：它与首回合在服务端赛跑会撞 -32603
+        // Unsupported（08-29 定时触发实测：新会话 runtime 未注册任何 provider），
+        // 模型注册与回合执行改由首条 send 携带的 runtimeModel 承担（send 已带 currentModel），
+        // 仅标记已应用防 messages/models 刷新时重发
+        if (!pendingFirst) {
+          get().applyModelIfReady(sid)
+        } else {
+          set({ modelAppliedForSession: sid })
+        }
         // 待命态预选的模式补下发——必须先于首条消息，预选 plan 时首问就按计划模式跑
         if (preselectedMode) get().setMode(preselectedMode)
         // 记忆的思考级别同样先于首条消息下发（否则首问跑在服务端默认级别上）；
         // 用待命态 info / 按模型缓存校验有效性，settings 到达后 applyThoughtLevelIfReady
-        // 被 appliedForSession 标记拦下不重发；无效（无缓存/不在列表）则留给该校准路径兜底
-        const savedLevel = getPersisted('zcode.thoughtLevel')
-        const info = standbyThought ?? readThoughtLevelCache(get().currentModel?.modelId)
-        if (savedLevel && info?.enabled && info.available.some((a) => a.value === savedLevel)) {
-          set({ thoughtLevel: { ...info, current: savedLevel } })
-          if (isModelSwitchInFlight(get())) {
-            // 上方 applyModelIfReady 刚发出 setModel：级别须推迟到切换落定后、由权威
-            // settings 响应校验再下发（modelSet 后 500ms 的 loadSettings 走 settings 处理器）。
-            // 不能按本地缓存校验直发——切换前缓存可能已被污染（旧会话切换时写入），会放行
-            // 对新模型非法的值（-32603，缺陷AA第二形态）；也不置 appliedForSession（留着给
-            // 权威路径使用）。暂存标记让 settings 处理器届时重置门控重新校验
-            set({ pendingThoughtLevel: savedLevel })
-          } else {
-            set({ thoughtLevelAppliedForSession: sid })
-            sendToJava({ op: 'setThoughtLevel', sessionId: sid, thoughtLevel: savedLevel })
+        // 被 appliedForSession 标记拦下不重发；无效（无缓存/不在列表）则留给该校准路径兜底。
+        // 懒创建首条消息在途时整块跳过：setThoughtLevel 若先于 send 到达服务端，会话还
+        // 跑在默认模型上，级别可能对其非法（-32603，同 setModel 赛跑根因）；级别交给
+        // 首回合后的权威 settings 校准（applyThoughtLevelIfReady 无 applied 门控挡路）
+        if (!pendingFirst) {
+          const savedLevel = getPersisted('zcode.thoughtLevel')
+          const info = standbyThought ?? readThoughtLevelCache(get().currentModel?.modelId)
+          if (savedLevel && info?.enabled && info.available.some((a) => a.value === savedLevel)) {
+            set({ thoughtLevel: { ...info, current: savedLevel } })
+            if (isModelSwitchInFlight(get())) {
+              // 上方 applyModelIfReady 刚发出 setModel：级别须推迟到切换落定后、由权威
+              // settings 响应校验再下发（modelSet 后 500ms 的 loadSettings 走 settings 处理器）。
+              // 不能按本地缓存校验直发——切换前缓存可能已被污染（旧会话切换时写入），会放行
+              // 对新模型非法的值（-32603，缺陷AA第二形态）；也不置 appliedForSession（留着给
+              // 权威路径使用）。暂存标记让 settings 处理器届时重置门控重新校验
+              set({ pendingThoughtLevel: savedLevel })
+            } else {
+              set({ thoughtLevelAppliedForSession: sid })
+              sendToJava({ op: 'setThoughtLevel', sessionId: sid, thoughtLevel: savedLevel })
+            }
           }
         }
         // 拉取上下文用量（圆环显示）
@@ -1860,10 +2033,16 @@ export function handleResponse(
         get().loadSettings()
         // 懒创建收尾：发出暂存的首条消息。须在 set 之后——set 复位了 streaming，
         // sendMessage 会重新置位并走完整的 subscribe+send+乐观消息流程
-        if (pendingFirst) get().sendMessage(pendingFirst, pendingFirstAttachments ?? undefined)
+        if (pendingFirst) {
+          get().sendMessage(
+            pendingFirst,
+            pendingFirstAttachments ?? undefined,
+            pendingFirstFireAt != null ? { scheduledFireAt: pendingFirstFireAt } : undefined,
+          )
+        }
       } else {
         // 异常响应（无 sessionId）：复位标志与暂存，防卡死
-        set({ creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null })
+        set({ creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null })
       }
       get().loadSessions()
       break
@@ -1875,6 +2054,8 @@ export function handleResponse(
       const deletedCurrent = cur.currentSessionId === msg.sessionId
       set({
         sessions: cur.sessions.filter((x) => x.sessionId !== msg.sessionId),
+        // Java 侧已同步丢弃该会话的待发定时消息，本地镜像过滤
+        scheduledMessages: cur.scheduledMessages.filter((m) => m.sessionId !== msg.sessionId),
         ...(deletedCurrent
               ? {
                 currentSessionId: null, messages: [], streaming: false, streamingMessageId: null, waitingSince: null, compacting: false, backgroundTasks: {},
@@ -1901,6 +2082,53 @@ export function handleResponse(
       if (get().archivedSessions.length > 0 || get().archivedLoading) {
         get().loadArchivedSessions()
       }
+      break
+    }
+
+    case 'scheduledList': {
+      // Java 侧权威列表全量镜像（跨标签广播/初始化水合共用），含已发记录（徽标匹配用）。
+      // ts 单调守卫：scheduledFired 上报与 scheduledDueAck 在 Java 侧并发处理，两次广播的
+      // 到达顺序不保证——旧快照（items 仍含已移除项）后到会把卡片复活回镜像（实测残留）
+      const ts = (msg as { ts?: number }).ts ?? 0
+      if (ts && ts < get().lastScheduledListTs) break
+      set({
+        lastScheduledListTs: ts,
+        scheduledMessages: (msg.items ?? []) as ScheduledMessageItem[],
+        firedHistory: (msg.fired ?? []) as ScheduledFiredRecord[],
+      })
+      break
+    }
+
+    case 'gotoSessionLocal': {
+      // 任务列表跳转：会话无宿主标签，由本标签切过去（external 分支 Java 已激活别的标签，
+      // 到不了这里）。关闭弹窗由组件侧 onGoto 完成，这里只负责切会话
+      const sess = get().sessions.find((s) => s.sessionId === (msg as { sessionId: string }).sessionId)
+      if (sess) get().selectSession(sess)
+      break
+    }
+
+    case 'scheduledDue': {
+      // 定时消息到点：走与手动发送同一段准入（sendMessage 内部分流——回合活跃入队尾，
+      // 空闲直接发），发出后消息带「定时执行」徽标。sessionId 不匹配（路由到的标签已
+      // 切走）不受理也不 ack → Java 侧 15s 超时降级直发
+      const { id, sessionId: dueSid, text, scheduledFireAt, providerId, modelId } = msg as {
+        id: string
+        sessionId?: string
+        text: string
+        scheduledFireAt?: number
+        providerId?: string
+        modelId?: string
+      }
+      if (dueSid && get().currentSessionId !== dueSid) break
+      get().sendMessage(text, undefined, scheduledFireAt != null
+        ? {
+            scheduledFireAt,
+            ...(modelId ? { scheduledProviderId: providerId, scheduledModelId: modelId } : {}),
+          }
+        : undefined)
+      // 本地即时移除（权威列表由 Java ack 后广播）；handleResponse 的 set 无 updater 形态
+      set({ scheduledMessages: get().scheduledMessages.filter((m) => m.id !== id) })
+      sendToJava({ op: 'scheduledDueAck', id })
       break
     }
 
@@ -2055,6 +2283,8 @@ export function handleResponse(
     case 'newSession':
       // Java 端自动新建会话（老会话模型不可用），切换到新会话
       console.log(`[store] 切换到新会话: ${msg.sessionId}`)
+      // 队列中定时来源的消息回退挂起到旧会话（不随队列丢弃）
+      get().requeueScheduledQueuesFor(get().currentSessionId)
       set({
         currentSessionId: msg.sessionId,
         messages: [], // 新会话无历史消息
@@ -2131,7 +2361,7 @@ export function handleResponse(
         modelTogglingId: null,
         // 浏览器设置请求失败（如插件未安装）：页面内联提示（browserBusy 在途时才归属该页）
         ...(get().browserBusy ? { browserBusy: null, browserError: msg.message } : {}),
-        ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null } : {}),
+        ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null } : {}),
       })
       console.error('[store] Java 错误:', msg.message)
       // 错误清 streaming 后继续发队列下一条（排队意图明确；持续失败时用户可删队列项）；

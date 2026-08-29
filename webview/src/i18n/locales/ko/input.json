@@ -48,7 +48,9 @@
     "sendNow": "즉시 전송(현재 응답 중단)",
     "sendNowShort": "즉시",
     "edit": "편집(입력창으로)",
-    "remove": "대기열에서 제거"
+    "remove": "대기열에서 제거",
+    "scheduledBadge": "예약 메시지 · {{time}}",
+    "scheduledShort": "예약"
   },
   "pasted": {
     "clickToPreview": "클릭하여 전체 내용 미리보기",
@@ -72,5 +74,42 @@
     "empty": "서브 에이전트가 없습니다. 설정에서 생성하세요",
     "manage": "서브 에이전트 관리",
     "clear": "선택 해제"
+  },
+  "schedule": {
+    "button": "예약 전송",
+    "title": "이 메시지 예약",
+    "rescheduleTitle": "다시 예약",
+    "hint": "설정 시간에 자동 전송되며 IDE가 실행 중이어야 합니다. 30분 초과 시 만료됩니다",
+    "confirm": "예약",
+    "pendingState": "{{time}} 예약됨",
+    "dueState": "전송 대기 (곧 실행)",
+    "expiredState": "만료 (수동 결정)",
+    "holdState": "보류 (세션 전환)",
+    "sendNow": "지금 보내기",
+    "sendNowShort": "즉시",
+    "reschedule": "시간 변경",
+    "cancel": "예약 취소",
+    "today": "오늘",
+    "tomorrow": "내일",
+    "countdownSoon": "곧 전송",
+    "countdownHM": "{{h}}시간 {{m}}분 후",
+    "countdownM": "{{m}}분 후",
+    "firedBadge": "예약 실행",
+    "allTasks": "전체 예약",
+    "newSchedule": "새 예약",
+    "modelLabel": "실행 모델",
+    "modelFollow": "세션 따름",
+    "goto": "세션으로 이동",
+    "pendingGroup": "실행 대기",
+    "firedGroup": "실행 완료(최근 5개)",
+    "firedEarly": "조기 실행",
+    "origFireAt": "예정",
+    "standbySession": "새 세션",
+    "emptyTasks": "예약 작업이 없습니다",
+    "promptPlaceholder": "예약 시간에 실행할 프롬프트 입력…",
+    "preset_in1m": "1분 후",
+    "preset_in5m": "5분 후",
+    "preset_in30m": "30분 후",
+    "preset_in1h": "1시간 후"
   }
 }

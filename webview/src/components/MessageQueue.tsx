@@ -38,6 +38,15 @@ export function MessageQueue({ onEdit }: Props) {
           <span className="message-queue__text" title={m.text}>
             {m.text.replace(/\n/g, ' ')}
           </span>
+          {m.scheduledFireAt != null && (
+            <span
+              className="message-queue__sched-badge"
+              title={t('input.queue.scheduledBadge', { time: new Date(m.scheduledFireAt).toLocaleString() })}
+            >
+              <span className="codicon codicon-calendar" />
+              {t('input.queue.scheduledShort')}
+            </span>
+          )}
           <span className="message-queue__actions">
             <button
               className="message-queue__btn message-queue__btn--send"

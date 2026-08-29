@@ -20,6 +20,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage, MessagePart, TextPart, ImagePart, FilePart } from '@/types/messages'
+import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import { ToolCallCard } from './ToolCallCard'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -49,6 +50,8 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
   const { info, parts } = message
   const isUser = info.role === 'user'
   const time = clockTime(info.time?.created)
+  // 已发定时记录：服务端读回的消息不带定时标记，按下匹配补「定时执行」徽标
+  const firedHistory = useStore((s) => s.firedHistory)
 
   // 子 agent / 任务回调的合成通知（role 是 user 但 synthetic）：独立卡片渲染，不当用户消息
   if (isAgentNotification(info)) {
@@ -66,13 +69,21 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
     return <TimelineSeparator part={timelinePart} />
   }
   if (isUser) {
+    const userText = collectUserText(parts)
+    // 乐观消息自带 scheduledFireAt（真发时本地构造）；服务端读回（历史重拉/后台直发打开标签）
+    // 不带任何定时标记，按 sessionId+text 从 Java 已发记录匹配还原
+    const firedAt =
+      typeof info.scheduledFireAt === 'number'
+        ? (info.scheduledFireAt as number)
+        : firedHistory.find((f) => f.sessionId === info.sessionID && f.text === userText)?.fireAt
     return (
       <UserBubble
-        text={collectUserText(parts)}
+        text={userText}
         imageParts={collectImageParts(parts)}
         time={time}
         anchorAttr={anchorAttr}
         searchActive={searchActive}
+        scheduledFireAt={firedAt}
       />
     )
   }
@@ -135,12 +146,15 @@ function UserBubble({
   time,
   anchorAttr,
   searchActive,
+  scheduledFireAt,
 }: {
   text: string
   imageParts: Array<ImagePart | FilePart>
   time: string
   anchorAttr?: string
   searchActive?: boolean
+  /** 定时消息标记（fireAt）：发出后气泡上带「定时执行」徽标（历史重拉不带，预期）*/
+  scheduledFireAt?: number
 }) {
   const { t } = useTranslation()
   const [showFull, setShowFull] = useState(false)
@@ -163,7 +177,15 @@ function UserBubble({
 
   return (
     <div className="msg msg--user" data-anchor-msg={anchorAttr}>
-      <div className="msg__time">{time}</div>
+      <div className="msg__time">
+        {time}
+        {scheduledFireAt != null && (
+          <span className="msg__schedule-badge" title={t('input.schedule.firedBadge')}>
+            <span className="codicon codicon-calendar" />
+            {t('input.schedule.firedBadge')}
+          </span>
+        )}
+      </div>
       <div className={`msg__bubble${collapsed ? ' msg__bubble--collapsed' : ''}`}>
         {hasImages && (
           <div className="msg__images">

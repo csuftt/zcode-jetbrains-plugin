@@ -114,4 +114,34 @@ object ZCodeNotifyService {
         val panel = project.zCodeService().findPanelForSession(sessionId) ?: return
         panel.activateContent()
     }
+
+    /**
+     * 定时消息直发通知（标签已关/懒加载未激活时后台发出，用户需要知道提示词已执行）。
+     * webview 准入路径发出的（标签开着能看到）不通知，避免重复打扰。
+     */
+    fun notifyScheduledFired(project: Project, sessionId: String, preview: String) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                val title = ZCodeBundle.message("notify.scheduled.fired.title")
+                val content = preview.trim().take(120).ifEmpty {
+                    ZCodeBundle.message("notify.scheduled.fired.body")
+                }
+                val notification = NotificationGroupManager.getInstance()
+                    .getNotificationGroup("ZCode")
+                    .createNotification(title, content, NotificationType.INFORMATION)
+                notification.addAction(object : com.intellij.openapi.actionSystem.AnAction(
+                    ZCodeBundle.message("notify.turn.openToolWindow")
+                ) {
+                    override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
+                        openConversationTab(project, sessionId)
+                        notification.expire()
+                    }
+                })
+                com.intellij.notification.Notifications.Bus.notify(notification, project)
+            } catch (e: Exception) {
+                com.intellij.openapi.diagnostic.Logger.getInstance("ZCodePlugin")
+                    .warn("Scheduled-fire notification failed: ${e.message}")
+            }
+        }
+    }
 }

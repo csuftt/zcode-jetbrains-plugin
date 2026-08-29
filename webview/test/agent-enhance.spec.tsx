@@ -278,14 +278,14 @@ describe('InputBox 发送拼装（@<name> 前缀）', () => {
 
   it('选中子智能体：发送文本前置 @test-agent', async () => {
     const { onSend } = setup(agentDef())
-    fireEvent.click(screen.getByRole('button', { name: /发送/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^发送 \(Enter\)$/ }))
     await waitFor(() => expect(onSend).toHaveBeenCalled())
     expect(onSend.mock.calls[0][0]).toBe('@test-agent\n帮我看看这段代码')
   })
 
   it('未选中：不带 @ 前缀', async () => {
     const { onSend } = setup(null)
-    fireEvent.click(screen.getByRole('button', { name: /发送/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^发送 \(Enter\)$/ }))
     await waitFor(() => expect(onSend).toHaveBeenCalled())
     expect(onSend.mock.calls[0][0]).toBe('帮我看看这段代码')
   })

@@ -74,6 +74,7 @@
 /* ===== 上方条（cc-gui ContextBar：附件按钮 + 上下文圆环）。
        带背景色与输入区区分（cc-gui 同款色带），圆角对齐卡片内角（8px - 1px border）*/
 .input-box-topbar {
+  position: relative; // 定时任务弹窗的定位父级（弹窗底部锚在本栏顶部之上）
   display: flex;
   align-items: center;
   gap: 6px;

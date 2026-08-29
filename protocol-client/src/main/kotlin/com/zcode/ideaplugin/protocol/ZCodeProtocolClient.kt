@@ -671,6 +671,14 @@ class ZCodeProtocolClient private constructor(
         val params = buildJsonObject {
             put("sessionId", sessionId)
             put("content", content)
+            // 带 runtimeModel 的 send（协议原生形态，对齐官方客户端按回合携带模型）：
+            // 首条消息即注册 provider 并让本回合直接跑在目标模型上。setModel 与新建会话
+            // 首回合在服务端赛跑会撞 -32603 Unsupported（08-29 定时触发实测：新会话
+            // runtime 未注册任何 provider，available 只有内置目录），send 携带则无此竞态。
+            // 构造失败（provider 不在 config.json）省略字段走服务端默认，与原行为一致
+            if (providerId != null && modelId != null) {
+                RuntimeModels.buildRuntimeModel(providerId, modelId)?.let { put("runtimeModel", it) }
+            }
             if (!attachments.isNullOrEmpty()) {
                 put("attachments", buildAttachmentsJson(attachments))
             }

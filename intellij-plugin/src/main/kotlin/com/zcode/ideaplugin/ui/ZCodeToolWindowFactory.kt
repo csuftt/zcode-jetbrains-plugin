@@ -49,6 +49,37 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             return content
         }
 
+        /**
+         * 激活已绑定指定会话的标签（须在 EDT 调用）；没有绑定标签时返回 false（由调用方决定兜底行为）。
+         * 定时消息后台补发（补发后须有标签可见）与任务列表跳转（优先去已开的标签）共用。
+         */
+        fun activateSessionTab(project: Project, sessionId: String): Boolean {
+            if (sessionId.isBlank()) return false
+            val toolWindow = getToolWindow(project) ?: return false
+            val cm = toolWindow.contentManager
+            val existing = cm.contents.firstOrNull {
+                (it.component as? ZCodeToolWindowPanel)?.getCurrentSessionIdForPersist() == sessionId
+            } ?: return false
+            toolWindow.show(null)
+            if (cm.selectedContent !== existing) cm.setSelectedContent(existing)
+            // 已是选中标签时 setSelectedContent 不触发 selectionChanged，懒加载场景需手动激活
+            else (existing.component as? ZCodeToolWindowPanel)?.ensureJcefCreated()
+            return true
+        }
+
+        /**
+         * 打开绑定指定会话的标签并激活（须在 EDT 调用）——定时消息后台补发后恢复实时交互：
+         * 已有绑定该会话的标签则选中（含懒加载标签激活）；没有则新建标签按该会话恢复
+         * （前端 boot 按 initialSessionId selectSession + subscribe，与重启恢复同路径）。
+         */
+        fun openSessionTab(project: Project, sessionId: String) {
+            if (sessionId.isBlank()) return
+            val toolWindow = getToolWindow(project) ?: return
+            if (activateSessionTab(project, sessionId)) return
+            addTabContent(project, toolWindow, sessionId, getNextTabName(toolWindow.contentManager))
+            toolWindow.show(null)
+        }
+
         /** 生成下一个标签名：从 1 起取最小未被占用的编号（最后一个标签禁关、编号只增不减，故不复用 max+1）*/
         private fun getNextTabName(cm: ContentManager): String {
             val pattern = tabNamePattern()

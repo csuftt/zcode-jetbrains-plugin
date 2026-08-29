@@ -49,7 +49,9 @@
     "sendNow": "Send now (interrupts current reply)",
     "sendNowShort": "Now",
     "edit": "Edit (back to input box)",
-    "remove": "Remove from queue"
+    "remove": "Remove from queue",
+    "scheduledBadge": "Scheduled · {{time}}",
+    "scheduledShort": "Scheduled"
   },
   "pasted": {
     "clickToPreview": "Click to preview full content",
@@ -77,5 +79,42 @@
     "empty": "No subagents yet — create one in Settings",
     "manage": "Manage subagents",
     "clear": "Clear selection"
+  },
+  "schedule": {
+    "button": "Schedule send",
+    "title": "Schedule this message",
+    "rescheduleTitle": "Reschedule",
+    "hint": "Sends automatically at the set time; IDE must be running. Over 30 min late it expires for manual decision",
+    "confirm": "Schedule",
+    "pendingState": "Scheduled at {{time}}",
+    "dueState": "Due (firing soon)",
+    "expiredState": "Expired (manual decision)",
+    "holdState": "Held (session switched)",
+    "sendNow": "Send now",
+    "sendNowShort": "Now",
+    "reschedule": "Reschedule",
+    "cancel": "Cancel schedule",
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "countdownSoon": "Firing soon",
+    "countdownHM": "in {{h}}h {{m}}m",
+    "countdownM": "in {{m}}m",
+    "firedBadge": "Scheduled run",
+    "allTasks": "All scheduled",
+    "newSchedule": "New scheduled",
+    "modelLabel": "Model",
+    "modelFollow": "Follow session",
+    "goto": "Go to session",
+    "pendingGroup": "Pending",
+    "firedGroup": "Fired (last 5)",
+    "firedEarly": "fired early",
+    "origFireAt": "Scheduled",
+    "standbySession": "New tab",
+    "emptyTasks": "No scheduled tasks",
+    "promptPlaceholder": "Prompt to run at the scheduled time…",
+    "preset_in1m": "In 1 min",
+    "preset_in5m": "In 5 min",
+    "preset_in30m": "In 30 min",
+    "preset_in1h": "In 1 hour"
   }
 }

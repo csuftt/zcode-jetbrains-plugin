@@ -34,6 +34,8 @@ import { ThoughtLevelSelect } from './ThoughtLevelSelect'
 import { ModeSelect } from './ModeSelect'
 import { ContextRing } from './ContextRing'
 import { MessageQueue } from './MessageQueue'
+import { ScheduledMessages, AllScheduledPanel } from './ScheduledMessages'
+import type { ScheduledMessageItem } from '@/store/useStore'
 import { AgentSelect, AgentColorDot } from './AgentSelect'
 import { PromptEnhancerDialog } from './PromptEnhancerDialog'
 import { sendToJava, onMessage } from '@/ipc/bridge'
@@ -154,6 +156,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
 
   // 历史跨会话共享（persist 通道），切会话仅重置导航位置
   const sessionId = useStore((s) => s.currentSessionId)
+  // 待执行定时任务总数（全项目，Java 权威列表镜像）——日历按钮角标
+  const scheduledCount = useStore((s) => s.scheduledMessages.length)
   useEffect(() => {
     resetNav()
     setGhostSuffix('')
@@ -268,24 +272,140 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     clearEnhanceResult()
   }
 
-  // ============ 发送 ============
-  function doSend() {
-    // 未选模型时不发送（引导用户先选择，避免 CLI 偷偷用默认模型）
-    if (!currentModel) return
-    // 序列化：内联 chip → @路径（chip 与正文的位置关系保留在文本流中）
-    const text = serializeEditor(editorRef.current ?? document.createElement('div')).replace(/\s+$/, '')
-    if (
-      !text.trim() &&
-      fileRefs.length === 0 &&
-      skillRefs.length === 0 &&
-      pastedTexts.length === 0 &&
-      images.length === 0
-    )
-      return
+  // ============ 定时消息（弹窗独立输入提示词，不与输入框内容绑定；纯客户端调度） ============
+  const [scheduleOpen, setScheduleOpen] = useState(false)
+  // 弹窗两态：form=定时表单（新建/改时间），list=全部定时任务（跨会话聚合可见）
+  const [scheduleView, setScheduleView] = useState<'form' | 'list'>('form')
+  const [rescheduleTarget, setRescheduleTarget] = useState<ScheduledMessageItem | null>(null)
+  // 弹窗内的提示词输入（独立于编辑器；待命态/新标签同样可用）
+  const [scheduleText, setScheduleText] = useState('')
+  // 执行模型（providerId+modelId 精确对；null = 跟随会话当前模型，执行时清单里已下架则默认兜底）
+  const [scheduleModel, setScheduleModel] = useState<{ providerId: string; modelId: string } | null>(null)
+  const [modelOpen, setModelOpen] = useState(false)
+  // datetime-local 值（预设点击后同步回填，用户可在其上微调）
+  const [scheduleValue, setScheduleValue] = useState('')
+  const [activePreset, setActivePreset] = useState<string | null>(null)
+  // 执行模型下拉按供应商分组（行为设置润色模型同款结构）
+  const scheduleModelGroups = useMemo(() => {
+    const map = new Map<string, typeof models>()
+    for (const m of models) {
+      const arr = map.get(m.providerId) ?? []
+      arr.push(m)
+      map.set(m.providerId, arr)
+    }
+    return [...map.entries()]
+  }, [models])
 
-    // 子智能体引用拼最前（@名称，主 Agent 据此调度该子智能体——2026-08-23 协议实测），
-    // 技能引用次之（/技能名），顶部文件引用（@路径）再次，正文（含内联引用）最后，
-    // 折叠的粘贴文本按粘贴顺序拼到正文末尾（CLI 收到完整原文）
+  /** 预设档位 → 绝对时间：常用相对间隔（1/5/30 分钟、1 小时；与日期选择同一行） */
+  function resolvePreset(key: string): Date {
+    const offsetsMs: Record<string, number> = {
+      in1m: 60_000,
+      in5m: 5 * 60_000,
+      in30m: 30 * 60_000,
+      in1h: 3_600_000,
+    }
+    return new Date(Date.now() + (offsetsMs[key] ?? 0))
+  }
+
+  function toDatetimeLocal(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  /** 打开新建表单（清空态）：list 视图「新建」按钮与日历无任务入口共用 */
+  function openScheduleForm() {
+    setRescheduleTarget(null)
+    setScheduleView('form')
+    setScheduleText('')
+    setScheduleModel(null)
+    setModelOpen(false)
+    setScheduleValue('')
+    setActivePreset(null)
+  }
+
+  function openSchedulePicker() {
+    // 有待执行任务（角标亮起）→ 直达全部定时任务列表；没有 → 直接新建表单
+    openScheduleForm()
+    if (scheduledCount > 0) setScheduleView('list')
+    setScheduleOpen(true)
+  }
+
+  function openReschedulePicker(item: ScheduledMessageItem) {
+    setRescheduleTarget(item)
+    setScheduleText(item.text)
+    setScheduleModel(item.providerId && item.modelId ? { providerId: item.providerId, modelId: item.modelId } : null)
+    setModelOpen(false)
+    setScheduleValue(toDatetimeLocal(new Date(item.fireAt)))
+    setActivePreset(null)
+    setScheduleView('form')
+    setScheduleOpen(true)
+  }
+
+  function closeSchedulePicker() {
+    setScheduleOpen(false)
+    setRescheduleTarget(null)
+    setScheduleView('form')
+    setScheduleText('')
+    setScheduleModel(null)
+    setModelOpen(false)
+    setScheduleValue('')
+    setActivePreset(null)
+  }
+
+  function pickPreset(key: string) {
+    setActivePreset(key)
+    setScheduleValue(toDatetimeLocal(resolvePreset(key)))
+  }
+
+  /** 确认定时：新建=弹窗内独立输入的提示词（不动输入框）；改时间=可同时编辑提示词与执行模型 */
+  function confirmSchedule() {
+    const fireAt = scheduleValue ? new Date(scheduleValue).getTime() : 0
+    if (!fireAt || Number.isNaN(fireAt)) return
+    const text = scheduleText.trim()
+    if (!text) return
+    // 执行模型（null = 跟随会话）；清单里已失效（下架/订阅过期）提交时按跟随会话落库，
+    // 与执行时默认兜底同语义；providerId+modelId 精确对（内置双套餐同 modelId 靠 providerId 区分）
+    const picked =
+      scheduleModel && models.some((m) => m.providerId === scheduleModel.providerId && m.modelId === scheduleModel.modelId)
+        ? scheduleModel
+        : null
+    if (rescheduleTarget) {
+      sendToJava({
+        op: 'scheduledReschedule',
+        id: rescheduleTarget.id,
+        fireAt,
+        text,
+        providerId: picked?.providerId ?? '',
+        modelId: picked?.modelId ?? '',
+      })
+      closeSchedulePicker()
+      return
+    }
+    if (!sessionId) {
+      // 待命态：先把会话建好再落库（空串待命项在所有新标签都可见、无法区分归属也没有
+      // 可跳转的会话），createSessionForSchedule 会在建好后以真实 sid 发 scheduledCreate
+      useStore.getState().createSessionForSchedule(text, fireAt, picked?.providerId, picked?.modelId)
+    } else {
+      sendToJava({
+        op: 'scheduledCreate',
+        sessionId,
+        workspacePath: useStore.getState().projectPath,
+        text,
+        fireAt,
+        ...(picked ? { providerId: picked.providerId, modelId: picked.modelId } : {}),
+      })
+    }
+    closeSchedulePicker()
+  }
+
+  // ============ 发送 ============
+  /**
+   * 组装引用前缀文本：子智能体引用拼最前（@名称，主 Agent 据此调度该子智能体——
+   * 2026-08-23 协议实测），技能引用次之（/技能名），顶部文件引用（@路径）再次，
+   * 正文（含内联引用）最后，折叠的粘贴文本按粘贴顺序拼到正文末尾（CLI 收到完整原文）。
+   * 发送与定时共用的文本终态（定时不支持图片，图片引导只在 doSend 里追加）。
+   */
+  function assembleRefsText(text: string): string {
     const parts: string[] = []
     if (selectedAgent) {
       parts.push(`@${selectedAgent.name}`)
@@ -300,7 +420,24 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     if (pastedTexts.length > 0) {
       parts.push(pastedTexts.map((p) => p.text).join('\n\n'))
     }
-    const fullText = parts.join('\n')
+    return parts.join('\n')
+  }
+
+  function doSend() {
+    // 未选模型时不发送（引导用户先选择，避免 CLI 偷偷用默认模型）
+    if (!currentModel) return
+    // 序列化：内联 chip → @路径（chip 与正文的位置关系保留在文本流中）
+    const text = serializeEditor(editorRef.current ?? document.createElement('div')).replace(/\s+$/, '')
+    if (
+      !text.trim() &&
+      fileRefs.length === 0 &&
+      skillRefs.length === 0 &&
+      pastedTexts.length === 0 &&
+      images.length === 0
+    )
+      return
+
+    const fullText = assembleRefsText(text)
     // 纯图片消息：无正文时补占位文本（对齐 cc-gui 的 [Uploaded N image(s)]——
     // 服务端 content 恒有值、模型端占位语义无歧义）
     let finalText =
@@ -1027,6 +1164,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       {/* 拖拽调高手柄（顶部细条，向上拖增大）*/}
       <div className="input-box__resize-handle" onMouseDown={handleResizeStart} title={t('input.resizeHandle')} />
       <div className="chat-input-box">
+        {/* 定时消息（指定时间执行的提示词卡片，按时间升序；在排队消息上方）*/}
+        <ScheduledMessages onReschedule={openReschedulePicker} />
+
         {/* 排队消息（streaming 中 Enter 入队的，回合结束自动发送）*/}
         <MessageQueue onEdit={editQueuedToInput} />
 
@@ -1115,7 +1255,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
           </div>
         )}
 
-        {/* 上方条（cc-gui ContextBar）：附件按钮 + 上下文圆环 + 子智能体下拉（左侧依次排列）*/}
+        {/* 上方条（cc-gui ContextBar）：附件按钮 + 定时任务 + 上下文圆环 + 子智能体下拉（左侧依次排列）*/}
         <div className="input-box-topbar">
           <button
             className="context-tool-btn"
@@ -1127,6 +1267,167 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
           </button>
           <ContextRing />
           <AgentSelect onManage={onOpenAgentSettings} disabled={disabled} />
+          {/* 定时任务（日历）：最右对齐（发送按钮正上方）；角标=待执行任务总数 */}
+          <div className="schedule-entry">
+            <button
+              className="context-tool-btn"
+              onClick={() => (scheduleOpen ? closeSchedulePicker() : openSchedulePicker())}
+              disabled={disabled}
+              title={t('input.schedule.button')}
+              type="button"
+            >
+              <span className="codicon codicon-calendar" />
+            </button>
+            {scheduledCount > 0 && <span className="schedule-entry__badge">{scheduledCount}</span>}
+          </div>
+          {/* 定时任务弹窗挂在附件栏（topbar）内：底部锚在附件栏顶部之上，不遮输入框编辑区；
+              原生日历向下展开不会被 webview 顶部裁切 */}
+          {scheduleOpen && (
+            <div className="schedule-popover" onKeyDown={(e) => e.key === 'Escape' && closeSchedulePicker()}>
+              {scheduleView === 'list' ? (
+                <>
+                  <div className="schedule-popover__title-row">
+                    <span className="schedule-popover__title">{t('input.schedule.allTasks')}</span>
+                    <button type="button" className="schedule-popover__link" onClick={openScheduleForm}>
+                      <span className="codicon codicon-plus" />
+                      {t('input.schedule.newSchedule')}
+                    </button>
+                  </div>
+                  {/* 全部定时任务：点改时间切回表单态（openReschedulePicker 内已置 view=form）；
+                      跳转会话由 Java 判定（已开标签直接激活，未开则本标签切换）后关弹窗 */}
+                  <AllScheduledPanel onReschedule={openReschedulePicker} onGoto={closeSchedulePicker} />
+                </>
+              ) : (
+                <>
+                  <div className="schedule-popover__title-row">
+                    <span className="schedule-popover__title">
+                      {rescheduleTarget ? t('input.schedule.rescheduleTitle') : t('input.schedule.title')}
+                    </span>
+                    <button
+                      type="button"
+                      className="schedule-popover__link"
+                      onClick={() => setScheduleView('list')}
+                      title={t('input.schedule.allTasks')}
+                    >
+                      <span className="codicon codicon-list-unordered" />
+                      {t('input.schedule.allTasks')}
+                      {scheduledCount > 0 && (
+                        <span className="schedule-popover__link-badge">{scheduledCount}</span>
+                      )}
+                    </button>
+                  </div>
+                  {/* 日期行放表单首行：原生日历向下展开时整个弹窗都在其下方，不再翻转溢出弹窗底部；
+                      预设四档与日期并排，编辑改时间同样保留 */}
+                  <div className="schedule-popover__row-inline">
+                    <input
+                      type="datetime-local"
+                      className="schedule-popover__datetime"
+                      value={scheduleValue}
+                      onChange={(e) => {
+                        setScheduleValue(e.target.value)
+                        setActivePreset(null)
+                      }}
+                    />
+                    <div className="schedule-popover__presets">
+                      {(['in1m', 'in5m', 'in30m', 'in1h'] as const).map((key) => (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`schedule-popover__preset${activePreset === key ? ' schedule-popover__preset--active' : ''}`}
+                          onClick={() => pickPreset(key)}
+                        >
+                          {t(`input.schedule.preset_${key}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* 提示词输入：新建与改时间都显示（改时间可同时编辑） */}
+                  <textarea
+                    className="schedule-popover__textarea"
+                    value={scheduleText}
+                    onChange={(e) => setScheduleText(e.target.value)}
+                    placeholder={t('input.schedule.promptPlaceholder')}
+                    rows={4}
+                    autoFocus
+                  />
+                  {/* 执行模型：null = 跟随会话当前模型；执行时已下架则默认兜底。
+                      下拉复用行为设置润色模型的 selector 体系（供应商分组 + 模型名） */}
+                  <div className="schedule-popover__row-inline">
+                    <span className="schedule-popover__model-label">{t('input.schedule.modelLabel')}</span>
+                    <div className="selector-button-wrap schedule-popover__model-select">
+                      <button type="button" className="selector-button" onClick={() => setModelOpen((v) => !v)}>
+                        {scheduleModel
+                          ? models.find(
+                              (m) => m.providerId === scheduleModel.providerId && m.modelId === scheduleModel.modelId,
+                            )?.modelName || scheduleModel.modelId
+                          : t('input.schedule.modelFollow')}
+                        <span className="codicon codicon-chevron-down selector-button-chevron" />
+                      </button>
+                      {modelOpen && (
+                        <div className="selector-dropdown schedule-popover__model-dropdown">
+                          <div className="selector-dropdown-group">
+                            <div
+                              className={`selector-dropdown-item ${scheduleModel == null ? 'is-selected' : ''}`}
+                              onClick={() => {
+                                setScheduleModel(null)
+                                setModelOpen(false)
+                              }}
+                            >
+                              {t('input.schedule.modelFollow')}
+                            </div>
+                          </div>
+                          {scheduleModelGroups.map(([pid, items]) => (
+                            <div key={pid} className="selector-dropdown-group">
+                              <div className="selector-dropdown-group-title">{items[0]?.providerName ?? pid}</div>
+                              {items.map((m) => (
+                                <div
+                                  key={`${m.providerId}/${m.modelId}`}
+                                  className={`selector-dropdown-item ${
+                                    scheduleModel?.providerId === m.providerId && scheduleModel?.modelId === m.modelId
+                                      ? 'is-selected'
+                                      : ''
+                                  }`}
+                                  onClick={() => {
+                                    setScheduleModel({ providerId: m.providerId, modelId: m.modelId })
+                                    setModelOpen(false)
+                                  }}
+                                >
+                                  {m.modelName}
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {scheduleModel &&
+                    !models.some((m) => m.providerId === scheduleModel.providerId && m.modelId === scheduleModel.modelId) && (
+                      <small className="schedule-popover__model-invalid">
+                        <span className="codicon codicon-warning" />
+                        <span>{t('settings.behavior.enhanceModel.invalidHint')}</span>
+                      </small>
+                    )}
+                  {!rescheduleTarget && (
+                    <div className="schedule-popover__hint">{t('input.schedule.hint')}</div>
+                  )}
+                  <div className="schedule-popover__actions">
+                    <button type="button" className="schedule-popover__btn" onClick={closeSchedulePicker}>
+                      {t('common.confirm.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      className="schedule-popover__btn schedule-popover__btn--primary"
+                      onClick={confirmSchedule}
+                      disabled={!scheduleValue || !scheduleText.trim()}
+                    >
+                      {t('input.schedule.confirm')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div
@@ -1291,6 +1592,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
             ))}
           </div>
         )}
+
       </div>
 
       {/* 粘贴文本预览弹窗（fixed 全屏遮罩，Escape/点遮罩关闭）*/}

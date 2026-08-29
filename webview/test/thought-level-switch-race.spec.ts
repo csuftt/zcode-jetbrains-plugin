@@ -122,31 +122,26 @@ beforeEach(() => {
 })
 
 describe('竞态1：createSession 级别补发须等权威 settings 校验', () => {
-  it('合法级别：切换落定后由权威 settings 校准下发（不在 modelSet 时直发）', () => {
+  it('合法级别：懒创建不发独立 setModel（模型由首条 send runtimeModel 承担），级别由权威 settings 校准下发', () => {
     resetStandby({ savedLevel: 'enabled', withQwenCache: true })
 
     useStore.getState().sendMessage('首条消息')
     pushResponse({ op: 'createSession', sessionId: NEW_SID })
 
-    // setModel 已发（applyModelIfReady），级别补发被推迟（否则会被会话默认模型
-    // GLM 的 off/high/max 拒绝 → -32603 Unsupported reasoning effort: enabled）
-    expect(sentOps()).toContain('setModel')
+    // 懒创建首条消息在途：不再独立下发 setModel（与首回合在服务端赛跑会撞
+    // -32603 Unsupported，08-29 定时触发实测），模型由首条 send 的 runtimeModel 承担；
+    // 级别块整块跳过（setThoughtLevel 先于 send 到达会撞默认模型级别集）
+    expect(sentOps()).not.toContain('setModel')
     expect(sentOps()).not.toContain('setThoughtLevel')
+    expect(sentOps()).toContain('send')
     const st = useStore.getState()
-    expect(st.pendingThoughtLevel).toBe('enabled')
-    // 不占 applied 门控：留给切换落定后的权威 settings 校验使用
-    expect(st.thoughtLevelAppliedForSession).toBeNull()
-    expect(st.modelSwitchInFlightAt).not.toBeNull()
+    expect(st.pendingThoughtLevel).toBeNull()
+    expect(st.modelSwitchInFlightAt).toBeNull()
+    // 仅标记已应用：防 messages/models 刷新重发 setModel
+    expect(st.modelAppliedForSession).toBe(NEW_SID)
 
-    // 模型切换落定——仍不直发（本地缓存可能已被污染，须等服务端权威级别集）
-    pushResponse({ op: 'modelSet', sessionId: NEW_SID, ...QWEN })
-    expect(sentOps()).not.toContain('setThoughtLevel')
-    expect(useStore.getState().modelSwitchInFlightAt).toBeNull()
-
-    // 500ms 后的重拉 settings 带回权威级别集（qwen=enabled/disabled）→ 合法补发
+    // 权威 settings（qwen=enabled/disabled）到达 → 合法级别校准补发
     // （current=disabled ≠ saved → 需要下发；current 已等于 saved 时服务端无需变更，不下发）
-    vi.advanceTimersByTime(600)
-    expect(sentOps()).toContain('getSettings')
     pushResponse({ op: 'settings', sessionId: NEW_SID, mode: { current: 'yolo' }, thoughtLevel: { ...QWEN_LEVELS, current: 'disabled' } })
 
     expect(lastOp('setThoughtLevel')).toMatchObject({ sessionId: NEW_SID, thoughtLevel: 'enabled' })
@@ -189,15 +184,12 @@ describe('竞态1：createSession 级别补发须等权威 settings 校验', () 
 
     useStore.getState().sendMessage('首条消息')
     pushResponse({ op: 'createSession', sessionId: NEW_SID })
-    expect(sentOps()).toContain('setModel')
+    // 懒创建不再发独立 setModel、级别块跳过（污染缓存不放行）
+    expect(sentOps()).not.toContain('setModel')
     expect(sentOps()).not.toContain('setThoughtLevel')
-    expect(useStore.getState().pendingThoughtLevel).toBe('enabled')
-
-    pushResponse({ op: 'modelSet', sessionId: NEW_SID, modelId: 'GLM-5.3', providerId: 'builtin' })
-    expect(sentOps()).not.toContain('setThoughtLevel')
+    expect(useStore.getState().pendingThoughtLevel).toBeNull()
 
     // 权威 settings：GLM 真实级别集 off/high/max → enabled 非法 → 静默跳过
-    vi.advanceTimersByTime(600)
     pushResponse({ op: 'settings', sessionId: NEW_SID, mode: { current: 'yolo' }, thoughtLevel: GLM_LEVELS })
 
     expect(sentOps()).not.toContain('setThoughtLevel')
@@ -209,12 +201,12 @@ describe('竞态1：createSession 级别补发须等权威 settings 校验', () 
 
 describe('竞态2：切换在途的 settings 响应级别部分不可信', () => {
   it('在途响应只同步 mode；级别不入 store、不下发、不污染模型缓存', () => {
-    // saved=max（旧模型所选，对 qwen 非法）；qwen 无缓存（首用）
+    // saved=max（旧模型所选，对 qwen 非法）；qwen 无缓存（首用）。
+    // 在途切换改为手动置位（既有会话回合中 setModel 的 modelSetPending 形态，
+    // 与懒创建是否发独立 setModel 解耦——守卫本身不受影响）
     resetStandby({ savedLevel: 'max', withQwenCache: false })
-
-    useStore.getState().sendMessage('首条消息')
-    pushResponse({ op: 'createSession', sessionId: NEW_SID })
-    expect(sentOps()).toContain('setModel') // 切换在途
+    // 已有会话 + 手动置在途标记（模拟回合中 setModel 的 modelSetPending 形态）
+    useStore.setState({ currentSessionId: NEW_SID, modelSwitchInFlightAt: Date.now() })
 
     // 旧模型（GLM 系）的 settings 响应晚到：max ∈ [off,high,max]，
     // 修复前 applyThoughtLevelIfReady 会照发 max → 服务端已切 qwen → -32603

@@ -799,6 +799,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "deleteSession" -> handleDeleteSession(msg)
                         "archiveSession" -> handleArchiveSession(msg)
                         "restoreSession" -> handleRestoreSession(msg)
+                        "scheduledCreate" -> handleScheduledCreate(msg)
+                        "scheduledCancel" -> handleScheduledOpSimple(msg, "cancel")
+                        "scheduledReschedule" -> handleScheduledReschedule(msg)
+                        "scheduledSendNow" -> handleScheduledOpSimple(msg, "sendNow")
+                        "scheduledRequeue" -> handleScheduledRequeue(msg)
+                        "scheduledList" -> handleScheduledListRequest()
+                        "scheduledDueAck" -> handleScheduledDueAck(msg)
+                        "scheduledFired" -> handleScheduledFired(msg)
+                        "gotoSession" -> handleGotoSession(msg)
                         "listArchivedSessions" -> handleListArchivedSessions(msg)
                         "listModels" -> handleListModels(msg)
                         "modelManageList" -> handleModelManageList(msg)
@@ -1688,6 +1697,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
         // 从已 subscribe 集合中移除
         subscribedSessions.remove(sessionId)
+        // 会话删除：连带丢弃其全部待发定时消息（对齐 webview 侧清理）
+        ZCodeScheduledMessageService.getInstance(project).dropForSession(sessionId)
         return buildJsonObject {
             put("op", "sessionDeleted")
             put("sessionId", sessionId)
@@ -1706,15 +1717,117 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.warn("Session archive failed: ${e.message}")
             return errorResponse("归档失败: ${e.message}")
         }
+        // 归档=用户把会话收起：待发定时消息一并丢弃（到点给归档会话发消息属惊吓行为）
+        ZCodeScheduledMessageService.getInstance(project).dropForSession(sessionId)
         return buildJsonObject {
             put("op", "sessionArchived")
             put("sessionId", sessionId)
         }
     }
 
-    /** 恢复归档会话（置 tasks.archived=0，客户端重启/刷新后同步可见）*/
-    private fun handleRestoreSession(msg: JsonObject): JsonObject {
+    // ============ 定时消息（ZCodeScheduledMessageService 的 webview op 入口） ============
+
+    private fun scheduledService() = ZCodeScheduledMessageService.getInstance(project)
+
+    private fun handleScheduledCreate(msg: JsonObject): JsonObject {
         val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val text = msg["text"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 text")
+        val fireAt = msg["fireAt"]?.jsonPrimitive?.longOrNull
+            ?: return errorResponse("缺少 fireAt")
+        val workspacePath = effectiveWorkspacePath(msg)
+        val providerId = msg["providerId"]?.jsonPrimitive?.contentOrNull
+        val modelId = msg["modelId"]?.jsonPrimitive?.contentOrNull
+        val item = scheduledService().create(sessionId, workspacePath, text, fireAt, providerId, modelId)
+            ?: return errorResponse("定时消息创建失败（参数不完整）")
+        return buildJsonObject {
+            put("op", "scheduledCreated")
+            put("id", item.id)
+        }
+    }
+
+    private fun handleScheduledReschedule(msg: JsonObject): JsonObject {
+        val id = msg["id"]?.jsonPrimitive?.content ?: return errorResponse("缺少 id")
+        val fireAt = msg["fireAt"]?.jsonPrimitive?.longOrNull ?: return errorResponse("缺少 fireAt")
+        val text = msg["text"]?.jsonPrimitive?.contentOrNull
+        // modelId 字段存在=更新执行模型（空串=清空改回跟随会话）；不存在=保持不变
+        val updateModel = msg.containsKey("modelId")
+        val providerId = msg["providerId"]?.jsonPrimitive?.contentOrNull
+        val modelId = msg["modelId"]?.jsonPrimitive?.contentOrNull
+        scheduledService().reschedule(id, fireAt, text, providerId, modelId, updateModel)
+        return ackOp("scheduledRescheduled")
+    }
+
+    /** cancel / sendNow：只需 id 的简单操作。均幂等：项不存在/已处理按成功应答——
+     *  webview 乐观移除先行时 Java 侧可能已无此项，报错横幅只会误导用户 */
+    private fun handleScheduledOpSimple(msg: JsonObject, action: String): JsonObject {
+        val id = msg["id"]?.jsonPrimitive?.content ?: return errorResponse("缺少 id")
+        when (action) {
+            "cancel" -> scheduledService().cancel(id)
+            "sendNow" -> scheduledService().sendNow(id)
+        }
+        return ackOp("scheduled${action.replaceFirstChar { it.uppercase() }}Done")
+    }
+
+    private fun handleScheduledRequeue(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val text = msg["text"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 text")
+        val fireAt = msg["fireAt"]?.jsonPrimitive?.longOrNull ?: 0L
+        val providerId = msg["providerId"]?.jsonPrimitive?.contentOrNull
+        val modelId = msg["modelId"]?.jsonPrimitive?.contentOrNull
+        scheduledService().requeueOnSessionLeave(sessionId, effectiveWorkspacePath(msg), text, fireAt, providerId, modelId)
+        return ackOp("scheduledRequeued")
+    }
+
+    private fun handleScheduledListRequest(): JsonObject {
+        scheduledService().pushListTo(this)
+        return ackOp("scheduledListServed")
+    }
+
+    private fun handleScheduledDueAck(msg: JsonObject): JsonObject {
+        val id = msg["id"]?.jsonPrimitive?.content ?: return errorResponse("缺少 id")
+        scheduledService().onDueAck(id)
+        return ackOp("scheduledDueAcked")
+    }
+
+    private fun handleScheduledFired(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content ?: return errorResponse("缺少 sessionId")
+        val text = msg["text"]?.jsonPrimitive?.content ?: return errorResponse("缺少 text")
+        val fireAt = msg["fireAt"]?.jsonPrimitive?.longOrNull ?: return errorResponse("缺少 fireAt")
+        scheduledService().onFiredReport(sessionId, text, fireAt)
+        return ackOp("scheduledFiredRecorded")
+    }
+
+    /**
+     * 任务列表跳转会话：会话已有宿主标签 → Java 直接激活那个标签（本标签不动）；
+     * 没有 → 应答 gotoSessionLocal，由发起的 webview 自己 selectSession。
+     * activateSessionTab 须 EDT，异步执行即可——external 判定用 findPanelForSession 同步得出。
+     */
+    private fun handleGotoSession(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content ?: return errorResponse("缺少 sessionId")
+        val external = project.zCodeService().findPanelForSession(sessionId) != null
+        if (external) {
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed) return@invokeLater
+                ZCodeToolWindowFactory.activateSessionTab(project, sessionId)
+            }
+        }
+        return buildJsonObject {
+            put("op", if (external) "gotoSessionExternal" else "gotoSessionLocal")
+            put("sessionId", sessionId)
+        }
+    }
+
+    private fun ackOp(op: String): JsonObject = buildJsonObject { put("op", op) }
+
+    /** 懒加载标签未激活（JCEF 未创建）时 webview 推送不可达，定时消息分派需降级直发 */
+    fun canPushToWebview(): Boolean = ::jbCefBrowser.isInitialized
+
+    /** 恢复归档会话（置 tasks.archived=0，客户端重启/刷新后同步可见）*/
+    private fun handleRestoreSession(msg: JsonObject): JsonObject {        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 sessionId")
         val client = project.zCodeService().getClient()
         try {

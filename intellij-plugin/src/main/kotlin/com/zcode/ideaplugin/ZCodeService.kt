@@ -47,6 +47,9 @@ interface ZCodeService {
      */
     fun pushToWebview(msg: JsonObject)
 
+    /** 广播消息到全部标签的 webview（多标签全局状态同步，如定时消息列表） */
+    fun broadcastToWebviews(msg: JsonObject)
+
     /** 当前激活会话面板（browser-use 内嵌浏览器宿主定位用）*/
     fun getActivePanel(): ZCodeToolWindowPanel?
 

@@ -1,0 +1,490 @@
+// 定时消息列表（输入框 topbar 下方、排队消息上方；复用 message-queue 的卡片语汇）
+// 项：时钟图标（主题色）+ 状态行（定时 HH:mm 执行 + 倒计时）+ 单行省略预览 + 操作组
+
+.scheduled-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 2px 0;
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-secondary);
+    font-size: 12px;
+    color: var(--text-primary);
+    min-width: 0; // 允许子级省略号收缩
+
+    // 已过期/挂起：降低存在感 + 警示边
+    &--expired {
+      opacity: 0.75;
+      border-color: var(--warningBorder, var(--border-secondary));
+    }
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    color: var(--button-primary);
+    font-size: 13px;
+  }
+
+  &__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  // 状态行（定时 HH:mm 执行 + 倒计时）：比提示词文本低一级的弱化视觉（小一号+三档灰）
+  &__state {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--text-tertiary);
+  }
+
+  &__countdown {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__text {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  // 操作组（立即执行 | 改时间 | 取消）
+  &__actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: 8px;
+  }
+
+  &__btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: 18px;
+    min-width: 18px;
+    padding: 0 2px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 12px;
+
+    &:hover {
+      background: var(--button-hover);
+      color: var(--text-secondary);
+    }
+
+    &--send {
+      // 对齐排队卡片 send 按钮：边框一体按钮（图标+文本），hover 主题色
+      height: 20px;
+      padding: 0 6px;
+      gap: 3px;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      color: var(--text-secondary);
+
+      // 对齐排队卡片 send-icon：export 箭头默认朝右上，逆时针 90° 转为朝上（「发出」语义）；
+      // 尺寸同样对齐排队（codicon 基础样式 font 简写 16px，须后代选择器提到同级优先级才生效）
+      .codicon {
+        font-size: 11px;
+        transform: rotate(-90deg);
+      }
+
+      &:hover {
+        border-color: var(--accent-primary);
+        background: var(--color-button-accent-hover-bg);
+        color: var(--accent-primary);
+        filter: none;
+      }
+    }
+
+    &-label {
+      font-size: 11px;
+    }
+  }
+}
+
+// 附件栏日历入口：推到 topbar 最右（发送按钮正上方）；角标=待执行任务总数
+.schedule-entry {
+  position: relative;
+  margin-left: auto;
+  display: inline-flex;
+
+  &__badge {
+    position: absolute;
+    top: -5px;
+    right: -6px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--button-primary);
+    color: var(--color-button-text);
+    font-size: 9px;
+    line-height: 13px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+}
+
+// 时间选择弹层：挂在附件栏（input-box-topbar）内、底部锚在其顶部之上——
+// 不遮输入框编辑区；日历入口在最右，弹窗随之右对齐（topbar 自身 position:relative）
+.schedule-popover {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  width: 460px;
+  max-width: calc(100% - 16px);
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg-elevated, var(--bg-primary));
+  border: 1px solid var(--border-secondary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  &__title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  // 标题行：左侧标题 + 右侧「全部定时任务/返回」切换
+  &__title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  &__link {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-size: 11px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+
+    .codicon {
+      font-size: 12px;
+    }
+
+    &:hover {
+      background: var(--button-hover);
+      color: var(--text-primary);
+    }
+  }
+
+  // 「全部定时任务」链接上的待执行数小徽标
+  &__link-badge {
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--button-primary);
+    color: var(--color-button-text);
+    font-size: 9px;
+    line-height: 13px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  // 提示词输入（弹窗独立输入，不与输入框绑定）
+  &__textarea {
+    width: 100%;
+    min-height: 72px;
+    max-height: 160px;
+    padding: 6px 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: inherit;
+    border-radius: 4px;
+    border: 1px solid var(--border-secondary);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    resize: vertical;
+    box-sizing: border-box;
+
+    &:focus {
+      outline: none;
+      border-color: var(--button-primary);
+    }
+
+    &::placeholder {
+      color: var(--text-tertiary);
+    }
+  }
+
+  &__presets {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  // 日期选择与预设并排一行：datetime 吃剩余宽度，四档预设不换行
+  &__row-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__preset {
+    padding: 3px 6px;
+    font-size: 11px;
+    border-radius: 10px;
+    border: 1px solid var(--border-secondary);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--button-hover);
+      color: var(--text-primary);
+    }
+
+    &--active {
+      border-color: var(--button-primary);
+      color: var(--button-primary);
+    }
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  // datetime 在行内吃剩余宽度：右侧留足分段宽度，否则 HH:MM 的"分"段被裁切点不到
+  &__datetime {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border-secondary);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    color-scheme: dark light;
+  }
+
+  // 执行模型行：label 固定 + selector 下拉（行为设置润色模型同款体系，供应商分组）
+  &__model-label {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  &__model-select {
+    flex: 1;
+    min-width: 0;
+
+    .selector-button {
+      width: 100%;
+      max-width: none;
+      justify-content: space-between;
+      padding: 3px 6px;
+      border: 1px solid var(--border-secondary);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+
+      &:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+        border-color: var(--button-primary);
+      }
+    }
+  }
+
+  // 下拉浮层：向上弹出默认朝上正确（模型行在弹窗中下部），压低高度防窄面板被顶部裁切
+  &__model-dropdown {
+    max-height: 220px;
+  }
+
+  // 预填模型已失效（下架/订阅过期）提示：执行时将默认兜底
+  &__model-invalid {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--warning-color, var(--text-tertiary));
+
+    .codicon {
+      font-size: 12px;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  &__btn {
+    padding: 3px 12px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border-secondary);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--button-hover);
+      color: var(--text-primary);
+    }
+
+    &--primary {
+      background: var(--button-primary);
+      border-color: var(--button-primary);
+      color: var(--color-button-text);
+
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  &__hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+}
+
+// 全部定时任务列表（schedule-popover 列表视图）：分组（待执行/已执行）+ 跨会话行
+.schedule-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+
+  &__empty {
+    padding: 16px 0;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+
+  &__group {
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-secondary);
+    min-width: 0;
+
+    &--fired {
+      opacity: 0.7;
+    }
+
+    &:hover {
+      border-color: var(--border-primary);
+    }
+  }
+
+  &__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  // 会话归属（title 截断）+ 目标时间：弱化视觉，同定时卡片状态行
+  &__session {
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 55%;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__time {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__text {
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    min-width: 18px;
+    padding: 0 2px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 12px;
+
+    &:hover {
+      background: var(--button-hover);
+      color: var(--text-secondary);
+    }
+  }
+}

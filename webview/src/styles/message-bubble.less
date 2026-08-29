@@ -32,6 +32,20 @@
     font-size: 11px;
     color: var(--text-tertiary);
     margin-bottom: 2px;
+
+    // 定时消息徽标（时钟 + 定时执行）：与时间同行，主题色弱化呈现
+    .msg__schedule-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-left: 6px;
+      font-size: 10px;
+      color: var(--button-primary);
+
+      .codicon {
+        font-size: 11px;
+      }
+    }
   }
 
   // ============ user 消息（右对齐气泡）============

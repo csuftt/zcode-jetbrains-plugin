@@ -405,6 +405,14 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         p.pushToWebview(msg)
     }
 
+    override fun broadcastToWebviews(msg: JsonObject) {
+        if (panels.isEmpty()) {
+            log.warn("broadcastToWebviews: no panels, message dropped: ${msg["op"]}")
+            return
+        }
+        panels.forEach { it.pushToWebview(msg) }
+    }
+
     override fun ensureUserInputHandler() {
         // 注册统一在 getClient() 启动成功后执行（registerProtocolHandlersLocked），
         // 这里只需确保协议客户端已拉起

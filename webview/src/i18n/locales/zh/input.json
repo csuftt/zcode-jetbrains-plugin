@@ -49,7 +49,9 @@
     "sendNow": "立即发送（中断当前回复）",
     "sendNowShort": "立即",
     "edit": "编辑（回到输入框）",
-    "remove": "移出队列"
+    "remove": "移出队列",
+    "scheduledBadge": "定时消息 · {{time}}",
+    "scheduledShort": "定时"
   },
   "pasted": {
     "clickToPreview": "点击预览完整内容",
@@ -77,5 +79,42 @@
     "empty": "暂无子智能体，去设置页新建",
     "manage": "管理子智能体",
     "clear": "取消选择"
+  },
+  "schedule": {
+    "button": "定时发送",
+    "title": "定时执行此消息",
+    "rescheduleTitle": "重新定时",
+    "hint": "到点自动发送；IDE 需处于运行状态，错过超 30 分钟将转为已过期",
+    "confirm": "定时",
+    "pendingState": "定时 {{time}} 执行",
+    "dueState": "待执行（即将补发）",
+    "expiredState": "已过期（需手动决定）",
+    "holdState": "已挂起（切会话回退）",
+    "sendNow": "立即执行",
+    "sendNowShort": "立即",
+    "reschedule": "改时间",
+    "cancel": "取消定时",
+    "today": "今天",
+    "tomorrow": "明天",
+    "countdownSoon": "即将执行",
+    "countdownHM": "{{h}} 小时 {{m}} 分后",
+    "countdownM": "{{m}} 分钟后",
+    "firedBadge": "定时执行",
+    "allTasks": "全部定时任务",
+    "newSchedule": "新建定时",
+    "modelLabel": "执行模型",
+    "modelFollow": "跟随会话",
+    "goto": "跳转会话",
+    "pendingGroup": "待执行",
+    "firedGroup": "已执行（最近 5 条）",
+    "firedEarly": "提前执行",
+    "origFireAt": "原定",
+    "standbySession": "新会话",
+    "emptyTasks": "暂无定时任务",
+    "promptPlaceholder": "输入到时执行的提示词…",
+    "preset_in1m": "1 分钟后",
+    "preset_in5m": "5 分钟后",
+    "preset_in30m": "30 分钟后",
+    "preset_in1h": "1 小时后"
   }
 }

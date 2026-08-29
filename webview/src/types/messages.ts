@@ -178,6 +178,8 @@ export interface MessageInfo {
   role: 'user' | 'assistant'
   time: { created: number; completed?: number }
   agent?: string
+  /** 定时消息标记（fireAt）：定时到点发出的乐观 user 消息携带（历史重拉不带，预期）*/
+  scheduledFireAt?: number
   // user 消息用嵌套 model
   model?: { providerID: string; modelID: string }
   // assistant 消息用扁平字段
@@ -377,6 +379,23 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'checkEnv' }
   /** 保存环境路径配置：字段缺席=不改该项，空串=清除（回退自动探测）；后端验证通过才落盘 */
   | { op: 'envSave'; nodePath?: string; cliPath?: string }
+  // ============ 定时消息（权威列表在 Java 侧 ZCodeScheduledMessageService）============
+  /** 新建定时消息（fireAt 绝对 epoch ms；过早由 Java 钳到 +10s；模型可空=跟随会话）*/
+  | { op: 'scheduledCreate'; sessionId: string; workspacePath?: string; text: string; fireAt: number; providerId?: string; modelId?: string }
+  | { op: 'scheduledCancel'; id: string }
+  | { op: 'scheduledReschedule'; id: string; fireAt: number; text?: string; providerId?: string; modelId?: string }
+  /** 立即执行：走 Java 分派（与到点分派同一路径，回合活跃入队尾/空闲直发）*/
+  | { op: 'scheduledSendNow'; id: string }
+  /** 切会话回退：定时来源的排队消息交还 Java 挂起（hold=true 不自动发）*/
+  | { op: 'scheduledRequeue'; sessionId: string; workspacePath?: string; text: string; fireAt: number; providerId?: string; modelId?: string }
+  /** 初始化水合：请求 Java 推送全量列表（scheduledList）*/
+  | { op: 'scheduledList' }
+  /** 到点受理回执：webview 已入队或已发；Java 超时未收到则降级直发 */
+  | { op: 'scheduledDueAck'; id: string }
+  /** 真发上报：定时消息实际发出（sendMessage 真发点）后上报 Java 记入已发历史（持久徽标数据源）*/
+  | { op: 'scheduledFired'; sessionId: string; text: string; fireAt: number }
+  /** 任务列表跳转会话：Java 判定——会话已有宿主标签则激活它，否则应答 gotoSessionLocal 由本标签切换 */
+  | { op: 'gotoSession'; sessionId: string }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {
@@ -708,6 +727,15 @@ export type JavaResponse =
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }
   | { op: 'archivedSessions'; sessions: SessionInfo[] }
+  // ============ 定时消息（Java 侧广播/定向推送）============
+  /** 全量镜像（广播到全部标签；UI 按 currentSessionId 过滤）；fired=已发记录（徽标匹配用）。
+   *  ts=Java 单调取号，webview 只应用更新的快照（多线程广播到达乱序防旧快照复活已移除项）*/
+  | { op: 'scheduledList'; ts?: number; items: import('../store/useStore').ScheduledMessageItem[]; fired?: import('../store/useStore').ScheduledFiredRecord[] }
+  /** 到点分派：走 webview 准入路径（sendMessage：回合活跃入队尾/空闲直发），处理后 ack */
+  | { op: 'scheduledDue'; id: string; sessionId: string; text: string; scheduledFireAt?: number; providerId?: string; modelId?: string }
+  /** 跳转会话应答：external=Java 已激活宿主标签（本标签不动）；local=本标签 selectSession */
+  | { op: 'gotoSessionExternal'; sessionId: string }
+  | { op: 'gotoSessionLocal'; sessionId: string }
   | { op: 'messages'; sessionId: string; messages: ZCodeMessage[]; reconcile?: boolean }
   | { op: 'subagents'; sessionId: string; data: SubagentsResult; error?: string }
   | { op: 'subagentMessages'; sessionId: string; messages: ZCodeMessage[]; error?: string }

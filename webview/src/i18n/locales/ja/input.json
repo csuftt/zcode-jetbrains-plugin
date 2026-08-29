@@ -48,7 +48,9 @@
     "sendNow": "今すぐ送信（現在の応答を中断）",
     "sendNowShort": "今すぐ",
     "edit": "編集（入力欄へ戻す）",
-    "remove": "キューから削除"
+    "remove": "キューから削除",
+    "scheduledBadge": "予約メッセージ · {{time}}",
+    "scheduledShort": "予約"
   },
   "pasted": {
     "clickToPreview": "クリックで全文をプレビュー",
@@ -72,5 +74,42 @@
     "empty": "サブエージェントがありません。設定で作成してください",
     "manage": "サブエージェントを管理",
     "clear": "選択を解除"
+  },
+  "schedule": {
+    "button": "予約送信",
+    "title": "このメッセージを予約",
+    "rescheduleTitle": "再予約",
+    "hint": "設定時刻に自動送信。IDE が起動中である必要があり、30 分超過で期限切れになります",
+    "confirm": "予約",
+    "pendingState": "{{time}} に予約済み",
+    "dueState": "送信待ち（まもなく）",
+    "expiredState": "期限切れ（手動で決定）",
+    "holdState": "保留中（セッション切替）",
+    "sendNow": "今すぐ送信",
+    "sendNowShort": "即時",
+    "reschedule": "時間変更",
+    "cancel": "予約取消",
+    "today": "今日",
+    "tomorrow": "明日",
+    "countdownSoon": "まもなく送信",
+    "countdownHM": "{{h}}時間{{m}}分後",
+    "countdownM": "{{m}}分後",
+    "firedBadge": "予約実行",
+    "allTasks": "すべての予約",
+    "newSchedule": "新規予約",
+    "modelLabel": "実行モデル",
+    "modelFollow": "セッションに従う",
+    "goto": "セッションへ移動",
+    "pendingGroup": "実行待ち",
+    "firedGroup": "実行済み（最新5件）",
+    "firedEarly": "繰り上げ実行",
+    "origFireAt": "予定",
+    "standbySession": "新規セッション",
+    "emptyTasks": "予約タスクはありません",
+    "promptPlaceholder": "予約時刻に実行するプロンプトを入力…",
+    "preset_in1m": "1分後",
+    "preset_in5m": "5分後",
+    "preset_in30m": "30分後",
+    "preset_in1h": "1時間後"
   }
 }

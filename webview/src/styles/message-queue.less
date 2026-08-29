@@ -43,6 +43,21 @@
     text-overflow: ellipsis;
   }
 
+  // 定时来源角标（时钟 + 定时）：定时消息到点并入队列时保留来源标识
+  &__sched-badge {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    color: var(--button-primary);
+    white-space: nowrap;
+
+    .codicon {
+      font-size: 11px;
+    }
+  }
+
   // 按钮组（立即发送 | 编辑 | 删除），间距比与文本间隔更大
   &__actions {
     flex-shrink: 0;
