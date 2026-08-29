@@ -131,10 +131,17 @@
   }
 }
 
-// 附件栏日历入口：推到 topbar 最右（发送按钮正上方）；角标=待执行任务总数
+// 附件栏定时入口：上下文圆环左侧；角标=待执行任务总数
 .schedule-entry {
   position: relative;
   display: inline-flex;
+
+  // clockface 字形墨迹占 em 94%（满幅圆盘），同 14px 下比回形针（88% 高）视觉大一圈——
+  // 压到 13px 墨迹 12.2px，与回形针 12.3px 齐平（fontTools 字形 bbox 实测）。
+  // 后代选择器（0,2,0）压过 codicon 基础 font 简写，单类 font-size 不生效
+  .context-tool-btn .codicon {
+    font-size: 13px;
+  }
 
   &__badge {
     position: absolute;
