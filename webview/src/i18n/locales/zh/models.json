@@ -17,7 +17,7 @@
   "vision": "视觉",
   "section": {
     "builtin": "内置渠道",
-    "builtinHint": "以 ZCode 客户端配置为准，同一时间仅一个生效，切换请前往客户端",
+    "builtinHint": "以 ZCode 客户端配置为准，同一时间仅一个生效，切换请前往客户端；体验套餐需人机验证，插件无法使用，已从列表剔除",
     "custom": "自定义供应商"
   },
   "builtinReadonlyHint": "内置渠道当前生效中（启停请在 ZCode 客户端操作）",
@@ -43,6 +43,6 @@
   "viaSelectedHint": "ZCode 客户端当前选中的渠道，权威生效",
   "viaFallback": "兜底生效",
   "viaFallbackHint": "客户端所选渠道凭证不可用，已回退到配置中首个可用的内置渠道",
-  "viaFallbackCaptcha": "体验套餐无法使用",
+  "viaFallbackCaptcha": "体验套餐已兜底",
   "viaFallbackCaptchaHint": "体验套餐渠道需人机验证（滑块），插件无法代为完成，已兜底到配置中首个可用的内置渠道（个人套餐/API Key）"
 }

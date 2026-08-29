@@ -16,7 +16,7 @@
   },
   "section": {
     "builtin": "내장 채널",
-    "builtinHint": "ZCode 클라이언트 설정을 따르며 동시에 하나만 활성화됩니다. 전환은 클라이언트에서 진행하세요",
+    "builtinHint": "ZCode 클라이언트 설정을 따르며 동시에 하나만 활성화됩니다. 전환은 클라이언트에서 진행하세요. 체험 플랜은 사람 인증(CAPTCHA)이 필요하여 플러그인에서 사용할 수 없어 목록에서 제외됩니다",
     "custom": "사용자 지정 공급자"
   },
   "builtinReadonlyHint": "내장 채널 활성 상태(활성/비활성 전환은 ZCode 클라이언트에서)",
@@ -42,6 +42,6 @@
   "viaSelectedHint": "ZCode 클라이언트에서 현재 선택한 채널(권한 있음)",
   "viaFallback": "폴백 적용",
   "viaFallbackHint": "클라이언트가 선택한 채널에 유효한 자격증명이 없어 첫 번째 사용 가능한 내장 채널로 대체되었습니다",
-  "viaFallbackCaptcha": "체험 플랜 사용 불가",
+  "viaFallbackCaptcha": "체험 플랜에서 폴백됨",
   "viaFallbackCaptchaHint": "체험 플랜 채널은 CAPTCHA(슬라이더) 인증이 필요하여 플러그인으로는 완료할 수 없습니다. 첫 번째 사용 가능한 내장 채널(개인 플랜/API 키)로 대체되었습니다"
 }

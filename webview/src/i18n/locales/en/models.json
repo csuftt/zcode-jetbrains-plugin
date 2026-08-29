@@ -17,7 +17,7 @@
   "vision": "Vision",
   "section": {
     "builtin": "Built-in Channels",
-    "builtinHint": "Follows the ZCode client config; only one is active at a time — switch in the client",
+    "builtinHint": "Follows the ZCode client config; only one is active at a time — switch in the client. The trial plan requires human verification (CAPTCHA) and cannot be used in this plugin, so it is excluded",
     "custom": "Custom Providers"
   },
   "builtinReadonlyHint": "Built-in channel active (enable/disable in the ZCode client)",
@@ -43,6 +43,6 @@
   "viaSelectedHint": "The channel currently selected in the ZCode client (authoritative)",
   "viaFallback": "Fallback",
   "viaFallbackHint": "The client-selected channel has no valid credential; fell back to the first usable builtin channel",
-  "viaFallbackCaptcha": "Trial plan unavailable",
+  "viaFallbackCaptcha": "Trial-plan fallback",
   "viaFallbackCaptchaHint": "The trial-plan channel requires CAPTCHA (slider) verification, which the plugin cannot complete; fell back to the first usable builtin channel (personal plan / API key)"
 }
