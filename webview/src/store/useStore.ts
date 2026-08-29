@@ -897,11 +897,18 @@ export const useStore = create<StoreState>((set, get) => ({
     // 定时消息指定了执行模型且清单里仍存在 → 覆盖；已下架（清单查不到）→ 默认兜底（currentModel）
     const cm = get().currentModel
     const schedModel = opts?.scheduledModelId
-      ? get().models.find((m) => m.modelId === opts.scheduledModelId)
+      ? get().models.find(
+          (m) => m.modelId === opts.scheduledModelId &&
+            (!opts.scheduledProviderId || m.providerId === opts.scheduledProviderId),
+        )
       : undefined
     const sendModel = schedModel
       ? { providerId: schedModel.providerId, modelId: schedModel.modelId }
       : cm
+    // 受理定时指定模型时同步切换会话模型（下拉跟随、后续手动消息沿用）：本回合正确性
+    // 由 send 自带 runtimeModel 保证；setModel 在回合中会被 Java 挂起至回合结束补发
+    // （延迟切模型机制），互不冲突
+    if (schedModel) get().setModel(schedModel.modelId, schedModel.providerId)
     sendToJava({
       op: 'send',
       sessionId: sid,
@@ -2096,14 +2103,6 @@ export function handleResponse(
         scheduledMessages: (msg.items ?? []) as ScheduledMessageItem[],
         firedHistory: (msg.fired ?? []) as ScheduledFiredRecord[],
       })
-      break
-    }
-
-    case 'gotoSessionLocal': {
-      // 任务列表跳转：会话无宿主标签，由本标签切过去（external 分支 Java 已激活别的标签，
-      // 到不了这里）。关闭弹窗由组件侧 onGoto 完成，这里只负责切会话
-      const sess = get().sessions.find((s) => s.sessionId === (msg as { sessionId: string }).sessionId)
-      if (sess) get().selectSession(sess)
       break
     }
 

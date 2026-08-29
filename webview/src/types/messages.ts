@@ -394,7 +394,7 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'scheduledDueAck'; id: string }
   /** 真发上报：定时消息实际发出（sendMessage 真发点）后上报 Java 记入已发历史（持久徽标数据源）*/
   | { op: 'scheduledFired'; sessionId: string; text: string; fireAt: number }
-  /** 任务列表跳转会话：Java 判定——会话已有宿主标签则激活它，否则应答 gotoSessionLocal 由本标签切换 */
+  /** 任务列表跳转会话：Java 统一 openSessionTab——激活已有宿主标签，无则新建标签按 sessionId 恢复 */
   | { op: 'gotoSession'; sessionId: string }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
@@ -734,8 +734,7 @@ export type JavaResponse =
   /** 到点分派：走 webview 准入路径（sendMessage：回合活跃入队尾/空闲直发），处理后 ack */
   | { op: 'scheduledDue'; id: string; sessionId: string; text: string; scheduledFireAt?: number; providerId?: string; modelId?: string }
   /** 跳转会话应答：external=Java 已激活宿主标签（本标签不动）；local=本标签 selectSession */
-  | { op: 'gotoSessionExternal'; sessionId: string }
-  | { op: 'gotoSessionLocal'; sessionId: string }
+  | { op: 'gotoSessionOpened' }
   | { op: 'messages'; sessionId: string; messages: ZCodeMessage[]; reconcile?: boolean }
   | { op: 'subagents'; sessionId: string; data: SubagentsResult; error?: string }
   | { op: 'subagentMessages'; sessionId: string; messages: ZCodeMessage[]; error?: string }

@@ -1276,7 +1276,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
               title={t('input.schedule.button')}
               type="button"
             >
-              <span className="codicon codicon-calendar" />
+              <span className="codicon codicon-clockface" />
             </button>
             {scheduledCount > 0 && <span className="schedule-entry__badge">{scheduledCount}</span>}
           </div>

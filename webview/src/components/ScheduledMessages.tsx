@@ -90,7 +90,7 @@ function ScheduleCard({
 
   return (
     <div className={`scheduled-messages__item${expired ? ' scheduled-messages__item--expired' : ''}`}>
-      <span className="codicon codicon-calendar scheduled-messages__icon" />
+      <span className="codicon codicon-clockface scheduled-messages__icon" />
       <div className="scheduled-messages__main">
         <div className="scheduled-messages__meta">
           <span className="scheduled-messages__state">{stateText}</span>

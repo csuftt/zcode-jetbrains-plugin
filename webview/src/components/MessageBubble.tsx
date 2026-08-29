@@ -188,7 +188,7 @@ function UserBubble({
         {time}
         {scheduledFireAt != null && (
           <span className="msg__schedule-badge" title={t('input.schedule.firedBadge')}>
-            <span className="codicon codicon-calendar" />
+            <span className="codicon codicon-clockface" />
             {t('input.schedule.firedBadge')}
           </span>
         )}

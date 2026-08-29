@@ -43,7 +43,7 @@ export function MessageQueue({ onEdit }: Props) {
               className="message-queue__sched-badge"
               title={t('input.queue.scheduledBadge', { time: new Date(m.scheduledFireAt).toLocaleString() })}
             >
-              <span className="codicon codicon-calendar" />
+              <span className="codicon codicon-clockface" />
               {t('input.queue.scheduledShort')}
             </span>
           )}

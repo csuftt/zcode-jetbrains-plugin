@@ -73,6 +73,11 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
         /** 扫描周期（墙钟判定，抗系统睡眠：醒来后按实际时间补判） */
         private const val SWEEP_PERIOD_MS = 20_000L
 
+        /** 开标签后的快速探测间隔/次数：JCEF boot 数秒即绪，等下轮 20s 扫描太久；
+         * 就绪即分派，探测用尽交还常规扫描兜底 */
+        private const val ACCEL_PROBE_INTERVAL_MS = 2_000L
+        private const val ACCEL_PROBES = 10
+
         fun getInstance(project: Project): ZCodeScheduledMessageService = project.getService(ZCodeScheduledMessageService::class.java)
 
         // ============ 纯逻辑（单测直接覆盖，不依赖 Project） ============
@@ -387,8 +392,29 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
             log.info("[scheduled] no active panel for session-less item, will retry next sweep id=${item.id}")
         } else {
             awaitingAck.remove(item.id)
-            log.info("[scheduled] no ready panel, opening session tab first (fires via webview next sweep) id=${item.id} session=${item.sessionId}")
+            log.info("[scheduled] no ready panel, opening session tab first (accelerated probe after open) id=${item.id} session=${item.sessionId}")
             openSessionTabOnEdt(item.sessionId)
+            accelerateAfterTabOpen(item.id, item.sessionId)
+        }
+    }
+
+    /**
+     * 开标签后快速探测推送：标签创建到 JCEF 可推送只差数秒，干等下轮 20s 扫描表现为
+     * 「打开标签好久才发消息」。每 [ACCEL_PROBE_INTERVAL_MS] 探测一次面板就绪，
+     * 就绪即 dispatch（防重入由 awaitingAck 保证，与常规扫描并发安全）。
+     */
+    private fun accelerateAfterTabOpen(id: String, sessionId: String) {
+        repeat(ACCEL_PROBES) { i ->
+            executor.schedule({
+                if (project.isDisposed) return@schedule
+                val item = items.firstOrNull { it.id == id } ?: return@schedule
+                val ready = try {
+                    project.zCodeService().findPanelForSession(sessionId)?.canPushToWebview() == true
+                } catch (e: Exception) {
+                    false
+                }
+                if (ready) dispatch(item)
+            }, ACCEL_PROBE_INTERVAL_MS * (i + 1), TimeUnit.MILLISECONDS)
         }
     }
 
