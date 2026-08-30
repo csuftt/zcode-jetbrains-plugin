@@ -104,6 +104,8 @@
     "firedGroup": "실행 완료(최근 5개)",
     "firedEarly": "조기 실행",
     "origFireAt": "예정",
+    "newSessionOption": "새 세션에서 실행",
+    "newSessionHint": "체크 시 백그라운드로 새 세션을 만들어 작업을 연결하고 예정 시각에 해당 세션에서 실행(현재 화면 유지). 체크하지 않으면 현재 세션에서 실행",
     "standbySession": "새 세션",
     "emptyTasks": "예약 작업이 없습니다",
     "promptPlaceholder": "예약 시간에 실행할 프롬프트 입력…",

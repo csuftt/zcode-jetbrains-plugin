@@ -384,6 +384,27 @@
     }
   }
 
+  // 「在新会话中执行」勾选（与执行模型同行）：checkbox 主题色 + 说明文字，不被 selector 挤压
+  &__check {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+
+    input[type='checkbox'] {
+      margin: 0;
+      accent-color: var(--button-primary);
+    }
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
   &__hint {
     font-size: 11px;
     color: var(--text-tertiary);

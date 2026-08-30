@@ -228,7 +228,7 @@ interface StoreState {
   /** 懒创建暂存首条消息的定时标记（定时消息在待命态触发懒创建时随行，徽标穿透）*/
   pendingFirstScheduledFireAt: number | null
   /** 待命态定时任务暂存：创建确认时先把会话建好（真实 sid 归属，防空串态跨标签串显），建好自动落库 */
-  pendingScheduleCreation: { text: string; fireAt: number; providerId?: string; modelId?: string } | null
+  pendingScheduleCreation: { text: string; fireAt: number; providerId?: string; modelId?: string; keepCurrent?: boolean } | null
   /** 已归档会话（回收站视图，独立于 sessions；用户进入「已归档」tab 时拉取）*/
   archivedSessions: SessionInfo[]
   /** 已归档列表加载中（tab 切换/归档后刷新的 loading 态）*/
@@ -452,7 +452,7 @@ interface StoreState {
   sendMessage: (text: string, attachments?: ImageAttachmentInput[], opts?: { scheduledFireAt?: number; scheduledProviderId?: string; scheduledModelId?: string }) => void
   createSession: () => void
   /** 待命态定时任务：先把会话建好再落库（归属唯一化），createSession 响应后自动 scheduledCreate */
-  createSessionForSchedule: (text: string, fireAt: number, providerId?: string, modelId?: string) => void
+  createSessionForSchedule: (text: string, fireAt: number, providerId?: string, modelId?: string, keepCurrent?: boolean) => void
   /** 「新建会话」按钮：重置为无会话待命态（延迟创建），首条消息触发建会话 */
   resetToNewSession: () => void
   deleteSession: (sessionId: string) => void
@@ -1063,12 +1063,21 @@ export const useStore = create<StoreState>((set, get) => ({
     sendToJava({ op: 'createSession', workspacePath: get().projectPath })
   },
 
-  createSessionForSchedule: (text, fireAt, providerId?, modelId?) => {
-    // 待命态定时任务先建会话：空串 sessionId 的待命项在所有新标签都可见、无法区分归属，
-    // 也没有可跳转的会话。建会话拿到真实 sid 后由 createSession 响应落库 scheduledCreate，
-    // 任务从此绑定唯一会话（当前标签同时变为该会话的宿主标签）
+  createSessionForSchedule: (text, fireAt, providerId?, modelId?, keepCurrent?) => {
+    // 定时任务先建会话：空串 sessionId 的待命项在所有新标签都可见、无法区分归属，
+    // 也没有可跳转的会话。建会话拿到真实 sid 后由 createSession 响应落库 scheduledCreate。
+    // keepCurrent=当前标签已有会话（勾选「在新会话中执行」）：后台建会话不切换视图——
+    // 切换会顶掉正在看的会话；新会话由到点分派时 openSessionTab 按需开标签承载。
+    // 待命态（无会话可覆盖）维持切换为新会话宿主
     if (get().creatingSession) return
-    set({ pendingScheduleCreation: { text, fireAt, ...(providerId && modelId ? { providerId, modelId } : {}) } })
+    set({
+      pendingScheduleCreation: {
+        text,
+        fireAt,
+        ...(providerId && modelId ? { providerId, modelId } : {}),
+        ...(keepCurrent ? { keepCurrent: true } : {}),
+      },
+    })
     get().createSession()
   },
 
@@ -1994,6 +2003,22 @@ export function handleResponse(
       // 待命态预选值（currentMode/thoughtLevel 无会话时的本地记录），下方 set 复位前捕获
       const preselectedMode = get().currentMode
       const standbyThought = get().thoughtLevel
+      // 后台建会话挂定时（勾选「在新会话中执行」且当前标签已有会话）：不切换当前视图——
+      // 切换会顶掉正在看的会话；只落库任务，新会话到点分派时由 Java openSessionTab
+      // 按需开标签承载（与后台补发同路径）。case 末尾的 loadSessions 会把新会话刷进列表
+      if (sid && pendingSchedule?.keepCurrent) {
+        set({ creatingSession: false, pendingScheduleCreation: null })
+        sendToJava({
+          op: 'scheduledCreate',
+          sessionId: sid,
+          workspacePath: get().projectPath,
+          text: pendingSchedule.text,
+          fireAt: pendingSchedule.fireAt,
+          ...(pendingSchedule.modelId ? { providerId: pendingSchedule.providerId, modelId: pendingSchedule.modelId } : {}),
+        })
+        get().loadSessions()
+        break
+      }
       if (sid) {
         const ws = get().projectPath
         set({

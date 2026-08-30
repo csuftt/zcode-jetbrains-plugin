@@ -104,6 +104,8 @@
     "firedGroup": "実行済み（最新5件）",
     "firedEarly": "繰り上げ実行",
     "origFireAt": "予定",
+    "newSessionOption": "新しいセッションで実行",
+    "newSessionHint": "チェックでバックグラウンドで新規セッションを作成してタスクを紐付け、予定時刻にそのセッションで実行（現在の表示は変わりません）。未チェックなら現在のセッションで実行",
     "standbySession": "新規セッション",
     "emptyTasks": "予約タスクはありません",
     "promptPlaceholder": "予約時刻に実行するプロンプトを入力…",

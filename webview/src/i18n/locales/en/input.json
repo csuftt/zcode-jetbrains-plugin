@@ -109,6 +109,8 @@
     "firedGroup": "Fired (last 5)",
     "firedEarly": "fired early",
     "origFireAt": "Scheduled",
+    "newSessionOption": "Run in a new session",
+    "newSessionHint": "Creates a background session for the task and runs it there at the scheduled time (current view stays unchanged); uncheck to run in the current session",
     "standbySession": "New tab",
     "emptyTasks": "No scheduled tasks",
     "promptPlaceholder": "Prompt to run at the scheduled time…",

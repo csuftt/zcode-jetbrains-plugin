@@ -104,6 +104,8 @@
     "firedGroup": "已執行（最近 5 條）",
     "firedEarly": "提前執行",
     "origFireAt": "原定",
+    "newSessionOption": "在新會話中執行",
+    "newSessionHint": "勾選後在後台新建一個會話並掛入定時，到點在該會話執行，當前會話視圖不變；不勾選則在當前會話執行",
     "standbySession": "新會話",
     "emptyTasks": "暫無定時任務",
     "promptPlaceholder": "輸入到時執行的提示詞…",

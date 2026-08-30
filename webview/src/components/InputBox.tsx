@@ -285,6 +285,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   // datetime-local 值（预设点击后同步回填，用户可在其上微调）
   const [scheduleValue, setScheduleValue] = useState('')
   const [activePreset, setActivePreset] = useState<string | null>(null)
+  // 「在新会话中执行」勾选（新建专用，改时间不改归属）：勾选=先建真实会话再挂任务（复用待命态路径）
+  const [scheduleNewSession, setScheduleNewSession] = useState(false)
   // 执行模型下拉按供应商分组（行为设置润色模型同款结构）
   const scheduleModelGroups = useMemo(() => {
     const map = new Map<string, typeof models>()
@@ -321,6 +323,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     setModelOpen(false)
     setScheduleValue('')
     setActivePreset(null)
+    setScheduleNewSession(false)
   }
 
   function openSchedulePicker() {
@@ -352,6 +355,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     setModelOpen(false)
     setScheduleValue('')
     setActivePreset(null)
+    setScheduleNewSession(false)
   }
 
   function pickPreset(key: string) {
@@ -383,10 +387,13 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       closeSchedulePicker()
       return
     }
-    if (!sessionId) {
-      // 待命态：先把会话建好再落库（空串待命项在所有新标签都可见、无法区分归属也没有
-      // 可跳转的会话），createSessionForSchedule 会在建好后以真实 sid 发 scheduledCreate
-      useStore.getState().createSessionForSchedule(text, fireAt, picked?.providerId, picked?.modelId)
+    if (scheduleNewSession || !sessionId) {
+      // 勾选「在新会话中执行」（或待命态无会话）：先建真实会话再落库（空串待命项无法区分归属
+      // 也没有可跳转的会话）。当前标签已有会话时 keepCurrent 后台建会话、不切换视图（防覆盖
+      // 正在看的会话），新会话由到点分派时 openSessionTab 开标签承载；待命态维持切为宿主
+      useStore
+        .getState()
+        .createSessionForSchedule(text, fireAt, picked?.providerId, picked?.modelId, scheduleNewSession && !!sessionId)
     } else {
       sendToJava({
         op: 'scheduledCreate',
@@ -1402,6 +1409,18 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                         </div>
                       )}
                     </div>
+                    {/* 在新会话中执行（新建可选；改时间不改任务归属，不显示）：勾选后先建真实
+                        会话再挂定时（同新标签页待命态创建路径），不勾选挂在当前会话；与执行模型同行省空间 */}
+                    {!rescheduleTarget && (
+                      <label className="schedule-popover__check" title={t('input.schedule.newSessionHint')}>
+                        <input
+                          type="checkbox"
+                          checked={scheduleNewSession}
+                          onChange={(e) => setScheduleNewSession(e.target.checked)}
+                        />
+                        <span>{t('input.schedule.newSessionOption')}</span>
+                      </label>
+                    )}
                   </div>
                   {scheduleModel &&
                     !models.some((m) => m.providerId === scheduleModel.providerId && m.modelId === scheduleModel.modelId) && (
