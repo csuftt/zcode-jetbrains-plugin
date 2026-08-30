@@ -700,7 +700,15 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         future.complete(result)
         // 服务端重试的其他 id 共享此 future，一并清理
         cleanupPendingFor(future)
-        log.info("[askUser] User answered, responding to server: action=$action answer=$normalizedAnswer")
+        // 应答是用户自由文本（意见/审批反馈），只记形态不记内容——秘钥类可走 LogRedactor
+        // 兜底，普通隐私文本没有模式可脱，落日志即泄露面（入参侧 :443 是结构化 params，
+        // redact 后可打；应答侧没有这个性质）
+        val answerShape = when (normalizedAnswer) {
+            null -> "null"
+            is JsonPrimitive -> "primitive(len=${normalizedAnswer.content.length})"
+            else -> "json(len=${normalizedAnswer.toString().length})"
+        }
+        log.info("[askUser] User answered, responding to server: action=$action answer=$answerShape")
         return buildJsonObject { put("op", "askUserAck"); put("requestId", requestId) }
     }
 

@@ -15,6 +15,7 @@
 import { memo, useMemo } from 'react'
 import { renderMarkdown } from '@/utils/markdown'
 import { MermaidBlock } from './MermaidBlock'
+import '../styles/markdown.less'
 
 interface BlockSectionProps {
   /** 单个块的 markdown 文本（已切分好）*/

@@ -561,7 +561,7 @@ class ZCodeProtocolClient private constructor(
         val alt = try {
             listSessionsOnce(altPath, includeArchived, limit, timeoutMs)
         } catch (e: Exception) {
-            println("[ZCodeProtocolClient] listSessions alt-form query failed, keep primary only: ${e.message?.take(120)}")
+            println("[ZCodeProtocolClient] listSessions alt-form query failed, keep primary only: ${e.message?.let { LogRedactor.redact(it).take(120) }}")
             emptyList()
         }
         // 并集必须按 updatedAt 重排：两查各自按时间倒序返回，直接拼接会把补查命中的
@@ -758,6 +758,9 @@ class ZCodeProtocolClient private constructor(
      * （普通 setModel 无效，见 send 内注释），CLI 的 --resume 走的是另一条
      * 干净的代码路径——有回复但无流式。
      * 这个方法 spawn 一个 CLI 子进程，等它返回 JSON 结果。
+     * 进程治理与 cliOneShot 同型：stderr 独立 drain 防管道满卡死、不混入 stdout 保
+     * JSON 纯净、waitFor 超时强杀、finally 兜底杀（修复：曾 readText 无超时永久阻塞、
+     * redirectErrorStream(true) 令 stderr 告警污染 JSON 解析、超时不杀进程）。
      */
     private fun sendViaCliResume(sessionId: String, content: String, workspacePath: String?): JsonObject {
         val cliPath = zcodePath.toString()
@@ -773,24 +776,42 @@ class ZCodeProtocolClient private constructor(
         val pb = ProcessBuilder(args)
         pb.environment().clear()
         pb.environment().putAll(credentials?.toEnvMap() ?: emptyMap())
-        pb.redirectErrorStream(true)
+        pb.redirectErrorStream(false)
 
         val proc = pb.start()
-        val output = proc.inputStream.bufferedReader().readText()
-        proc.waitFor(120, TimeUnit.SECONDS)
-
-        // CLI 输出是单个 JSON 对象
-        return try {
-            val cliResult = Json.parseToJsonElement(output).jsonObject
-            // 转成 app-server 的 send 响应格式
-            buildJsonObject {
-                put("accepted", true)
-                put("sessionId", sessionId)
-                put("cliResponse", cliResult["response"] ?: JsonNull)
-                put("cliUsage", cliResult["usage"] ?: JsonNull)
+        val errText = StringBuilder()
+        Thread({
+            runCatching {
+                proc.errorStream.bufferedReader().forEachLine {
+                    if (errText.length < 8000) errText.appendLine(it)
+                }
             }
-        } catch (e: Exception) {
-            throw ZCodeProtocolException("CLI resume 发送失败: ${output.take(200)}")
+        }, "zcode-cli-resume-stderr").start()
+
+        val outputFuture = CompletableFuture.supplyAsync {
+            proc.inputStream.bufferedReader().readText()
+        }
+        try {
+            if (!proc.waitFor(120, TimeUnit.SECONDS)) {
+                proc.destroyForcibly()
+                throw ZCodeProtocolException("CLI resume 发送超时（120s），进程已终止")
+            }
+            val output = outputFuture.get(5, TimeUnit.SECONDS)
+            // CLI 输出是单个 JSON 对象
+            return try {
+                val cliResult = Json.parseToJsonElement(output).jsonObject
+                // 转成 app-server 的 send 响应格式
+                buildJsonObject {
+                    put("accepted", true)
+                    put("sessionId", sessionId)
+                    put("cliResponse", cliResult["response"] ?: JsonNull)
+                    put("cliUsage", cliResult["usage"] ?: JsonNull)
+                }
+            } catch (e: Exception) {
+                throw ZCodeProtocolException("CLI resume 发送失败: ${LogRedactor.redact(output).take(200)}")
+            }
+        } finally {
+            if (proc.isAlive) proc.destroyForcibly()
         }
     }
 
@@ -847,7 +868,7 @@ class ZCodeProtocolClient private constructor(
                 Json.parseToJsonElement(output).jsonObject
             } catch (e: Exception) {
                 throw ZCodeProtocolException(
-                    "CLI 一次性调用输出解析失败: stdout=${output.take(150)} stderr=${errText.toString().take(150)}"
+                    "CLI 一次性调用输出解析失败: stdout=${LogRedactor.redact(output).take(150)} stderr=${LogRedactor.redact(errText.toString()).take(150)}"
                 )
             }
         } finally {
@@ -1412,6 +1433,7 @@ class ZCodeProtocolClient private constructor(
         globalListeners.clear()
         eventListeners.clear()
         userInputRequestHandler = null
+        permissionRequestHandler = null
         browserListHandler = null
         browserExecuteHandler = null
         backendErrorHandler = null

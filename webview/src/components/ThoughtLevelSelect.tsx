@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { useStore } from '@/store/useStore'
+import '../styles/input-box.less'
 
 /** 级别 value → 标签 i18n key（ZCode 客户端 UI 本地化同款，未知值原样显示）
  *  实测补充：部分模型用 disabled / nothink 表示关闭思考（与 off 同义）*/

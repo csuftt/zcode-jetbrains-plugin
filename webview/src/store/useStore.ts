@@ -50,6 +50,32 @@ const STREAM_DEAD_PROBES = 8
 /** 最近一次当前会话流式活动（事件到达/消息发出）时刻——看门狗静默计时基准 */
 let lastStreamActivityAt = 0
 let streamWatchTimer: ReturnType<typeof setInterval> | null = null
+
+/** 润色/浏览器数据操作的兜底定时器句柄：回包或新请求发起时取消。
+ *  不取消的话，残留定时器可在下一次同类请求的在途窗口内命中
+ *  `get().xxx` 在途标志，误杀 loading 并注入上一次的错误文案 */
+let enhanceTimer: number | undefined
+const browserBusyTimers = new Map<string, number>()
+function cancelEnhanceTimer(): void {
+  if (enhanceTimer !== undefined) {
+    clearTimeout(enhanceTimer)
+    enhanceTimer = undefined
+  }
+}
+function armBrowserBusyTimer(mode: string, onFire: () => void, ms = 30_000): void {
+  cancelBrowserBusyTimer(mode)
+  browserBusyTimers.set(mode, window.setTimeout(() => {
+    browserBusyTimers.delete(mode)
+    onFire()
+  }, ms))
+}
+function cancelBrowserBusyTimer(mode: string): void {
+  const t = browserBusyTimers.get(mode)
+  if (t !== undefined) {
+    clearTimeout(t)
+    browserBusyTimers.delete(mode)
+  }
+}
 let reconcileProbeInFlight = false
 let reconcileProbeSentAt = 0
 let reconcileDeadCount = 0
@@ -1373,23 +1399,24 @@ export const useStore = create<StoreState>((set, get) => ({
     if (get().browserBusy) return
     set({ browserBusy: mode, browserError: null, browserCleared: null })
     sendToJava({ op: 'clearBrowserData', mode })
-    // 兜底：30s 无响应复位（CDP 通道异常/浏览器 tab 无响应时不永远转圈；正常完成后 busy 已复位）
-    setTimeout(() => {
+    // 兜底：30s 无响应复位（CDP 通道异常/浏览器 tab 无响应时不永远转圈；正常完成后 busy 已复位）。
+    // 定时器在回包时取消，防残留定时器误杀下一次操作
+    armBrowserBusyTimer(mode, () => {
       if (get().browserBusy === mode) {
         set({ browserBusy: null, browserError: i18n.t('browser.data.timeout') })
       }
-    }, 30_000)
+    })
   },
 
   loadBrowserOverview: () => {
     if (get().browserBusy === 'overview') return
     set({ browserBusy: 'overview', browserError: null })
     sendToJava({ op: 'browserDataOverview' })
-    setTimeout(() => {
+    armBrowserBusyTimer('overview', () => {
       if (get().browserBusy === 'overview') {
         set({ browserBusy: null, browserError: i18n.t('browser.data.timeout') })
       }
-    }, 30_000)
+    })
   },
 
   clearBrowserError: () => {
@@ -1415,8 +1442,11 @@ export const useStore = create<StoreState>((set, get) => ({
       workspacePath: get().currentWorkspacePath ?? undefined,
       ...(cm ? { providerId: cm.providerId, modelId: cm.modelId } : {}),
     })
-    // 兜底：3 分钟无响应复位（CLI 卡死/超时漏网时弹窗不永远转圈）
-    setTimeout(() => {
+    // 兜底：3 分钟无响应复位（CLI 卡死/超时漏网时弹窗不永远转圈）；
+    // 回包/新请求先取消旧定时器，防残留定时器误杀下一次润色
+    cancelEnhanceTimer()
+    enhanceTimer = window.setTimeout(() => {
+      enhanceTimer = undefined
       if (get().enhancing) {
         set({
           enhancing: false,
@@ -1427,6 +1457,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   clearEnhanceResult: () => {
+    cancelEnhanceTimer()
     set({ enhancing: false, enhanceResult: null })
   },
 
@@ -2341,6 +2372,8 @@ export function handleResponse(
       // 延迟自动重试。追加指引防用户"一看报错就重启"（重启重新 resume 重新进窗口，
       // 永远观察不到自愈——2026-08-27 用户 b5756ab4 四轮重启全超时、放置 100s 自愈实测）
       const resumeBusy = /请求超时: session\//.test(msg.message)
+      // 浏览器数据操作在途时一并取消其兜底定时器，防后续误报超时
+      if (get().browserBusy) Array.from(browserBusyTimers.keys()).forEach(cancelBrowserBusyTimer)
       set({
         lastError: sessionInactive
           ? `${msg.message}；${i18n.t('app.sessionInactiveHint')}`
@@ -2745,6 +2778,8 @@ export function handleResponse(
       break
 
     case 'browserDataCleared':
+      // 回包取消兜底定时器（busy 守卫保证同时只有一个在途操作，全清即可）
+      Array.from(browserBusyTimers.keys()).forEach(cancelBrowserBusyTimer)
       set({
         browserBusy: null,
         browserCleared: { all: msg.all, httpCache: msg.httpCache, cookies: msg.cookies, sites: msg.sites },
@@ -2754,6 +2789,7 @@ export function handleResponse(
 
     case 'browserDataOverview': {
       const { op: _overviewOp, ...overviewData } = msg
+      Array.from(browserBusyTimers.keys()).forEach(cancelBrowserBusyTimer)
       set({ browserBusy: null, browserOverview: overviewData })
       break
     }
@@ -2777,7 +2813,8 @@ export function handleResponse(
 
     case 'enhancePromptResult':
       // 润色回包（含失败态）：关闭 loading，弹窗按 error 有无渲染错误/结果；
-      // 回包不带 model（CLI 降级通道）时保留发起时的占位模型
+      // 回包不带 model（CLI 降级通道）时保留发起时的占位模型；取消兜底定时器
+      cancelEnhanceTimer()
       set({
         enhancing: false,
         enhanceResult: {
@@ -3058,18 +3095,31 @@ function handleStreamBatch(
   // （约 1 秒播完），后续事件（tool_call/tool.updated 等）排队保序——下游
   // reducer/组件零改动，事件流被"重新流式化"。小 delta（真实逐块流式）直通。
   const atoms = sliceBigToolInputDeltas(events)
-  if (atoms || replayQueue.length > 0) {
-    if (atoms) replayQueue.push(...atoms)
-    else replayQueue.push(...events)
-    if (replayTimer === null) startReplayPump(sessionId, set, get)
+  if (atoms || (replayQueues.get(sessionId)?.length ?? 0) > 0) {
+    enqueueReplay(sessionId, atoms ?? events, set, get)
     return
   }
   handleStreamBatchDirect(sessionId, events, set, get)
 }
 
-/** 回放队列与节拍器（模块级：跨批次保序） */
-let replayQueue: StreamEvent[] = []
-let replayTimer: number | null = null
+/** 回放队列与节拍器（模块级：跨批次保序）。按会话隔离——泵与队列都绑定各自的
+ *  sessionId，防 A 会话回放窗口（~1s）内到达的 B 会话事件被挤进同一队列、
+ *  按 A 的 sessionId 错误分发（多标签/子会话并行流式实测可撞） */
+const replayQueues = new Map<string, StreamEvent[]>()
+const replayTimers = new Map<string, number>()
+
+/** 入队回放（切片原子或原样事件），该会话无运行中的泵则启动 */
+function enqueueReplay(
+  sessionId: string,
+  events: StreamEvent[],
+  set: (partial: Partial<StoreState>) => void,
+  get: () => StoreState,
+): void {
+  const queue = replayQueues.get(sessionId)
+  if (queue) queue.push(...events)
+  else replayQueues.set(sessionId, [...events])
+  if (!replayTimers.has(sessionId)) startReplayPump(sessionId, set, get)
+}
 /** 触发切片的 delta 阈值（字符）；低于此视为自然流式直通 */
 const REPLAY_DELTA_THRESHOLD = 400
 const REPLAY_FRAME_MS = 16
@@ -3103,22 +3153,24 @@ function sliceBigToolInputDeltas(events: StreamEvent[]): StreamEvent[] | null {
   return atoms
 }
 
-/** 每拍派发一个原子事件，队列空则停表 */
+/** 每拍派发一个原子事件，队列空则停表并清掉本会话的队列/定时器 */
 function startReplayPump(
   sessionId: string,
   set: (partial: Partial<StoreState>) => void,
   get: () => StoreState,
 ): void {
   const pump = () => {
-    const next = replayQueue.shift()
+    const queue = replayQueues.get(sessionId)
+    const next = queue?.shift()
     if (next) handleStreamBatchDirect(sessionId, [next], set, get)
-    if (replayQueue.length > 0) {
-      replayTimer = window.setTimeout(pump, REPLAY_FRAME_MS)
+    if (queue && queue.length > 0) {
+      replayTimers.set(sessionId, window.setTimeout(pump, REPLAY_FRAME_MS))
     } else {
-      replayTimer = null
+      replayQueues.delete(sessionId)
+      replayTimers.delete(sessionId)
     }
   }
-  replayTimer = window.setTimeout(pump, REPLAY_FRAME_MS)
+  replayTimers.set(sessionId, window.setTimeout(pump, REPLAY_FRAME_MS))
 }
 
 /** 从工具 result 内容解析后台任务 ID（Bash run_in_background / 手动后台化）。
@@ -3330,10 +3382,8 @@ function handleStreamEvent(
 
   // ===== 工具输入大块 delta 的流式回放（同批量路径；mock/关键事件走单推）=====
   const atoms = sliceBigToolInputDeltas([event])
-  if (atoms || replayQueue.length > 0) {
-    if (atoms) replayQueue.push(...atoms)
-    else replayQueue.push(event)
-    if (replayTimer === null) startReplayPump(sessionId, set, get)
+  if (atoms || (replayQueues.get(sessionId)?.length ?? 0) > 0) {
+    enqueueReplay(sessionId, atoms ?? [event], set, get)
     return
   }
 

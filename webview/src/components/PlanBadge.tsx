@@ -5,6 +5,7 @@
  */
 
 import { useTranslation } from 'react-i18next'
+import '../styles/global.less'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 

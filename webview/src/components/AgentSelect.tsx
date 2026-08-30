@@ -14,6 +14,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import type { AgentDef } from '@/types/messages'
+import '../styles/agent-select.less'
+import '../styles/input-box.less'
 
 interface Props {
   /** 打开设置页「子智能体」管理（App 层切视图 + 定位 tab）*/

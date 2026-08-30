@@ -762,7 +762,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 log.warn("[webview-console] [$level] ${LogRedactor.redact(text)}")
                 return
             }
-            log.info("Handling op=$op")
+            // 高频热路径：debug 级防 log 风暴（idea.log 已知瓶颈，排查时开 debug 看）
+            log.debug("Handling op=$op")
 
             ApplicationManager.getApplication().executeOnPooledThread {
                 try {
@@ -1587,7 +1588,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             return
         }
         val jsonStr = Json.encodeToString(JsonObject.serializer(), msg)
-        log.info("sendToJs dispatch: length=${jsonStr.length}, preview=${LogRedactor.redact(jsonStr.take(600)).take(80)}")
+        // 每条消息推送都走这里，流式期间高频：debug 级防 log 风暴
+        log.debug("sendToJs dispatch: length=${jsonStr.length}, preview=${LogRedactor.redact(jsonStr.take(600)).take(80)}")
         // 用 JSON.parse 传字符串，避免转义地狱
         // 关键：executeJavaScript 的 JS 代码里，我们构造一个 JS 字符串字面量
         // 用 JSON.stringify 风格转义（双引号字符串）
@@ -3242,7 +3244,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
-        log.info("[stream] event type=${event.type} seq=${event.seq} (forwarded to frontend)")
+        // 每个流式事件一行，高频：debug 级防 log 风暴
+        log.debug("[stream] event type=${event.type} seq=${event.seq} (forwarded to frontend)")
         val eventJson = buildJsonObject {
             put("type", event.type)
             put("seq", event.seq)

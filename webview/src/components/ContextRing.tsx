@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore, GLM_PLAN_PROVIDER } from '@/store/useStore'
 import { fmtTokens, limitTitle, fmtResetTime, fmtTime } from '@/utils/format'
 import type { ContextBreakdownItem, ContextSource } from '@/types/messages'
+import '../styles/input-box.less'
 
 const POP_W = 280
 

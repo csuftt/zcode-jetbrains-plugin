@@ -8,6 +8,7 @@
 
 import { memo, useMemo } from 'react'
 import { getFileIcon, getFolderIcon } from '@/utils/fileIcons'
+import '../styles/global.less'
 
 interface Props {
   /** 文件或文件夹路径（文件夹末尾带 / 或 \）*/

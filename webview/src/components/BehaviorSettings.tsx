@@ -22,6 +22,8 @@ import { readNotifyConfig, writeNotifyConfig } from '@/utils/notifyConfig'
 import { readEnhanceConfig, writeEnhanceConfig, type EnhanceModel } from '@/utils/enhanceConfig'
 import { readTurnCollapseConfig, writeTurnCollapseConfig, type TurnCollapseConfig } from '@/utils/turnCollapseConfig'
 import { useStore } from '@/store/useStore'
+import '../styles/basic-settings.less'
+import '../styles/agent-select.less'
 
 export function BehaviorSettings() {
   const { t } = useTranslation()

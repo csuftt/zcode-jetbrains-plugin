@@ -41,12 +41,13 @@ class McpListIntegrationTest {
     @Test
     fun `mcp list status 模式返回 statuses`() {
         val result = client.listMcpServers(System.getProperty("user.dir"), mode = "status")
-        println("✅ mcp/list(status) 响应: ${result.toString().take(500)}")
+        // 响应可能含 authorization 等凭证字段，先脱敏再截断（showStandardStreams=true 会落入 CI 日志）
+        println("✅ mcp/list(status) 响应: ${LogRedactor.redact(result.toString()).take(500)}")
         assertTrue(result.containsKey("statuses"), "响应应含 statuses 节点")
         val statuses = result["statuses"]!!.jsonObject
         println("   statuses 数量: ${statuses.size}")
         statuses.entries.take(5).forEach { (name, st) ->
-            println("   - $name: ${st.toString().take(120)}")
+            println("   - $name: ${LogRedactor.redact(st.toString()).take(120)}")
         }
     }
 }

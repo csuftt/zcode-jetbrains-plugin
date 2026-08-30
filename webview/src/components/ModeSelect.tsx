@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
+import '../styles/input-box.less'
 
 /** 协议 4 模式（value 与服务端一致；label/title 文案经 i18n：input.mode.<value>.label/.title）*/
 const MODES = [{ value: 'build' }, { value: 'edit' }, { value: 'plan' }, { value: 'yolo' }] as const

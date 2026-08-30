@@ -165,7 +165,6 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         // 侧边栏标签显示名（id 保持 "ZCode" 供 getToolWindow 查找，显示名改为 ZC GUI）
         toolWindow.stripeTitle = "ZC GUI"
-        toolWindow.show(null) // TODO 临时：截图实验用，实验后移除
         ensureCdpPortForBrowserUse()
         val cm = toolWindow.contentManager
 

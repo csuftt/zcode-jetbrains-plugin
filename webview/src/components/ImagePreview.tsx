@@ -7,6 +7,7 @@
 
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import '../styles/input-box.less'
 
 export function ImagePreview({
   src,

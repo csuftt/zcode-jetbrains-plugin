@@ -16,6 +16,7 @@ import { fmtTokens } from '@/utils/format'
 import type { ModelOption } from '@/types/messages'
 import { ModelIcon } from './ModelIcon'
 import { PlanBadge, VisionBadge } from './PlanBadge'
+import '../styles/input-box.less'
 
 interface Props {
   /** 当前会话模型（null 时回退到消息 footer 的 modelID）*/
