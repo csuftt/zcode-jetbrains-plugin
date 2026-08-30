@@ -19,6 +19,8 @@ import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { useStore } from '@/store/useStore'
 import { sendToJava } from '@/ipc/bridge'
+import { getAgentToolOutput } from '@/utils/parseStatus'
+import type { AgentItem } from '@/types/messages'
 import '../styles/status-panel.less'
 
 type TabType = 'todo' | 'agent' | 'files'
@@ -41,6 +43,8 @@ export function StatusPanel() {
   const fileChanges = useStore((s) => s.fileChanges)
   const streaming = useStore((s) => s.streaming)
   const openSubagentDetail = useStore((s) => s.openSubagentDetail)
+  const openSubagentReport = useStore((s) => s.openSubagentReport)
+  const messages = useStore((s) => s.messages)
   const [openTab, setOpenTab] = useState<TabType | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   // popover 用 fixed 定位（脱离父级 overflow:hidden 裁剪），位置由 tab 行的 rect 计算
@@ -53,6 +57,19 @@ export function StatusPanel() {
   const hasRunningAgent = agents.some((a) => a.status === 'running')
   const totalAdd = fileChanges.reduce((n, f) => n + f.additions, 0)
   const totalDel = fileChanges.reduce((n, f) => n + f.deletions, 0)
+
+  // 列表点击的默认页分流：已完成 → 最终报告弹窗（报告 md 缺失时回退执行记录），
+  // 其余状态 → 执行记录弹窗。两弹窗头部按钮互斥切换的逻辑不变
+  const handleAgentClick = (a: AgentItem) => {
+    if (a.status === 'completed') {
+      const markdown = getAgentToolOutput(messages, a.callID)
+      if (markdown) {
+        openSubagentReport({ callID: a.callID, title: a.description || t('tool.subagentReport'), markdown })
+        return
+      }
+    }
+    openSubagentDetail(a.callID)
+  }
 
   // 点击外部 / Escape 关闭 popover
   useEffect(() => {
@@ -174,7 +191,7 @@ export function StatusPanel() {
                       key={a.callID}
                       className={`status-panel-agent-item status-${a.status} clickable`}
                       title={t('app.status.viewSubagentDetail')}
-                      onClick={() => openSubagentDetail(a.callID)}
+                      onClick={() => handleAgentClick(a)}
                     >
                       <span className={`codicon ${icon} ${spin ? 'spin' : ''} status-panel-agent-icon`} />
                       <div className="status-panel-agent-body">

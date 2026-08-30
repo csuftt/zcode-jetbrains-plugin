@@ -93,6 +93,20 @@ export function parseAgents(messages: ZCodeMessage[]): AgentItem[] {
 }
 
 /**
+ * Agent 工具 part 的最终报告输出（子代理报告弹窗 / 底部栏点击分流共用）。
+ * 取该 callID 最后一次出现的 output 快照（重试/多帧时以最终态为准），无则空串。
+ */
+export function getAgentToolOutput(messages: ZCodeMessage[], callID: string): string {
+  let output = ''
+  for (const msg of messages) {
+    for (const part of msg.parts) {
+      if (part.type === 'tool' && part.callID === callID && part.state.output) output = part.state.output
+    }
+  }
+  return output
+}
+
+/**
  * 有效耗时对：起止齐且 end > start 才可用。
  * RPC 的 startedAt/endedAt 实测完成后可能返回相等/倒挂的一对（兜底链取自不同
  * 层级），直接作差会被钳成 0 —— 子代理耗时显示 "0s" 的根源。

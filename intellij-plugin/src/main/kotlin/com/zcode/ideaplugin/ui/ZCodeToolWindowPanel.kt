@@ -1655,11 +1655,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
         log.info("listSessions(workspace=$workspacePath) returned ${sessions.size} session(s)")
 
+        // 子代理子会话不进历史列表：session/list 的 DB 查询（roots=true）排除
+        // subagent_child，但内存活跃会话补列不排——子代理回合结束后仍驻留 app-server
+        // 内存时，每次列表请求都被补列进响应（IDEA 重启杀进程才消失），按 id 前缀过滤
+        val listed = sessions.filter { !it.sessionId.startsWith("sess_subagent") }
+
         val filtered = if (workspacePath.isEmpty()) {
-            sessions
+            listed
         } else {
             val normalized = normalizePath(workspacePath)
-            sessions.filter { s ->
+            listed.filter { s ->
                 val ws = s.workspace?.workspacePath
                 ws != null && normalizePath(ws) == normalized
             }

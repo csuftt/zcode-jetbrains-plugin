@@ -1930,10 +1930,16 @@ export function handleResponse(
       // 标题合并优先级：手动重命名（persist）> 服务端正式标题（顺带清临时标题）
       // > 本地临时标题（乐观占位，见 sendMessage）> 上一帧完整标题（防服务端空值
       // 覆盖，见下）> 服务端占位（空/会话 id）
+      // 子代理子会话过滤（sess_subagent_*）：session/list 的 DB 查询排除 subagent_child，
+      // 但内存活跃会话补列不排——子代理回合结束后驻留 app-server 内存期间，每次列表
+      // 请求都被补列进响应（IDEA 重启杀进程才消失）。Java 侧已过滤，这里兜底服务端
+      // 直传；staleLocal 同样排除，防已混入的本地条目经补插机制在后续刷新中复活
       const prevProvisionals = get().provisionalTitles
       const prevSessions = get().sessions
       const nextProvisionals = { ...prevProvisionals }
-      const merged = msg.sessions.map((s) => {
+      const merged = msg.sessions
+        .filter((s) => !s.sessionId.startsWith('sess_subagent'))
+        .map((s) => {
         const stored = getPersisted(`zcode.sessionTitle.${s.sessionId}`)
         if (stored) {
           delete nextProvisionals[s.sessionId]
@@ -1963,7 +1969,7 @@ export function handleResponse(
       // 缺失的会话保留（服务端权威数据由后续刷新校正；已删会话已被 sessionDeleted 过滤，
       // 不会在这里复活）
       const serverIds = new Set(merged.map((s) => s.sessionId))
-      const staleLocal = get().sessions.filter((s) => !serverIds.has(s.sessionId))
+      const staleLocal = get().sessions.filter((s) => !serverIds.has(s.sessionId) && !s.sessionId.startsWith('sess_subagent'))
       if (staleLocal.length) merged.push(...staleLocal)
       // 时间倒序统一收口：服务端快照整体有序，但本地的补插项（staleLocal 追加在尾、
       // 乐观新建插在头）会破坏全局顺序 → 按更新时间倒序重排（稳定排序，同时间戳保持原序）

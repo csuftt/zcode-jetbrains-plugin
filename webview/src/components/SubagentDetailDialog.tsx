@@ -22,7 +22,7 @@ import { ToolCallCard } from './ToolCallCard'
 import { BashCommandGroupCard } from './BashCommandGroupCard'
 import { FileToolGroupCard } from './FileToolGroupCard'
 import { groupParts, type PartRenderUnit } from '@/utils/groupParts'
-import { validSpan } from '@/utils/parseStatus'
+import { getAgentToolOutput, validSpan } from '@/utils/parseStatus'
 import { formatToolDuration } from '@/utils/time'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
@@ -233,12 +233,7 @@ export function SubagentDetailDialog() {
   }
 
   // 主聊天里 Agent 工具 part 的 output（最终报告，childSessionId 缺失时的兜底内容）
-  let agentOutput = ''
-  for (const m of messages) {
-    for (const p of m.parts) {
-      if (p.type === 'tool' && p.callID === key && p.state.output) agentOutput = p.state.output
-    }
-  }
+  const agentOutput = getAgentToolOutput(messages, key)
   // 报告按钮：状态=已完成才显示（running 时报告未生成、error 时无完整报告可读），
   // 状态取三源之最先非空（流式聚合 / RPC 权威 / 转发活动，见数据分三层注释）
   const finalStatus = item?.status ?? info?.status ?? activity?.status
