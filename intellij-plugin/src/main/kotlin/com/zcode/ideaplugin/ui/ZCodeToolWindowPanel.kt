@@ -226,6 +226,14 @@ class ZCodeToolWindowPanel(
         const val KEY_BROWSER_EXPANDED = "zcode.browser.paneExpanded"
         const val KEY_CHAT_BASE_WIDTH = "zcode.browser.chatBaseWidth"
 
+        /**
+         * config.json 读-改-写全程互斥锁（多标签各持独立 Panel 实例，op 处理并发跑在
+         * 各自的池线程上）：锁住「读文件→内存改→原子替换」整段，防两个标签同时切换
+         * provider 时后写覆盖前写。与 ZCode 官方客户端的跨进程并发无法加锁，靠
+         * tmp+原子替换把窗口压到毫秒级、且只改 provider.<id>.enabled 单字段兜底。
+         */
+        val CONFIG_WRITE_LOCK = Any()
+
         /** 外观配置（Application 级，跨项目共享，存取见 ZCodeAppearanceStore）：
          *  localStorage 在生产模式下按 origin 隔离——内置 server 每次重启端口随机，
          *  origin 变化导致配置丢失，因此主题/字号/自定义颜色以 IDE 侧持久化为权威源，
@@ -568,7 +576,22 @@ class ZCodeToolWindowPanel(
     private fun loadWebview() {
         val devUrl = "http://localhost:5173"
 
-        if (isDevServerAlive(devUrl)) {
+        // dev server 探测（socket 300ms + HTTP 校验最多 ~2.6s）挪出 EDT：initJcef 在 EDT
+        // 上走到这里，同步探测会把首个标签/新开标签卡住秒级（多标签时 ×N）。池线程探测，
+        // 完成后回 EDT 按结果加载——期间 initJcef 余下步骤照常执行，面板先渲染占位
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            val devAlive = isDevServerAlive(devUrl)
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                // 探测期间面板可能已 dispose（项目快速关闭）：jbCefBrowser 未初始化即放弃
+                if (!::jbCefBrowser.isInitialized) return@invokeLater
+                loadWebviewAfterProbe(devUrl, devAlive)
+            }
+        }
+    }
+
+    /** 探测完成后的实际加载决策（EDT 上执行，与原 loadWebview 的优先级链一致） */
+    private fun loadWebviewAfterProbe(devUrl: String, devAlive: Boolean) {
+        if (devAlive) {
             // dev 模式：连 vite dev server
             log.info("Dev server detected, loading $devUrl (dev mode, HMR)")
             jbCefBrowser.loadURL(devUrl)
@@ -2093,69 +2116,71 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (!java.nio.file.Files.isRegularFile(configPath)) {
             return errorResponse("config.json not found: $configPath")
         }
-        val file = configPath.toFile()
-        val root = try {
-            json.parseToJsonElement(file.readText(Charsets.UTF_8)).jsonObject
-        } catch (e: Exception) {
-            log.warn("Failed to parse config.json: ${e.message}")
-            return errorResponse("解析 config.json 失败")
-        }
-        val providersObj = root["provider"]?.let { runCatching { it.jsonObject }.getOrNull() }
-        if (providersObj == null || providersObj[providerId] == null) {
-            return errorResponse("provider 不存在: $providerId")
-        }
-
-        // 变更集：目标 provider 的 enabled 字段（内置互斥已随 builtin 只读化移除）
-        data class Change(val id: String, val newEnabled: Boolean)
-        val changes = mutableListOf(Change(providerId, enabled))
-
-        // 仅替换各目标 provider 的 enabled 字段，其余内容（含顺序）原样保留
-        val newProviders = JsonObject(LinkedHashMap<String, kotlinx.serialization.json.JsonElement>(providersObj.size).apply {
-            providersObj.forEach { (k, v) ->
-                val change = changes.find { it.id == k }
-                put(k, if (change != null) buildJsonObject {
-                    v.jsonObject.forEach { (pk, pv) -> if (pk != "enabled") put(pk, pv) }
-                    put("enabled", change.newEnabled)
-                } else v)
-            }
-        })
-        val newRoot = buildJsonObject {
-            root.forEach { (k, v) -> put(k, if (k == "provider") newProviders else v) }
-        }
-
-        val pretty = Json { prettyPrint = true }
-        val bak = java.nio.file.Path.of(file.parentFile.absolutePath, file.name + ".bak")
-        try {
-            // 备份 → 写 tmp → 原子替换；替换失败从备份恢复
-            java.nio.file.Files.copy(configPath, bak, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            val tmp = java.nio.file.Path.of(file.parentFile.absolutePath, file.name + ".tmp")
-            tmp.toFile().writeText(pretty.encodeToString(JsonObject.serializer(), newRoot), Charsets.UTF_8)
-            try {
-                java.nio.file.Files.move(tmp, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        return synchronized(CONFIG_WRITE_LOCK) {
+            val file = configPath.toFile()
+            val root = try {
+                json.parseToJsonElement(file.readText(Charsets.UTF_8)).jsonObject
             } catch (e: Exception) {
-                java.nio.file.Files.move(bak, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-                throw e
+                log.warn("Failed to parse config.json: ${e.message}")
+                return@synchronized errorResponse("解析 config.json 失败")
             }
-            val changeDesc = changes.joinToString(", ") { c -> c.id + "=" + c.newEnabled }
-            log.info("modelToggleProvider: $changeDesc written back to $configPath")
-            // 凭证可用性随 enabled 变化：失效环境检测缓存，30s TTL 内的自动路径不再报旧状态
-            com.zcode.ideaplugin.env.ZCodeEnvChecker.invalidate()
-        } catch (e: Exception) {
-            log.warn("Failed to write back config.json: ${e.message}")
-            return errorResponse("写回失败: ${e.message}")
-        }
-        val changesJson = JsonArray(changes.map { c ->
+            val providersObj = root["provider"]?.let { runCatching { it.jsonObject }.getOrNull() }
+            if (providersObj == null || providersObj[providerId] == null) {
+                return@synchronized errorResponse("provider 不存在: $providerId")
+            }
+
+            // 变更集：目标 provider 的 enabled 字段（内置互斥已随 builtin 只读化移除）
+            data class Change(val id: String, val newEnabled: Boolean)
+            val changes = mutableListOf(Change(providerId, enabled))
+
+            // 仅替换各目标 provider 的 enabled 字段，其余内容（含顺序）原样保留
+            val newProviders = JsonObject(LinkedHashMap<String, kotlinx.serialization.json.JsonElement>(providersObj.size).apply {
+                providersObj.forEach { (k, v) ->
+                    val change = changes.find { it.id == k }
+                    put(k, if (change != null) buildJsonObject {
+                        v.jsonObject.forEach { (pk, pv) -> if (pk != "enabled") put(pk, pv) }
+                        put("enabled", change.newEnabled)
+                    } else v)
+                }
+            })
+            val newRoot = buildJsonObject {
+                root.forEach { (k, v) -> put(k, if (k == "provider") newProviders else v) }
+            }
+
+            val pretty = Json { prettyPrint = true }
+            val bak = java.nio.file.Path.of(file.parentFile.absolutePath, file.name + ".bak")
+            try {
+                // 备份 → 写 tmp → 原子替换；替换失败从备份恢复
+                java.nio.file.Files.copy(configPath, bak, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                val tmp = java.nio.file.Path.of(file.parentFile.absolutePath, file.name + ".tmp")
+                tmp.toFile().writeText(pretty.encodeToString(JsonObject.serializer(), newRoot), Charsets.UTF_8)
+                try {
+                    java.nio.file.Files.move(tmp, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                } catch (e: Exception) {
+                    java.nio.file.Files.move(bak, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                    throw e
+                }
+                val changeDesc = changes.joinToString(", ") { c -> c.id + "=" + c.newEnabled }
+                log.info("modelToggleProvider: $changeDesc written back to $configPath")
+                // 凭证可用性随 enabled 变化：失效环境检测缓存，30s TTL 内的自动路径不再报旧状态
+                com.zcode.ideaplugin.env.ZCodeEnvChecker.invalidate()
+            } catch (e: Exception) {
+                log.warn("Failed to write back config.json: ${e.message}")
+                return@synchronized errorResponse("写回失败: ${e.message}")
+            }
+            val changesJson = JsonArray(changes.map { c ->
+                buildJsonObject {
+                    put("providerId", c.id)
+                    put("enabled", c.newEnabled)
+                }
+            })
+            // 多标签同步：发起标签由下方 modelToggled 应答合并，其余已开标签靠
+            // window.onModelsChanged 广播就地合并 + 重拉下拉（同 broadcastAppearance 模式）
+            broadcastModelChanges(changesJson.toString())
             buildJsonObject {
-                put("providerId", c.id)
-                put("enabled", c.newEnabled)
+                put("op", "modelToggled")
+                put("changes", changesJson)
             }
-        })
-        // 多标签同步：发起标签由下方 modelToggled 应答合并，其余已开标签靠
-        // window.onModelsChanged 广播就地合并 + 重拉下拉（同 broadcastAppearance 模式）
-        broadcastModelChanges(changesJson.toString())
-        return buildJsonObject {
-            put("op", "modelToggled")
-            put("changes", changesJson)
         }
     }
 
@@ -3280,12 +3305,22 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (streamFlusherRunning) return
             streamFlusherRunning = true
         }
-        Thread({
-            Thread.sleep(16) // 60fps 节流窗口
-            flushStreamBuffer()
-            synchronized(streamFlushLock) { streamFlusherRunning = false }
-        }, "zcode-stream-flush").apply { isDaemon = true }.start()
+        // 单线程调度池延迟 16ms 执行：替代此前每窗口裸建 Thread（sleep 即弃，
+        // 流式 60fps 下线程抖动明显），线程在首次调度时创建、复用常驻
+        streamFlushScheduler.schedule({
+            try {
+                flushStreamBuffer()
+            } finally {
+                synchronized(streamFlushLock) { streamFlusherRunning = false }
+            }
+        }, 16, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
+
+    /** 流式缓冲 flush 调度器（面板级单线程，懒创建、守护线程） */
+    private val streamFlushScheduler =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "zcode-stream-flush").apply { isDaemon = true }
+        }
 
     /** 把缓冲区所有事件合并成一批推送 */
     private fun flushStreamBuffer() {

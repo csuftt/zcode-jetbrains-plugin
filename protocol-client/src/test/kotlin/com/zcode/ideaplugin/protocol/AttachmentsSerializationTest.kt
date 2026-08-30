@@ -1,16 +1,14 @@
 package com.zcode.ideaplugin.protocol
 
 import com.zcode.ideaplugin.protocol.model.AttachmentInput
-import com.zcode.ideaplugin.protocol.model.SendParams
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /**
  * session/send 图片附件序列化测试（纯单元，无需 ZCode 环境）
@@ -43,28 +41,15 @@ class AttachmentsSerializationTest {
     }
 
     @Test
-    fun `SendParams 可选字段缺省不序列化`() {
-        val params = SendParams(sessionId = "sess_1", content = "看这张图")
-        val obj = json.parseToJsonElement(json.encodeToString(SendParams.serializer(), params)).jsonObject
-        assertNull(obj["attachments"]?.jsonPrimitive?.contentOrNull)
-    }
-
-    @Test
-    fun `SendParams 带附件时序列化完整`() {
-        val params = SendParams(
-            sessionId = "sess_1",
-            content = "看这张图",
-            attachments = listOf(
-                AttachmentInput(filename = "a.png", mimeType = "image/png", sizeBytes = 1, dataBase64 = "QQ=="),
-            ),
-        )
-        val obj = json.parseToJsonElement(json.encodeToString(SendParams.serializer(), params)).jsonObject
-        val atts = obj["attachments"]?.jsonArray
-        assertTrue(atts != null && atts.size == 1, "attachments 应为 1 项数组")
-        val first = atts!![0].jsonObject
-        assertEquals("image", first["kind"]?.jsonPrimitive?.content)
-        assertEquals("image/png", first["mimeType"]?.jsonPrimitive?.content)
-        assertEquals("QQ==", first["dataBase64"]?.jsonPrimitive?.content)
+    fun `AttachmentInput 未提供的可选字段缺省不序列化`() {
+        // 生产链路手工 buildJsonObject 恒省略未提供的可选字段；此处锁默认省略语义
+        val json = Json { encodeDefaults = false }
+        val att = AttachmentInput(filename = "a.png", mimeType = "image/png")
+        val obj = json.parseToJsonElement(json.encodeToString(AttachmentInput.serializer(), att)).jsonObject
+        assertFalse(obj.containsKey("sizeBytes"), "未提供的 sizeBytes 不应出现")
+        assertFalse(obj.containsKey("dataBase64"), "未提供的 dataBase64 不应出现")
+        assertFalse(obj.containsKey("localPath"), "未提供的 localPath 不应出现")
+        assertFalse(obj.containsKey("kind"), "默认 kind=image 不应出现（encodeDefaults=false）")
     }
 
     @Test

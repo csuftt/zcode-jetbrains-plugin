@@ -59,23 +59,6 @@ data class RuntimePreferences(
     }
 }
 
-/** session/subscribe 的参数 */
-@Serializable
-data class SubscribeParams(
-    val sessionId: String,
-    val deliveryKind: String = "desktop-continuous",  // 0.16 必填
-    val includeSnapshot: Boolean = true,
-    val afterSeq: Long = 0
-)
-
-/** session/send 的参数（字段是 content 不是 message！） */
-@Serializable
-data class SendParams(
-    val sessionId: String,
-    val content: String,
-    val attachments: List<AttachmentInput>? = null
-)
-
 /**
  * session/send 的图片附件（ZCode Protocol 通道原生形态，2026-08-26 zcode.cjs 源码确认）：
  * base64 内联直传，服务端负责缩放（最长边 2000px）/压缩/落盘 image-cache，

@@ -322,8 +322,13 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             val ps = ProcessBuilder("ps", "ax", "-o", "pid=,ppid=,command=")
                 .redirectErrorStream(true).start()
             val out = try {
+                // 输出与等待并发：ps ax 输出可超管道缓冲，先 waitFor 后读会互等死锁
+                // （ps 阻塞在写、这边在等退出）→ 5s 超时静默 return，清理永不生效
+                val outFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                    runCatching { ps.inputStream.bufferedReader().readText() }.getOrDefault("")
+                }
                 if (!ps.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) return
-                ps.inputStream.bufferedReader().readText()
+                outFuture.get(2, java.util.concurrent.TimeUnit.SECONDS)
             } finally {
                 ps.destroyForcibly()
             }

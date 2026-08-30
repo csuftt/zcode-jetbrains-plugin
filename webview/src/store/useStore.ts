@@ -76,6 +76,33 @@ function cancelBrowserBusyTimer(mode: string): void {
     browserBusyTimers.delete(mode)
   }
 }
+
+/**
+ * 会话视图清空基底（切会话/清空待命/新建会话/删除当前会话/newSession 五处共用）：
+ * 清掉绑定旧会话的消息、流式、队列与底部栏/子代理派生数据。
+ * 各调用点的差异字段（loadingMessages/thoughtLevel/currentMode/弹窗关闭/compacting/
+ * 模型切换在途标记等）由调用方 spread 覆盖或另行补充，语义注释留在差异现场。
+ */
+function sessionResetBase(): Partial<StoreState> {
+  return {
+    messages: [],
+    streaming: false,
+    streamingMessageId: null,
+    waitingSince: null,
+    queuedMessages: [],
+    todos: [],
+    agents: [],
+    fileChanges: [],
+    subagentActivities: [],
+    subagents: [],
+    subagentDetail: null,
+    childMessages: {},
+    childMessagesError: null,
+    childSessionKeys: {},
+    childLiveMessages: {},
+    childStreamingIds: {},
+  }
+}
 let reconcileProbeInFlight = false
 let reconcileProbeSentAt = 0
 let reconcileDeadCount = 0
@@ -820,30 +847,15 @@ export const useStore = create<StoreState>((set, get) => ({
       modelPendingSwitch: null, // 旧会话的延迟切换提示不带到新会话（补发 modelSet 有 sessionId 守卫）
       modelSwitchPrevModel: null,
       lastNotice: null,
-      messages: [],
-      loadingMessages: true,
-      streaming: false,
-      streamingMessageId: null,
-      waitingSince: null,
+      ...sessionResetBase(),
+      loadingMessages: true, // 切换后要拉取消息历史
       compacting: false,
       backgroundTasks: {},
-      queuedMessages: [], // 队列绑定会话上下文，切会话丢弃
       contextUsage: null, // 清空旧会话数据，等 getUsage 回来更新
       contextBreakdown: null,
       thoughtLevel: null, // 清空旧会话设置，等 getSettings 回来更新（currentMode 由 messages 推断兜底）
-      todos: [], // 派生状态同步清零，消除 messages 响应回来前的底部栏串扰空窗
-      agents: [],
-      fileChanges: [],
-      subagentActivities: [], // 子代理数据绑定会话，切会话清空重拉
-      subagents: [],
-      subagentDetail: null,
       subagentReport: null,
       markdownPreview: null,
-      childMessages: {},
-      childMessagesError: null,
-      childSessionKeys: {}, // 子会话注册与实时归约数据同样绑定会话
-      childLiveMessages: {},
-      childStreamingIds: {},
       // 模型切换在途标记与推迟的级别补发绑定旧会话流程，切会话作废
       modelSwitchInFlightAt: null,
       pendingThoughtLevel: null,
@@ -1062,31 +1074,15 @@ export const useStore = create<StoreState>((set, get) => ({
       pendingFirstMessage: null,
       pendingFirstAttachments: null,
       pendingFirstScheduledFireAt: null,
-      messages: [],
-      loadingMessages: false,
-      streaming: false,
-      streamingMessageId: null,
-      waitingSince: null,
+      ...sessionResetBase(),
       compacting: false,
       backgroundTasks: {},
-      queuedMessages: [], // 队列绑定旧会话上下文，丢弃
       contextUsage: null,
       contextBreakdown: null,
       thoughtLevel: null,
       currentMode: null,
-      todos: [],
-      agents: [],
-      fileChanges: [],
-      subagentActivities: [],
-      subagents: [],
-      subagentDetail: null,
       subagentReport: null,
       markdownPreview: null,
-      childMessages: {},
-      childMessagesError: null,
-      childSessionKeys: {},
-      childLiveMessages: {},
-      childStreamingIds: {},
       askUser: null, // 旧会话遗留的提问/审批弹窗随会话切换关闭
       exitPlanApproval: null,
       permissionRequest: null,
@@ -1977,14 +1973,9 @@ export function handleResponse(
           pendingFirstAttachments: null,
           pendingFirstScheduledFireAt: null,
           pendingScheduleCreation: null,
-          messages: [],
-          loadingMessages: false,
-          streaming: false,
-          streamingMessageId: null,
-          waitingSince: null,
+          ...sessionResetBase(),
           compacting: false,
           backgroundTasks: {},
-          queuedMessages: [], // 队列绑定旧会话上下文，新建会话丢弃
           contextUsage: null, // 清空旧会话数据，等 getUsage 回来更新
           contextBreakdown: null,
           // 保留待命态的级别集（与当前模型同源缓存）与预选模式，避免选择器/按钮闪回默认；
@@ -1995,19 +1986,8 @@ export function handleResponse(
           // 其发送 setModel 时会重新置位）
           modelSwitchInFlightAt: null,
           pendingThoughtLevel: null,
-          todos: [], // 派生状态同步清零：新会话不发 messages 请求，不重算会一直残留旧会话底部栏数据
-          agents: [],
-          fileChanges: [],
-          subagentActivities: [], // 新会话无子代理
-          subagents: [],
-          subagentDetail: null,
           subagentReport: null,
           markdownPreview: null,
-          childMessages: {},
-          childMessagesError: null,
-          childSessionKeys: {},
-          childLiveMessages: {},
-          childStreamingIds: {},
           // 新会话乐观插入列表（空标题占位）：listSessions 异步返回前 header/历史列表
           // 就能找到该会话——否则乐观标题（sendMessage 的 map）匹配不到，标题要等
           // 列表刷新才显示（期间 header 是会话 id 前缀）。服务端权威数据由下方
@@ -2104,17 +2084,19 @@ export function handleResponse(
         // Java 侧已同步丢弃该会话的待发定时消息，本地镜像过滤
         scheduledMessages: cur.scheduledMessages.filter((m) => m.sessionId !== msg.sessionId),
         ...(deletedCurrent
-              ? {
-                currentSessionId: null, messages: [], streaming: false, streamingMessageId: null, waitingSince: null, compacting: false, backgroundTasks: {},
-                queuedMessages: [],
-                contextUsage: null, contextBreakdown: null, thoughtLevel: null, currentMode: null,
-                modelSwitchInFlightAt: null, pendingThoughtLevel: null,
-            todos: [], agents: [], fileChanges: [], // 底部栏派生状态随会话删除清零
-            subagentActivities: [], subagents: [], subagentDetail: null, childMessages: {},
-            childMessagesError: null,
-            childSessionKeys: {}, childLiveMessages: {}, childStreamingIds: {},
-          }
-          : {}),
+          ? {
+              currentSessionId: null,
+              ...sessionResetBase(),
+              compacting: false,
+              backgroundTasks: {},
+              contextUsage: null,
+              contextBreakdown: null,
+              thoughtLevel: null,
+              currentMode: null,
+              modelSwitchInFlightAt: null,
+              pendingThoughtLevel: null,
+            }
+            : {}),
       })
       // 删的是当前会话 → 进入待命态，恢复当前模型的缓存级别集供预选
       if (deletedCurrent) get().hydrateThoughtLevelStandby()
@@ -2326,26 +2308,11 @@ export function handleResponse(
       get().requeueScheduledQueuesFor(get().currentSessionId)
       set({
         currentSessionId: msg.sessionId,
-        messages: [], // 新会话无历史消息
-        streaming: false,
-        streamingMessageId: null,
-        waitingSince: null,
+        ...sessionResetBase(), // 新会话无历史消息
         thoughtLevel: null,
         currentMode: null,
-        queuedMessages: [], // 队列绑定旧会话上下文，丢弃
-        todos: [], // 底部栏派生状态随会话切换清零
-        agents: [],
-        fileChanges: [],
-        subagentActivities: [], // 子代理数据绑定旧会话，丢弃
-        subagents: [],
-        subagentDetail: null,
         subagentReport: null,
         markdownPreview: null,
-        childMessages: {},
-        childMessagesError: null,
-        childSessionKeys: {},
-        childLiveMessages: {},
-        childStreamingIds: {},
       })
       // 刷新会话列表（新会话会出现在列表里）
       get().loadSessions()

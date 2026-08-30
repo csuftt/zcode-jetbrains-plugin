@@ -7,7 +7,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.TimeUnit
 
 /**
  * ZCode 客户端任务索引（~/.zcode/v2/tasks-index.sqlite）读写器
@@ -129,22 +128,17 @@ class TaskIndexStore(
         val pb = ProcessBuilder(nodePath, "-e", script)
         pb.environment()["ZCODE_TASKS_DB"] = dbPath.toString()
         extraEnv.forEach { (k, v) -> pb.environment()[k] = v }
-        val p = pb.start()
-        val out = p.inputStream.bufferedReader().readText()
-        val err = p.errorStream.bufferedReader().readText()
-        val finished = p.waitFor(15, TimeUnit.SECONDS)
-        if (!finished) {
-            p.destroyForcibly()
-            throw IllegalStateException("tasks-index 操作超时")
-        }
-        if (p.exitValue() == 2) {
+        // 统一执行器：stdout 并发读 + stderr 异步 drain（先 waitFor 后读输出会因
+        // 管道缓冲死锁——getSessionStats/stderr 4KB 两次实踩的同型坑）
+        val r = SubprocessUtil.runForOutput(pb, 15, "tasks-index 操作超时")
+        if (r.exitValue == 2) {
             onSchemaMismatch()
             return ""
         }
-        if (p.exitValue() != 0) {
-            throw IllegalStateException("tasks-index 操作失败: ${err.ifBlank { out }}")
+        if (r.exitValue != 0) {
+            throw IllegalStateException("tasks-index 操作失败: ${r.err.ifBlank { r.out }}")
         }
-        return out
+        return r.out
     }
 }
 

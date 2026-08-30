@@ -38,15 +38,39 @@ type View = 'chat' | 'history' | 'settings'
 
 export default function App() {
   const { t } = useTranslation()
-  const {
-    sessions, currentSessionId,
-    messages, loadingMessages, streaming, streamingMessageId, waitingSince, lastError, lastNotice, compacting,
-    askUser, exitPlanApproval, permissionRequest, currentModel,
-    init, loadSessions, selectSession, resetToNewSession, stopStreaming, sendMessage,
-    clearError, clearNotice,
-    renameSession, setModel,
-    archivedSessions, archivedLoading, loadArchivedSessions, archiveSession, restoreSession,
-  } = useStore()
+  // 逐字段 selector（勿合并成对象返回——useSyncExternalStore 对新建对象严格判等
+  // 会死循环白屏）。整仓 useStore() 会让任意 store 字段变化（skillsLoading、
+  // quotaPollTimer 等无关字段）都重渲染 App 根组件，流式期间放大整树 diff
+  const sessions = useStore((s) => s.sessions)
+  const currentSessionId = useStore((s) => s.currentSessionId)
+  const messages = useStore((s) => s.messages)
+  const loadingMessages = useStore((s) => s.loadingMessages)
+  const streaming = useStore((s) => s.streaming)
+  const streamingMessageId = useStore((s) => s.streamingMessageId)
+  const waitingSince = useStore((s) => s.waitingSince)
+  const lastError = useStore((s) => s.lastError)
+  const lastNotice = useStore((s) => s.lastNotice)
+  const compacting = useStore((s) => s.compacting)
+  const askUser = useStore((s) => s.askUser)
+  const exitPlanApproval = useStore((s) => s.exitPlanApproval)
+  const permissionRequest = useStore((s) => s.permissionRequest)
+  const currentModel = useStore((s) => s.currentModel)
+  const archivedSessions = useStore((s) => s.archivedSessions)
+  const archivedLoading = useStore((s) => s.archivedLoading)
+  // action 引用稳定，单独取不触发重渲染
+  const init = useStore((s) => s.init)
+  const loadSessions = useStore((s) => s.loadSessions)
+  const selectSession = useStore((s) => s.selectSession)
+  const resetToNewSession = useStore((s) => s.resetToNewSession)
+  const stopStreaming = useStore((s) => s.stopStreaming)
+  const sendMessage = useStore((s) => s.sendMessage)
+  const clearError = useStore((s) => s.clearError)
+  const clearNotice = useStore((s) => s.clearNotice)
+  const renameSession = useStore((s) => s.renameSession)
+  const setModel = useStore((s) => s.setModel)
+  const loadArchivedSessions = useStore((s) => s.loadArchivedSessions)
+  const archiveSession = useStore((s) => s.archiveSession)
+  const restoreSession = useStore((s) => s.restoreSession)
   const setPendingSettingsSection = useStore((s) => s.setPendingSettingsSection)
   const changelogOpen = useStore((s) => s.changelogOpen)
   const openChangelog = useStore((s) => s.openChangelog)

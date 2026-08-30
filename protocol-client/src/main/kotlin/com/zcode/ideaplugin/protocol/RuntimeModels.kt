@@ -36,7 +36,7 @@ object RuntimeModels {
     /** 按 providerId 查 config.json 判定（provider 缺失/无 baseURL = 不门控）*/
     fun isCaptchaGatedProvider(providerId: String, configPath: Path = Credentials.defaultConfigPath()): Boolean {
         val pv = readProviders(configPath)?.get(providerId)?.jsonObject ?: return false
-        val baseURL = pv["options"]?.jsonObject?.get("baseURL")?.jsonPrimitive?.contentOrNull ?: return false
+        val baseURL = pv["options"]?.jsonObject?.get("baseURL")?.jsonPrimitive?.jsonStringOrNull ?: return false
         return isCaptchaGatedBaseUrl(baseURL)
     }
 
@@ -52,7 +52,7 @@ object RuntimeModels {
             val pv = try { providerEl.jsonObject } catch (e: Exception) { continue }
             if (!isEnabledAnthropic(pv)) continue
             val options = pv["options"]?.jsonObject ?: continue
-            val baseURL = options["baseURL"]?.jsonPrimitive?.contentOrNull ?: continue
+            val baseURL = options["baseURL"]?.jsonPrimitive?.jsonStringOrNull ?: continue
             // 体验套餐(zcode-plan 网关)渠道不作默认（-32031 恢复兜底不落门控渠道）
             if (isCaptchaGatedBaseUrl(baseURL)) continue
             val modelId = pv["models"]?.jsonObject?.keys?.firstOrNull() ?: continue
@@ -86,8 +86,8 @@ object RuntimeModels {
 
     /** enabled 缺省视为启用（config.json 现状：DeepSeek 无 enabled 字段但已启用） */
     private fun isEnabledAnthropic(pv: JsonObject): Boolean {
-        val enabled = pv["enabled"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: true
-        return enabled && pv["kind"]?.jsonPrimitive?.contentOrNull == "anthropic"
+        val enabled = pv["enabled"]?.jsonPrimitive?.jsonStringOrNull?.toBoolean() ?: true
+        return enabled && pv["kind"]?.jsonPrimitive?.jsonStringOrNull == "anthropic"
     }
 
     private fun build(providerId: String, modelId: String, pv: JsonObject): JsonObject = buildJsonObject {
@@ -99,15 +99,15 @@ object RuntimeModels {
         })
         put("provider", buildJsonObject {
             put("providerId", providerId)
-            put("kind", pv["kind"]?.jsonPrimitive?.contentOrNull ?: "anthropic")
-            pv["name"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { put("label", it) }
-            put("source", pv["source"]?.jsonPrimitive?.contentOrNull ?: "custom")
+            put("kind", pv["kind"]?.jsonPrimitive?.jsonStringOrNull ?: "anthropic")
+            pv["name"]?.jsonPrimitive?.jsonStringOrNull?.takeIf { it.isNotBlank() }?.let { put("label", it) }
+            put("source", pv["source"]?.jsonPrimitive?.jsonStringOrNull ?: "custom")
             val options = pv["options"]?.jsonObject
-            options?.get("baseURL")?.jsonPrimitive?.contentOrNull
+            options?.get("baseURL")?.jsonPrimitive?.jsonStringOrNull
                 ?.takeIf { it.isNotBlank() }
                 ?.let { put("baseURL", it) }
             // apiKey 空（oauth 等走凭据存储）时不传该字段——schema 可选，服务端自行解析
-            options?.get("apiKey")?.jsonPrimitive?.contentOrNull
+            options?.get("apiKey")?.jsonPrimitive?.jsonStringOrNull
                 ?.takeIf { it.isNotBlank() }
                 ?.let {
                     put("apiKey", buildJsonObject {
@@ -124,9 +124,9 @@ object RuntimeModels {
                     put("modelId", mid)
                     val modelDef = mv as? JsonObject ?: return@map buildJsonObject { put("modelId", mid) }
                     (modelDef["limit"] as? JsonObject)?.let { limit ->
-                        limit["context"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        limit["context"]?.jsonPrimitive?.jsonStringOrNull?.toIntOrNull()
                             ?.takeIf { it > 0 }?.let { put("contextWindow", it) }
-                        limit["output"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        limit["output"]?.jsonPrimitive?.jsonStringOrNull?.toIntOrNull()
                             ?.takeIf { it > 0 }?.let { put("maxOutputTokens", it) }
                     }
                     // modalities.input 的能力位（USt schema 无 modalities 字段，图像/PDF/视频为布尔位）
@@ -135,7 +135,7 @@ object RuntimeModels {
                     if ("image" in inputKinds) put("supportsImages", true)
                     if ("pdf" in inputKinds) put("supportsPdf", true)
                     if ("video" in inputKinds) put("supportsVideo", true)
-                    modelDef["name"]?.jsonPrimitive?.contentOrNull
+                    modelDef["name"]?.jsonPrimitive?.jsonStringOrNull
                         ?.takeIf { it.isNotBlank() }?.let { put("label", it) }
                 }
             } ?: emptyList()))
@@ -143,6 +143,10 @@ object RuntimeModels {
     }
 }
 
-/** JsonObject 工具：安全取字符串（与 ZCodeProtocolClient.kt 中同名的 file-private 扩展等价）*/
-private val JsonPrimitive.contentOrNull: String?
+/**
+ * JsonObject 工具：安全取字符串（模块内共用，替代此前 RuntimeModels/ZCodeProtocolClient
+ * 各持一份的 file-private contentOrNull）。与 kotlinx 的 contentOrNull 语义差异：字符串
+ * 字面量 "null" 也按 null 处理（CLI 偶发回 JSON null 字符串形态）。
+ */
+internal val JsonPrimitive.jsonStringOrNull: String?
     get() = if (this.isString) this.content else this.content.takeIf { it != "null" }

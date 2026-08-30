@@ -98,8 +98,7 @@ object Credentials {
             val st = json.parseToJsonElement(settingPath.readText()).jsonObject
             val selected = st["modelProviderFamilySelectedKeys"]?.jsonObject ?: return null
             if (selected.isEmpty()) return null
-            // 用 content 与本文件其余读取一致（contentOrNull 与同包两个 file-private
-            // 扩展同名冲突）；这些 setting 值均为普通字符串，不存在时 ?. 短路
+            // 用 content 与本文件其余读取一致；这些 setting 值均为普通字符串，不存在时 ?. 短路
             val domainRaw = st["providerFamilyDomain"]?.jsonPrimitive?.content
             val domain = domainRaw?.takeIf { dom -> dom.isNotBlank() }
             val rawEntry = domain?.let { selected[it] } ?: selected.values.firstOrNull()
