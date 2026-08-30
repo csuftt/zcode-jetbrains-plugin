@@ -50,6 +50,8 @@ function resetIdleWithSession(): void {
     streamingMessageId: null,
     queuedMessages: [],
     scheduledMessages: [],
+    firedHistory: [],
+    lastScheduledListTs: 0,
     messages: [],
     creatingSession: false,
     pendingFirstMessage: null,
@@ -208,5 +210,42 @@ describe('定时消息分派链路', () => {
     })
     useStore.getState().requeueScheduledQueuesFor(null)
     expect(sentOps()).not.toContain('scheduledRequeue')
+  })
+
+  it('广播丢失自愈：重拉 scheduledList 后权威快照收敛镜像（后台唤起卡片残留缺陷）', () => {
+    const fireAt = Date.now() - 1000
+    // ① 镜像收到含任务快照（用户面板卡片出现）
+    handleResponse(
+      {
+        op: 'scheduledList',
+        ts: 1000,
+        items: [{ id: 's1', sessionId: SID, workspacePath: 'G:\\mock', text: '你有什么功能', fireAt, createdAt: 0 }],
+        fired: [],
+      },
+      useStore.setState,
+      useStore.getState,
+    )
+    expect(useStore.getState().scheduledMessages).toHaveLength(1)
+
+    // ② remove/fired 广播在该面板静默丢失（后台唤起窗口 executeJavaScript 丢帧——
+    //    Java 侧已 removed+recorded，本面板一无所知，卡片残留「待执行（即将补发）」）
+
+    // ③ 用户切回 IDE / 打开定时列表触发重拉（focus/visibilitychange/弹窗入口）
+    useStore.getState().refreshScheduledList()
+    expect(sentRequests.some((r) => r.op === 'scheduledList')).toBe(true)
+
+    // ④ Java 权威快照（items 空 + fired 含记录）到达 → 卡片消失、历史出现
+    handleResponse(
+      {
+        op: 'scheduledList',
+        ts: 2000,
+        items: [],
+        fired: [{ sessionId: SID, text: '你有什么功能', fireAt, firedAt: fireAt + 5000 }],
+      },
+      useStore.setState,
+      useStore.getState,
+    )
+    expect(useStore.getState().scheduledMessages).toHaveLength(0)
+    expect(useStore.getState().firedHistory).toHaveLength(1)
   })
 })

@@ -324,7 +324,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   }
 
   function openSchedulePicker() {
-    // 有待执行任务（角标亮起）→ 直达全部定时任务列表；没有 → 直接新建表单
+    // 有待执行任务（角标亮起）→ 直达全部定时任务列表；没有 → 直接新建表单。
+    // 打开即对账：广播丢帧时（后台唤起窗口）镜像可能滞后，重拉保证列表所见即权威
+    useStore.getState().refreshScheduledList()
     openScheduleForm()
     if (scheduledCount > 0) setScheduleView('list')
     setScheduleOpen(true)

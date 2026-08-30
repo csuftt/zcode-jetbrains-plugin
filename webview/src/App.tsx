@@ -143,6 +143,28 @@ export default function App() {
     init()
   }, [init])
 
+  // 定时任务镜像自愈：Java→JS 广播无端到端确认，后台唤起窗口丢一条 remove 快照，
+  // 卡片就永久残留「待执行（即将补发）」、fired 历史缺记录（2026-08-30 实测）。
+  // 回到前台的瞬间重拉全量快照对账（节流 5s，防 focus 抖动高频请求）
+  useEffect(() => {
+    let last = 0
+    const refresh = () => {
+      const now = Date.now()
+      if (now - last < 5000) return
+      last = now
+      useStore.getState().refreshScheduledList()
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
+
   // 升级后首次打开自动弹「版本更新」：已读标记走 persist kv 通道（IDE 侧持久——
   // 内置 server 随机端口致 localStorage 跨重启失效）。JCEF 内等权威 kv 水合完成再比对
   // （注入兜底失败时 persist 停用，本会话宁可不弹不误弹）。桥注入时序不稳（可能晚于

@@ -587,6 +587,8 @@ interface StoreState {
   sendScheduledNow: (id: string) => void
   /** 取消定时消息：乐观移除卡片 + Java 幂等移除 */
   cancelScheduled: (id: string) => void
+  /** 重拉定时任务全量快照（广播无端到端确认，镜像靠重拉自愈：focus/切回前台/打开定时列表时调用）*/
+  refreshScheduledList: () => void
   /** 切会话丢弃队列前的回退：定时来源的排队消息交还 Java 侧挂起（防静默丢失）*/
   requeueScheduledQueuesFor: (oldSessionId: string | null) => void
   /**
@@ -1171,6 +1173,14 @@ export const useStore = create<StoreState>((set, get) => ({
     // 乐观移除 + Java 幂等移除（不存在/已处理按成功应答）
     set({ scheduledMessages: get().scheduledMessages.filter((m) => m.id !== id) })
     sendToJava({ op: 'scheduledCancel', id })
+  },
+
+  refreshScheduledList: () => {
+    // 广播无端到端确认（executeJavaScript succeeded ≠ JS 应用成功：后台唤起窗口、
+    // 页面加载竞态、listener 空窗都会静默丢帧），非受理面板只靠广播同步——丢一条
+    // remove 快照就永久残留「待执行」卡片、fired 历史缺记录（2026-08-30 实测）。
+    // 应答与广播走同一 scheduledList 通道（ts 守卫保序），重拉即对账自愈
+    sendToJava({ op: 'scheduledList' })
   },
 
   flushQueue: () => {
