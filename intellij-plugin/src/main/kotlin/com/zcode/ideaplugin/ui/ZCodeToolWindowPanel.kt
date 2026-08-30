@@ -1836,16 +1836,27 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 任务列表跳转会话：统一 openSessionTab——已有宿主标签则激活它（含懒加载面板 ensure），
      * 没有则新建标签按 sessionId 恢复打开（与后台补发/重启恢复同路径）。
      * 绝不在发起标签内 selectSession 覆盖当前会话：覆盖会顶掉用户正在看的会话，且
-     * 覆盖后宿主判定跟着漂移，再次跳转其他会话时行为混乱。EDT 异步执行即可。
+     * 覆盖后宿主判定跟着漂移，再次跳转其他会话时行为混乱。
+     * 例外：会话挂有待发定时任务且已不存在（空会话未落库即关 IDE），跳转只会白开死
+     * 标签——转定时服务「新会话补发」执行任务（缺陷AH）。存在性判定含阻塞 RPC，放后台线程。
      */
     private fun handleGotoSession(msg: JsonObject): JsonObject {
         val sessionId = msg["sessionId"]?.jsonPrimitive?.content ?: return errorResponse("缺少 sessionId")
-        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
-            if (project.isDisposed) return@invokeLater
-            try {
-                ZCodeToolWindowFactory.openSessionTab(project, sessionId)
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            val fellBack = try {
+                ZCodeScheduledMessageService.getInstance(project).tryFallbackDeadSession(sessionId)
             } catch (e: Exception) {
-                log.warn("Open session tab for goto failed: ${e.message}")
+                log.warn("goto dead-session fallback check failed: ${e.message}")
+                false
+            }
+            if (fellBack || project.isDisposed) return@executeOnPooledThread
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed) return@invokeLater
+                try {
+                    ZCodeToolWindowFactory.openSessionTab(project, sessionId)
+                } catch (e: Exception) {
+                    log.warn("Open session tab for goto failed: ${e.message}")
+                }
             }
         }
         return ackOp("gotoSessionOpened")

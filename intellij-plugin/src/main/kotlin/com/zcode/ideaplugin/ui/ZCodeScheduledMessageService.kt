@@ -36,8 +36,12 @@ import java.util.concurrent.TimeUnit
  *  - 到点分派优先走 webview 准入路径（推 scheduledDue 给会话所在标签 → 前端 sendMessage：
  *    回合活跃入队尾/空闲直接发，与手动 Enter 同一段代码）；推送后 15s 无 ack 重推一轮
  *    （标签刚打开时前端 boot 未就绪），仍无 ack 降级本服务直发；
- *  - 标签不在/懒加载未激活：先打开标签、不直发——直发会让回合跑在无人订阅的窗口里，
- *    标签打开后流式接不上（要等回合完成才看到内容，实测）；下轮扫描改走准入推送；
+ *  - 标签不在/懒加载未激活：先开标签、不直发——直发会让回合跑在无人订阅的窗口里，
+ *    标签打开后流式接不上（要等回合完成才看到内容，实测）；开标签每个 item 限一次，
+ *    开过仍等不到就绪面板（webview 启动异常等）即记录失败并放弃自动分派，防标签风暴；
+ *  - 绑定会话已不存在（「在新会话中执行」的空会话未落库即关 IDE、会话被删等）：开标签
+ *    永远等不到就绪面板，分派时先验存在性，不存在直接按任务语义**新建会话补发**并打开
+ *    新会话标签（gotoSession 点击死任务卡同样兜底，缺陷AH）；
  *  - 直发兜底（两轮推送均无 ack/面板中途消失）：client.send + 冷会话 -32004 resume 重试 +
  *    悬挂回合 -32010 延迟重扫（绝不 stop——定时消息不许打断正在跑的回合），成功后系统通知；
  *  - 错过策略：到点后 [GRACE_MS]（默认 30min）内扫到即补发；超宽限保持待发但卡片呈
@@ -85,6 +89,18 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
         /** 到点且在宽限窗内才自动分派；hold（切会话回退挂起）永不自动 */
         fun shouldAutoFire(item: Item, now: Long, graceMs: Long = GRACE_MS): Boolean =
             !item.hold && item.fireAt <= now && now - item.fireAt <= graceMs
+
+        /**
+         * 自动分派候选：到点在宽限窗内、未挂起、且未被放弃。
+         * giveUp = 开过一次标签仍等不到就绪面板的项（会话多半已不存在），转手动决定，
+         * 不再参与自动分派（防每轮 sweep 重复开标签的标签风暴，实测缺陷）。
+         */
+        fun autoDispatchCandidates(
+            items: List<Item>,
+            now: Long,
+            graceMs: Long = GRACE_MS,
+            giveUp: Set<String> = emptySet(),
+        ): List<Item> = items.filter { it.id !in giveUp && shouldAutoFire(it, now, graceMs) }
 
         fun itemsToJson(list: List<Item>): JsonArray = buildJsonArray {
             list.forEach { it ->
@@ -196,6 +212,12 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
     /** 已推送 scheduledDue、等待 webview ack 的 id（超时降级直发） */
     private val awaitingAck = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** 已为该 item 自动开过会话标签（每个 item 只开一次，面板仍未就绪不再重复开） */
+    private val tabOpenedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** 自动分派已放弃的 item（开标签一次仍不就绪=会话多半已不存在），等用户手动决定 */
+    private val autoGiveUp = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     /** 已在「过期」日志播报过的 id（防扫看日志风暴） */
     private val expiredLogged = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
@@ -271,15 +293,21 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
             old.copy(text = newText, fireAt = maxOf(fireAt, System.currentTimeMillis() + 10_000), hold = false)
         }
         expiredLogged.remove(id)
+        // 重新定时=重新获得自动分派资格（含开标签一次的机会）
+        autoGiveUp.remove(id)
+        tabOpenedFor.remove(id)
         persistAndBroadcast()
         log.info("[scheduled] rescheduled id=$id fireAt=${items[idx].fireAt} (textEdited=${newText != old.text})")
         return true
     }
 
     /** op:scheduledSendNow——立即执行（走与到点一致的准入分派；挂起项同样放行）。
-     *  项不存在时静默成功：webview 镜像可能滞后（乐观移除已发生/广播在途），报错只会误导 */
+     *  项不存在时静默成功：webview 镜像可能滞后（乐观移除已发生/广播在途），报错只会误导。
+     *  手动执行不受「开标签限一次」约束：清掉自动分派失败态，允许再开一次标签 */
     fun sendNow(id: String): Boolean {
         val item = items.firstOrNull { it.id == id } ?: return true
+        autoGiveUp.remove(id)
+        tabOpenedFor.remove(id)
         dispatch(item)
         return true
     }
@@ -364,7 +392,7 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
     }
 
     internal fun sweep(now: Long) {
-        val due = items.filter { shouldAutoFire(it, now) }
+        val due = autoDispatchCandidates(items, now, giveUp = autoGiveUp)
         // 超宽限的播报一次（卡片由 webview 按 fireAt 自行呈「已过期」态）
         items.filter { !it.hold && it.fireAt <= now - GRACE_MS }
             .forEach { if (expiredLogged.add(it.id)) log.info("[scheduled] expired beyond grace, holding for manual decision id=${it.id}") }
@@ -375,7 +403,8 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
      * 分派单条：优先 webview 准入路径（回合活跃入队尾/空闲直接发，与手动发送同一段代码）。
      * 标签不在/懒加载未激活时**先开标签、不直发**——直发会让回合跑在无人订阅的窗口里，
      * 标签打开后流式接不上（只能等回合完成才看到内容，实测）；开标签后下轮扫描改走推送，
-     * 消息由前端在订阅就绪后发出，流式全程在线。无会话项（sessionId 空）路由当前激活面板。
+     * 消息由前端在订阅就绪后发出，流式全程在线。开标签每个 item 限一次（tabOpenedFor），
+     * 再走不到就绪面板即放弃自动分派（autoGiveUp）。无会话项（sessionId 空）路由当前激活面板。
      */
     private fun dispatch(item: Item) {
         if (!awaitingAck.add(item.id)) return // 已在途，防重入
@@ -387,15 +416,95 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
         }
         if (panelReady) {
             pushDue(item, 1)
-        } else if (sessionless) {
-            awaitingAck.remove(item.id)
-            log.info("[scheduled] no active panel for session-less item, will retry next sweep id=${item.id}")
-        } else {
-            awaitingAck.remove(item.id)
-            log.info("[scheduled] no ready panel, opening session tab first (accelerated probe after open) id=${item.id} session=${item.sessionId}")
-            openSessionTabOnEdt(item.sessionId)
-            accelerateAfterTabOpen(item.id, item.sessionId)
+            return
         }
+        awaitingAck.remove(item.id)
+        if (sessionless) {
+            log.info("[scheduled] no active panel for session-less item, will retry next sweep id=${item.id}")
+            return
+        }
+        // 绑定会话已不存在（「在新会话中执行」的空会话未落库即关 IDE、会话被删等）：
+        // 开标签永远等不到就绪面板，直接按任务语义新建会话补发，不再白开死标签（缺陷AH）
+        if (!sessionExists(item)) {
+            fallbackNewSessionSend(item)
+            return
+        }
+        if (!tabOpenedFor.add(item.id)) {
+            // 会话标签只自动开一次：开过（含加速探测 20s + 下轮扫描）仍无就绪面板
+            // （webview 启动异常等），记录失败并放弃自动分派，项保持待发由用户手动决定
+            autoGiveUp.add(item.id)
+            log.warn("[scheduled] session tab opened once but panel never ready, giving up auto-dispatch (kept pending for manual decision) id=${item.id} session=${item.sessionId}")
+            return
+        }
+        log.info("[scheduled] no ready panel, opening session tab first (accelerated probe after open) id=${item.id} session=${item.sessionId}")
+        openSessionTabOnEdt(item.sessionId)
+        accelerateAfterTabOpen(item.id, item.sessionId)
+    }
+
+    /**
+     * 会话存在性校验：session/list（workspace 过滤，limit 放宽防大列表截断漏判）。
+     * 查询失败按存在处理（fail-soft，宁可多走开标签路径也不误建新会话分叉）。
+     * 含阻塞 RPC，勿在 EDT 调用。
+     */
+    private fun sessionExists(item: Item): Boolean = try {
+        project.zCodeService().getClient()
+            .listSessions(item.workspacePath.ifBlank { null }, limit = 1000)
+            .any { it.sessionId == item.sessionId }
+    } catch (e: Exception) {
+        log.warn("[scheduled] session existence check failed, assume exists id=${item.id}: ${e.message}")
+        true
+    }
+
+    /**
+     * 会话已消失时的兜底补发：按任务语义新建会话发出消息（「在新会话中执行」的本意即
+     * 新会话承载），成功即移除项、记录已发、系统通知并打开新会话标签。任何失败保持
+     * 待发并放弃自动分派（防每轮 sweep 重复建会话的循环），由用户手动决定。
+     */
+    private fun fallbackNewSessionSend(item: Item) {
+        if (!awaitingAck.add(item.id)) return // 防点击跳转与 sweep 并发双发
+        log.info("[scheduled] bound session missing, falling back to fresh session send id=${item.id} session=${item.sessionId}")
+        val newSid = try {
+            val client = project.zCodeService().getClient()
+            val sid = client.createSession(
+                Workspace(item.workspacePath),
+                com.zcode.ideaplugin.protocol.model.PermissionMode.YOLO,
+            )
+            try {
+                client.send(sid, item.text, item.workspacePath, providerId = item.providerId, modelId = item.modelId)
+            } catch (e: ZCodeProtocolException) {
+                val unsupportedModel = (e.code == -32603 || e.message?.contains("-32603") == true) &&
+                    e.message?.contains("Unsupported model", ignoreCase = true) == true
+                if (unsupportedModel && item.modelId != null) {
+                    log.info("[scheduled] specified model unavailable on fallback, retry default id=${item.id} model=${item.modelId}")
+                    client.send(sid, item.text, item.workspacePath)
+                } else {
+                    throw e
+                }
+            }
+            sid
+        } catch (e: Exception) {
+            log.warn("[scheduled] fallback fresh-session send failed, giving up auto-dispatch (kept pending) id=${item.id}: ${e.message}")
+            autoGiveUp.add(item.id)
+            awaitingAck.remove(item.id)
+            return
+        }
+        removeById(item.id, "fired-fallback-new-session")
+        recordFired(newSid, item.text, item.fireAt)
+        ZCodeNotifyService.notifyScheduledFired(project, newSid, item.text)
+        openSessionTabOnEdt(newSid)
+        log.info("[scheduled] fallback fresh-session send succeeded id=${item.id} newSession=$newSid")
+    }
+
+    /**
+     * gotoSession 点击兜底：该会话挂有待发定时任务且会话已不存在时，跳转只会白开死标签
+     * （实测缺陷AH），转「新会话补发」执行任务并打开新会话标签。会话存在或无关联任务
+     * 返回 false（调用方走正常跳转）。含阻塞 RPC，勿在 EDT 调用。
+     */
+    fun tryFallbackDeadSession(sessionId: String): Boolean {
+        val item = items.firstOrNull { it.sessionId == sessionId && !it.hold } ?: return false
+        if (sessionExists(item)) return false
+        fallbackNewSessionSend(item)
+        return true
     }
 
     /**
@@ -537,6 +646,8 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
         val removed = items.removeIf { it.id == id }
         if (removed) {
             awaitingAck.remove(id)
+            autoGiveUp.remove(id)
+            tabOpenedFor.remove(id)
             persistAndBroadcast()
             log.info("[scheduled] removed id=$id reason=$reason")
         }

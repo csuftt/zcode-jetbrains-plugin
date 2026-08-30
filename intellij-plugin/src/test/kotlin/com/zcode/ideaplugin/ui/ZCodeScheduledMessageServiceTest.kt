@@ -54,6 +54,27 @@ class ZCodeScheduledMessageServiceTest {
     }
 
     @Test
+    fun `已放弃的项不再进入自动分派候选（防标签风暴）`() {
+        val fireAt = 1_000_000L
+        val due = item(fireAt)
+        val other = item(fireAt).copy(id = "s2")
+        // 开标签一次仍不就绪的项（giveUp）被排除，其余到期项不受影响
+        val candidates = ZCodeScheduledMessageService.autoDispatchCandidates(
+            listOf(due, other), fireAt + 1000, giveUp = setOf("s1"),
+        )
+        assertEquals(listOf("s2"), candidates.map { it.id })
+        // giveUp 为空时行为与 shouldAutoFire 过滤一致
+        assertEquals(
+            listOf("s1", "s2"),
+            ZCodeScheduledMessageService.autoDispatchCandidates(listOf(due, other), fireAt + 1000).map { it.id },
+        )
+        // giveUp 项被手动重定时（giveUp 清空）后重新参与
+        assertTrue(
+            ZCodeScheduledMessageService.autoDispatchCandidates(listOf(due), fireAt + 1000, giveUp = emptySet()).isNotEmpty(),
+        )
+    }
+
+    @Test
     fun `序列化回环保留全部字段`() {
         val src = listOf(
             ZCodeScheduledMessageService.Item("a", "sess", "G:\\p", "文本\n多行", 123L, 456L, hold = true, providerId = "p1", modelId = "glm-5.3"),
