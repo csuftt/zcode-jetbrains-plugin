@@ -690,6 +690,8 @@ export interface EnvCliStatus {
   configured: boolean
   path?: string
   found: boolean
+  /** 形如 "0.16.5"（spawn `node <cli> --version`）；探测失败缺省 */
+  version?: string
   error?: string
   code?: string
   arg?: string

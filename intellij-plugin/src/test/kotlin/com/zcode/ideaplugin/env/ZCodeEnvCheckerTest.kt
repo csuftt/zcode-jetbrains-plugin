@@ -243,11 +243,13 @@ class ZCodeEnvCheckerTest {
         // 前置：本机 PATH 有 node、ZCode 标准位置安装、~/.zcode/v2/config.json 已登录
         ZCodeEnvChecker.setStoreForTest(WritableStore())
         val s = ZCodeEnvChecker.check(force = true)
-        println("✅ 环境检测: allOk=${s.allOk}, node=${s.node.path} ${s.node.version}, cli=${s.cli.path}, cred=${s.credentials.model}")
+        println("✅ 环境检测: allOk=${s.allOk}, node=${s.node.path} ${s.node.version}, cli=${s.cli.path} ${s.cli.version}, cred=${s.credentials.model}")
 
         assertTrue(s.node.found, "本机 PATH 应有 node（否则请先安装）: ${s.node.error}")
         assertTrue(s.node.versionTooLow.not(), "本机 node 应 ≥ 18: ${s.node.version}")
         assertTrue(s.cli.found, "本机应有标准位置 ZCode: ${s.cli.error}")
+        assertTrue(!s.cli.version.isNullOrBlank() && Regex("""\d+\.\d+\.\d+""").matches(s.cli.version!!),
+            "CLI 版本应探测成功且形如 N.N.N: ${s.cli.version}")
         assertTrue(s.credentials.ok, "本机应已登录 ZCode: ${s.credentials.error}")
         assertTrue(s.allOk)
     }
@@ -273,11 +275,13 @@ class ZCodeEnvCheckerTest {
 
     @Test
     fun `statusJson 字段结构与前端契约对齐`() {
-        val json = ZCodeEnvChecker.statusJson(EnvStatus(okNode(), okCli(), okCred()))
+        val cli = okCli().copy(version = "0.16.5")
+        val json = ZCodeEnvChecker.statusJson(EnvStatus(okNode(), cli, okCred()))
         val node = json["node"]!!.jsonObject
         assertEquals("/usr/bin/node", node["path"]!!.jsonPrimitive.content)
         assertEquals("v20.11.1", node["version"]!!.jsonPrimitive.content)
         assertEquals(18, node["minVersion"]!!.jsonPrimitive.content.toInt())
+        assertEquals("0.16.5", json["cli"]!!.jsonObject["version"]!!.jsonPrimitive.content)
         val cred = json["credentials"]!!.jsonObject
         assertEquals("glm-4.7", cred["model"]!!.jsonPrimitive.content)
         assertEquals(true, json["allOk"]!!.jsonPrimitive.content.toBoolean())
@@ -302,6 +306,7 @@ class ZCodeEnvCheckerTest {
         )
         assertTrue("path" !in bad["node"]!!.jsonObject, "null path 应省略")
         assertTrue("version" !in bad["node"]!!.jsonObject)
+        assertTrue("version" !in bad["cli"]!!.jsonObject, "探测失败的 cli version 应省略")
         assertFalse(bad["allOk"]!!.jsonPrimitive.content.toBoolean())
     }
 }

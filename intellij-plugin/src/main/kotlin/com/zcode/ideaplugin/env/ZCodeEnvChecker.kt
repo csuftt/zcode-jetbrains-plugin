@@ -57,6 +57,8 @@ data class CliStatus(
     /** 机器可读错误码（前端 i18n）：cliFileNotFound/cliNotFound */
     val code: String? = null,
     val arg: String? = null,
+    /** 形如 "0.16.5"（spawn `node <cli> --version`）；探测失败/未探测 null（展示用，不影响 allOk）*/
+    val version: String? = null,
 )
 
 data class CredentialStatus(
@@ -201,9 +203,10 @@ object ZCodeEnvChecker {
         if (!force && cached != null && now - cachedAt < CACHE_TTL_MILLIS) {
             return cached!!
         }
+        val nodeStatus = detectNode(configuredNodePath())
         val status = EnvStatus(
-            node = detectNode(configuredNodePath()),
-            cli = detectCli(configuredCliPath()),
+            node = nodeStatus,
+            cli = detectCli(configuredCliPath(), nodeStatus),
             credentials = detectCredentials(),
             browserHost = null,
         )
@@ -280,11 +283,11 @@ object ZCodeEnvChecker {
         else -> path
     }
 
-    private fun detectCli(configured: String?): CliStatus {
+    private fun detectCli(configured: String?, node: NodeStatus): CliStatus {
         if (configured != null) {
             val file = Path.of(configured).toFile()
             return if (file.isFile) {
-                CliStatus(true, configured, true, null)
+                CliStatus(true, configured, true, null, version = probeCliVersion(node, configured))
             } else {
                 CliStatus(true, null, false, "zcode.cjs 不存在：$configured", code = "cliFileNotFound", arg = configured)
             }
@@ -292,9 +295,32 @@ object ZCodeEnvChecker {
         // ZCodeLocator.detect() 按 os 选标准安装路径并校验存在性，异常消息即失败原因
         return try {
             val p = ZCodeLocator.detect()
-            CliStatus(false, p.toString(), true, null)
+            CliStatus(false, p.toString(), true, null, version = probeCliVersion(node, p.toString()))
         } catch (e: Exception) {
             CliStatus(false, null, false, e.message ?: "ZCode CLI 未找到", code = "cliNotFound")
+        }
+    }
+
+    /**
+     * zcode CLI 版本探测（spawn `node <cli> --version`，输出形如 "0.16.5"）。
+     * 展示用非阻断项：node 未找到/探测失败/超时/输出不可解析一律 null，不报错不缓存失败状态。
+     */
+    private fun probeCliVersion(node: NodeStatus, cliPath: String): String? {
+        val nodePath = node.path ?: return null
+        return try {
+            val proc = ProcessBuilder(nodePath, cliPath, "--version")
+                .redirectErrorStream(true)
+                .start()
+            try {
+                if (!proc.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) return null
+                if (proc.exitValue() != 0) return null
+                val output = proc.inputStream.bufferedReader().readText()
+                Regex("""\d+\.\d+\.\d+""").find(output)?.value
+            } finally {
+                proc.destroyForcibly()
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -553,6 +579,7 @@ object ZCodeEnvChecker {
             put("configured", s.cli.configured)
             putStringOrNull("path", s.cli.path)
             put("found", s.cli.found)
+            putStringOrNull("version", s.cli.version)
             putStringOrNull("error", s.cli.error)
             putStringOrNull("code", s.cli.code)
             putStringOrNull("arg", s.cli.arg)

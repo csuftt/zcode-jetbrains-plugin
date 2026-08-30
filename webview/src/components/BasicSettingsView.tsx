@@ -595,8 +595,11 @@ function EnvironmentSettings() {
           <span className="codicon codicon-rocket" />
           <span className="basic-settings__field-label">{t('settings.env.cli.label')}</span>
           {envStatus?.cli.found && cliPath && (
-            <span className="basic-settings__version-badge is-ok" title={cliPath}>
-              {t('settings.env.cli.found')}
+            <span
+              className="basic-settings__version-badge is-ok"
+              title={cliPath}
+            >
+              {envStatus.cli.version ?? t('settings.env.cli.found')}
             </span>
           )}
         </div>
