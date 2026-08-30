@@ -51,6 +51,63 @@ const STREAM_DEAD_PROBES = 8
 let lastStreamActivityAt = 0
 let streamWatchTimer: ReturnType<typeof setInterval> | null = null
 
+// ===== 切换模型后首回合零输出提示（2026-08-30 定时 flush 挂死事故）=====
+// 定时消息 flush 携带切模型时 setModel+send 紧贴 turn.completed 背靠背发出，实测会把
+// 该会话新模型的运行时状态在服务端写坏（随会话记录落盘，重启 IDEA 不愈）：此后该模型
+// 每个回合 turn.started 后零输出零完成零报错，而 session.updated 心跳不断重置静默看门狗
+// 计时、usage 轮询又确认回合活跃——既有看门狗对本故障结构性失明。此处只提示不判定：
+// 切换落定后 20s 内开始的回合，60s 仍无任何模型输出事件则提示可停止重发/切回原模型。
+// max 思考级别的合法静默思考可能误触（提示可关闭、无自动动作，代价可接受）
+let lastModelSetAckAt = 0
+let turnHasModelOutput = false
+let stallHintTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelSwitchStallHint(): void {
+  if (stallHintTimer) {
+    clearTimeout(stallHintTimer)
+    stallHintTimer = null
+  }
+}
+
+function armSwitchStallHint(
+  sessionId: string,
+  set: (partial: Partial<StoreState>) => void,
+  get: () => StoreState,
+): void {
+  cancelSwitchStallHint()
+  if (Date.now() - lastModelSetAckAt > 20_000) return
+  stallHintTimer = setTimeout(() => {
+    stallHintTimer = null
+    const st = get()
+    if (st.currentSessionId !== sessionId) return
+    if (!st.streaming || st.compacting) return
+    if (turnHasModelOutput) return
+    set({ lastNotice: i18n.t('app.modelSwitchStallHint') })
+  }, 60_000)
+}
+
+/**
+ * 等模型切换落定后再放行发送。定时 flush 携带切模型时 setModel+send 相距毫秒级、且紧贴
+ * 上一回合 turn.completed，正好撞进服务端回合清算滞后窗口（Java applyPendingModelSwitch
+ * 注释：事件已到、锁未放，偶发 -32603）——2026-08-30 实测会把该会话新模型运行时状态写坏
+ * 并随会话落盘（此后该模型所有回合无声挂死）。等 modelSet ack 再缓冲 500ms，对齐手动
+ * 「切换→发送」的天然健康间隔（实测 ~1.5s 间隔正常出流）。上限 6s：ack 迟迟不回也放行，
+ * 退化为旧时序不阻塞发送。
+ */
+function waitForModelSwitchSettled(maxWaitMs = 6000): Promise<void> {
+  return new Promise((resolve) => {
+    const start = Date.now()
+    const tick = () => {
+      if (isModelSwitchInFlight(useStore.getState()) && Date.now() - start < maxWaitMs) {
+        setTimeout(tick, 100)
+        return
+      }
+      setTimeout(resolve, 500) // ack 只代表 RPC 回包，再给服务端状态收敛留一拍
+    }
+    tick()
+  })
+}
+
 /** 润色/浏览器数据操作的兜底定时器句柄：回包或新请求发起时取消。
  *  不取消的话，残留定时器可在下一次同类请求的在途窗口内命中
  *  `get().xxx` 在途标志，误杀 loading 并注入上一次的错误文案 */
@@ -850,6 +907,7 @@ export const useStore = create<StoreState>((set, get) => ({
     // 服务端活跃信号绑定会话：切走后旧会话 usage 响应被丢弃，信号一并清空
     // （新会话的 loadUsage 会重新建立；防残留信号豁免新会话的判死判定）
     serverActiveTurnId = null
+    cancelSwitchStallHint() // 挂死提示定时器绑定旧会话，一并撤销
     const workspacePath = session.workspacePath || get().projectPath
     set({
       currentSessionId: session.sessionId,
@@ -957,19 +1015,37 @@ export const useStore = create<StoreState>((set, get) => ({
     // 受理定时指定模型时同步切换会话模型（下拉跟随、后续手动消息沿用）：本回合正确性
     // 由 send 自带 runtimeModel 保证；setModel 在回合中会被 Java 挂起至回合结束补发
     // （延迟切模型机制），互不冲突
+    // 等待判定必须在 setModel 之前：目标=当前显示模型时 setModel 走 no-op 分支会清掉
+    // 在途标记（切回语义），但真实切换仍可能在途（ack 未回），send 不能贴上去
+    const curModel = get().currentModel
+    const switchUnderway = isModelSwitchInFlight(get())
+      || (schedModel != null
+        && (curModel?.modelId !== schedModel.modelId || curModel?.providerId !== schedModel.providerId))
     if (schedModel) get().setModel(schedModel.modelId, schedModel.providerId)
-    sendToJava({
-      op: 'send',
-      sessionId: sid,
-      text,
-      workspacePath: get().currentWorkspacePath,
-      ...(sendModel ? { providerId: sendModel.providerId, modelId: sendModel.modelId } : {}),
-      ...(attachments?.length ? { attachments } : {}),
-    })
-    // 定时消息真发上报：Java 记入已发历史（持久化），历史重拉/重启后按 sessionId+text
-    // 匹配补「定时执行」徽标——服务端消息本身不带任何定时标记
-    if (opts?.scheduledFireAt != null) {
-      sendToJava({ op: 'scheduledFired', sessionId: sid, text, fireAt: opts.scheduledFireAt })
+    const wsPath = get().currentWorkspacePath
+    const doSend = () => {
+      sendToJava({
+        op: 'send',
+        sessionId: sid,
+        text,
+        workspacePath: wsPath,
+        ...(sendModel ? { providerId: sendModel.providerId, modelId: sendModel.modelId } : {}),
+        ...(attachments?.length ? { attachments } : {}),
+      })
+      // 定时消息真发上报：Java 记入已发历史（持久化），历史重拉/重启后按 sessionId+text
+      // 匹配补「定时执行」徽标——服务端消息本身不带任何定时标记
+      if (opts?.scheduledFireAt != null) {
+        sendToJava({ op: 'scheduledFired', sessionId: sid, text, fireAt: opts.scheduledFireAt })
+      }
+    }
+    // 切换在途（定时 flush 的 setModel 刚发出 / 用户手动切换后立刻发送）时等落定再发：
+    // setModel+send 背靠背且紧贴上一回合 turn.completed 会撞服务端回合清算滞后窗口，
+    // 实测（2026-08-30）把该会话新模型运行时状态写坏并落盘——所有后续该模型回合无声挂死。
+    // 乐观 UI（下方用户消息/标题占位）不等待，立即呈现
+    if (switchUnderway) {
+      void waitForModelSwitchSettled().then(doSend)
+    } else {
+      doSend()
     }
 
     // 本地把用户消息立即加入列表（不等 reload，体验更快）；
@@ -2252,6 +2328,7 @@ export function handleResponse(
           // 长工具执行）时豁免判死；真断流（app-server 死/回合结束）时信号消失
           const verdict = classifyReconcileSnapshot(msg.messages, serverActiveTurnId !== null)
           if (verdict !== 'progress') {
+            cancelSwitchStallHint()
             set({ streaming: false, streamingMessageId: null, waitingSince: null, compacting: false, backgroundTasks: {} })
             if (verdict === 'dead') {
               console.warn('[store] 流式对账：长时间无事件且服务端无进展，判定流丢失并收尾')
@@ -2368,6 +2445,7 @@ export function handleResponse(
       // 停止应答：立即复位等待态，不等终止帧（缺陷AD重审：V4 stop 流式期引擎不发
       // legacy 终止帧，面板合成帧/真实帧后到均幂等）。刻意不 flushQueue：停止意图=只收当前回合
       if (msg.sessionId === get().currentSessionId) {
+        cancelSwitchStallHint()
         set({ streaming: false, streamingMessageId: null, waitingSince: null, compacting: false })
       }
       break
@@ -2619,6 +2697,7 @@ export function handleResponse(
       // 延迟切换的补发可能晚到数分钟（挂起期间用户已切走会话）：目标会话不是当前
       // 会话时丢弃，避免旧会话的模型翻转污染当前会话显示与级别缓存
       if (msg.sessionId && msg.sessionId !== get().currentSessionId) break
+      lastModelSetAckAt = Date.now() // 切换后首回合零输出提示的时间基准
       set({
         currentModel: { modelId: msg.modelId, providerId: msg.providerId },
         modelInvalidated: false,
@@ -3321,7 +3400,12 @@ function handleStreamBatchDirect(
         bgDirty = true
       }
     }
-    if (event.type === 'turn.started') turnStarted = true
+    if (event.type === 'model.streaming' || event.type === 'tool.updated') turnHasModelOutput = true
+    if (event.type === 'turn.started') {
+      turnStarted = true
+      turnHasModelOutput = false
+      armSwitchStallHint(sessionId, set, get)
+    }
     // 压缩回合不建流式 assistant 消息（同单推路径：零 delta 空气泡，CompactingIndicator 表达）
     if (event.type !== 'turn.started' || !get().compacting) {
       const result = applyStreamEvent(messages, event, streamingMessageId)
@@ -3350,6 +3434,7 @@ function handleStreamBatchDirect(
   // 同批 completed+started（服务端自动续轮）时保留 reducer 返回的新 streamingMessageId，
   // 不能按"turn 结束"清空——清了后续 delta 全部丢失（实时断流）
   if (turnEnded && !turnStarted) {
+    cancelSwitchStallHint()
     patch.streaming = false
     patch.streamingMessageId = null
     patch.waitingSince = null
@@ -3501,6 +3586,12 @@ function handleStreamEvent(
     return
   }
 
+  if (event.type === 'model.streaming' || event.type === 'tool.updated') turnHasModelOutput = true
+  if (event.type === 'turn.started') {
+    turnHasModelOutput = false
+    armSwitchStallHint(sessionId, set, get)
+  }
+
   const { messages, streamingMessageId, turnEnded, modeEvent, turnError } = applyStreamEvent(
     get().messages,
     event,
@@ -3525,6 +3616,7 @@ function handleStreamEvent(
 
   // turn 结束：重新拉完整消息确保数据一致，清除流式状态，自动发送队列下一条
   if (turnEnded) {
+    cancelSwitchStallHint()
     const wasCompacting = get().compacting
     set({
       streaming: false,
