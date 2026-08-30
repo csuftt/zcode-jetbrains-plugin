@@ -1,4 +1,8 @@
 {
+  "openChoiceTitle": "세션 열기",
+  "openChoiceMessage": "현재 탭에 이미 세션이 있습니다. \"{{title}}\"을(를) 어디에서 열까요?",
+  "openHere": "현재 탭 덮어쓰기",
+  "openNewTab": "새 탭에서 열기",
   "totalSessions": "총 {{count}}개의 세션",
   "selectedSessions": "{{count}}개의 세션 선택됨",
   "selectAll": "모두 선택",
@@ -14,9 +18,6 @@
   "deleteConfirmMulti": "선택한 {{count}}개의 세션을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
   "deleteConfirmSingle": "이 세션을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
   "delete": "삭제",
-  "switchTitle": "세션 전환",
-  "switchMessage": "현재 탭에서 \"{{title}}\"을(를) 엽니다. 현재 세션은 기록에 유지됩니다. 전환하시겠습니까?",
-  "switch": "전환",
   "confirmDeleteAgain": "다시 클릭하여 삭제 확정",
   "deleteSession": "세션 삭제",
   "messageCount": "메시지 {{count}}건",

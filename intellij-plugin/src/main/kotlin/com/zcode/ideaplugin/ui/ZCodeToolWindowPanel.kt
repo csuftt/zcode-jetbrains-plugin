@@ -832,6 +832,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "scheduledDueAck" -> handleScheduledDueAck(msg)
                         "scheduledFired" -> handleScheduledFired(msg)
                         "gotoSession" -> handleGotoSession(msg)
+                        "locateSession" -> handleLocateSession(msg)
                         "listArchivedSessions" -> handleListArchivedSessions(msg)
                         "listModels" -> handleListModels(msg)
                         "modelManageList" -> handleModelManageList(msg)
@@ -1846,6 +1847,30 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     private fun ackOp(op: String): JsonObject = buildJsonObject { put("op", op) }
+
+    /**
+     * 历史列表打开会话前的定位查询：任一标签已绑定该会话 → EDT 上激活那个宿主标签
+     * （含懒加载面板 ensure）并回 found=true，发起标签只需切回聊天视图；没有任何宿主
+     * 标签时回 found=false 且不产生副作用，由 webview 决定覆盖当前标签页还是新开标签。
+     */
+    private fun handleLocateSession(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content ?: return errorResponse("缺少 sessionId")
+        var found = false
+        try {
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeAndWait {
+                if (!project.isDisposed) {
+                    found = ZCodeToolWindowFactory.activateSessionTab(project, sessionId)
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("Locate session tab failed: ${e.message}")
+        }
+        return buildJsonObject {
+            put("op", "sessionTabLocated")
+            put("sessionId", sessionId)
+            put("found", found)
+        }
+    }
 
     /** 懒加载标签未激活（JCEF 未创建）时 webview 推送不可达，定时消息分派需降级直发 */
     fun canPushToWebview(): Boolean = ::jbCefBrowser.isInitialized

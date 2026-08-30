@@ -1,4 +1,8 @@
 {
+  "openChoiceTitle": "セッションを開く",
+  "openChoiceMessage": "現在のタブには既にセッションがあります。「{{title}}」をどこで開きますか？",
+  "openHere": "現在のタブを上書き",
+  "openNewTab": "新しいタブで開く",
   "totalSessions": "全 {{count}} 件のセッション",
   "selectedSessions": "{{count}} 件のセッションを選択中",
   "selectAll": "すべて選択",
@@ -14,9 +18,6 @@
   "deleteConfirmMulti": "選択した {{count}} 件のセッションを削除しますか？この操作は元に戻せません。",
   "deleteConfirmSingle": "このセッションを削除しますか？この操作は元に戻せません。",
   "delete": "削除",
-  "switchTitle": "セッション切替",
-  "switchMessage": "現在のタブで「{{title}}」を開きます。現在のセッションは履歴に保持されます。切替しますか？",
-  "switch": "切替",
   "confirmDeleteAgain": "もう一度クリックして削除を確定",
   "deleteSession": "セッションを削除",
   "messageCount": "{{count}} 件のメッセージ",

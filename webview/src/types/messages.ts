@@ -396,6 +396,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'scheduledFired'; sessionId: string; text: string; fireAt: number }
   /** 任务列表跳转会话：Java 统一 openSessionTab——激活已有宿主标签，无则新建标签按 sessionId 恢复 */
   | { op: 'gotoSession'; sessionId: string }
+  /** 历史列表打开前定位：查所有标签是否已绑定该会话（有则 Java 直接激活宿主标签跳转，无副作用）*/
+  | { op: 'locateSession'; sessionId: string }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {
@@ -735,6 +737,8 @@ export type JavaResponse =
   | { op: 'scheduledDue'; id: string; sessionId: string; text: string; scheduledFireAt?: number; providerId?: string; modelId?: string }
   /** 跳转会话应答：external=Java 已激活宿主标签（本标签不动）；local=本标签 selectSession */
   | { op: 'gotoSessionOpened' }
+  /** 定位应答：found=true 时 Java 已激活宿主标签（发起标签只需切回聊天视图）；false=无宿主标签 */
+  | { op: 'sessionTabLocated'; sessionId: string; found: boolean }
   | { op: 'messages'; sessionId: string; messages: ZCodeMessage[]; reconcile?: boolean }
   | { op: 'subagents'; sessionId: string; data: SubagentsResult; error?: string }
   | { op: 'subagentMessages'; sessionId: string; messages: ZCodeMessage[]; error?: string }

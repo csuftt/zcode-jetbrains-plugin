@@ -1,4 +1,8 @@
 {
+  "openChoiceTitle": "開啟會話",
+  "openChoiceMessage": "目前標籤頁已有會話，「{{title}}」要開啟到哪裡？",
+  "openHere": "覆蓋目前標籤頁",
+  "openNewTab": "在新標籤頁開啟",
   "totalSessions": "共 {{count}} 個會話",
   "selectedSessions": "已選擇 {{count}} 個會話",
   "selectAll": "全選",
@@ -14,9 +18,6 @@
   "deleteConfirmMulti": "確定要刪除所選 {{count}} 個會話嗎？此操作不可撤銷。",
   "deleteConfirmSingle": "確定要刪除這個會話嗎？此操作不可撤銷。",
   "delete": "刪除",
-  "switchTitle": "切換會話",
-  "switchMessage": "將在當前標籤頁開啟「{{title}}」，當前會話會保留在歷史記錄中。確定切換嗎？",
-  "switch": "切換",
   "confirmDeleteAgain": "再次點選確認刪除",
   "deleteSession": "刪除會話",
   "messageCount": "{{count}} 條訊息",

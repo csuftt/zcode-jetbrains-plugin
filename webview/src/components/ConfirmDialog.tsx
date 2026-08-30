@@ -17,9 +17,12 @@ interface Props {
   confirmText?: string
   /** 取消按钮文案（缺省取 common.confirm.cancel）*/
   cancelText?: string
+  /** 第三选项按钮文案（如「新标签页打开」）：渲染在取消与确认之间，中性样式 */
+  extraText?: string
   /** 危险操作（确认按钮红色）*/
   danger?: boolean
   onConfirm: () => void
+  onExtra?: () => void
   onCancel: () => void
 }
 
@@ -28,8 +31,10 @@ export function ConfirmDialog({
   message,
   confirmText,
   cancelText,
+  extraText,
   danger = false,
   onConfirm,
+  onExtra,
   onCancel,
 }: Props) {
   const { t } = useTranslation()
@@ -42,6 +47,11 @@ export function ConfirmDialog({
           <button className="modal-btn modal-btn-cancel" onClick={onCancel}>
             {cancelText ?? t('common.confirm.cancel')}
           </button>
+          {extraText && onExtra && (
+            <button className="modal-btn modal-btn-cancel" onClick={onExtra}>
+              {extraText}
+            </button>
+          )}
           <button
             className={`modal-btn ${danger ? 'modal-btn-danger' : 'modal-btn-primary'}`}
             onClick={onConfirm}

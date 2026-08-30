@@ -71,6 +71,8 @@ export default function App() {
   const loadArchivedSessions = useStore((s) => s.loadArchivedSessions)
   const archiveSession = useStore((s) => s.archiveSession)
   const restoreSession = useStore((s) => s.restoreSession)
+  const locateSessionTab = useStore((s) => s.locateSessionTab)
+  const openSessionNewTab = useStore((s) => s.openSessionNewTab)
   const setPendingSettingsSection = useStore((s) => s.setPendingSettingsSection)
   const changelogOpen = useStore((s) => s.changelogOpen)
   const openChangelog = useStore((s) => s.openChangelog)
@@ -288,8 +290,8 @@ export default function App() {
             archivedSessions={archivedSessions}
             archivedLoading={archivedLoading}
             currentSessionId={currentSessionId}
-            /** 当前会话有对话历史时，历史列表切换前需二次确认（覆盖当前标签页）*/
-            currentSessionHasMessages={!loadingMessages && messages.length > 0}
+            onLocate={locateSessionTab}
+            onOpenNewTab={openSessionNewTab}
             onSelect={selectSession}
             onBack={() => setCurrentView('chat')}
             onArchive={archiveSession}

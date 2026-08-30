@@ -1,4 +1,8 @@
 {
+  "openChoiceTitle": "Open Session",
+  "openChoiceMessage": "The current tab already has a session. Where should \"{{title}}\" be opened?",
+  "openHere": "Replace current tab",
+  "openNewTab": "Open in new tab",
   "totalSessions": "{{count}} sessions",
   "selectedSessions": "{{count}} sessions selected",
   "selectAll": "Select all",
@@ -14,9 +18,6 @@
   "deleteConfirmMulti": "Are you sure you want to delete the {{count}} selected sessions? This cannot be undone.",
   "deleteConfirmSingle": "Are you sure you want to delete this session? This cannot be undone.",
   "delete": "Delete",
-  "switchTitle": "Switch Session",
-  "switchMessage": "\"{{title}}\" will be opened in the current tab. The current session will be kept in history. Switch now?",
-  "switch": "Switch",
   "confirmDeleteAgain": "Click again to confirm deletion",
   "confirmArchiveAgain": "Click again to confirm archive",
   "confirmRestoreAgain": "Click again to confirm restore",

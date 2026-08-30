@@ -115,6 +115,8 @@ let serverActiveTurnId: string | null = null
 /** 客户端最近处理过 turn.completed/failed 的回合 id：usage 响应的 activeTurnId
  *  与之相同 = 服务端清算滞后的「已完成那轮」读数，不得据此复活压缩指示器 */
 let lastCompletedTurnId: string | null = null
+/** locateSession 在途应答的解析器（单槽，见 locateSessionTab）*/
+let pendingTabLocate: ((found: boolean) => void) | null = null
 /** 本轮压缩态是否被服务端 activeTurnKind 确认过（滞后读数不算）：只允许"确认过
  *  后的缺失"清除压缩指示器——旧版 zcode.cjs 不上报该字段，无条件清会把 /compact
  *  的指示器在首个轮询样本就抹掉（维持旧客户端"字段缺失不动作"语义） */
@@ -460,6 +462,13 @@ interface StoreState {
   archiveSession: (sessionId: string) => void
   /** 恢复归档会话（从回收站移回历史列表）*/
   restoreSession: (sessionId: string) => void
+  /**
+   * 历史列表打开会话前的定位查询：resolve true = Java 已激活该会话的宿主标签（跨标签跳转完成）；
+   * false = 没有任何标签打开过它（调用方决定覆盖当前标签页还是新开）
+   */
+  locateSessionTab: (sessionId: string) => Promise<boolean>
+  /** 历史列表「新标签页打开」：走 Java gotoSession 统一路径（定位已确认无宿主 → 必然新建标签）*/
+  openSessionNewTab: (sessionId: string) => void
   stopStreaming: () => void
   /** 重命名会话（CLI 协议无 rename op，仅前端 persist 持久化）*/
   renameSession: (sessionId: string, title: string) => void
@@ -1110,6 +1119,18 @@ export const useStore = create<StoreState>((set, get) => ({
 
   restoreSession: (sessionId) => {
     sendToJava({ op: 'restoreSession', sessionId })
+  },
+
+  locateSessionTab: (sessionId) =>
+    new Promise<boolean>((resolve) => {
+      // 单槽复用：上一笔在途请求按未找到放行（模态弹窗期间不会有并发定位，仅防极端连点挂死）
+      pendingTabLocate?.(false)
+      pendingTabLocate = resolve
+      sendToJava({ op: 'locateSession', sessionId })
+    }),
+
+  openSessionNewTab: (sessionId) => {
+    sendToJava({ op: 'gotoSession', sessionId })
   },
 
   stopStreaming: () => {
@@ -2167,6 +2188,15 @@ export function handleResponse(
       // 恢复：从已归档列表移除，刷新历史列表让会话重新出现
       set({ archivedSessions: get().archivedSessions.filter((x) => x.sessionId !== msg.sessionId) })
       get().loadSessions()
+      break
+    }
+
+    case 'sessionTabLocated': {
+      // 历史列表定位应答：found=true 时 Java 已激活宿主标签（跨标签跳转完成），
+      // 发起标签的 HistoryView 拿到 true 后只需切回聊天视图
+      const resolve = pendingTabLocate
+      pendingTabLocate = null
+      resolve?.(msg.found)
       break
     }
 

@@ -26,8 +26,13 @@ interface Props {
   archivedSessions: SessionInfo[]
   archivedLoading: boolean
   currentSessionId: string | null
-  /** 当前会话是否有对话历史（有 → 切换前二次确认，防止误触覆盖当前标签页）*/
-  currentSessionHasMessages?: boolean
+  /**
+   * 打开会话前的定位查询：resolve true = 该会话已有宿主标签且 Java 已激活跳转
+   * （本标签只需切回聊天视图）；false = 没有任何标签打开过它
+   */
+  onLocate: (sessionId: string) => Promise<boolean>
+  /** 「新标签页打开」选择：Java gotoSession 统一路径（定位已确认无宿主 → 必然新建标签）*/
+  onOpenNewTab: (sessionId: string) => void
   onSelect: (session: SessionInfo) => void
   /** 切回 chat 视图 */
   onBack: () => void
@@ -64,7 +69,8 @@ export function HistoryView({
   archivedSessions,
   archivedLoading,
   currentSessionId,
-  currentSessionHasMessages = false,
+  onLocate,
+  onOpenNewTab,
   onSelect,
   onBack,
   onArchive,
@@ -83,8 +89,10 @@ export function HistoryView({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   // 批量操作确认 modal（null = 不显示）
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
-  // 切换确认 modal（待切换到当前标签页的历史会话，null = 不显示）
+  // 切换确认 modal（当前标签有会话时的打开方式选择，null = 不显示）
   const [switchTarget, setSwitchTarget] = useState<SessionInfo | null>(null)
+  // 定位应答在途标记：模态未开前的 IPC 往返窗口内拦截重复点击
+  const locatingRef = useRef(false)
 
   // 切到已归档 tab 时拉取列表（每次切换都刷新，保证归档项新鲜）
   useEffect(() => {
@@ -154,21 +162,41 @@ export function HistoryView({
     setSelectedIds(new Set())
   }
 
-  const handleItemClick = (session: SessionInfo) => {
+  const handleItemClick = async (session: SessionInfo) => {
     if (selectionMode) {
       toggleSelection(session.sessionId)
       return
     }
     // 已归档会话：点击不进入会话，恢复走专属「还原」按钮（防止误触进入归档会话）
     if (tab === 'archived') return
-    // 切到别的会话且当前标签页有对话历史 → 二次确认（防止误触覆盖当前会话）；
-    // 点当前会话 / 当前为空会话 → 直接切换，无需打扰
-    if (session.sessionId !== currentSessionId && currentSessionHasMessages) {
-      setSwitchTarget(session)
+    // 点当前会话：无操作，切回 chat 视图
+    if (session.sessionId === currentSessionId) {
+      onSelect(session)
+      onBack()
       return
     }
-    onSelect(session)
-    onBack() // 切回 chat 视图
+    // 防抖：定位应答在途时忽略重复点击
+    if (locatingRef.current) return
+    locatingRef.current = true
+    let found = false
+    try {
+      found = await onLocate(session.sessionId)
+    } finally {
+      locatingRef.current = false
+    }
+    // 任一标签已打开该会话 → Java 已激活那个标签（跨标签跳转），本标签切回聊天视图
+    if (found) {
+      onBack()
+      return
+    }
+    // 当前标签无真实会话（新标签待命态）→ 直接在当前标签打开，无需打扰
+    if (!currentSessionId) {
+      onSelect(session)
+      onBack()
+      return
+    }
+    // 当前标签已有会话 → 让用户选：覆盖当前标签页 / 新标签页打开
+    setSwitchTarget(session)
   }
 
   // ============ 批量操作确认 ============
@@ -361,16 +389,23 @@ export function HistoryView({
         />
       )}
 
-      {/* 切换会话确认 modal（历史会话覆盖当前标签页）*/}
+      {/* 打开方式选择 modal（当前标签已有会话：覆盖当前标签页 / 新标签页打开）*/}
       {switchTarget && (
         <ConfirmDialog
-          title={t('history.switchTitle')}
-          message={t('history.switchMessage', { title: switchTarget.title.slice(0, 30) })}
-          confirmText={t('history.switch')}
+          title={t('history.openChoiceTitle')}
+          message={t('history.openChoiceMessage', { title: switchTarget.title.slice(0, 30) })}
+          confirmText={t('history.openHere')}
+          extraText={t('history.openNewTab')}
           onConfirm={() => {
             const target = switchTarget
             setSwitchTarget(null)
             onSelect(target)
+            onBack()
+          }}
+          onExtra={() => {
+            const sid = switchTarget.sessionId
+            setSwitchTarget(null)
+            onOpenNewTab(sid)
             onBack()
           }}
           onCancel={() => setSwitchTarget(null)}
