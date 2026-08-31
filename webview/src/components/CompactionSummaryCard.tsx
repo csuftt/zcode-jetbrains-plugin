@@ -10,11 +10,12 @@
  * 缺失时退化为纯标题行（boundary 是压缩点固有产物，正常都在）。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage, CompactionPart } from '@/types/messages'
 import { MarkdownBlock } from './MarkdownBlock'
+import { ScrollJumpButton } from './ScrollJumpButton'
 import '../styles/compaction.less'
 
 /** token 数缩写：287247 → 287k（分隔卡与摘要卡共用）*/
@@ -84,6 +85,7 @@ function CompactionSummaryDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -114,9 +116,11 @@ function CompactionSummaryDialog({
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>
-        <div className="subagent-detail-body subagent-report-body">
+        <div className="subagent-detail-body subagent-report-body" ref={bodyRef}>
           <MarkdownBlock markdown={body} />
         </div>
+        {/* 滚动跳转按钮（↑置顶/↓置底，对齐主界面）：长摘要快速回顶/到底 */}
+        <ScrollJumpButton containerRef={bodyRef} />
       </div>
     </div>,
     document.body,

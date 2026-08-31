@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ZCodeMessage } from '@/types/messages'
-import { isAgentNotification } from '@/utils/parseNotification'
+import { isAgentNotification, isCompactSummaryMessage } from '@/utils/parseNotification'
 import '../styles/chat-view.less'
 
 interface Props {
@@ -38,9 +38,12 @@ export function MessageAnchorRail({ messages, containerRef }: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null)
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 锚点列表：只取真实 user 消息（排除子agent/任务回调等合成通知）
+  // 锚点列表：只取真实 user 消息（排除子agent/任务回调等合成通知，以及压缩摘要
+  // 消息——role 也是 user 但渲染走 CompactionSummaryCard、不挂 data-anchor-msg，
+  // 收进锚点点了也跳不动）
   const anchors = useMemo<Anchor[]>(() => {
-    const userMsgs = messages.filter((m) => m.info.role === 'user' && !isAgentNotification(m.info))
+    const userMsgs = messages.filter((m) =>
+      m.info.role === 'user' && !isAgentNotification(m.info) && !isCompactSummaryMessage(m.info))
     if (userMsgs.length === 0) return []
     const max = 30
     const sampled = userMsgs.length > max ? sampleItems(userMsgs, max) : userMsgs
