@@ -18,6 +18,7 @@
 }
 
 .subagent-detail-dialog {
+  position: relative; /* 滚动跳转按钮（scroll-control-button absolute）的定位锚 */
   width: 760px;
   max-width: 92vw;
   max-height: 82vh;
@@ -175,6 +176,37 @@
   }
 }
 
+/* 失败收尾提示条：状态徽标之外的正文级失败说明（含 Agent 工具 output 的错误详情） */
+.subagent-detail-failed {
+  margin: 4px 12px 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  border-radius: 4px;
+  background: rgba(244, 67, 54, 0.06);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--status-error);
+
+    .codicon {
+      font-size: 14px;
+    }
+  }
+
+  &__reason {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed rgba(244, 67, 54, 0.25);
+    font-size: 12px;
+    color: var(--text-secondary);
+    max-height: 180px;
+    overflow-y: auto;
+  }
+}
+
 .subagent-detail-error {
   display: flex;
   align-items: center;
@@ -232,20 +264,35 @@
     color: var(--status-info);
   }
 
+  // 内容区堆叠与主界面 msg__content 同构（flex column + 4px 上下 padding，无容器 gap）。
+  // 弹窗紧凑密度：卡片自带 margin 8px 上下若再叠容器 gap 会到 24px（flex 不折叠），
+  // 过程流几十张卡视觉空旷——容器不加 gap 并压卡片 margin 至 4px（卡间距 8px）
   &-body {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding-left: 10px;
+    padding: 4px 0 4px 10px;
     border-left: 2px solid var(--border-primary);
+
+    .tool-card,
+    .bash-group,
+    .file-group,
+    .thinking-block {
+      margin: 4px 0;
+    }
   }
 }
 
-/* 运行中实时工具列表 */
+/* 运行中实时工具列表（层2 回退）：与 msg-body 同款紧凑密度（gap 叠加卡片 margin 会超 20px）*/
 .subagent-detail-tools {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+
+  .tool-card,
+  .bash-group,
+  .file-group,
+  .thinking-block {
+    margin: 4px 0;
+  }
 }
 
 .subagent-detail-fallback {

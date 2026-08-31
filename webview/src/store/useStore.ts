@@ -156,6 +156,7 @@ function sessionResetBase(): Partial<StoreState> {
     childMessages: {},
     childMessagesError: null,
     childSessionKeys: {},
+    childSessionV4: {},
     childLiveMessages: {},
     childStreamingIds: {},
   }
@@ -320,6 +321,9 @@ interface StoreState {
   /** 已注册子会话（childSessionId → 聚合键）：spawned 通知/转发事件/RPC 三处注册，*/
   /** 注册后其原生事件流被实时归约（不再被 currentSessionId 过滤丢弃）*/
   childSessionKeys: Record<string, string>
+  /** 子会话 v4 实时通道是否可用（subscribeChild 应答的 v4 标志）：可用时弹窗不做
+   *  3s 快照轮询（实时流在场，轮询只添乱且用户无法区分数据来源），不可用时保留轮询兜底 */
+  childSessionV4: Record<string, boolean>
   /** 子会话实时归约消息（childSessionId → messages，运行中详情弹窗完整对话源）*/
   childLiveMessages: Record<string, ZCodeMessage[]>
   /** 子会话各自的流式消息 id（applyStreamEvent 的 streamingMessageId）*/
@@ -705,6 +709,7 @@ export const useStore = create<StoreState>((set, get) => ({
   childMessagesLoading: false,
   childMessagesError: null,
   childSessionKeys: {},
+  childSessionV4: {},
   childLiveMessages: {},
   childStreamingIds: {},
 
@@ -2438,7 +2443,11 @@ export function handleResponse(
       break
 
     case 'subscribed':
-    case 'subscribedChild': // 子会话订阅 ack（事件流随 subscribeChild op 建立后自然到达）
+      break
+    case 'subscribedChild': // 子会话订阅 ack：记录 v4 通道可用性（弹窗据此停用快照轮询）
+      if (typeof msg.v4 === 'boolean' && msg.sessionId) {
+        set({ childSessionV4: { ...get().childSessionV4, [msg.sessionId]: msg.v4 } })
+      }
       break
 
     case 'stopped':
@@ -3166,8 +3175,24 @@ function handleChildStreamBatch(
   let streamingId = get().childStreamingIds[sessionId] ?? null
   let childTurnEnded = false
   let childTurnFailed = false
+  // 批内 turn 生命周期归并（2026-08-31 实测"会话没完成被判失败"根因修复）：
+  // 子代理多 turn 续跑（前 turn 失败重试/自动续轮）时，turn1 终态与 turn2.started
+  // 可能同批到达——最终态以批内最后一个生命周期事件为准，turn2 已开则不收尾
+  let lastLifecycle: 'started' | 'ended' | null = null
+  let sawTurnStarted = false
   for (const event of events) {
+    // v4 快照回放前的重置标记：清空 live 归约状态再重建（重订阅/online 重同步
+    // 场景防内容重复追加；applyStreamEvent 不认识它，在此拦截）
+    if (event.type === 'stream.snapshotReset') {
+      messages = []
+      streamingId = null
+      continue
+    }
     if (event.type === 'state.updated') continue
+    if (event.type === 'turn.started') {
+      lastLifecycle = 'started'
+      sawTurnStarted = true
+    }
     // 防御：子会话原生流不应出现转发标记，出现则跳过（转发事件走父会话流）
     if (event.type === 'tool.updated' && isSubagentToolEvent(event.payload)) continue
     const r = applyStreamEvent(messages, event, streamingId)
@@ -3175,26 +3200,37 @@ function handleChildStreamBatch(
     streamingId = r.streamingMessageId
     if (r.turnEnded) {
       childTurnEnded = true
+      lastLifecycle = 'ended'
       if (r.turnError) childTurnFailed = true
     }
   }
   const st = get()
+  let activities = st.subagentActivities
+  // 跨批恢复：turn 终态收尾后子代理又续跑新 turn（重试/续轮）——恢复 running，
+  // 防误终态被 mergeAgentItems 防降级锁死（RPC running 盖不回本地终态）
+  const key = st.childSessionKeys[sessionId]
+  if (sawTurnStarted && key) {
+    const restored = activities.map((a) => a.key === key && a.status !== 'running'
+      ? { ...a, status: 'running' as const, endedAt: undefined, lastUpdate: Date.now() }
+      : a)
+    if (restored !== activities) activities = restored
+  }
   set({
     childLiveMessages: { ...st.childLiveMessages, [sessionId]: messages },
     childStreamingIds: { ...st.childStreamingIds, [sessionId]: streamingId },
+    ...(activities !== st.subagentActivities
+      ? { subagentActivities: activities, ...refreshStatus(st.messages, activities, st.subagents) }
+      : {}),
   })
   // 子会话 turn 结束 = 子代理跑完：后台代理唯一实时可用的终点信号
   //（session/subscribe 流不带 subagent.lifecycle，合成通知消息只在重拉时可见），
-  // 即时收尾父会话活动 + 权威刷新。子会话多 turn 自动续轮时会提前收尾一次，
-  // RPC 刷新返回 running 会把状态盖回来，可自愈。
-  if (childTurnEnded) {
-    const key = st.childSessionKeys[sessionId]
-    if (key) {
-      const ts = events[events.length - 1]?.timestamp ?? Date.now()
-      const activities = markActivityOutcome(st.subagentActivities, key, childTurnFailed, ts)
-      set({ subagentActivities: activities, ...refreshStatus(st.messages, activities, st.subagents) })
-      get().loadSubagents()
-    }
+  // 即时收尾父会话活动 + 权威刷新。批内最后生命周期事件是新 turn.started
+  //（多 turn 续轮：终态后又开了新回合）时跳过收尾——子代理整体仍在跑
+  if (childTurnEnded && lastLifecycle !== 'started' && key) {
+    const ts = events[events.length - 1]?.timestamp ?? Date.now()
+    const closed = markActivityOutcome(activities, key, childTurnFailed, ts)
+    set({ subagentActivities: closed, ...refreshStatus(st.messages, closed, st.subagents) })
+    get().loadSubagents()
   }
 }
 
@@ -3211,7 +3247,7 @@ function handleStreamBatch(
   // 展示累计。这里把超阈值的大 delta 切片成原子事件队列，按 ~16ms/片回放
   // （约 1 秒播完），后续事件（tool_call/tool.updated 等）排队保序——下游
   // reducer/组件零改动，事件流被"重新流式化"。小 delta（真实逐块流式）直通。
-  const atoms = sliceBigToolInputDeltas(events)
+  const atoms = sliceBigStreamDeltas(events)
   if (atoms || (replayQueues.get(sessionId)?.length ?? 0) > 0) {
     enqueueReplay(sessionId, atoms ?? events, set, get)
     return
@@ -3242,20 +3278,43 @@ const REPLAY_DELTA_THRESHOLD = 400
 const REPLAY_FRAME_MS = 16
 const REPLAY_TARGET_SLICES = 55
 
-/** 批内含超阈值 tool_input_delta 时，把大 delta 展开成切片原子序列 */
-function sliceBigToolInputDeltas(events: StreamEvent[]): StreamEvent[] | null {
+/** 批内含超阈值大块 delta 时，把大 delta 展开成切片原子序列（按 kind 分阈值）：
+ *  - tool_input_delta >400 字符：GLM openai-compatible 聚合大块（原有场景）
+ *  - text_delta/reasoning_delta >32 字符：v4 增量帧的 row.delta append 块
+ *    （2026-08-31 抓包：中位 7 字、最大 87 字），主会话 legacy 流是小 delta 不受影响，
+ *    子会话 v4 流的大块一次到达即"跳字"，切片后与主界面打字机体感一致 */
+const TEXT_REPLAY_THRESHOLD = 32
+const TEXT_SLICE_CHARS = 8
+
+function replayThresholdFor(kind: unknown): number | null {
+  if (kind === 'tool_input_delta') return REPLAY_DELTA_THRESHOLD
+  if (kind === 'text_delta' || kind === 'reasoning_delta') return TEXT_REPLAY_THRESHOLD
+  return null
+}
+
+function sliceBigStreamDeltas(events: StreamEvent[]): StreamEvent[] | null {
   const hasBig = events.some((e) => {
     if (e.type !== 'model.streaming') return false
+    // 快照回放（v4 订阅/重同步的全量文本）不是流式，不切片——切片会让几十行的
+    // 历史回放拖成数秒打字机，快照要求"到场即完整"
+    if (e.deliveryKind === 'snapshot') return false
     const p = e.payload as Record<string, unknown>
-    return p.kind === 'tool_input_delta' && typeof p.delta === 'string' && p.delta.length > REPLAY_DELTA_THRESHOLD
+    const th = replayThresholdFor(p.kind)
+    return th != null && typeof p.delta === 'string' && p.delta.length > th
   })
   if (!hasBig) return null
   const atoms: StreamEvent[] = []
   for (const e of events) {
     const p = e.payload as Record<string, unknown>
-    if (e.type === 'model.streaming' && p.kind === 'tool_input_delta'
-      && typeof p.delta === 'string' && p.delta.length > REPLAY_DELTA_THRESHOLD) {
-      const slices = Math.min(REPLAY_TARGET_SLICES, Math.max(2, Math.ceil(p.delta.length / 96)))
+    const th = replayThresholdFor(p.kind)
+    const isToolInput = p.kind === 'tool_input_delta'
+    if (e.type === 'model.streaming' && e.deliveryKind !== 'snapshot' && th != null
+      && typeof p.delta === 'string' && p.delta.length > th) {
+      // 两者都封顶 55 片：tool_input 按 96 字/片；text/reasoning 按 8 字/片微步进
+      // （87 字块 ~11 片 ≈ 176ms 播完，兼顾逐字体感与更低的 DOM 替换频率）——
+      // text 不封顶时一次数 KB 的大块会展开成数百片，拖出数秒打字机滞后
+      const perSlice = isToolInput ? 96 : TEXT_SLICE_CHARS
+      const slices = Math.min(REPLAY_TARGET_SLICES, Math.max(2, Math.ceil(p.delta.length / perSlice)))
       const size = Math.ceil(p.delta.length / slices)
       for (let i = 0; i * size < p.delta.length; i++) {
         atoms.push({
@@ -3270,7 +3329,10 @@ function sliceBigToolInputDeltas(events: StreamEvent[]): StreamEvent[] | null {
   return atoms
 }
 
-/** 每拍派发一个原子事件，队列空则停表并清掉本会话的队列/定时器 */
+/** 每拍派发一个原子事件，队列空则停表并清掉本会话的队列/定时器。
+ *  ⚠️ 单事件处理异常必须吞掉续泵：pump 回调若异常中断，timer 链断而
+ *  replayTimers 残留键 → enqueueReplay 的 has 判定永不重启 → 该会话全部
+ *  后续事件永久积压（2026-08-31 用户实测：工具停在 loading，手动刷新才渲染）*/
 function startReplayPump(
   sessionId: string,
   set: (partial: Partial<StoreState>) => void,
@@ -3278,9 +3340,20 @@ function startReplayPump(
 ): void {
   const pump = () => {
     const queue = replayQueues.get(sessionId)
-    const next = queue?.shift()
-    if (next) handleStreamBatchDirect(sessionId, [next], set, get)
-    if (queue && queue.length > 0) {
+    // 追帧：积压越长每拍播放越多（>100 片起每 100 片加一拍速），长报告切片
+    // 不至于拖出数秒滞后；正常小队列仍是 16ms/片的匀速打字机
+    const burst = queue ? Math.max(1, Math.floor(queue.length / 100)) : 1
+    for (let i = 0; i < burst; i++) {
+      let next: StreamEvent | undefined
+      try {
+        next = queue?.shift()
+        if (next) handleStreamBatchDirect(sessionId, [next], set, get)
+      } catch (err) {
+        console.error('[stream-replay] event dispatch failed (dropped, pump continues):', next?.type, err)
+      }
+    }
+    const alive = replayQueues.get(sessionId)
+    if (alive && alive.length > 0) {
       replayTimers.set(sessionId, window.setTimeout(pump, REPLAY_FRAME_MS))
     } else {
       replayQueues.delete(sessionId)
@@ -3504,7 +3577,7 @@ function handleStreamEvent(
   lastStreamActivityAt = Date.now()
 
   // ===== 工具输入大块 delta 的流式回放（同批量路径；mock/关键事件走单推）=====
-  const atoms = sliceBigToolInputDeltas([event])
+  const atoms = sliceBigStreamDeltas([event])
   if (atoms || (replayQueues.get(sessionId)?.length ?? 0) > 0) {
     enqueueReplay(sessionId, atoms ?? [event], set, get)
     return
@@ -3763,7 +3836,16 @@ function classifyReconcileSnapshot(raw: ZCodeMessage[], serverActive: boolean): 
   }
   const visible = raw.filter((m) => !isHiddenSyntheticMessage(m.info))
   const last = visible[visible.length - 1]
-  if (last && last.info.role === 'assistant' && hasVisibleText(last)) return 'ended'
+  if (last && last.info.role === 'assistant' && hasVisibleText(last)) {
+    // 服务端回合仍活跃时不判结束：流式消息已有正文 + 前台子代理/长工具执行中是
+    // 合法静默（末条 assistant 带文本是常态而非回合终点）。此处提前收尾会清掉
+    // streamingMessageId，子代理完成后的续写 delta 全被丢弃——主界面实时流丢失、
+    // 回合结束权威重拉才一次性渲染（2026-08-31 实测）。回合真结束的权威判定 =
+    // turn.completed 事件 / activeTurnId 消失，看门狗只兜真断流
+    if (!serverActive) return 'ended'
+    reconcileDeadCount = 0
+    return 'progress'
+  }
   // 服务端回合仍活跃 = 合法等待，清零无进展计数（真断流时回合结束 activeTurnId
   // 消失、快照出现完整回复或计数累计，两条路径都照常收尾）
   if (serverActive) {

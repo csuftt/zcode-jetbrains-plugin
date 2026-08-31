@@ -18,12 +18,13 @@
  * AskUserQuestion 的 answer 只要求非空，两者不能复用同一应答值。
  */
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import { DialogCountdown } from './DialogCountdown'
+import { ScrollJumpButton } from './ScrollJumpButton'
 import '../styles/plan-approval-dialog.less'
 
 interface Props {
@@ -36,6 +37,7 @@ interface Props {
 
 export function PlanApprovalDialog({ requestId, plan, deadlineMs, onClose }: Props) {
   const { t } = useTranslation()
+  const bodyRef = useRef<HTMLDivElement>(null)
   const [feedback, setFeedback] = useState('')
 
   const handleApprove = () => {
@@ -89,9 +91,11 @@ export function PlanApprovalDialog({ requestId, plan, deadlineMs, onClose }: Pro
           <DialogCountdown deadlineMs={deadlineMs} />
         </div>
 
-        <div className="plan-approval-dialog__body">
+        <div className="plan-approval-dialog__body" ref={bodyRef}>
           <MarkdownBlock markdown={plan || t('app.planApproval.emptyPlan')} />
         </div>
+        {/* 滚动跳转按钮（↑置顶/↓置底，对齐主界面）：长计划快速回顶/到底 */}
+        <ScrollJumpButton containerRef={bodyRef} />
 
         <div className="plan-approval-dialog__footer">
           {/* 一行两组：批准主按钮在左（主操作优先），竖线分隔，输入组（框+继续规划）居右 */}

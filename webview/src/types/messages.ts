@@ -108,7 +108,8 @@ export interface ToolState {
   inputRaw?: string
   output?: string
   title?: string
-  error?: { message: string; code?: string }
+  /** 失败详情双形态：历史读回（session/messages）为纯字符串；流式 tool.updated(kind=error) 为 {message, code} */
+  error?: string | { message: string; code?: string }
   metadata?: Record<string, unknown>
   time?: { start: number; end?: number }
 }
@@ -748,7 +749,7 @@ export type JavaResponse =
   /** getClipboardImage 响应：base64 缺省 = 剪贴板无图片（Java 侧读取失败同样返回空）*/
   | { op: 'clipboardImage'; base64?: string; mediaType?: string }
   | { op: 'subscribed'; sessionId: string; alreadySubscribed?: boolean }
-  | { op: 'subscribedChild'; sessionId: string }
+  | { op: 'subscribedChild'; sessionId: string; v4?: boolean }
   | { op: 'stopped'; sessionId: string }
   | { op: 'streamEvent'; sessionId: string; event: StreamEvent }
   | { op: 'streamBatch'; sessionId: string; events: StreamEvent[] }
@@ -856,6 +857,8 @@ export interface StreamEvent {
   sessionId: string
   turnId?: string | null
   timestamp: number
+  /** 事件来源标记："snapshot" = v4 订阅/重同步的快照回放（全量非流式，前端跳过切片回放） */
+  deliveryKind?: string | null
   payload: StreamEventPayload
 }
 
@@ -866,6 +869,7 @@ export type StreamEventPayload =
   | TurnStartedPayload
   | TurnCompletedPayload
   | TurnFailedPayload
+  | { messageId?: string; text: string } // turn.userInput（v4 快照回放的 user 消息）
   | Record<string, unknown> // 兜底（session.updated 等暂不处理的）
 
 /**

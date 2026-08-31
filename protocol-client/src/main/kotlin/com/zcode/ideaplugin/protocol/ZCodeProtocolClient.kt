@@ -75,6 +75,17 @@ class ZCodeProtocolClient private constructor(
     // 全局事件监听器（所有 session）
     private val globalListeners = ConcurrentHashMap.newKeySet<(SessionEvent) -> Unit>()
 
+    // ============ v4 会话协议（子会话实时流根治通道） ============
+
+    /** 连接级 connectionId：一次生成全程复用（同一 connection 可订阅多个 topic） */
+    private val v4ConnectionId = "zcode-idea-plugin-${java.util.UUID.randomUUID()}"
+
+    /** 已 v4 订阅的会话（幂等去重；帧到达时也以此为门禁，未订阅会话的帧不映射） */
+    private val v4SubscribedSessions = ConcurrentHashMap.newKeySet<String>()
+
+    /** v4 增量帧 → legacy SessionEvent 映射（行表等状态集中此处，v4 面演进只改一类） */
+    private val v4FrameMapper = V4FrameMapper()
+
     // 运行时偏好应答策略：memoryEnabled 决定 MEMORY.md 自动记忆是否注入会话上下文
     // （宿主答 false 时 CLI 强制 memory:{enabled:false}）。默认 SAFE_DEFAULT（全 false），
     // 宿主可注入真实配置。在 reader 线程同步调用，实现必须快（本地小文件读取级别）
@@ -435,7 +446,28 @@ class ZCodeProtocolClient private constructor(
             eventListeners[sid]?.forEach { it(event) }
             globalListeners.forEach { it(event) }
         }
+        // v4/conversation/frame：v4 订阅会话的增量帧（子会话实时流根治通道）。
+        // topic=conversation/<sessionId>；只对主动 v4 订阅过的会话映射，防与 legacy 流双写
+        else if (method == "v4/conversation/frame") {
+            val topic = params["topic"]?.jsonPrimitive?.jsonStringOrNull ?: return
+            val sid = topic.removePrefix("conversation/")
+            if (sid.length == topic.length || sid !in v4SubscribedSessions) return
+            val frame = params["frame"]?.jsonObject ?: return
+            val events = try {
+                v4FrameMapper.mapFrame(sid, frame)
+            } catch (e: Exception) {
+                System.err.println("[ZCodeProtocolClient] v4 frame map error (frame dropped): ${e.javaClass.simpleName}: ${e.message}")
+                return
+            }
+            for (ev in events) dispatchSessionEvent(ev)
+        }
         // v4/telemetry/event 等暂不处理
+    }
+
+    /** 会话事件统一分发：per-session 监听器 + 全局监听器（session/event 与 v4 映射共用出口） */
+    private fun dispatchSessionEvent(event: SessionEvent) {
+        eventListeners[event.sessionId]?.forEach { it(event) }
+        globalListeners.forEach { it(event) }
     }
 
     // ============ 底层发送 ============
@@ -670,6 +702,49 @@ class ZCodeProtocolClient private constructor(
         requireOk(r)
         return r["result"]?.jsonObject ?: JsonObject(emptyMap())
     }
+
+    /**
+     * v4/conversation/subscribe — 订阅会话的 v4 增量帧流（子会话实时流根治通道）。
+     *
+     * legacy session/subscribe 对子会话恒成功但 0 事件投递（0.16.5 实测），本通道
+     * 订阅后增量帧实时到达 v4/conversation/frame，由 V4FrameMapper 映射回 legacy
+     * SessionEvent 推给现有监听器——前端归约链路零改动。clientMode 固定
+     * desktop-continuous（continuous profile 含 inputText/output.text 流路径，
+     * flush 窗口 30ms；replayable 不推 output 流）。幂等：同会话重复订阅直接返回。
+     * 老版本 CLI 无 v4 面时报 -32601，调用方按降级处理（快照轮询兜底）。
+     */
+    fun subscribeConversationV4(sessionId: String, timeoutMs: Long = 10000): JsonObject {
+        if (sessionId in v4SubscribedSessions) return JsonObject(emptyMap())
+        val params = buildJsonObject {
+            put("topic", "conversation/$sessionId")
+            put("connectionId", v4ConnectionId)
+            put("clientMode", "desktop-continuous")
+        }
+        val r = request("v4/conversation/subscribe", params, timeoutMs)
+        requireOk(r)
+        v4SubscribedSessions.add(sessionId)
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * v4/conversation/unsubscribe — 退订（best-effort：失败只清本地状态不抛）。
+     * 连接级开销可忽略，不退订也无害；供会话关闭路径收敛使用。
+     */
+    fun unsubscribeConversationV4(sessionId: String, timeoutMs: Long = 5000) {
+        v4SubscribedSessions.remove(sessionId)
+        v4FrameMapper.cleanup(sessionId)
+        try {
+            request("v4/conversation/unsubscribe", buildJsonObject {
+                put("topic", "conversation/$sessionId")
+                put("connectionId", v4ConnectionId)
+            }, timeoutMs)
+        } catch (e: Exception) {
+            // 退订失败可忽略（连接回收/进程退出时服务端自清）
+        }
+    }
+
+    /** 该会话是否已建立 v4 增量帧订阅（订阅幂等应答的 v4 标志数据源） */
+    fun isConversationV4Subscribed(sessionId: String): Boolean = sessionId in v4SubscribedSessions
 
     /**
      * session/send — 发消息（字段是 content 不是 message！）

@@ -78,7 +78,8 @@
     "noChildSession": "No child session records. The subagent's final report:",
     "loading": "Loading subagent records…",
     "noData": "No subagent process data",
-    "loadFull": "Load full history"
+    "loadFull": "Load full history",
+    "taskFailed": "Subagent task failed"
   },
   "viewPlan": "View plan details",
   "planTitle": "Execution Plan"

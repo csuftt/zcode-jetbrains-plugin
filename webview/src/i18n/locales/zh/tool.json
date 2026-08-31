@@ -78,7 +78,8 @@
     "noChildSession": "无子会话记录，以下为子代理最终报告：",
     "loading": "正在加载子代理记录…",
     "noData": "暂无子代理过程数据",
-    "loadFull": "加载完整记录"
+    "loadFull": "加载完整记录",
+    "taskFailed": "子代理执行失败"
   },
   "viewPlan": "查阅计划详情",
   "planTitle": "执行计划"

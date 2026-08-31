@@ -6,16 +6,19 @@
  * openMarkdownPreview），复用子代理弹窗的 overlay/dialog 样式结构。
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
+import { ScrollJumpButton } from './ScrollJumpButton'
 import '../styles/subagent-detail.less'
 
 export function MarkdownPreviewDialog() {
   const { t } = useTranslation()
   const preview = useStore((s) => s.markdownPreview)
   const closeMarkdownPreview = useStore((s) => s.closeMarkdownPreview)
+
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   // Escape 关闭
   useEffect(() => {
@@ -46,9 +49,11 @@ export function MarkdownPreviewDialog() {
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>
-        <div className="subagent-detail-body subagent-report-body">
+        <div className="subagent-detail-body subagent-report-body" ref={bodyRef}>
           <MarkdownBlock markdown={preview.markdown} />
         </div>
+        {/* 滚动跳转按钮（↑置顶/↓置底，对齐主界面）：长文快速回顶/到底 */}
+        <ScrollJumpButton containerRef={bodyRef} />
       </div>
     </div>
   )

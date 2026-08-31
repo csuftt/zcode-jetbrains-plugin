@@ -120,6 +120,9 @@ class ZCodeToolWindowPanel(
     // 已 subscribe 过的会话集合（每个会话只 subscribe 一次，不 unsubscribe）。
     // 多标签下事件按此集合过滤：本面板只推自己订阅会话的事件，与其他标签互不影响
     private val subscribedSessions = java.util.concurrent.CopyOnWriteArraySet<String>()
+
+    /** 子会话事件推送计数（[v4-child-probe] 诊断日志，见 pushStreamEvent） */
+    private val childEventProbe = java.util.concurrent.ConcurrentHashMap<String, Long>()
     // 全局监听器是否已注册
     @Volatile
     private var globalListenerRegistered = false
@@ -3236,22 +3239,47 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
         if (sessionId in subscribedSessions) {
             log.info("subscribeChild: child session $sessionId already subscribed, skipping")
+            // 幂等跳过路径：v4 未订上（首订失败）则补试一次——否则该子会话永远停在
+            // 快照轮询，实时流无重试机会
+            if (!client.isConversationV4Subscribed(sessionId)) {
+                try {
+                    client.subscribeConversationV4(sessionId)
+                    log.info("subscribeChild: v4 conversation subscribed (retry) $sessionId")
+                } catch (e: Exception) {
+                    log.info("subscribeChild: v4 retry still unavailable for $sessionId: ${e.message}")
+                }
+            }
             return buildJsonObject {
                 put("op", "subscribedChild")
                 put("sessionId", sessionId)
+                put("v4", client.isConversationV4Subscribed(sessionId))
             }
         }
 
         // subscribe 要求会话 active，先 resume（同会话短窗去重）；运行中的子会话可能已 active，失败静默
         resumeSessionDeduped(client, sessionId, workspacePath)
 
+        // legacy 订阅（0.16.5 对子会话恒成功但 0 事件投递，保留无害，兼容未来版本修复）
         return try {
             client.subscribe(sessionId, onEvent = null)
             subscribedSessions.add(sessionId)
             log.info("subscribeChild: child session event stream subscribed $sessionId")
+            // v4 订阅：子会话实时流的根治通道（v4/conversation/frame 增量帧 → 映射回
+            // legacy 事件 → pushStreamEvent 白名单放行 → 前端 childLiveMessages 归约）。
+            // 失败降级为纯快照轮询（弹窗 3s 兜底由前端按 v4=false 自行启用），不阻断订阅应答
+            var v4Ok = false
+            try {
+                client.subscribeConversationV4(sessionId)
+                v4Ok = true
+                log.info("subscribeChild: v4 conversation subscribed $sessionId")
+            } catch (e: Exception) {
+                log.info("subscribeChild: v4 subscribe unavailable for $sessionId (degraded to snapshot polling): ${e.message}")
+            }
             buildJsonObject {
                 put("op", "subscribedChild")
                 put("sessionId", sessionId)
+                // v4 通道可用标志：前端据此停用 3s 快照轮询（v4 实时流在场时轮询只添乱）
+                put("v4", v4Ok)
             }
         } catch (e: Exception) {
             log.warn("subscribeChild: subscribe failed $sessionId: ${e.message}")
@@ -3291,6 +3319,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 多标签隔离：只推本面板订阅过的会话（其他标签的事件由各自的监听器推送）
         if (sessionId !in subscribedSessions) return
 
+        // 子会话事件诊断计数（v4 实时流排查）：首条 + 每 500 条 INFO 摘要——
+        // idea.log 有计数递增而 UI 不动 = 断在前端归约；计数停滞 = 断在 Java/协议层
+        if (sessionId.startsWith("sess_subagent")) {
+            val n = childEventProbe.merge(sessionId, 1L, Long::plus)
+            if (n != null && (n == 1L || n % 500L == 0L)) {
+                log.info("[v4-child-probe] $sessionId pushed $n events (last=${event.type})")
+            }
+        }
         // 回合生命周期 → 延迟切模型状态机（缺陷AC：见 streamingTurns 注释）。
         // 覆盖本面板订阅的全部会话（切模型只在当前会话触发，但当前会话一定已订阅）
         when (event.type) {
@@ -3318,6 +3354,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("sessionId", event.sessionId)
             event.turnId?.let { put("turnId", it) }
             put("timestamp", event.timestamp)
+            // v4 快照回放标记（前端切片回放据此跳过；legacy 流恒 null 不发）
+            event.deliveryKind?.let { put("deliveryKind", it) }
             put("payload", event.payload)
         }
 

@@ -177,6 +177,29 @@ describe('store：流式静默对账看门狗', () => {
     expect(useStore.getState().lastError).toBeNull()
   })
 
+  it('服务端回合活跃时末条带文本的 assistant 快照不判结束（前台子代理静默段）', () => {
+    // 2026-08-31 实测缺陷：主代理先输出"派一个子代理去搜索…"再等 Agent 工具返回，
+    // 静默 60s 后对账快照末条 = 带正文的流式消息 → 被判"回合已结束"收尾清掉
+    // streamingMessageId → 子代理完成后主代理续写 delta 全被丢弃，主界面实时流
+    // 丢失、回合结束权威重拉才一次性渲染。服务端回合活跃（activeTurnId）必须豁免
+    useStore.setState({ streaming: true, streamingMessageId: 'm2' })
+    messageHandler!({ op: 'usage', sessionId: SID, activeTurnId: 'turn_active', activeTurnKind: 'regular', used: 0, size: 0 })
+    vi.advanceTimersByTime(61_000)
+    const snapshot = [mkMsg('user', '搜索国外政府新闻', 'm1'), mkMsg('assistant', '好，派一个子代理去搜索', 'm2')]
+    messageHandler!({ op: 'messages', sessionId: SID, reconcile: true, messages: snapshot })
+    // 不收尾：流式挂载点保住（子代理完成后的续写依赖它）
+    const st = useStore.getState()
+    expect(st.streaming).toBe(true)
+    expect(st.streamingMessageId).toBe('m2')
+
+    // 活跃信号消失（回合真结束/服务端无进展）→ 下一轮探测照常判 ended 收尾
+    messageHandler!({ op: 'usage', sessionId: SID, used: 0, size: 0 })
+    vi.advanceTimersByTime(61_000)
+    messageHandler!({ op: 'messages', sessionId: SID, reconcile: true, messages: snapshot })
+    expect(useStore.getState().streaming).toBe(false)
+    expect(useStore.getState().lastError).toBeNull() // ended 是正常收尾不报错
+  })
+
   it('usage activeTurnId 是滞后读数（=== lastCompletedTurnId）→ 不算活跃，照旧判死', () => {
     useStore.setState({ streaming: true })
     // 回合结束（记录已完成 turnId），随后 usage 读到服务端未清算的滞后读数

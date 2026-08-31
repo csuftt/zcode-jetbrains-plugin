@@ -36,6 +36,10 @@ interface Props {
   onSearchClose?: () => void
 }
 
+/** 上滑余震窗（与 ScrollJumpButton 同值）：滚轮上滑后的短窗内 scroll/wheel 的
+ *  "还在底部附近"判定不可信——既不恢复跟滚也不隐藏/切向刚显示的 ↑ */
+const UP_GHOST_MS = 600
+
 /** 计算最后一条消息的内容指纹（流式增长时变化 → 触发滚动）*/
 function lastMessageFingerprint(messages: ZCodeMessage[]): string {
   const last = messages[messages.length - 1]
@@ -54,6 +58,9 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
+  // 最近一次滚轮上滑时刻：其后的短窗口内 scroll 的"到底判定"不恢复自动跟滚——
+  // 上滑断跟后流式置底/微小回弹引发的 scroll 会把跟滚立刻拉回（上滑弹跳根因）
+  const lastUpWheelAt = useRef(0)
   const prevLastId = useRef<string | undefined>(undefined)
   const fingerprint = lastMessageFingerprint(messages)
   // 滚动跳转按钮（cc-gui ScrollControl）：单个按钮，方向跟随用户滚轮方向，
@@ -71,33 +78,48 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
     const el = containerRef.current
     if (!el) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    userScrolledUp.current = !nearBottom
-    // cc-gui checkScrollPosition：到底部（或内容不再溢出）即隐藏跳转按钮
-    if (nearBottom || el.scrollHeight <= el.clientHeight) {
+    // 上滑后的短窗内不因"到底判定"恢复跟滚（流式置底/微小回弹会立刻拉回用户）
+    if (!(nearBottom && Date.now() - lastUpWheelAt.current < UP_GHOST_MS)) {
+      userScrolledUp.current = !nearBottom
+    }
+    // cc-gui checkScrollPosition：到底部（或内容不再溢出）即隐藏跳转按钮——
+    // 上滑余震窗内除外：起步第一格 scroll 离底仍 <80px，会立即打掉刚显示的 ↑
+    if ((nearBottom || el.scrollHeight <= el.clientHeight) && Date.now() - lastUpWheelAt.current >= UP_GHOST_MS) {
       setScrollBtnVisible(false)
     }
   }
 
-  // 滚轮方向决定按钮箭头：deltaY>0 下滑→↓置底，deltaY<0 上滑→↑置顶（cc-gui handleWheel）
+  // 滚轮方向决定按钮箭头：deltaY>0 下滑→↓置底，deltaY<0 上滑→↑置顶（cc-gui handleWheel）。
+  // 上滑必须立即断开自动跟滚并显示 ↑——滚轮意图先于 scroll 生效，等 scroll 承认
+  // 会被高频流式置底反复拽回（弹跳）；从底部起步的第一格也要出 ↑（wheel 先于
+  // scroll，scrollTop 未更新，不能被 nearBottom 早退吞掉）
   const handleWheel = (e: React.WheelEvent) => {
     const el = containerRef.current
     if (!el) return
     // 内容不满一屏，不显示
     if (el.scrollHeight <= el.clientHeight) return
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    // 已在底部附近，不显示（wheel 先于 scroll 触发，此时 scrollTop 还未更新）
-    if (distanceFromBottom < 80) {
-      setScrollBtnVisible(false)
+    if (e.deltaY < 0) {
+      lastUpWheelAt.current = Date.now()
+      userScrolledUp.current = true
+      if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current)
+      setScrollBtnDirection('up')
+      setScrollBtnVisible(true)
+      scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), 1500)
       return
     }
-    if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current)
-    if (e.deltaY > 0) {
-      setScrollBtnDirection('down')
-    } else if (e.deltaY < 0) {
-      setScrollBtnDirection('up')
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    // 已在底部附近，下滑无意义不显示（wheel 先于 scroll 触发，此时 scrollTop 还未更新）；
+    // 上滑余震窗内的惯性/微抖反向事件直接忽略（隐藏或切向 ↓ 都会打断刚显示的 ↑）
+    if (e.deltaY > 0 && distanceFromBottom < 80) {
+      if (Date.now() - lastUpWheelAt.current >= UP_GHOST_MS) setScrollBtnVisible(false)
+      return
     }
-    setScrollBtnVisible(true)
-    scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), 1500)
+    if (e.deltaY > 0) {
+      if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current)
+      setScrollBtnDirection('down')
+      setScrollBtnVisible(true)
+      scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), 1500)
+    }
   }
 
   // 消息变化（含流式内容增长）+ 新消息 + waiting 变化时滚动

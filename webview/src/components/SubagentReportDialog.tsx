@@ -7,10 +7,11 @@
  * 报告 → 过程 → 报告 可通过头部按钮来回切换，Escape 只关当前弹窗。
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
+import { ScrollJumpButton } from './ScrollJumpButton'
 import '../styles/subagent-detail.less'
 
 export function SubagentReportDialog() {
@@ -18,6 +19,8 @@ export function SubagentReportDialog() {
   const report = useStore((s) => s.subagentReport)
   const openSubagentDetail = useStore((s) => s.openSubagentDetail)
   const closeSubagentReport = useStore((s) => s.closeSubagentReport)
+
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   // Escape 关闭
   useEffect(() => {
@@ -56,9 +59,11 @@ export function SubagentReportDialog() {
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>
-        <div className="subagent-detail-body subagent-report-body">
+        <div className="subagent-detail-body subagent-report-body" ref={bodyRef}>
           <MarkdownBlock markdown={report.markdown} />
         </div>
+        {/* 滚动跳转按钮（↑置顶/↓置底，对齐主界面）：长报告快速回顶/到底 */}
+        <ScrollJumpButton containerRef={bodyRef} />
       </div>
     </div>
   )

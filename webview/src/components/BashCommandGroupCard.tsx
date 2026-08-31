@@ -17,6 +17,7 @@ import { useStore } from '@/store/useStore'
 import { useTick } from '@/hooks/useTick'
 import { formatToolDuration } from '@/utils/time'
 import { isBackgroundTaskOutput } from '@/utils/backgroundTask'
+import { toolErrorText } from '@/utils/parseStatus'
 import '../styles/tool-call-card.less'
 
 /** 列表最大可见高度（3.5 项 × 32px/项），超出内部滚动 */
@@ -47,7 +48,7 @@ function parseBashItem(part: ToolPart): BashItem {
     command,
     description,
     output: state.output ?? '',
-    errorMessage: state.error?.message ?? '',
+    errorMessage: toolErrorText(state.error),
     status: state.status,
     callID: part.callID,
     rawInput: !state.input && state.inputRaw ? state.inputRaw.replace(/\s+/g, ' ') : '',

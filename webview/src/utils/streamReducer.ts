@@ -57,6 +57,24 @@ export function applyStreamEvent(
     case 'turn.started':
       return handleTurnStarted(messages, event, payload)
 
+    case 'turn.userInput': {
+      // v4 快照回放的 user 消息（子会话 prompt）：live 流没有本地乐观添加路径，
+      // 由快照映射层补发；幂等（messageId 命中即跳过，重订阅/重同步重放安全）
+      const p = payload as { messageId?: string; text: string }
+      const uid = p.messageId || `snapuser_${event.turnId || event.seq}`
+      if (messages.some((m) => m.info.id === uid)) {
+        return { messages, streamingMessageId, turnEnded: false }
+      }
+      return {
+        messages: [...messages, {
+          info: { role: 'user', time: { created: event.timestamp }, id: uid, sessionID: event.sessionId },
+          parts: p.text ? [{ type: 'text', text: p.text }] : [],
+        }],
+        streamingMessageId,
+        turnEnded: false,
+      }
+    }
+
     case 'model.streaming':
       return handleModelStreaming(messages, streamingMessageId, event.timestamp, payload)
 

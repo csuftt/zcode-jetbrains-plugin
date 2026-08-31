@@ -78,7 +78,8 @@
     "noChildSession": "하위 세션 기록이 없습니다. 아래는 서브에이전트의 최종 보고서입니다:",
     "loading": "서브에이전트 기록 로드 중…",
     "noData": "서브에이전트 과정 데이터 없음",
-    "loadFull": "전체 기록 로드"
+    "loadFull": "전체 기록 로드",
+    "taskFailed": "서브에이전트 작업이 실패했습니다"
   },
   "viewPlan": "계획 세부 정보 보기",
   "planTitle": "실행 계획"

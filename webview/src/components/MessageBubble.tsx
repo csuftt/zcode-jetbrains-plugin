@@ -27,12 +27,7 @@ import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage, MessagePart, TextPart, ImagePart, FilePart } from '@/types/messages'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
-import { ToolCallCard } from './ToolCallCard'
-import { ThinkingBlock } from './ThinkingBlock'
 import { AgentNotificationCard } from './AgentNotificationCard'
-import { BashCommandGroupCard } from './BashCommandGroupCard'
-import { FileToolGroupCard } from './FileToolGroupCard'
-import { groupParts, type PartRenderUnit } from '@/utils/groupParts'
 import { isAgentNotification, isCompactSummaryMessage, findTimelinePart } from '@/utils/parseNotification'
 import { clockTime, formatDuration } from '@/utils/time'
 import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
@@ -40,7 +35,14 @@ import { KV_HYDRATED_EVENT } from '@/utils/persist'
 import { useTick } from '@/hooks/useTick'
 import { CompactionSummaryCard } from './CompactionSummaryCard'
 import { TimelineSeparator } from './TimelineSeparator'
-import { ImagePreview } from './ImagePreview'
+import {
+  collectImageParts,
+  imagePartSrc,
+  imagePartTitle,
+  MessageImage,
+  renderPartUnits,
+} from './PartUnits'
+import { groupParts } from '@/utils/groupParts'
 import '../styles/message-bubble.less'
 
 interface Props {
@@ -96,46 +98,6 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
   }
   return <AssistantBubble message={message} time={time} streaming={streaming} searchActive={searchActive} />
 })
-
-/**
- * user 消息的图片 part 收集：乐观消息（type:'image'）与服务端读回
- * （type:'file' + mime image/*，2026-08-26 RPC 实测形态）两种形态统一收集。
- */
-function collectImageParts(parts: MessagePart[]): Array<ImagePart | FilePart> {
-  return parts.filter((p): p is ImagePart | FilePart =>
-    p.type === 'image' || (p.type === 'file' && (p.mime ?? '').startsWith('image/')),
-  )
-}
-
-/** 图片 part → 可渲染 src：image 用 dataUrl/拼 base64；file 用 url（Java 已换成 http）*/
-function imagePartSrc(img: ImagePart | FilePart): string {
-  if (img.type === 'image') {
-    if (img.dataUrl) return img.dataUrl
-    if (img.dataBase64) return `data:${img.mediaType || 'image/png'};base64,${img.dataBase64}`
-    return ''
-  }
-  // file part：zcode-artifact://（Java 未转换/转换失败）不可渲染，返回空跳过
-  return img.url && /^https?:\/\//.test(img.url) ? img.url : ''
-}
-
-/** 图片 part 的展示标题（hover/大图预览）*/
-function imagePartTitle(img: ImagePart | FilePart): string | undefined {
-  if (img.type === 'image') return img.source?.filename ?? img.source?.placeholder
-  return img.filename ?? (img.metadata?.image as Record<string, unknown> | undefined)?.filename as string | undefined
-}
-
-/**
- * 消息内图片（限宽圆角，点击大图预览）。user 气泡与 PartRenderer 共用。
- */
-function MessageImage({ src, title }: { src: string; title?: string }) {
-  const [preview, setPreview] = useState(false)
-  return (
-    <>
-      <img className="msg__image" src={src} alt={title ?? ''} title={title} onClick={() => setPreview(true)} />
-      {preview && <ImagePreview src={src} title={title} onClose={() => setPreview(false)} />}
-    </>
-  )
-}
 
 /** 用户消息长文折叠阈值（对齐 InputBox 粘贴折叠 PASTE_* 常量：≥10 行或 ≥500 字符）*/
 const USER_COLLAPSE_LINES = 10
@@ -313,42 +275,15 @@ function AssistantBubble({
   time: string
   streaming?: boolean
   searchActive?: boolean
-}) {  const { info, parts } = message
-  // 找最后一个 reasoning part
-  const lastReasoningIdx = (() => {
-    for (let i = parts.length - 1; i >= 0; i--) {
-      if (parts[i].type === 'reasoning') return i
-    }
-    return -1
-  })()
-
-  // 最后一个 reasoning 之后是否已有 text part（有则折叠 reasoning，没有则保持展开）
-  const hasTextAfterLastReasoning = lastReasoningIdx >= 0
-    ? parts.slice(lastReasoningIdx + 1).some((p) => p.type === 'text')
-    : false
-
-  // 流式时最后一个 part 是正在增长的
-  const lastPartIdx = parts.length - 1
+}) {
+  const { info, parts } = message
 
   // 连续 Bash 命令聚组（cc-gui groupBlocks 规则）：压缩批量命令的消息区长度。
   // 分组保留原始 part 下标，reasoning 自动展开/流式判定的 index 语义不变
   const units = useMemo(() => groupParts(parts), [parts])
-  const renderUnit = (unit: PartRenderUnit) =>
-    unit.kind === 'toolGroup' ? (
-      unit.group === 'bash' ? (
-        <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} />
-      ) : (
-        <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} />
-      )
-    ) : (
-      <PartRenderer
-        key={unit.index}
-        part={unit.part}
-        // reasoning 自动展开：是最后一个 reasoning + 后面还没有正文
-        autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
-        streaming={!!streaming && unit.index === lastPartIdx}
-      />
-    )
+  // 单元渲染走共享管线（与子代理弹窗共用，含组卡/单卡/reasoning 自动展开推导）；
+  // 折叠态只渲染尾部单元（结论后的收尾动作），推导仍基于完整 parts
+  const renderedUnits = useMemo(() => renderPartUnits(units, parts, streaming), [units, parts, streaming])
 
   // 完成轮折叠（流式期间全渲染，turn 结束起默认只留结论）；
   // 「自动折叠执行过程」设置控制默认态，手动点折叠栏的意图优先于设置；
@@ -367,12 +302,16 @@ function AssistantBubble({
   )
   // 折叠态下保留的尾部单元：整组/单个 part 全部落在结论之后（工具组是连续同类
   // tool 的极大游程，text 不在其中，不会出现跨越结论的组）
-  const tailUnits = useMemo(
+  const renderedTailUnits = useMemo(
     () =>
       collapsible
-        ? units.filter((u) => (u.kind === 'toolGroup' ? u.startIndex : u.index) > lastTextIdx)
+        ? renderPartUnits(
+            units.filter((u) => (u.kind === 'toolGroup' ? u.startIndex : u.index) > lastTextIdx),
+            parts,
+            streaming,
+          )
         : [],
-    [collapsible, lastTextIdx, units],
+    [collapsible, lastTextIdx, units, parts, streaming],
   )
   // 折叠栏概览的轮次耗时：服务端权威值（completed - created）；重拉窗口缺 completed 就不显示
   const processMs =
@@ -394,10 +333,10 @@ function AssistantBubble({
         {collapsed ? (
           <>
             <MarkdownBlock markdown={(parts[lastTextIdx] as TextPart).text} />
-            {tailUnits.map(renderUnit)}
+            {renderedTailUnits}
           </>
         ) : (
-          units.map(renderUnit)
+          renderedUnits
         )}
       </div>
       <MessageFooter info={info} time={time} streaming={streaming} />
@@ -435,46 +374,6 @@ function TurnProcessBar({
       {items.length > 0 && <span className="msg__process-bar-meta">{items.join(' · ')}</span>}
     </button>
   )
-}
-
-/** 单个 part 的渲染分发 */
-function PartRenderer({
-  part,
-  autoExpandReasoning,
-  streaming,
-}: {
-  part: MessagePart
-  autoExpandReasoning: boolean
-  streaming: boolean
-}) {
-  switch (part.type) {
-    case 'text':
-      return <MarkdownBlock markdown={part.text} streaming={streaming} />
-
-    case 'image':
-    case 'file': {
-      // file part：仅 image/* 是图片（Java 已把 url 换成 http；非图片/未转换返回 null）
-      if (part.type === 'file' && !(part.mime ?? '').startsWith('image/')) return null
-      const src = imagePartSrc(part)
-      if (!src) return null
-      return <MessageImage src={src} title={imagePartTitle(part)} />
-    }
-
-    case 'reasoning':
-      // 自动展开：思考还在进行中或刚结束还没正文。正文出现后自动折叠。
-      // streaming（本 part 是流式中最后一个 part）驱动思考耗时跳动计时
-      return <ThinkingBlock part={part} autoExpand={autoExpandReasoning} streaming={streaming} />
-
-    case 'tool':
-      return <ToolCallCard part={part} />
-
-    case 'step-start':
-    case 'step-finish':
-      return null
-
-    default:
-      return null
-  }
 }
 
 /** user 消息的文本收集：把所有 text part 合并 */

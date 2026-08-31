@@ -18,27 +18,30 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
-import { ToolCallCard } from './ToolCallCard'
-import { BashCommandGroupCard } from './BashCommandGroupCard'
-import { FileToolGroupCard } from './FileToolGroupCard'
-import { groupParts, type PartRenderUnit } from '@/utils/groupParts'
-import { getAgentToolOutput, validSpan } from '@/utils/parseStatus'
+import { renderPartUnits } from './PartUnits'
+import { ScrollJumpButton } from './ScrollJumpButton'
+import { groupParts } from '@/utils/groupParts'
+import { getAgentToolOutput, getAgentToolErrorText, validSpan } from '@/utils/parseStatus'
 import { formatToolDuration } from '@/utils/time'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
 
 /**
- * 分组单元 → 组卡片/单卡（弹窗内 Transcript 与回退工具列表共用，
- * 规则同主聊天 MessageBubble：连续同类工具聚组，单个走原单卡）
+ * 分组单元 → 共享渲染管线（与主聊天 AssistantBubble 同一实现：组卡/单卡/
+ * ThinkingBlock 可折叠思考/图片），按 2026-08-30 决策对齐主界面且**不做完成轮折叠**。
+ * text 单元的空文本过滤与完成态报告折叠行是弹窗特有逻辑，由调用方处理。
+ * streaming：live 源末条 assistant 消息（实时流打字机光标反馈，等待时的可见交互）。
  */
-function UnitRenderer({ unit }: { unit: PartRenderUnit }) {
-  if (unit.kind === 'toolGroup') {
-    return unit.group === 'bash'
-      ? <BashCommandGroupCard parts={unit.parts} />
-      : <FileToolGroupCard kind={unit.group} parts={unit.parts} />
-  }
-  if (unit.part.type === 'tool') return <ToolCallCard part={unit.part} />
-  return null
+function UnitRenderer({
+  unit,
+  parts,
+  streaming,
+}: {
+  unit: ReturnType<typeof groupParts>[number]
+  parts: ZCodeMessage['parts']
+  streaming?: boolean
+}) {
+  return <>{renderPartUnits([unit], parts, streaming)[0]}</>
 }
 
 /** 状态徽标文案 */
@@ -54,14 +57,25 @@ function statusText(status: string | undefined, t: TFunction): { text: string; c
 /** 子会话完整消息 → 转录（user prompt + assistant 文本/工具，复用主聊天渲染组件）。
  *  完成态：末条 assistant 消息即子代理最终报告，在过程流中折叠为入口行
  *  （全文由报告弹窗承载，避免过程末尾大段报告与独立查看入口重复）；
- *  运行中不折叠——实时文本是了解进展的唯一窗口。*/
+ *  运行中不折叠——实时文本是了解进展的唯一窗口。
+ *  ⚠️ 折叠只对权威转录（isLive=false）**且子代理成功完成**生效：live 是 v4 归约的
+ *  单条大 assistant 消息（整轮累积），折叠它 = 正文全部隐藏只剩工具卡（2026-08-31
+ *  用户实测"点击工具后内容变空"的根因）；失败时末条只是中断残段，折叠成
+ *  "最终报告已生成"是误报（同日实测：报告内容不对且无失败原因）——残段原样
+ *  展示，失败原因由列表末尾的失败提示条承载。*/
 function Transcript({
   messages,
   running,
+  isLive,
+  allowReportCollapse,
   onOpenReport,
 }: {
   messages: ZCodeMessage[]
   running: boolean
+  /** 显示源是否实时流（live 归约，单条大消息结构）——禁用末条报告折叠 + 末条打字机光标 */
+  isLive: boolean
+  /** 末条报告折叠入口只对成功完成的子代理生效（finalStatus==='completed'） */
+  allowReportCollapse: boolean
   /** 点击折叠行打开报告弹窗（入参 = 该条文本，Agent 工具输出缺失时兜底）*/
   onOpenReport: (fallbackMd: string) => void
 }) {
@@ -74,7 +88,7 @@ function Transcript({
           .map((p) => p.text)
           .join('')
           .trim()
-        const collapsed = !running && i === messages.length - 1
+        const collapsed = allowReportCollapse && !running && !isLive && i === messages.length - 1
           && msg.info.role === 'assistant' && reportText.length > 0
         return (
           <div key={msg.info.id || i} className={`subagent-detail-msg role-${msg.info.role}`}>
@@ -82,13 +96,18 @@ function Transcript({
               {msg.info.role === 'user' ? t('tool.subagent.roleTask') : 'AI'}
             </div>
             <div className="subagent-detail-msg-body">
-              {/* 连续同类工具聚组（同主聊天规则）：子代理连读十几个文件时压缩弹窗长度 */}
+              {/* 连续同类工具聚组 + reasoning/图片 全走共享渲染管线（同主聊天）；
+                  text 空文本跳过；完成态末条报告折叠为入口行（弹窗特有）；
+                  live 源末条 assistant 消息带 streaming（打字机光标，等待中的可见交互） */}
               {groupParts(msg.parts).map((unit) =>
-                unit.kind === 'single' && unit.part.type === 'text' && unit.part.text.trim() ? (
-                  collapsed ? null : <MarkdownBlock key={unit.index} markdown={unit.part.text} />
-                ) : (
-                  <UnitRenderer key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index} unit={unit} />
-                ),
+                unit.kind === 'single' && unit.part.type === 'text' && !unit.part.text.trim() ? null
+                : collapsed && unit.kind === 'single' && unit.part.type === 'text' ? null
+                : <UnitRenderer
+                    key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index}
+                    unit={unit}
+                    parts={msg.parts}
+                    streaming={isLive && running && !collapsed && i === messages.length - 1 && msg.info.role === 'assistant'}
+                  />,
               )}
               {collapsed && (
                 <div className="subagent-detail-report-collapsed" onClick={() => onOpenReport(reportText)}>
@@ -139,18 +158,26 @@ export function SubagentDetailDialog() {
   const transcript = childSessionId ? childMessages[childSessionId] : undefined
   const liveMessages = childSessionId ? childLiveMessages[childSessionId] : undefined
   const running = item?.status === 'running' || item?.status === 'pending'
-  // 显示源：运行中实时流优先（手动拉的快照不覆盖实时）；结束后权威快照优先
-  const display = running ? (liveMessages ?? transcript) : (transcript ?? liveMessages)
+  // 显示源：运行中实时流优先（手动拉的快照不覆盖实时）；结束后权威快照优先。
+  // 空数组也回退（?? 只防 null/undefined）：任一源异常为空时另一源兜底，防"变空"。
+  // live 接管加**实质内容迟滞**：live 只含订阅点之后的内容，中途打开弹窗时它往往
+  // 只有 turn.started 建的空壳消息——此时不接管（快照先撑住显示），长出实际
+  // 内容（正文/思考/工具任一）才切换，消除"快照→空壳→重长"的源跳变闪烁
+  const liveHasContent = (m?: ZCodeMessage[]) => !!m && m.some((msg) =>
+    msg.parts.some((p) =>
+      (p.type === 'text' && p.text.trim()) ||
+      (p.type === 'reasoning' && p.text.trim()) ||
+      p.type === 'tool'))
+  const hasAny = (m?: ZCodeMessage[]) => !!m && m.length > 0
+  const display = running
+    ? (liveHasContent(liveMessages) ? liveMessages : (hasAny(transcript) ? transcript : liveMessages))
+    : (hasAny(transcript) ? transcript : liveMessages)
+  const isLive = display === liveMessages
 
   // 自动滚底（与 ChatView 同策略）：距底 80px 内才跟随内容滚动，用户上滑即停
+  //（上滑状态由 ScrollJumpButton 的 onStickChange 维护：scroll 事件原生监听）
   const bodyRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
-  const handleScroll = () => {
-    const el = bodyRef.current
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    userScrolledUp.current = !nearBottom
-  }
   // 内容指纹：实时工具追加/状态变化、实时流文本增长、转录加载完成、loading 切换都会变
   const activityFingerprint = activity?.tools
     .map((t) => `${t.callID}:${t.state.status}:${t.state.output?.length ?? 0}`)
@@ -183,24 +210,37 @@ export function SubagentDetailDialog() {
     loadChildMessages(childSessionId)
   }, [key, childSessionId, transcript, running, loading, error, loadChildMessages])
 
-  // 运行中：每 3s 静默轮询子会话快照（实时兜底）。
-  // 子会话原生事件流（text_delta 等）服务端实测不投递——subscribeChild 补订后
-  // 事件仍不到（只推父会话转发的工具级摘要），实时流归约无源；而"resume + 读
-  // 快照"路径（手动刷新按钮）实测可靠，故运行中以轮询快照为准。
-  // 结束（running=false，事件流收尾时会再拉一次权威全量）或关闭弹窗即停。
-  // 若某版本服务端开始投递原生事件，liveMessages 仍有数据且优先于轮询快照（见 display）
+  // running→结束翻转：旧快照里的工具卡永远停在 running（v4 模式快照只在打开时拉过
+  // 一次，"标题已完成、列表假转圈"的根因）——翻转沿自动重拉权威转录；1.5s 后静默
+  // 补一次（服务端回合清算落库有滞后，首拉可能仍拿到倒数第二步）
+  const prevRunningRef = useRef(running)
+  const settleRetimer = useRef<number>(0)
+  useEffect(() => () => window.clearTimeout(settleRetimer.current), [])
+  useEffect(() => {
+    if (prevRunningRef.current && !running && childSessionId) {
+      loadChildMessages(childSessionId)
+      window.clearTimeout(settleRetimer.current)
+      settleRetimer.current = window.setTimeout(() => {
+        loadChildMessages(childSessionId, true)
+      }, 1500)
+    }
+    prevRunningRef.current = running
+  }, [running, childSessionId, loadChildMessages])
+
+  // 运行中的快照获取：v4 实时通道可用（subscribeChild 应答标志）时**不做 3s 轮询**——
+  // 实时流在场时轮询只添乱（用户无法区分数据来源；resume 运行中子会话也可能扰动
+  // 服务端流），只打开时拉一次快照作 live 空窗期的初始内容；v4 不可用（老 CLI 降级）
+  // 才保留 3s 轮询兜底。结束（running=false，事件流收尾时会再拉一次权威全量）或
+  // 关闭弹窗即停。手动刷新按钮不受影响。
+  const v4 = useStore((s) => (childSessionId ? !!s.childSessionV4[childSessionId] : false))
   useEffect(() => {
     if (!running || !childSessionId) return
-    // 打开即拉一次（不等第一个 3s），此后每 3s 轮询；每次触发同样旋转按钮
-    // （最短 600ms 心跳动画）——自动刷新对用户可见，而非只有数据悄悄变化
-    const poll = () => {
-      loadChildMessages(childSessionId, true)
-      triggerSpin()
-    }
-    poll()
-    const timer = setInterval(poll, 3000)
+    // 打开即拉一次（v4 场景作初始内容；降级场景作为轮询首拍）
+    loadChildMessages(childSessionId, true)
+    if (v4) return // 实时流在场：不轮询
+    const timer = setInterval(() => loadChildMessages(childSessionId, true), 3000)
     return () => clearInterval(timer)
-  }, [running, childSessionId, loadChildMessages])
+  }, [running, childSessionId, v4, loadChildMessages])
 
   // Escape 关闭
   useEffect(() => {
@@ -234,9 +274,14 @@ export function SubagentDetailDialog() {
 
   // 主聊天里 Agent 工具 part 的 output（最终报告，childSessionId 缺失时的兜底内容）
   const agentOutput = getAgentToolOutput(messages, key)
+  // 失败原因：失败的 Agent part 没有 output、只有 state.error（历史读回为字符串，
+  // 如 [1301] 内容审查拦截文案）——session/subagents 的 ended 只收录 success 条目，
+  // 失败子会话拿不到 childSessionId、转录无从拉取时，这是弹窗唯一能展示的失败详情
+  const failErrorText = getAgentToolErrorText(messages, key)
   // 报告按钮：状态=已完成才显示（running 时报告未生成、error 时无完整报告可读），
   // 状态取三源之最先非空（流式聚合 / RPC 权威 / 转发活动，见数据分三层注释）
   const finalStatus = item?.status ?? info?.status ?? activity?.status
+  const failed = !running && (finalStatus === 'error' || finalStatus === 'failed')
   const reportReady = finalStatus === 'completed' && !!agentOutput
 
   return (
@@ -287,7 +332,7 @@ export function SubagentDetailDialog() {
           </button>
         </div>
 
-        <div className="subagent-detail-body" ref={bodyRef} onScroll={handleScroll}>
+        <div className="subagent-detail-body" ref={bodyRef}>
           {error && (
             <div className="subagent-detail-error">
               <span className="codicon codicon-error" />
@@ -303,12 +348,32 @@ export function SubagentDetailDialog() {
             <Transcript
               messages={display}
               running={running}
+              isLive={isLive}
+              allowReportCollapse={finalStatus === 'completed'}
               onOpenReport={(fallbackMd) => openSubagentReport({
                 callID: key,
                 title: item?.description || activity?.description || t('tool.subagentReport'),
                 markdown: agentOutput || fallbackMd,
               })}
             />
+          )}
+
+          {/* 失败收尾提示条：独立于转录渲染（排在层 2-4 之前）——失败子会话不被
+              session/subagents 的 ended 收录，历史重开时 childSessionId 无从获取、
+              转录拉不到，这条常是弹窗唯一内容；错误详情优先 Agent 工具 output
+              （流式收尾文本），缺失时读 part.state.error（历史读回形态） */}
+          {failed && (
+            <div className="subagent-detail-failed">
+              <div className="subagent-detail-failed__head">
+                <span className="codicon codicon-error" />
+                <span>{t('tool.subagent.taskFailed')}</span>
+              </div>
+              {(agentOutput || failErrorText) && (
+                <div className="subagent-detail-failed__reason">
+                  <MarkdownBlock markdown={agentOutput || failErrorText} />
+                </div>
+              )}
+            </div>
           )}
 
           {/* 层2 回退：无对话流（事件流缺失，如历史会话）→ 父会话转发的实时工具列表 */}
@@ -325,14 +390,15 @@ export function SubagentDetailDialog() {
                   <UnitRenderer
                     key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index}
                     unit={unit}
+                    parts={activity!.tools}
                   />
                 ))}
               </div>
             </>
           )}
 
-          {/* 层3：无实时数据 → 兜底显示 Agent 工具的最终报告 */}
-          {!display && toolCount === 0 && agentOutput && (
+          {/* 层3：无实时数据 → 兜底显示 Agent 工具的最终报告（失败场景由上方失败条承载，不双显） */}
+          {!display && toolCount === 0 && agentOutput && !failed && (
             <div className="subagent-detail-fallback">
               <div className="subagent-detail-hint">{t('tool.subagent.noChildSession')}</div>
               <MarkdownBlock markdown={agentOutput} />
@@ -349,6 +415,12 @@ export function SubagentDetailDialog() {
             </div>
           )}
         </div>
+        {/* 滚动跳转按钮（↑置顶/↓置底，对齐主界面）：子代理过程动辄几十个工具卡，
+            置顶看 prompt/置底追进展是高频操作 */}
+        <ScrollJumpButton
+          containerRef={bodyRef}
+          onStickChange={(up) => { userScrolledUp.current = up }}
+        />
       </div>
     </div>
   )

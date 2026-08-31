@@ -19,6 +19,7 @@ import type { ToolPart } from '@/types/messages'
 import { relativeTime, formatToolDuration } from '@/utils/time'
 import { parsePartialToolInput, lineCount, tailLines } from '@/utils/partialToolInput'
 import { isBackgroundTaskOutput } from '@/utils/backgroundTask'
+import { toolErrorText } from '@/utils/parseStatus'
 import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { useTick } from '@/hooks/useTick'
@@ -437,7 +438,7 @@ export function ToolCallCard({ part }: Props) {
               <div className="tool-card__bash-cmd">$ {String(input?.command ?? input?.cmd ?? '')}</div>
               {hasOutput && <pre className="tool-card__code tool-card__bash-out">{state.output}</pre>}
               {state.error && (
-                <pre className="tool-card__code tool-card__bash-out tool-card__bash-out--err">{state.error.message}</pre>
+                <pre className="tool-card__code tool-card__bash-out tool-card__bash-out--err">{toolErrorText(state.error)}</pre>
               )}
             </>
           )}
@@ -490,7 +491,7 @@ export function ToolCallCard({ part }: Props) {
           {state.error && tool !== 'Bash' && (
             <div className="tool-card__section tool-card__section--err">
               <div className="tool-card__label">{t('tool.error')}</div>
-              <pre className="tool-card__code">{state.error.message}</pre>
+              <pre className="tool-card__code">{toolErrorText(state.error)}</pre>
             </div>
           )}
       {state.time?.start && (

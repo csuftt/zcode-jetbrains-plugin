@@ -13,7 +13,7 @@
  */
 
 import i18n from '@/i18n/config'
-import type { AgentItem, FileChangeItem, FileEditContent, SubagentActivity, SubagentInfo, TodoItem, ZCodeMessage } from '@/types/messages'
+import type { AgentItem, FileChangeItem, FileEditContent, SubagentActivity, SubagentInfo, TodoItem, ToolState, ZCodeMessage } from '@/types/messages'
 
 /** 工具 part 的 input 字段名兼容（实测 Edit 用 file_path，Write 用 path）*/
 function getFilePath(input?: Record<string, unknown>): string {
@@ -104,6 +104,26 @@ export function getAgentToolOutput(messages: ZCodeMessage[], callID: string): st
     }
   }
   return output
+}
+
+/** state.error 双形态（字符串=历史读回 / {message}=流式事件）统一取文本 */
+export function toolErrorText(err: ToolState['error']): string {
+  if (!err) return ''
+  return typeof err === 'string' ? err : err.message
+}
+
+/**
+ * Agent 工具 part 的失败原因（子代理详情弹窗失败提示条）。失败的 Agent part
+ * 没有 output、只有 state.error（如 [1301] 内容审查拦截文案），无则空串。
+ */
+export function getAgentToolErrorText(messages: ZCodeMessage[], callID: string): string {
+  let text = ''
+  for (const msg of messages) {
+    for (const part of msg.parts) {
+      if (part.type === 'tool' && part.callID === callID) text = toolErrorText(part.state.error)
+    }
+  }
+  return text
 }
 
 /**
