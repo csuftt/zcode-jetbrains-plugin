@@ -1,6 +1,6 @@
 {
   "name": "zcode-webview",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "ZCode IDEA 插件的 JCEF webview（cc-gui 风格 React UI）",

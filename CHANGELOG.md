@@ -6,6 +6,54 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.3.0] - 2026-08-31
+
+中文:
+
+### 新增
+
+- **会话内定时发送**：输入框新增定时入口，设定时间与提示词后到点自动执行——支持时间预设、指定执行模型、勾选「在新会话中执行」；任务卡片支持立即执行 / 改时间 / 取消，「全部定时任务」列表可跨会话管理与跳转；到点自动打开对应会话标签，任务跨插件重启保留，已发消息带「定时执行」标记。
+- **完成轮执行过程自动折叠**：已完成的回合默认只显示最终结论，结论上方折叠栏展示思考次数 / 工具数 / 轮次耗时，点击展开完整过程；行为设置新增开关（默认开启）；会话内搜索时自动展开保证定位。
+- **内嵌浏览器调试采集**：AI 可读取内嵌浏览器的 console 输出、接口请求与未捕获异常，排查页面问题不再靠截图转述。
+- **历史会话打开编排**：点击历史会话时，已在其他标签页打开的直接跳转过去；当前标签已有会话时可选择「覆盖当前」或「新标签打开」。
+- **环境检测显示 CLI 版本号**：环境检测的 ZCode CLI 徽标直接显示检测到的版本号。
+
+### 修复
+
+- **体验套餐渠道切模型后回合必失败**：zcode-plan 网关强制滑块验证（官方客户端专属能力），插件切到该渠道后每次对话都报 "Model request failed"；现在全链路过滤该渠道并自动兜底到可用渠道。
+- **历史列表混入子代理会话**：app-server 会把驻留内存的子代理会话混进历史列表（重启才消失）；现在双层过滤，不再出现。
+- **点停止后后台任务仍在跑**：停止此前只结束前台回合，后台化的子代理任务照常运行并继续触发回调；现在停止会连带取消运行中的后台任务。
+- **历史列表时间倒序被破坏**：部分会话因路径双形态并集拼接垫底导致时间顺序错乱；现在统一按更新时间倒序。
+- **切模型后立即发消息的时序防护**：切模型落定瞬间发送可能撞上服务端回合清算窗口导致首回合无输出；现在发送会等待切换落定，切换后 60 秒零输出时顶栏给出挂死提示。
+- **稳定性批修复**：删除会话 / 任务归档操作偶发卡死、打开新标签卡 UI 数秒、流式回放跨会话串扰、崩溃日志泄露敏感信息等一批代码审查问题。
+
+### 变更
+
+- **底部栏子代理点击默认开最终报告**：已完成的子代理点击默认打开最终报告弹窗（无报告时回退执行记录）。
+
+English:
+
+### Added
+
+- **Scheduled messages in a session**: A new timer entry in the input box lets you schedule a prompt to run automatically at a set time — with time presets, a per-task execution model, and an "execute in a new session" option. Task cards support run now / reschedule / cancel, and an "All scheduled tasks" list manages and jumps across sessions. The corresponding session tab opens automatically when a task fires; tasks survive plugin restarts, and sent messages carry a "Scheduled" badge.
+- **Auto-collapse of finished turns**: A finished turn now shows only the final conclusion by default, with a collapse bar above it showing thought count / tool count / turn duration — click to expand the full execution process. A toggle is added to behavior settings (on by default), and in-session search auto-expands collapsed turns so matches stay reachable.
+- **Embedded browser debug capture**: The AI can now read console output, network requests and uncaught errors from the embedded browser — no more debugging page issues through screenshots.
+- **History open orchestration**: Clicking a history session jumps to its tab if it is already open elsewhere; when the current tab already hosts a session, you can choose between "overwrite current" and "open in new tab".
+- **CLI version in environment check**: The ZCode CLI badge in environment check now shows the detected version number.
+
+### Fixed
+
+- **Turns always failing after switching to the trial-plan channel**: The zcode-plan gateway enforces a slider captcha (exclusive to the official client), so every conversation failed with "Model request failed" after switching to it. The channel is now filtered out across the stack with automatic fallback to a usable one.
+- **Subagent sessions leaking into history**: app-server kept in-memory subagent sessions in the history list (until restart). They are now filtered on both ends and no longer appear.
+- **Background tasks kept running after Stop**: Stop only ended the foreground turn, leaving background subagent tasks running and firing callbacks. Stop now also cancels running background tasks.
+- **History list ordering broken**: Some sessions sank to the bottom due to dual path-form merging, scrambling the time order. The list is now consistently sorted by update time, newest first.
+- **Send timing protection after a model switch**: Sending right as a model switch landed could hit the server's turn-settlement window and produce a turn with no output. Sending now waits for the switch to settle, and a banner hint appears if a turn produces no output for 60 seconds right after a switch.
+- **Batch stability fixes**: A batch of code-review issues — occasional hangs when deleting sessions or archiving tasks, multi-second UI freezes when opening new tabs, streaming replay leaking across sessions, and sensitive data leaking into crash logs.
+
+### Changed
+
+- **Bottom-bar subagent click opens the final report**: Clicking a completed subagent now opens its final report by default (falling back to the execution log when no report exists).
+
 ## [0.2.7] - 2026-08-28
 
 中文:
