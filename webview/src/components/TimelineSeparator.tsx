@@ -11,7 +11,7 @@
 
 import { useTranslation } from 'react-i18next'
 import type { TimelinePart } from '@/types/messages'
-import { shortTokens } from './CompactionSummaryCard'
+import { compactTokens } from '@/utils/time'
 import '../styles/compaction.less'
 
 interface Props {
@@ -31,8 +31,8 @@ export function TimelineSeparator({ part }: Props) {
           <span className="codicon codicon-compress" />
           {t('chat.compaction.title')}
           {pre != null && post != null && (
-            <span className="tl-sep__meta">
-              {' '}{shortTokens(pre)} → {shortTokens(post)} tokens
+            <span className="tl-sep__meta" title={`${pre.toLocaleString()} → ${post.toLocaleString()}`}>
+              {' '}{compactTokens(pre)} → {compactTokens(post)} tokens
             </span>
           )}
         </span>

@@ -29,7 +29,7 @@ import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import { AgentNotificationCard } from './AgentNotificationCard'
 import { isAgentNotification, isCompactSummaryMessage, findTimelinePart } from '@/utils/parseNotification'
-import { clockTime, formatDuration } from '@/utils/time'
+import { clockTime, compactTokens, formatDuration } from '@/utils/time'
 import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
 import { KV_HYDRATED_EVENT } from '@/utils/persist'
 import { useTick } from '@/hooks/useTick'
@@ -424,8 +424,11 @@ function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; 
         </span>
       )}
       {tokens && (
-        <span className="msg__footer-tokens">
-          💡 {tokens.input.toLocaleString()} in / {tokens.output.toLocaleString()} out
+        <span
+          className="msg__footer-tokens"
+          title={`${tokens.input.toLocaleString()} in / ${tokens.output.toLocaleString()} out`}
+        >
+          💡 {compactTokens(tokens.input)} in / {compactTokens(tokens.output)} out
           {tokens.cache?.read ? ` · ${t('chat.message.cachePercent', { percent: Math.round((tokens.cache.read / tokens.input) * 100) })}` : ''}
         </span>
       )}

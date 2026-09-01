@@ -89,7 +89,7 @@ describe('时间线分隔卡渲染（缺陷 C3）', () => {
     expect(container.querySelector('.tl-sep')).toBeTruthy()
     // 空壳气泡的 footer（耗时行）不应出现
     expect(container.querySelector('.msg__footer')).toBeFalsy()
-    expect(screen.getByText(/287k → 16k tokens/)).toBeTruthy()
+    expect(screen.getByText(/287\.2k → 15\.8k tokens/)).toBeTruthy()
   })
 
   it('model_change marker → 模型切换分隔卡', () => {

@@ -62,6 +62,15 @@ export function formatFileSize(bytes: number): string {
   return `${(kb / 1024).toFixed(1)} MB`
 }
 
+/** token 数 → 紧凑可读："4.3k" / "461.6k" / "4.6m"（<1000 原样；尾零 .0 去掉；
+ *  消息统计 footer / 子代理通知卡 / 压缩分隔卡统一口径，精确值放各处 title） */
+export function compactTokens(n: number): string {
+  if (!Number.isFinite(n) || n < 1000) return String(Math.round(n))
+  const isMillion = n >= 1_000_000
+  const s = (isMillion ? n / 1_000_000 : n / 1000).toFixed(1).replace(/\.0$/, '')
+  return `${s}${isMillion ? 'm' : 'k'}`
+}
+
 /** 计时器描述：已耗时秒数 → "X 秒" / "X 分 Y 秒"（规划文档第四节 WaitingIndicator） */
 export function elapsedDesc(startMs: number, now: number = Date.now()): string {
   return formatDuration(now - startMs)

@@ -18,11 +18,6 @@ import { MarkdownBlock } from './MarkdownBlock'
 import { ScrollJumpButton } from './ScrollJumpButton'
 import '../styles/compaction.less'
 
-/** token 数缩写：287247 → 287k（分隔卡与摘要卡共用）*/
-export function shortTokens(n: number): string {
-  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
-}
-
 interface Props {
   message: ZCodeMessage
   time: string

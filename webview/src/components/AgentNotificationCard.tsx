@@ -21,7 +21,7 @@ import {
   resolveTaskSource,
   type ParsedNotification,
 } from '@/utils/parseNotification'
-import { formatToolDuration } from '@/utils/time'
+import { compactTokens, formatToolDuration } from '@/utils/time'
 import '../styles/notification-card.less'
 
 interface Props {
@@ -76,7 +76,9 @@ export function AgentNotificationCard({ message, time }: Props) {
           <span className="notif-card__meta">⏱ {formatToolDuration(usage.durationMs)}</span>
         )}
         {usage?.tokens != null && (
-          <span className="notif-card__meta">💡 {usage.tokens.toLocaleString()}</span>
+          <span className="notif-card__meta" title={usage.tokens.toLocaleString()}>
+            💡 {compactTokens(usage.tokens)}
+          </span>
         )}
         {parsed.kind === 'message' && parsed.agentType && (
           <span className="notif-card__meta">{parsed.agentType}</span>
