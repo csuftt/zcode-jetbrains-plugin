@@ -2,6 +2,7 @@ package com.zcode.ideaplugin.ui
 
 import com.zcode.ideaplugin.protocol.LogRedactor
 
+import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
@@ -228,6 +229,9 @@ class ZCodeToolWindowPanel(
     private companion object {
         const val KEY_BROWSER_EXPANDED = "zcode.browser.paneExpanded"
         const val KEY_CHAT_BASE_WIDTH = "zcode.browser.chatBaseWidth"
+
+        /** openExternal 的目标（设置页开源支持区块，前端复制展示用同地址字面量）*/
+        const val GITHUB_REPO_URL = "https://github.com/csuftt/zcode-jetbrains-plugin"
 
         /**
          * config.json 读-改-写全程互斥锁（多标签各持独立 Panel 实例，op 处理并发跑在
@@ -856,6 +860,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "showDiff" -> handleShowDiff(msg)
                         "refreshFile" -> handleRefreshFile(msg)
                         "createTab" -> handleCreateTab()
+                        "openExternal" -> handleOpenExternal()
                         "toggleBrowserPane" -> handleToggleBrowserPane()
                         "setTabTitle" -> handleSetTabTitle(msg)
                         "clearTabSession" -> handleClearTabSession()
@@ -3664,6 +3669,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
         return buildJsonObject { put("op", "tabCreating") }
+    }
+
+    /**
+     * 打开本项目 GitHub 仓库（设置页「开源与支持」区块）：系统默认浏览器直达仓库页。
+     * op 不携带 url 参数、目标硬编码伴生对象常量——语义即"打开本项目仓库"，零注入面。
+     */
+    private fun handleOpenExternal(): JsonObject {
+        BrowserUtil.browse(GITHUB_REPO_URL)
+        return buildJsonObject { put("op", "externalOpened") }
     }
 
     /**

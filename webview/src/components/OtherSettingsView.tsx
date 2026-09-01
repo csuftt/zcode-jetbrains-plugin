@@ -25,6 +25,7 @@ import {
   type HistoryItem,
 } from '@/hooks/useInputHistory'
 import { ConfirmDialog } from './ConfirmDialog'
+import { StarSupportSection } from './StarSupportSection'
 import { useStore } from '@/store/useStore'
 import { APP_VERSION } from '@/version/version'
 import '../styles/other-settings.less'
@@ -376,7 +377,7 @@ export function OtherSettingsView() {
           )}
         </div>
         {/* 版本记录（What's New 弹窗手动入口）：标签右侧展示当前版本号 */}
-        <div className="other-settings__field-header other-settings__field-header--version">
+        <div className="other-settings__field-header other-settings__field-header--divider">
           <span className="codicon codicon-tag" />
           <span className="other-settings__field-label">{t('settings.other.versionHistory')}</span>
           <span className="other-settings__version-now">v{APP_VERSION}</span>
@@ -395,6 +396,9 @@ export function OtherSettingsView() {
           <span className="codicon codicon-info" />
           <span>{t('settings.other.versionHistoryHint')}</span>
         </small>
+
+        {/* 开源与支持：GitHub Star 引导（主按钮经 openExternal 桥直达仓库页） */}
+        <StarSupportSection />
       </section>
 
       {/* 条目编辑弹窗（条件渲染保证每次打开重置初始值）*/}

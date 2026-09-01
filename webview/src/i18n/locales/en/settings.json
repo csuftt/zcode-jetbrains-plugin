@@ -95,7 +95,15 @@
     "confirmClearLowMsg": "This will delete {{count}} records that were used only once. This cannot be undone.",
     "versionHistory": "Version History",
     "versionHistoryView": "View History",
-    "versionHistoryHint": "See new features and fixes in each release"
+    "versionHistoryHint": "See new features and fixes in each release",
+    "support": {
+      "title": "Open Source & Support",
+      "desc": "This project is open source on GitHub. If it helps you, a Star would mean a lot and keep it going",
+      "starBtn": "Star on GitHub",
+      "copyBtn": "Copy repository URL",
+      "copied": "Copied",
+      "copyFailed": "Copy failed, please copy manually"
+    }
   },
   "basicTabs": {
     "appearance": "Appearance",

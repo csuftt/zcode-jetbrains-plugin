@@ -747,6 +747,10 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
     case 'copyImage':
       // mock：模拟 Java 系统剪贴板写入成功
       return { op: 'imageCopied', ok: true }
+    case 'openExternal':
+      // mock：生产走 Java BrowserUtil 调系统浏览器，dev 浏览器环境退化为新标签页打开
+      window.open('https://github.com/csuftt/zcode-jetbrains-plugin', '_blank')
+      return { op: 'externalOpened' }
     case 'listModels':
       // 模拟 ~/.zcode/v2/config.json 的 provider 注册表（验收模型下拉用；内置套餐带 plan 标记；
       // limit.context/output 与生产 handleListModels 同口径，悬停 tooltip 可验上下文窗口行）

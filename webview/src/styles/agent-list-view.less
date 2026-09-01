@@ -4,7 +4,7 @@
  */
 
 .agent-list-view__title {
-  font-size: 13px;
+  font-size: var(--fs-page-title);
   font-weight: 600;
   color: var(--text-primary);
   align-self: center;
@@ -12,7 +12,7 @@
 
 .agent-list-view__desc {
   margin: 0 0 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-hint);
   line-height: 1.5;
   color: var(--text-muted);
 }
@@ -26,7 +26,7 @@
   border: none;
   border-radius: 4px;
   color: #fff;
-  font-size: 12px;
+  font-size: var(--fs-body);
   cursor: pointer;
   flex-shrink: 0;
 
@@ -62,7 +62,7 @@
 
 /* 卡片头部 tools 摘要（skill-card__path 之后的补充段）*/
 .agent-card__tools-hint {
-  font-size: 10.5px;
+  font-size: var(--fs-hint);
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -73,7 +73,7 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -106,7 +106,7 @@
 
   h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--fs-body);
     color: var(--text-primary);
     display: flex;
     align-items: center;
@@ -139,7 +139,7 @@
   }
 
   .agent-edit-dialog__label {
-    font-size: 11.5px;
+    font-size: var(--fs-body);
     font-weight: 600;
     color: var(--text-secondary);
     display: flex;
@@ -151,7 +151,7 @@
   }
 
   .agent-edit-dialog__hint {
-    font-size: 10.5px;
+    font-size: var(--fs-hint);
     font-weight: 400;
     color: var(--text-muted);
     white-space: normal;
@@ -167,7 +167,7 @@
     border: 1px solid var(--border-primary);
     border-radius: 4px;
     color: var(--text-primary);
-    font-size: 12.5px;
+    font-size: var(--fs-body);
     font-family: inherit;
     outline: none;
 
@@ -222,7 +222,7 @@
     background: var(--bg-secondary);
     border: 1px solid var(--border-primary);
     border-radius: 3px;
-    font-size: 11.5px;
+    font-size: var(--fs-hint);
     color: var(--text-secondary);
     cursor: pointer;
     user-select: none;
@@ -243,7 +243,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-body);
     color: var(--text-primary);
     cursor: pointer;
 
@@ -254,7 +254,7 @@
   }
 
   .agent-edit-dialog__error {
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--error-color);
   }
 
@@ -271,13 +271,13 @@
 
   h3 {
     margin: 0 0 8px;
-    font-size: 14px;
+    font-size: var(--fs-page-title);
     color: var(--text-primary);
   }
 
   .agent-delete-dialog__message {
     margin: 0 0 12px;
-    font-size: 12.5px;
+    font-size: var(--fs-body);
     line-height: 1.6;
     color: var(--text-secondary);
   }

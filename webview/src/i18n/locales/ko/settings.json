@@ -95,7 +95,15 @@
     "confirmClearLowMsg": "한 번만 사용한 기록 {{count}}개를 삭제합니다. 복구할 수 없습니다.",
     "versionHistory": "버전 기록",
     "versionHistoryView": "기록 보기",
-    "versionHistoryHint": "각 버전의 새 기능과 수정 사항 확인"
+    "versionHistoryHint": "각 버전의 새 기능과 수정 사항 확인",
+    "support": {
+      "title": "오픈소스 및 지원",
+      "desc": "이 프로젝트는 GitHub에서 오픈소스로 공개 중입니다. 도움이 되었다면 Star를 남겨주세요. 지속적인 유지 보수의 큰 힘이 됩니다",
+      "starBtn": "GitHub에서 Star 남기기",
+      "copyBtn": "저장소 URL 복사",
+      "copied": "복사됨",
+      "copyFailed": "복사 실패, 직접 복사해 주세요"
+    }
   },
   "basicTabs": {
     "appearance": "외관",

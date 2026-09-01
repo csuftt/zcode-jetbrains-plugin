@@ -19,7 +19,8 @@
 .changelog-dialog {
   display: flex;
   flex-direction: column;
-  width: 560px;
+  /* 620px：双语一页内容多，加宽减少折行帮助一屏显示（字号同步缩小一档）*/
+  width: 620px;
   max-width: calc(100vw - 48px);
   max-height: min(640px, calc(100vh - 96px));
   background: var(--bg-elevated);
@@ -89,33 +90,33 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 18px;
+  padding: 12px 16px;
 }
 
 .changelog-dialog__intro {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 
   p {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-tertiary);
-    line-height: 1.6;
-    margin: 0 0 6px;
+    line-height: 1.5;
+    margin: 0 0 4px;
   }
 
   blockquote {
-    margin: 0 0 6px;
-    padding: 4px 10px;
+    margin: 0 0 4px;
+    padding: 3px 10px;
     border-left: 3px solid var(--border-focus);
     background: var(--bg-secondary);
     border-radius: 0 4px 4px 0;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-tertiary);
-    line-height: 1.6;
+    line-height: 1.5;
   }
 }
 
 .changelog-dialog__section {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 
   &:last-child {
     margin-bottom: 4px;
@@ -126,25 +127,25 @@
 .changelog-dialog__lang-divider {
   border: none;
   border-top: 1px dashed var(--border-primary);
-  margin: 18px 0 14px;
+  margin: 14px 0 10px;
 }
 
 .changelog-dialog__section-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 
 .changelog-dialog__list {
   margin: 0;
-  padding-left: 20px;
+  padding-left: 18px;
 
   li {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-tertiary);
-    line-height: 1.65;
-    margin-bottom: 6px;
+    line-height: 1.5;
+    margin-bottom: 4px;
     word-break: break-word;
 
     strong {
@@ -153,7 +154,7 @@
 
     code {
       font-family: var(--font-mono, 'Consolas', monospace);
-      font-size: 12px;
+      font-size: 11px;
       background: var(--bg-secondary);
       border: 1px solid var(--border-secondary);
       border-radius: 3px;

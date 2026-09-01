@@ -28,7 +28,7 @@
 
   &__hint {
     flex: 1;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
   }
 
@@ -37,7 +37,7 @@
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: var(--text-secondary);
     cursor: pointer;
     display: inline-flex;
@@ -84,7 +84,7 @@
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: var(--text-secondary);
     cursor: pointer;
     display: inline-flex;
@@ -107,7 +107,7 @@
     border-radius: 8px;
     background: var(--accent-primary, #3574f0);
     color: #fff;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 16px;
     text-align: center;
     padding: 0 4px;
@@ -124,7 +124,7 @@
     border: 1px solid var(--border-primary);
     border-radius: 8px;
     background: var(--bg-secondary);
-    font-size: 12px;
+    font-size: var(--fs-body);
   }
 
   &__summary-item {
@@ -159,7 +159,7 @@
   &__summary-total {
     margin-left: auto;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--fs-hint);
   }
 
   /* connect 检测进行中提示（真实连接可能几十秒）*/
@@ -168,7 +168,7 @@
     align-items: center;
     gap: 8px;
     color: var(--accent-yellow, #e0a428);
-    font-size: 12px;
+    font-size: var(--fs-body);
     padding: 6px 10px;
     background: rgba(224, 164, 40, 0.08);
     border-radius: 6px;
@@ -177,7 +177,7 @@
   /* RPC 失败降级提示（黄条，非致命——清单仍展示）*/
   &__error {
     color: var(--accent-yellow, #e0a428);
-    font-size: 12px;
+    font-size: var(--fs-body);
     padding: 8px 12px;
     background: rgba(224, 164, 40, 0.1);
     border-radius: 6px;
@@ -193,7 +193,7 @@
     justify-content: center;
     gap: 8px;
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: var(--fs-body);
     padding: 28px 0;
   }
 
@@ -204,7 +204,7 @@
     justify-content: center;
     gap: 8px;
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: var(--fs-body);
     padding: 32px 0;
 
     .codicon {
@@ -214,7 +214,7 @@
   }
 
   &__empty-hint {
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
   }
 
@@ -293,7 +293,7 @@
   }
 
   &__name {
-    font-size: 13px;
+    font-size: var(--fs-body);
     font-weight: 600;
     color: var(--text-primary);
     flex-shrink: 0;
@@ -305,7 +305,7 @@
 
   &__status-text {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: var(--fs-hint);
 
     &.connected {
       color: #10b981;
@@ -332,7 +332,7 @@
 
   &__transport {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 16px;
     padding: 0 7px;
     border-radius: 9px;
@@ -347,7 +347,7 @@
     flex: 1;
     min-width: 60px;
     max-width: 220px;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--status-error-text, #ef4444);
     white-space: nowrap;
     overflow: hidden;
@@ -361,7 +361,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
 
@@ -378,7 +378,7 @@
   &__scope {
     flex-shrink: 0;
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 16px;
     padding: 0 7px;
     border-radius: 9px;
@@ -417,7 +417,7 @@
   &__row {
     display: flex;
     gap: 10px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     line-height: 1.6;
     min-width: 0;
   }
@@ -437,7 +437,7 @@
     flex: 1;
     min-width: 0;
     font-family: var(--font-mono, Consolas, monospace);
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-secondary);
     background: var(--bg-tertiary, rgba(128, 128, 128, 0.1));
     border-radius: 6px;
@@ -448,7 +448,7 @@
   &__env-keys {
     color: var(--text-secondary);
     font-family: var(--font-mono, Consolas, monospace);
-    font-size: 11px;
+    font-size: var(--fs-hint);
     word-break: break-all;
   }
 
@@ -468,7 +468,7 @@
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: var(--text-secondary);
     cursor: pointer;
     display: inline-flex;
@@ -497,7 +497,7 @@
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     padding: 3px 10px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: var(--text-secondary);
     cursor: pointer;
     display: inline-flex;
@@ -565,13 +565,13 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 12px;
+    font-size: var(--fs-section-title);
     color: var(--text-secondary);
   }
 
   &__tools-meta {
     flex: 1;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
     text-align: right;
   }
@@ -620,7 +620,7 @@
 
   &__tool-name {
     font-family: var(--font-mono, Consolas, monospace);
-    font-size: 11px;
+    font-size: var(--fs-body);
     color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -629,7 +629,7 @@
 
   &__tool-desc {
     padding-left: 19px; /* 与名字对齐（icon 13px + gap 6px）*/
-    font-size: 11px;
+    font-size: var(--fs-hint);
     line-height: 1.5;
     color: var(--text-muted);
     overflow: hidden;

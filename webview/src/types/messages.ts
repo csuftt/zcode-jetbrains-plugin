@@ -401,6 +401,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'locateSession'; sessionId: string }
   /** mermaid 复制图片：PNG 纯 base64 → Java 系统剪贴板（JCEF 的 clipboard.write 图片不可靠的降级通道）*/
   | { op: 'copyImage'; dataBase64: string }
+  /** 打开本项目 GitHub 仓库（设置页开源支持区块）：目标 URL 硬编码 Java 侧，op 不带参数零注入面 */
+  | { op: 'openExternal' }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {
@@ -779,6 +781,7 @@ export type JavaResponse =
   /** 反向请求终结确认；requestId 缺省 = 旧格式兜底全清（正常路径都带 id 精确关窗）*/
   | { op: 'askUserAck'; requestId?: string }
   | { op: 'tabCreating' }
+  | { op: 'externalOpened' }
   | { op: 'browserPaneToggled'; visible: boolean }
   | { op: 'tabTitleSet' }
   | { op: 'appearanceSave' }

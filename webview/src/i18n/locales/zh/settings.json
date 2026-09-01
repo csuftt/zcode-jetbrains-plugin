@@ -95,7 +95,15 @@
     "confirmClearLowMsg": "将删除 {{count}} 条仅使用过一次的记录，删除后不可恢复。",
     "versionHistory": "版本记录",
     "versionHistoryView": "查看记录",
-    "versionHistoryHint": "查看各版本的新功能与修复"
+    "versionHistoryHint": "查看各版本的新功能与修复",
+    "support": {
+      "title": "开源与支持",
+      "desc": "本项目已在 GitHub 开源。如果插件帮到了你，欢迎去点个 Star，这是持续维护的动力",
+      "starBtn": "前往 GitHub 点 Star",
+      "copyBtn": "复制仓库地址",
+      "copied": "已复制",
+      "copyFailed": "复制失败，请手动复制"
+    }
   },
   "basicTabs": {
     "appearance": "外观",

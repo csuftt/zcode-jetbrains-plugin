@@ -73,7 +73,7 @@ export function ModeSelect() {
         onClick={() => setOpen((v) => !v)}
         title={activeMode ? t(`input.mode.${activeMode.value}.title`) : t('input.mode.title')}
       >
-        <span className={`codicon ${modeIcon(displayValue)}`} />
+        <span className={`codicon ${modeIcon(displayValue)} mode-icon`} />
         <span className="selector-button-text">{displayLabel}</span>
         <span className="codicon codicon-chevron-down selector-button-chevron" />
       </button>

@@ -95,7 +95,15 @@
     "confirmClearLowMsg": "使用が 1 回のみの記録 {{count}} 件を削除します。元に戻せません。",
     "versionHistory": "バージョン履歴",
     "versionHistoryView": "履歴を表示",
-    "versionHistoryHint": "各バージョンの新機能と修正を確認"
+    "versionHistoryHint": "各バージョンの新機能と修正を確認",
+    "support": {
+      "title": "オープンソースとサポート",
+      "desc": "本プロジェクトは GitHub で公開中です。役に立ったら Star をいただけると開発の励みになります",
+      "starBtn": "GitHub で Star を付ける",
+      "copyBtn": "リポジトリ URL をコピー",
+      "copied": "コピーしました",
+      "copyFailed": "コピー失敗。手動でコピーしてください"
+    }
   },
   "basicTabs": {
     "appearance": "外観",

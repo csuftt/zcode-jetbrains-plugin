@@ -32,7 +32,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
 
     .codicon {
@@ -65,7 +65,7 @@
       border: none;
       outline: none;
       color: var(--text-primary);
-      font-size: 12px;
+      font-size: var(--fs-body);
       padding: 5px 0;
 
       &::placeholder {
@@ -118,7 +118,7 @@
     border: none;
     border-radius: 8px;
     padding: 5px 12px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: #fff;
     cursor: pointer;
     transition: background 0.15s;
@@ -133,7 +133,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-tertiary);
     border: 1px dashed var(--border-primary);
     border-radius: 8px;
@@ -179,7 +179,7 @@
     border: 1px solid var(--status-error, #f44336);
     border-radius: 8px;
     padding: 8px 12px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: var(--status-error-text, #f48f8f);
   }
 
@@ -197,7 +197,7 @@
   }
 
   &__section-title {
-    font-size: 11px;
+    font-size: var(--fs-section-title);
     font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
@@ -205,7 +205,7 @@
   }
 
   &__section-hint {
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
   }
 
@@ -231,7 +231,7 @@
     gap: 8px;
     padding: 40px 0;
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: var(--fs-body);
   }
 
   &__empty {
@@ -242,7 +242,7 @@
     gap: 6px;
     padding: 40px 0;
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: var(--fs-body);
 
     .codicon {
       font-size: 28px;
@@ -251,7 +251,7 @@
   }
 
   &__empty-hint {
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
   }
 
@@ -284,7 +284,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: var(--fs-body);
     transition: all 0.15s;
 
     &.on {
@@ -316,14 +316,14 @@
 
   &__provider-name {
     flex-shrink: 0;
-    font-size: 13px;
+    font-size: var(--fs-body);
     font-weight: 600;
     color: var(--text-primary);
   }
 
   &__provider-id {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
     font-family: var(--font-mono, Consolas, monospace);
     overflow: hidden;
@@ -335,7 +335,7 @@
   // 内置渠道命中方式徽章：selected=客户端选中生效（绿）；fallback=兜底生效（警示色）
   &__provider-via {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     padding: 1px 6px;
     border-radius: 8px;
     border: 1px solid var(--color-success);
@@ -349,7 +349,7 @@
 
   &__provider-off {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 16px;
     padding: 0 7px;
     border-radius: 8px;
@@ -360,7 +360,7 @@
   &__provider-url {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-tertiary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -370,7 +370,7 @@
 
   &__provider-count {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 14px;
     padding: 0 6px;
     border-radius: 7px;
@@ -386,7 +386,7 @@
 
   &__models-empty {
     padding: 12px;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
   }
 
@@ -419,7 +419,8 @@
 
   &__model-name {
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: var(--fs-body);
+    font-weight: 600;
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -430,7 +431,7 @@
   &__model-id {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-tertiary);
     font-family: var(--font-mono, Consolas, monospace);
     overflow: hidden;
@@ -440,7 +441,7 @@
 
   &__model-badge {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 16px;
     padding: 0 7px;
     border-radius: 8px;
@@ -481,7 +482,7 @@
 
     p {
       margin: 0;
-      font-size: 12px;
+      font-size: var(--fs-body);
       line-height: 1.7;
       color: var(--text-secondary);
       word-break: break-word;
@@ -494,7 +495,7 @@
     border-radius: 6px;
     background: var(--bg-tertiary, rgba(128, 128, 128, 0.1));
     font-family: var(--font-mono, Consolas, monospace);
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-primary);
     word-break: break-all;
   }

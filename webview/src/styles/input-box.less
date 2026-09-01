@@ -273,7 +273,7 @@
 .button-area-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   flex: 1;
   min-width: 0;
 }
@@ -429,20 +429,20 @@
 .selector-button {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 4px 6px;
+  gap: 2px;
+  padding: 2px 5px;
   /* 行高统一压成 1（继承到文字/chevron；图标自带）：codicon 简写 16px/1 与各元素
      font-size 覆盖叠加后，normal 行盒基线落点不一致（实测 icon/chev 基线比文字低
      2~3px），flex 只居中盒不居中墨迹——图标视觉偏上、箭头偏下 */
   line-height: 1;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-secondary);
   background: transparent;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-  max-width: 160px;
+  max-width: 140px;
 
   &:hover:not(:disabled) {
     background: var(--bg-hover);
@@ -459,10 +459,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* 13px（≈1.18em）让 CJK 墨迹在行盒内居中：实测 11px 汉字 ink 分布为 ascent10/
-     descent1，line-height:1 时墨迹中心高出盒心 ~1.5px（字形整体偏上），13px 时
-     墨迹中心与盒心差 ~0.5px——与 codicon 图标（0.64px）基本重合 */
-  line-height: 13px;
+  /* ≈1.2em（10px 字配 12px）让 CJK 墨迹在行盒内居中：line-height:1 时 10px 汉字
+     墨迹中心高出盒心 ~1.5px（字形整体偏上），12px 时与 codicon 图标基本重合
+     （11px 字配 13px 同理，缩放档位换算自 16px/13px 实测基准） */
+  line-height: 12px;
 
   /* 无模型时的占位文案（请选择模型）：仅弱化色，不用斜体（中文斜体观感差）*/
   &--placeholder {
@@ -473,7 +473,7 @@
 /* 提特异性压 codicon.css 的 .codicon[class*='codicon-'] 简写（0,2,0）——单类
    (0,1,0) 的 font-size:10px 从未生效，箭头一直按 16px 渲染 */
 .selector-button .selector-button-chevron {
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1;
   flex-shrink: 0;
 }
@@ -494,22 +494,29 @@
   white-space: nowrap;
 }
 
-/* 思考级别图标（按钮与下拉同款）：codicon 简写默认 16px 在 11px 文案旁偏大——
-   火箭（最高）满框绘制尤其明显，压到 13px（嵌套提特异性压 codicon 0,2,0 简写）*/
+/* 思考级别图标（按钮与下拉同款）：codicon 简写默认 16px 在小字号文案旁偏大——
+   火箭（最高）满框绘制尤其明显，压到 11px（嵌套提特异性压 codicon 0,2,0 简写）*/
 .selector-button .thought-level-icon,
 .selector-dropdown-item .thought-level-icon {
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1;
   flex-shrink: 0;
 }
 
-/* 模式激活色：仅「完全控制」（yolo）着橙金警示色（cc-gui selectors.css #cc8400 同款）；
-   build/edit/plan 及思考级别一律用原版按钮色 */
+/* 模式图标（ModeSelect 按钮首位裸 codicon）：同样压 codicon 简写 16px 到文字档 */
+.selector-button .mode-icon {
+  font-size: 11px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* 模式激活色：仅「完全控制」（yolo）着橙金警示色（cc-gui 原版 #cc8400 偏暗，
+   提亮一档改善暗底可读性；build/edit/plan 及思考级别一律用原版按钮色）*/
 .selector-button.mode-active-yolo {
-  color: #cc8400;
+  color: #e09520;
 
   &:hover:not(:disabled) {
-    color: #e09520;
+    color: #f2ad42;
   }
 }
 
@@ -519,9 +526,9 @@
   bottom: calc(100% + 4px);
   left: 0;
   z-index: 10000;
-  min-width: 220px;
-  max-width: 320px;
-  max-height: 300px;
+  min-width: 200px;
+  max-width: 300px;
+  max-height: 264px;
   overflow-y: auto;
   background: var(--dropdown-bg, #252526);
   border: 1px solid var(--dropdown-border, #454545);
@@ -531,7 +538,7 @@
 }
 
 .selector-dropdown-group-title {
-  padding: 4px 8px 2px;
+  padding: 3px 7px 2px;
   font-size: 10px;
   font-weight: 600;
   color: var(--text-muted);
@@ -541,8 +548,8 @@
 
 /* 下拉空态提示（无模型时下拉仍可开，配合底部刷新按钮拉新——置灰会死锁刷新入口）*/
 .selector-dropdown-empty {
-  padding: 10px 12px;
-  font-size: 12px;
+  padding: 8px 10px;
+  font-size: 11px;
   color: var(--text-tertiary);
   line-height: 1.6;
 }
@@ -555,7 +562,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px;
+  padding: 4px 7px;
   margin-top: 2px;
   border-top: 1px solid var(--dropdown-border, #454545);
   font-size: 11px;
@@ -566,7 +573,7 @@
   background: var(--dropdown-bg, #252526);
 
   .codicon {
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1;
   }
 
@@ -594,8 +601,8 @@
 .selector-dropdown-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
+  gap: 5px;
+  padding: 3px 7px;
   border-radius: 3px;
   cursor: pointer;
 
@@ -621,7 +628,7 @@
 }
 
 .selector-dropdown-item-name {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -638,16 +645,16 @@
 /* 嵌套提特异性压 codicon 简写（同 selector-button-chevron 的坑）：单类 0,1,0 失效，
    实际一直按 16px 渲染；下拉内 check 期望 12px */
 .selector-dropdown .selector-dropdown-item-check {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
   color: var(--accent-secondary);
   flex-shrink: 0;
 }
 
-/* 分隔竖线（cc-gui：1×16px）*/
+/* 分隔竖线（随 selector 按钮紧凑化 16→13）*/
 .button-divider {
   width: 1px;
-  height: 16px;
+  height: 13px;
   background: var(--border-color, var(--border-primary));
   opacity: 0.5;
 }

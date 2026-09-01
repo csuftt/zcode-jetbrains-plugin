@@ -32,6 +32,15 @@
   --text-muted: #666666;
   --text-placeholder: #6e6e6e;
 
+  /* 字号规范（四档，主题无关；设置页各视图统一引用，新页面勿再硬编码 px）
+   * 页面标题 16/600 · 小节标题 13/600（分组/卡片组标题）· 正文 12（列表项/卡片名/
+   * 按钮文字；卡片名可叠加 font-weight:600）· 辅助 11（hint/badge/时间戳）。
+   * 展示性大数字（用量统计值等）与 codicon 图标尺寸不在此体系，按需单独设定。*/
+  --fs-page-title: 16px;
+  --fs-section-title: 13px;
+  --fs-body: 12px;
+  --fs-hint: 11px;
+
   /* 强调色 */
   --accent-primary: #007fd4;   /* VSCode 蓝 */
   --accent-primary-hover: #026ec1; /* cc-gui */

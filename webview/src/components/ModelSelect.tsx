@@ -142,7 +142,7 @@ export function ModelSelect({ currentModel, onSelect, disabled = false }: Props)
           <ModelIcon
             modelId={currentModel?.modelId ?? displayName ?? undefined}
             providerId={currentModel?.providerId}
-            size={16}
+            size={9}
           />
         )}
         <span className={`selector-button-text ${!hasModel ? 'selector-button-text--placeholder' : ''}`}>

@@ -39,7 +39,7 @@
     background: transparent;
     border: none;
     padding: 5px 12px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: var(--text-secondary);
     cursor: pointer;
     display: inline-flex;
@@ -61,7 +61,7 @@
   }
 
   &__count {
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 14px;
     padding: 0 5px;
     border-radius: 7px;
@@ -93,7 +93,7 @@
       border: none;
       outline: none;
       color: var(--text-primary);
-      font-size: 12px;
+      font-size: var(--fs-body);
 
       &::placeholder {
         color: var(--text-tertiary);
@@ -141,7 +141,7 @@
 
   &__error {
     color: var(--status-error-text);
-    font-size: 12px;
+    font-size: var(--fs-body);
     padding: 8px 12px;
     background: var(--status-error-bg, rgba(244, 67, 54, 0.1));
     border-radius: 6px;
@@ -155,7 +155,7 @@
     justify-content: center;
     gap: 8px;
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: var(--fs-body);
     padding: 28px 0;
   }
 
@@ -207,7 +207,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: var(--fs-body);
     transition: all 0.15s;
 
     &.on {
@@ -232,7 +232,7 @@
   }
 
   &__name {
-    font-size: 13px;
+    font-size: var(--fs-body);
     font-weight: 600;
     color: var(--text-primary);
     flex-shrink: 0;
@@ -248,7 +248,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 16px;
     padding: 0 7px;
     border-radius: 9px;
@@ -273,7 +273,7 @@
 
   &__badge-off {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--fs-hint);
     line-height: 16px;
     padding: 0 7px;
     border-radius: 9px;
@@ -283,14 +283,14 @@
 
   &__plugin {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     color: var(--text-muted);
   }
 
   &__path {
     flex: 1;
     min-width: 60px;
-    font-size: 11px;
+    font-size: var(--fs-hint);
     font-family: var(--font-mono, Consolas, monospace);
     color: var(--text-muted);
     white-space: nowrap;
@@ -323,7 +323,7 @@
   &__row {
     display: flex;
     gap: 10px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     line-height: 1.6;
   }
 
@@ -349,7 +349,7 @@
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--fs-body);
     color: var(--text-secondary);
     cursor: pointer;
     display: inline-flex;

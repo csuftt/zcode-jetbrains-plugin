@@ -28,7 +28,7 @@
 }
 
 .other-settings__title {
-  font-size: 20px;
+  font-size: var(--fs-page-title);
   font-weight: 600;
   margin: 0 0 8px 0;
   color: var(--text-primary);
@@ -37,7 +37,7 @@
 .other-settings__desc {
   color: var(--text-tertiary);
   margin: 0 0 24px 0;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .other-settings__field-header {
@@ -46,9 +46,11 @@
   gap: 8px;
   margin-bottom: 12px;
 
-  /* 与上一区块（管理历史记录等）拉开间隔：header 只有下边距，区块收起时两标题紧贴 */
-  &--version {
+  /* 新栏目分隔：上横线 + 上间距（页面首栏目不加，避免紧跟页面描述多一条线）*/
+  &--divider {
     margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-secondary);
   }
 
   .codicon {
@@ -58,14 +60,14 @@
 }
 
 .other-settings__field-label {
-  font-size: 14px;
+  font-size: var(--fs-section-title);
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 /* 版本记录行的当前版本号（What's New 手动入口） */
 .other-settings__version-now {
-  font-size: 12px;
+  font-size: var(--fs-hint);
   color: var(--text-tertiary);
   font-family: var(--font-mono, 'Consolas', monospace);
 }
@@ -74,13 +76,63 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-hint);
   color: var(--text-tertiary);
 
   .codicon {
-    font-size: 12px;
+    font-size: var(--fs-hint);
     margin-top: 1px;
     flex-shrink: 0;
+  }
+}
+
+/* ============ 开源与支持（GitHub Star 引导） ============ */
+
+.other-settings__support-desc {
+  color: var(--text-tertiary);
+  margin: 0 0 14px 0;
+  font-size: var(--fs-body);
+}
+
+.other-settings__support-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.other-settings__support-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  .codicon {
+    font-size: 14px;
+  }
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+  }
+
+  /* 主按钮：GitHub 强调（描边风格，hover 反白）*/
+  &--star {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+
+    &:hover {
+      background: var(--accent-primary);
+      color: #ffffff;
+    }
   }
 }
 
@@ -137,14 +189,17 @@
 }
 
 .other-settings__toggle-label {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-secondary);
 }
 
 /* ============ 历史记录管理 ============ */
 
+/* 独立栏目：与上方补全开关横线分隔 */
 .other-settings__management {
   margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-secondary);
 }
 
 .other-settings__expand-btn {
@@ -154,7 +209,7 @@
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-family: inherit;
   cursor: pointer;
   padding: 4px 0;
@@ -171,7 +226,7 @@
 
 .other-settings__count {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--fs-hint);
 }
 
 .other-settings__list-container {
@@ -216,7 +271,7 @@
   align-items: center;
   gap: 4px;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-family: inherit;
   cursor: pointer;
   padding: 4px 8px;
@@ -287,7 +342,7 @@
 }
 
 .other-settings__importance {
-  font-size: 11px;
+  font-size: var(--fs-hint);
   font-family: var(--font-mono);
   color: var(--accent-primary);
   min-width: 32px;
@@ -297,7 +352,7 @@
 
 .other-settings__item-text {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -305,7 +360,7 @@
 }
 
 .other-settings__item-time {
-  font-size: 11px;
+  font-size: var(--fs-hint);
   color: var(--text-tertiary);
   flex-shrink: 0;
 }
@@ -361,7 +416,7 @@
   }
 
   > span:not(.codicon) {
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
 }
 
@@ -421,7 +476,7 @@
 
 .other-settings__editor-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--fs-page-title);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -463,7 +518,7 @@
 
 .other-settings__editor-label {
   display: block;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 8px;
@@ -475,7 +530,7 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-secondary);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-family: inherit;
   color: var(--text-primary);
   resize: vertical;
@@ -534,7 +589,7 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-secondary);
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 500;
   color: var(--text-primary);
   text-align: center;
@@ -572,7 +627,7 @@
   background: transparent;
   border: 1px solid var(--border-secondary);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-family: inherit;
   color: var(--text-secondary);
   cursor: pointer;

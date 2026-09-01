@@ -95,7 +95,15 @@
     "confirmClearLowMsg": "將刪除 {{count}} 條僅使用過一次的記錄，刪除後不可恢復。",
     "versionHistory": "版本記錄",
     "versionHistoryView": "檢視記錄",
-    "versionHistoryHint": "檢視各版本的新功能與修復"
+    "versionHistoryHint": "檢視各版本的新功能與修復",
+    "support": {
+      "title": "開源與支持",
+      "desc": "本專案已在 GitHub 開源。如果外掛幫到了你，歡迎去點個 Star，這是持續維護的動力",
+      "starBtn": "前往 GitHub 點 Star",
+      "copyBtn": "複製倉庫地址",
+      "copied": "已複製",
+      "copyFailed": "複製失敗，請手動複製"
+    }
   },
   "basicTabs": {
     "appearance": "外觀",
