@@ -18,6 +18,13 @@ import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption,
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, looksLikeQuotaError } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import i18n from '@/i18n/config'
+
+/** 前端诊断日志直落 idea.log（Java __jsLog 通道——console.warn 不被 JCEF 转发，
+ *  2026-09-01 缺陷AO 追查踩坑：诊断必须走此通道才可见） */
+function diagWarn(text: string): void {
+  try { sendToJava({ op: '__jsLog', level: 'warn', text }) } catch { /* 诊断不设障 */ }
+}
+
 import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/utils/parseStatus'
 import { isHiddenSyntheticMessage } from '@/utils/parseNotification'
 import { mergeTurnMessages } from '@/utils/mergeTurnMessages'
@@ -2392,7 +2399,7 @@ export function handleResponse(
         // 不再有破坏性效果——此前"非成功白名单即失败"会把服务端新词（如 stopped/done）
         // 误读成失败并锁死活动（markActivityOutcome 只翻 running，error 定格）
         const failed = ['failed', 'error', 'interrupted', 'aborted', 'cancelled'].includes(s)
-        if (failed) console.warn(`[subagent-mark-failed] src=rpc key=${it.toolCallId} status=${s}`)
+        if (failed) diagWarn(`[subagent-mark-failed] src=rpc key=${it.toolCallId} status=${s}`)
         activities = markActivityOutcome(activities, it.toolCallId, failed, Date.now())
       }
       set({
@@ -3152,7 +3159,7 @@ function applySubagentLifecycle(
     // 当时无对象可标记），不在这里收尾会卡 running 直到主回合 turnEnded
     const failStatus = (lc.status ?? '').toLowerCase()
     const failed = ['failed', 'error', 'interrupted', 'aborted', 'cancelled'].includes(failStatus)
-    if (failed) console.warn(`[subagent-mark-failed] src=lifecycle key=${key} status=${failStatus}`)
+    if (failed) diagWarn(`[subagent-mark-failed] src=lifecycle key=${key} status=${failStatus}`)
     if (key) {
       const activities = markActivityOutcome(st.subagentActivities, key, failed, timestamp)
       set({ subagentActivities: activities, ...refreshStatus(st.messages, activities, st.subagents) })
@@ -3235,7 +3242,7 @@ function handleChildStreamBatch(
     const ts = events[events.length - 1]?.timestamp ?? Date.now()
     if (childTurnFailed) {
       const lastTs = events[events.length - 1]?.timestamp
-      console.warn(`[subagent-mark-failed] src=child-turn key=${key} childSid=${sessionId} lastEventTs=${lastTs}`)
+      diagWarn(`[subagent-mark-failed] src=child-turn key=${key} childSid=${sessionId} lastEventTs=${lastTs}`)
     }
     const closed = markActivityOutcome(activities, key, childTurnFailed, ts)
     set({ subagentActivities: closed, ...refreshStatus(st.messages, closed, st.subagents) })
@@ -3650,7 +3657,7 @@ function handleStreamEvent(
       && get().subagentActivities.some((a) => a.key === p.toolCallId)) {
       const st = get()
       if (p.result?.success === false) {
-        console.warn(`[subagent-mark-failed] src=agent-result key=${p.toolCallId}`)
+        diagWarn(`[subagent-mark-failed] src=agent-result key=${p.toolCallId}`)
       }
       const activities = markActivityOutcome(st.subagentActivities, p.toolCallId, p.result?.success === false, event.timestamp)
       set({ subagentActivities: activities, ...refreshStatus(st.messages, activities, st.subagents) })

@@ -185,7 +185,11 @@ class V4FrameMapper {
                     val started = event("turn.started", sessionId, ts, nextSeq(), turnId) {
                         entityId?.let { put("messageId", it) }
                     }
-                    if (state == "running") {
+                    if (state == "running" || state == "completedInterrupted") {
+                        // completedInterrupted = step 间隙常态（2026-09-01 复测实锤：一个模型
+                        // step 完成而任务未终时 turnHeader 停在此态，下个 step 开始翻回 running）。
+                        // 快照抓到它时子代理仍在跑——按 running 处理只发挂载点，此前当终态发
+                        // turn.failed 是"活动中途 0.8s 误标失败 + 实时流停更"的根因
                         sessionTurnActive[sessionId] = true
                         pendingStart = started
                         flushed = false
@@ -319,6 +323,10 @@ class V4FrameMapper {
                     entityId?.let { put("messageId", it) }
                 }
             }
+            // step 间隙常态（见 mapSnapshot 同名分支）：step 完成、任务未终，下个
+            // step 会翻回 running——跳过不发任何 turn 事件，防误发 turn.failed；
+            // 真中断场景由权威轮询/lifecycle 收尾兜底
+            "completedInterrupted" -> null
             "completedSuccess" -> {
                 sessionTurnActive[sessionId] = false
                 event("turn.completed", sessionId, ts, seq, turnId) { }

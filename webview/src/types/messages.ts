@@ -289,6 +289,8 @@ export interface ImageAttachmentInput {
 }
 
 export type JavaRequest =  | { op: 'askUserPendingState' }
+  /** 前端诊断日志直落 idea.log（Java handleJsMessage 的 [webview-console] 通道） */
+  | { op: '__jsLog'; level: string; text: string }
   | { op: 'listSessions'; workspacePath?: string }
   | { op: 'createSession'; workspacePath?: string }
   /** 前端进入无会话待命态（「新建会话」延迟创建）→ Java 清 TabState 绑定与标签 tooltip */

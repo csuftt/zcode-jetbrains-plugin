@@ -271,6 +271,38 @@ class V4FrameMapperTest {
     }
 
     @Test
+    fun `snapshot 抓到 step 间隙 completedInterrupted 不发终态（缺陷AO 根治）`() {
+        // 复现 2026-09-01 复测实锤：子代理任务进行中，弹窗订阅恰好落在 step 间隙——
+        // 一个模型 step 完成而任务未终时 turnHeader 停在 completedInterrupted，
+        // 下个 step 开始翻回 running。此前把它当任务终态发 turn.failed → 前端
+        // markActivityOutcome 误标失败（0.8s 假终态）+ display 切静态致实时流停更
+        val out = mapper.mapFrame(sid, snapshotFrame(
+            turnHeader(1, "completedInterrupted"),
+            buildJsonObject { put("rowId", 2); put("kind", "userInput"); put("turnId", "msg_turn_1"); put("text", "任务") },
+            buildJsonObject { put("rowId", 5); put("kind", "toolCall"); put("turnId", "msg_turn_1"); put("toolCallId", "call_w1"); put("toolName", "Write"); put("status", "success"); put("inputText", "{}"); put("output", buildJsonObject { put("text", "ok") }) },
+        ))
+        assertTrue(out.none { it.type == "turn.completed" || it.type == "turn.failed" },
+            "step 间隙态不发终态: " + out.map { it.type })
+        // 挂载点照常（live 消息序完整），turn 上下文 active（后续增量不自愈合成）
+        assertEquals(1, out.count { it.type == "turn.started" })
+        val follow = mapper.mapFrame(sid, frame(upserted(turnHeader(1, "running"))))
+        assertEquals(1, follow.count { it.type == "turn.started" }, "下个 step 翻回 running 正常发 started")
+    }
+
+    @Test
+    fun `增量帧 turnHeader upsert 到 completedInterrupted 跳过不发终态`() {
+        // 增量路径同样防御：step 间隙的 upsert（running → completedInterrupted → running）
+        // 中间值不得发 turn.failed——真中断由权威轮询/lifecycle 收尾兜底
+        mapper.mapFrame(sid, frame(appended(turnHeader(1, "running"))))
+        val gap = mapper.mapFrame(sid, frame(upserted(turnHeader(1, "completedInterrupted"))))
+        assertTrue(gap.isEmpty(), "step 间隙 upsert 不产事件: " + gap.map { it.type })
+        val resume = mapper.mapFrame(sid, frame(upserted(turnHeader(1, "running"))))
+        assertEquals(1, resume.count { it.type == "turn.started" })
+        val end = mapper.mapFrame(sid, frame(upserted(turnHeader(1, "completedSuccess"))))
+        assertEquals(1, end.count { it.type == "turn.completed" }, "真终态照常收尾")
+    }
+
+    @Test
     fun `snapshot 截尾窗口无 turnHeader 时内容行兜底合成 started`() {
         val out = mapper.mapFrame(sid, snapshotFrame(
             buildJsonObject { put("rowId", 2); put("kind", "userInput"); put("turnId", "msg_t9"); put("text", "任务") },
