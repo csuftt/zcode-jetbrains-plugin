@@ -495,6 +495,9 @@
     &--pending { color: var(--status-warning); animation: tool-spin 1s linear infinite; }
     &--completed { color: var(--status-success); }
     &--error { color: var(--status-error); }
+    /* 中间失败重试（子代理活动 running 期间的软化样式）：静态 ↻ 不转（转圈会被
+       读成"执行中"，↻ 语义是"会再来一次"），色用 info 与 pending 的暖黄区分 */
+    &--retry { color: var(--status-info, #4fc3f7); }
     /* 后台任务徽标 + 真实运行时间（缺陷Y；比行文本小一号，紧凑不抢行）*/
     &--bg {
       display: inline-flex;

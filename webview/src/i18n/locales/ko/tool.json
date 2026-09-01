@@ -53,6 +53,7 @@
   "bash": {
     "groupTitle": "명령 일괄 실행 ({{count}})",
     "failedCount": "{{count}}개 실패",
+    "retryCount": "{{count}}개 재시도 중",
     "allDone": "모두 완료",
     "progress": "{{done}}/{{total}} 완료",
     "waitingInput": "(입력 대기 중…)",

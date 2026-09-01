@@ -36,12 +36,14 @@ function UnitRenderer({
   unit,
   parts,
   streaming,
+  softenError,
 }: {
   unit: ReturnType<typeof groupParts>[number]
   parts: ZCodeMessage['parts']
   streaming?: boolean
+  softenError?: boolean
 }) {
-  return <>{renderPartUnits([unit], parts, streaming)[0]}</>
+  return <>{renderPartUnits([unit], parts, streaming, softenError)[0]}</>
 }
 
 /** 状态徽标文案 */
@@ -107,6 +109,7 @@ function Transcript({
                     unit={unit}
                     parts={msg.parts}
                     streaming={isLive && running && !collapsed && i === messages.length - 1 && msg.info.role === 'assistant'}
+                    softenError={running}
                   />,
               )}
               {collapsed && (
@@ -391,6 +394,7 @@ export function SubagentDetailDialog() {
                     key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index}
                     unit={unit}
                     parts={activity!.tools}
+                    softenError={running}
                   />
                 ))}
               </div>

@@ -53,6 +53,7 @@
   "bash": {
     "groupTitle": "コマンド一括実行 ({{count}})",
     "failedCount": "{{count}} 件失敗",
+    "retryCount": "{{count}} 件リトライ中",
     "allDone": "すべて完了",
     "progress": "{{done}}/{{total}} 完了",
     "waitingInput": "（入力待ち…）",

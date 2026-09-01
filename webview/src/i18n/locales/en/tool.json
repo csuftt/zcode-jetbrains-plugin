@@ -53,6 +53,7 @@
   "bash": {
     "groupTitle": "Batch commands ({{count}})",
     "failedCount": "{{count}} failed",
+    "retryCount": "{{count}} retrying",
     "allDone": "All completed",
     "progress": "{{done}}/{{total}} completed",
     "waitingInput": "(waiting for input…)",

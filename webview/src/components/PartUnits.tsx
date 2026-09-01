@@ -102,11 +102,14 @@ export function PartRenderer({
   }
 }
 
-/** 渲染分组单元列表（组卡与单卡全覆盖）。units 通常来自 groupParts(parts)。 */
+/** 渲染分组单元列表（组卡与单卡全覆盖）。units 通常来自 groupParts(parts)。
+ *  softenError：子代理弹窗活动 running 期间传 true——组卡 error 工具降级为
+ *  「↻ 重试中」中性样式（中间失败重试是常态，红色 ✗ 误导）；主聊天不传保持 ✗。 */
 export function renderPartUnits(
   units: PartRenderUnit[],
   parts: MessagePart[],
   streaming?: boolean,
+  softenError?: boolean,
 ): ReactNode[] {
   // 最后一个 reasoning 的自动展开推导：其后尚无正文（思考进行中/刚结束）才展开
   let lastReasoningIdx = -1
@@ -121,9 +124,9 @@ export function renderPartUnits(
   return units.map((unit) =>
     unit.kind === 'toolGroup' ? (
       unit.group === 'bash' ? (
-        <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} />
+        <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} softenError={softenError} />
       ) : (
-        <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} />
+        <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} softenError={softenError} />
       )
     ) : (
       <PartRenderer

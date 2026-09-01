@@ -67,7 +67,12 @@ function itemSummary(item: BashItem, t: TFunction): string {
   return item.rawInput ? truncateCommand(item.rawInput) : t('tool.bash.waitingInput')
 }
 
-export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
+/** softenError（子代理弹窗活动 running 期间）：error 降级为「↻ 重试中」中性样式，
+ *  同 FileToolGroupCard——子代理中途失败重试是常态，红色 ✗ 会被误读成任务失败 */
+export function BashCommandGroupCard({ parts, softenError }: {
+  parts: ToolPart[]
+  softenError?: boolean
+}) {
   const { t } = useTranslation()
   // 组卡片默认展开（cc-gui 行为：批量任务进行中需要看到进度）
   const [expanded, setExpanded] = useState(true)
@@ -131,8 +136,9 @@ export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
             <span className="codicon codicon-debug-alt" /> {t('tool.bash.backgroundCount', { count: bgCount })}
           </span>
         ) : errorCount > 0 ? (
-          <span className="bash-group__progress bash-group__progress--error">
-            <span className="codicon codicon-warning" /> {t('tool.bash.failedCount', { count: errorCount })}
+          <span className={`bash-group__progress${softenError ? '' : ' bash-group__progress--error'}`}>
+            <span className={`codicon ${softenError ? 'codicon-sync' : 'codicon-warning'}`} />
+            {' '}{softenError ? t('tool.bash.retryCount', { count: errorCount }) : t('tool.bash.failedCount', { count: errorCount })}
           </span>
         ) : doneCount === totalCount ? (
           <span className="bash-group__progress bash-group__progress--ok">
@@ -161,7 +167,7 @@ export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
             const bgStatic = !bg && isBackgroundTaskOutput(item.output)
             const nodeCls =
               bg && !bgDone ? 'bg'
-                : item.status === 'error' ? 'error'
+                : item.status === 'error' ? (softenError ? 'retry' : 'error')
                   : item.status === 'completed' ? 'completed'
                     : 'pending'
             return (
@@ -201,7 +207,7 @@ export function BashCommandGroupCard({ parts }: { parts: ToolPart[] }) {
                           <span className="codicon codicon-check" />
                           {t('tool.backgroundCompleted')}
                         </>
-                      ) : item.status === 'error' ? '✗' : item.status === 'completed' ? '✓' : '⟳'}
+                      ) : item.status === 'error' ? (softenError ? '↻' : '✗') : item.status === 'completed' ? '✓' : '⟳'}
                     </span>
                   </div>
                   {isItemExpanded && (

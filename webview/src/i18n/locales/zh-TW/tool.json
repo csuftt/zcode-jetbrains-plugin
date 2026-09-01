@@ -53,6 +53,7 @@
   "bash": {
     "groupTitle": "批次執行命令 ({{count}})",
     "failedCount": "{{count}} 個失敗",
+    "retryCount": "{{count}} 個重試中",
     "allDone": "全部完成",
     "progress": "{{done}}/{{total}} 已完成",
     "waitingInput": "(等待輸入…)",

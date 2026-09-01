@@ -104,16 +104,30 @@ function parseSearchItem(part: ToolPart): SearchItem {
   }
 }
 
-/** 状态字符（与批量命令组一致）*/
-function statusChar(status: ToolPart['state']['status']): { text: string; cls: string } {
+/**
+ * 状态字符（与批量命令组一致）。
+ * softenError（子代理弹窗活动 running 期间）：error 降级为「↻ 重试中」中性样式——
+ * 子代理中途失败重试是常态（如 Write/Edit 后重读被拒再重试），红色 ✗ 会被误读成
+ * 整个任务失败（2026-09-01 实测）；活动收尾后 soften=false 恢复 ✗ 保留失败事实。
+ */
+function statusChar(
+  status: ToolPart['state']['status'],
+  softenError?: boolean,
+): { text: string; cls: string } {
   switch (status) {
     case 'completed': return { text: '✓', cls: 'completed' }
-    case 'error': return { text: '✗', cls: 'error' }
+    case 'error': return softenError
+      ? { text: '↻', cls: 'retry' }
+      : { text: '✗', cls: 'error' }
     default: return { text: '⟳', cls: 'pending' }
   }
 }
 
-export function FileToolGroupCard({ kind, parts }: { kind: FileGroupKind; parts: ToolPart[] }) {
+export function FileToolGroupCard({ kind, parts, softenError }: {
+  kind: FileGroupKind
+  parts: ToolPart[]
+  softenError?: boolean
+}) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(true)
   const listRef = useRef<HTMLDivElement>(null)
@@ -193,7 +207,7 @@ export function FileToolGroupCard({ kind, parts }: { kind: FileGroupKind; parts:
         >
           {kind !== 'search' &&
             fileItems.map((item, index) => {
-              const st = statusChar(item.status)
+              const st = statusChar(item.status, softenError)
               return (
                 <div key={parts[index].callID} className="file-group__row">
                   {item.filePath ? (
@@ -231,7 +245,7 @@ export function FileToolGroupCard({ kind, parts }: { kind: FileGroupKind; parts:
             })}
           {kind === 'search' &&
             searchItems.map((item, index) => {
-              const st = statusChar(item.status)
+              const st = statusChar(item.status, softenError)
               return (
                 <div
                   key={parts[index].callID}
