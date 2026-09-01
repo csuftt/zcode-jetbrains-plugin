@@ -3,7 +3,7 @@
 > **免责声明**：本文档非 Z.ai 官方文档，由 ZC-GUI 插件开发过程中对 ZCode CLI 的静态分析与协议实测逆向整理而来，仅供第三方集成参考。协议随 CLI 版本演进可能随时变化，以官方发布为准。
 >
 > **基准版本**：ZCode CLI 0.16.5（2026-08-28 构建），部分条目附 0.16.1（2026-08-09 构建）对照。
-> **使用情况**：表中「ZC-GUI」列表示 [ZC-GUI](https://github.com/csuftt/zcode-jetbrains-plugin) JetBrains 插件（v0.2.7）对该 API 的使用状态——✅ 使用中 / ⬜ 未使用。供同样基于 app-server 做集成的开发者参考。
+> **使用情况**：表中「ZC-GUI」列表示 [ZC-GUI](https://github.com/csuftt/zcode-jetbrains-plugin) JetBrains 插件（v0.3.1 开发中快照）对该 API 的使用状态——✅ 使用中 / ⬜ 未使用。供同样基于 app-server 做集成的开发者参考。
 
 ## 1. 概述
 
@@ -39,7 +39,7 @@ flowchart LR
 - 三个消息方向：
   1. **请求**（宿主 → 服务端，带 `id`）：普通方法调用；
   2. **反向请求**（服务端 → 宿主，带 `id`，方法名多为 `interaction/*`）：服务端需要宿主侧的用户交互或能力（提问、权限审批、浏览器操作等），**宿主必须应答**，无法处理的应回 JSON-RPC error（如 -32601），不应挂起不答；
-  3. **通知**（服务端 → 宿主，无 `id`）：目前实测只有 `session/event` 一个通道，会话内全部事件（流式增量、工具状态、回合生命周期等）都经它推送。
+  3. **通知**（服务端 → 宿主，无 `id`）：两个通道——`session/event`（legacy，会话内全部事件：流式增量、工具状态、回合生命周期等）与 `v4/conversation/frame`（V4 订阅增量帧，见 §4.4）。
 
 ## 3. RPC 方法清单
 
@@ -48,7 +48,7 @@ flowchart LR
 | 方法 | 语义 | ZC-GUI |
 |---|---|---|
 | `session/create` | 创建会话，参数含 `workspace {workspacePath, workspaceKey}` 与 `mode`（权限模式），返回会话对象 | ✅ |
-| `session/list` | 按工作区列会话（分页） | ✅ |
+| `session/list` | 按工作区列会话（分页）。**0.16.5 实测坑**：① CLI 原样落库 `workspacePath`——正/反斜杠双形态并存时单形态查询各丢一半，宿主查询需双形态并集、写入需归一；② 内存补列不排子代理会话（`sess_subagent_*`），混入主列表需前缀过滤 | ✅ |
 | `session/subscribe` | 订阅会话事件流（subscribe 前会话须处于活跃状态，冷会话会报 -32004，先 `session/resume`） | ✅ |
 | `session/resume` | 恢复/激活历史会话（跨进程的会话在本进程未激活时，一切操作前都需先 resume） | ✅ |
 | `session/send` | 发送消息驱动回合；支持 `attachments` 附件、`toolDenylist`、`automationId`（定时任务触发）等特殊输入 | ✅ |
@@ -56,7 +56,7 @@ flowchart LR
 | `session/close` | 关闭会话（释放运行时） | ✅ |
 | `session/read` | 读会话详情快照：`runtime`（模型、contextUsage 等）、`settings`（模式/思考级别）、`activeTurnKind` 等 | ✅ |
 | `session/messages` | 拉取会话消息列表（含每个 turn 的 parts 结构） | ✅ |
-| `session/subagents` | 子智能体会话列表（主会话派生的 agent 会话及状态） | ✅ |
+| `session/subagents` | 子智能体会话列表（主会话派生的 agent 会话及状态）。**实测缺陷**：`ended.items` 只收录 `status=success` 条目，失败的子会话被整体丢弃——失败子代理的 `childSessionId` 无从获取，宿主只能展示 Agent 工具 part 自带的 `state.error` | ✅ |
 | `session/usage` | 会话级用量 | ✅ |
 | `session/events` | 按 `afterSeq`/`limit` 拉历史事件（断线补发） | ⬜ |
 | `session/fork` | 从 checkpoint 或 messageId 分叉新会话，继承 mode/model/thoughtLevel | ⬜ |
@@ -132,7 +132,17 @@ flowchart LR
 
 其中服务端原生消息队列（`sendText` 的 `queue` 投递 + `sendQueuedNow` / `editQueueItem` / `reorderQueueItem` / `deleteQueueItem` 编辑族）是官方客户端「排队秒发」体验的实现基础。
 
-**ZC-GUI 使用情况**：仅 `v4/command`（`type=stop`）——✅，其余 ⬜。裸 `v4/command` 不需要先建立任何 v4 订阅，`connectionId` 可自造；`v4/conversation/subscribe` 则需要 `topic=conversation/<sessionId>` + `connectionId` + `clientMode`（缺 `clientMode` 报 ZodError）。
+**ZC-GUI 使用情况**（v0.3.1 起）：`v4/command`（`type=stop`）与 `v4/conversation/subscribe·unsubscribe`——✅，其余 ⬜。后者是子智能体会话实时流的数据源（legacy `session/subscribe` 对子会话假成功、无事件，见 §4.4），收到 `v4/conversation/frame` 通知后映射回 legacy 事件形态复用既有消费逻辑。裸 `v4/command` 不需要先建立任何 v4 订阅，`connectionId` 可自造；`v4/conversation/subscribe` 则需要 `topic=conversation/<sessionId>` + `connectionId` + `clientMode`（缺 `clientMode` 报 ZodError）。
+
+### 4.4 订阅帧结构实测（0.16.5，2026-09-01 捕获）
+
+`v4/conversation/subscribe`（`clientMode=desktop-continuous`，不带 base）成功后先推一帧 initial snapshot，随后增量帧实时到达 `v4/conversation/frame` 通知：
+
+- **snapshot 帧**：`payload = {kind:"snapshot", snapshot:{rows:{window:[…行数组]}}}`。window 是尾部窗口（实测 `snapshotTailWindowRows=60` 行），长会话只有近尾部内容；回放时宿主应把已有 UI 状态对齐到快照再消费增量。
+- **行类型**：`userInput`（user prompt）/ `turnHeader`（回合头）/ `assistantText` / `reasoning` / `toolCall`。
+- **toolCall 行关键字段**：`toolCallId` / `toolName` / `status`（`inputStreaming · pendingApproval · running · success · error · cancelled`）/ `inputText`（参数 JSON 文本）/ `input`（已解析对象）/ `output {text}` / `error {code, message}` / **`startedAt` / `endedAt`（毫秒 epoch，optional）**。时间戳是工具耗时的权威数据源；仅消费 legacy `tool.updated` 事件的宿主拿不到精确起止，只能本地计时。
+- **增量 op**：`row.appended` / `row.upserted`（整行替换，`inputText` 为**累积全文**，宿主自行 diff 出增量）/ `row.delta`（`append` 追加文本）；`state.updated` / `row.removed` 等与本映射无关。
+- **消费建议**：v4 帧与 legacy 事件形态差异大，宿主可做一层映射器（快照回放标记 deliveryKind 供前端区分、upsert 累积文本按长度 diff、时间戳原样透传）——ZC-GUI `V4FrameMapper` 即此做法。
 
 ### 4.3 停止回合的相位差异（0.16.1 → 0.16.5 实测）
 
@@ -169,7 +179,7 @@ flowchart LR
 |---|---|
 | 回合生命周期 | `turn.started` / `turn.completed` / `turn.failed` |
 | 消息与流式 | `message.updated`；`model.streaming`（含 `tool_input_start·delta`、文本 delta 等） |
-| 工具执行 | `tool.updated`（result/batch 类帧无 toolName 字段）、`tool_call_scheduled` |
+| 工具执行 | `tool.updated`（result/batch 类帧无 toolName 字段）、`tool_call_scheduled`；精确起止时间戳见 §4.4 的 v4 toolCall 行（`startedAt`/`endedAt`） |
 | 检查点 | `checkpoint_created`（payload 含 checkpointId / targetMessageId / scope / snapshotRef）；文件变更台账随 `model_complete` 事件（`fileChanges.items[{path, additions, deletions}]`） |
 | 后台任务 | `background_task_started·updated·completed` |
 | 权限 | `permission_requested·resolved·denied` |
@@ -202,4 +212,4 @@ flowchart LR
 
 ---
 
-*最后更新：2026-08-28 · 基于 ZCode CLI 0.16.5 · ZC-GUI v0.2.7 使用快照*
+*最后更新：2026-09-01 · 基于 ZCode CLI 0.16.5 · ZC-GUI v0.3.1（开发中）使用快照*
