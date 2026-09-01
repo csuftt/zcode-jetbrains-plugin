@@ -43,7 +43,11 @@
     "zoomOutTitle": "축소 (-10%)",
     "zoomInTitle": "확대 (+10%)",
     "resetZoom": "100%로 초기화(휠로 확대/축소)",
-    "close": "닫기 (Esc)"
+    "close": "닫기 (Esc)",
+    "copyCode": "코드 복사",
+    "copyImage": "이미지 복사",
+    "copied": "복사됨",
+    "copyFailed": "복사 실패"
   },
   "code": {
     "copy": "코드 복사",

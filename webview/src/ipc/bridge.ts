@@ -744,6 +744,9 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
     case 'locateSession':
       // mock：固定无宿主标签，让「覆盖当前标签页 / 新标签页打开」弹窗在 dev 可验收
       return { op: 'sessionTabLocated', sessionId: req.sessionId, found: false }
+    case 'copyImage':
+      // mock：模拟 Java 系统剪贴板写入成功
+      return { op: 'imageCopied', ok: true }
     case 'listModels':
       // 模拟 ~/.zcode/v2/config.json 的 provider 注册表（验收模型下拉用；内置套餐带 plan 标记；
       // limit.context/output 与生产 handleListModels 同口径，悬停 tooltip 可验上下文窗口行）

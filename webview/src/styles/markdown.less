@@ -231,34 +231,54 @@
     height: auto;
   }
 
-  /* 右上角放大按钮：默认隐藏，hover mermaid-block 时浮现 */
-  .mermaid-zoom-btn {
+  /* 右上角工具栏（复制代码 | 复制图片 | 放大）：默认隐藏，hover mermaid-block 时浮现 */
+  .mermaid-toolbar {
     position: absolute;
     top: 6px;
     right: 6px;
     z-index: 2;
     display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .mermaid-tool-btn {
+    display: flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 18px;
+    height: 18px;
     padding: 0;
     border: 1px solid var(--border-primary);
     border-radius: 4px;
     background: var(--bg-elevated);
     color: var(--text-secondary);
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-    font-size: 13px;
+    font-size: 10px;
     line-height: 1;
+
+    /* codicon.css 的 .codicon[class*='codicon-'] font 简写（0,2,0=16px）压过继承的
+       font-size（按钮上设了也不生效），须高特异性直接覆盖图标 */
+    .codicon[class*='codicon-'] {
+      font-size: 10px;
+    }
 
     &:hover {
       background: var(--bg-hover);
       color: var(--text-primary);
     }
+
+    /* 复制结果反馈着色（✓ 绿 / ✗ 红） */
+    &.mermaid-copy-ok {
+      color: var(--status-success);
+    }
+    &.mermaid-copy-fail {
+      color: var(--status-error);
+    }
   }
-  &:hover .mermaid-zoom-btn {
+
+  &:hover .mermaid-toolbar {
     opacity: 1;
   }
 }
@@ -305,11 +325,23 @@
   overflow: auto;
   padding: 48px 24px 24px; /* 顶部 48 留给右上角工具栏 */
   background: var(--bg-elevated); /* 不透明背景，与底层聊天内容分离，不混图 */
+  display: flex;
+
+  /* 手型拖动平移：仅内容溢出时（--pan），按住变 grabbing */
+  &.mermaid-modal-content--pan {
+    cursor: grab;
+  }
+  &.dragging {
+    cursor: grabbing;
+  }
 }
 
 .mermaid-modal-svg {
   display: block;
-  margin: 0 auto; /* 宽 < 容器(zoom<1)时居中；放大溢出时 auto 失效，自然左对齐可横向滚动 */
+  /* flex 子项 margin:auto = 安全居中：fit 时水平+垂直都居中（图不再贴顶），
+     溢出方向 auto 归零 → 自然可滚（align-items:center 溢出会裁掉顶部滚不到） */
+  margin: auto;
+  flex-shrink: 0; /* flex 默认 shrink 会把 zoom>1 的宽度压回容器宽 */
   svg {
     width: 100% !important;      /* 跟随容器宽度（zoom 百分比）等比缩放 */
     height: auto !important;
@@ -360,6 +392,14 @@
   min-height: 28px;
   padding: 6px;
   font-size: 14px;
+
+  /* 复制结果反馈着色（✓ 绿 / ✗ 红） */
+  &.mermaid-copy-ok {
+    color: var(--status-success);
+  }
+  &.mermaid-copy-fail {
+    color: var(--status-error);
+  }
 }
 
 .mermaid-modal-pct {

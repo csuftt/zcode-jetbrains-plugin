@@ -797,6 +797,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "listSessions" -> handleListSessions(msg)
                         "send" -> handleSend(msg)
                         "getClipboardImage" -> handleGetClipboardImage(msg)
+                        "copyImage" -> handleCopyImage(msg)
                         "messages" -> handleMessages(msg)
                         "subagents" -> handleSubagents(msg)
                         "subagentMessages" -> handleSubagentMessages(msg)
@@ -2978,6 +2979,55 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: Exception) {
             log.warn("clipboard image encode failed: ${e.message}")
             empty()
+        }
+    }
+
+    /**
+     * mermaid 复制图片降级通道（webview 的 navigator.clipboard.write 在 JCEF 写图片不可靠）：
+     * PNG 纯 base64 → BufferedImage → AWT 系统剪贴板 imageFlavor，可粘贴到任意应用。
+     * 剪贴板写入必须在 EDT（本 handler 跑 pooled 线程），PNG 解码留在 pooled 线程。
+     */
+    private fun handleCopyImage(msg: JsonObject): JsonObject {
+        val b64 = msg["dataBase64"]?.jsonPrimitive?.content
+            ?: return buildJsonObject { put("op", "imageCopied"); put("ok", false); put("error", "missing dataBase64") }
+        val image = try {
+            val bytes = java.util.Base64.getDecoder().decode(b64)
+            javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(bytes))
+        } catch (e: Exception) {
+            log.warn("copyImage decode failed: ${e.message}")
+            null
+        }
+        if (image == null) {
+            return buildJsonObject { put("op", "imageCopied"); put("ok", false); put("error", "png decode failed") }
+        }
+        var clipErr: String? = null
+        ApplicationManager.getApplication().invokeAndWait {
+            try {
+                java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                    object : java.awt.datatransfer.Transferable {
+                        override fun getTransferDataFlavors() =
+                            arrayOf(java.awt.datatransfer.DataFlavor.imageFlavor)
+                        override fun isDataFlavorSupported(flavor: java.awt.datatransfer.DataFlavor?) =
+                            flavor == java.awt.datatransfer.DataFlavor.imageFlavor
+                        override fun getTransferData(flavor: java.awt.datatransfer.DataFlavor?): Any {
+                            if (flavor != java.awt.datatransfer.DataFlavor.imageFlavor) {
+                                throw java.awt.datatransfer.UnsupportedFlavorException(flavor)
+                            }
+                            return image
+                        }
+                    },
+                    null,
+                )
+            } catch (e: Exception) {
+                clipErr = e.message
+            }
+        }
+        return if (clipErr == null) {
+            log.info("copyImage: image written to system clipboard (${image.width}x${image.height})")
+            buildJsonObject { put("op", "imageCopied"); put("ok", true) }
+        } else {
+            log.warn("copyImage clipboard write failed: $clipErr")
+            buildJsonObject { put("op", "imageCopied"); put("ok", false); put("error", clipErr) }
         }
     }
 

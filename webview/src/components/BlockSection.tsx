@@ -43,7 +43,14 @@ function extractMermaid(block: string): { code: string } | null {
  *   HTML，安全性由 renderMarkdown 里的 DOMPurify 保证）
  */
 export const BlockSection = memo(function BlockSection({ markdown, isStreaming }: BlockSectionProps) {
+  // 两个 hook 必须无条件调用：mermaid/普通形态在流式中会互相切换
+  // （围栏闭合后、空行切块前的 delta 会把后续文本追加进同一块），
+  // 条件 hooks 会让同一实例的 hooks 数量变化 → React #300 整树卸载（黑屏）
   const mermaidBlock = useMemo(() => extractMermaid(markdown), [markdown])
+  const html = useMemo(
+    () => (mermaidBlock ? null : renderMarkdown(markdown, isStreaming)),
+    [markdown, isStreaming, mermaidBlock],
+  )
 
   if (mermaidBlock) {
     return (
@@ -52,12 +59,7 @@ export const BlockSection = memo(function BlockSection({ markdown, isStreaming }
       </div>
     )
   }
-
-  const html = useMemo(
-    () => renderMarkdown(markdown, isStreaming),
-    [markdown, isStreaming],
-  )
-  return <div className="md-block" dangerouslySetInnerHTML={{ __html: html }} />
+  return <div className="md-block" dangerouslySetInnerHTML={{ __html: html ?? '' }} />
 })
 
 /**

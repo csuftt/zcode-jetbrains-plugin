@@ -43,7 +43,11 @@
     "zoomOutTitle": "缩小 (-10%)",
     "zoomInTitle": "放大 (+10%)",
     "resetZoom": "重置为 100%（滚轮可缩放）",
-    "close": "关闭 (Esc)"
+    "close": "关闭 (Esc)",
+    "copyCode": "复制代码",
+    "copyImage": "复制图片",
+    "copied": "已复制",
+    "copyFailed": "复制失败"
   },
   "code": {
     "copy": "复制代码",

@@ -43,7 +43,11 @@
     "zoomOutTitle": "縮小 (-10%)",
     "zoomInTitle": "拡大 (+10%)",
     "resetZoom": "100% にリセット（ホイールで拡大縮小）",
-    "close": "閉じる (Esc)"
+    "close": "閉じる (Esc)",
+    "copyCode": "コードをコピー",
+    "copyImage": "画像をコピー",
+    "copied": "コピーしました",
+    "copyFailed": "コピーに失敗しました"
   },
   "code": {
     "copy": "コードをコピー",

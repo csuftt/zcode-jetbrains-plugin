@@ -43,7 +43,11 @@
     "zoomOutTitle": "Zoom out (-10%)",
     "zoomInTitle": "Zoom in (+10%)",
     "resetZoom": "Reset to 100% (scroll to zoom)",
-    "close": "Close (Esc)"
+    "close": "Close (Esc)",
+    "copyCode": "Copy code",
+    "copyImage": "Copy image",
+    "copied": "Copied",
+    "copyFailed": "Copy failed"
   },
   "code": {
     "copy": "Copy code",

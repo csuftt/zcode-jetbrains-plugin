@@ -399,6 +399,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'gotoSession'; sessionId: string }
   /** 历史列表打开前定位：查所有标签是否已绑定该会话（有则 Java 直接激活宿主标签跳转，无副作用）*/
   | { op: 'locateSession'; sessionId: string }
+  /** mermaid 复制图片：PNG 纯 base64 → Java 系统剪贴板（JCEF 的 clipboard.write 图片不可靠的降级通道）*/
+  | { op: 'copyImage'; dataBase64: string }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {
@@ -732,6 +734,8 @@ export type JavaResponse =
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }
   | { op: 'archivedSessions'; sessions: SessionInfo[] }
+  /** copyImage 回执：Java 系统剪贴板写入结果 */
+  | { op: 'imageCopied'; ok: boolean; error?: string }
   // ============ 定时消息（Java 侧广播/定向推送）============
   /** 全量镜像（广播到全部标签；UI 按 currentSessionId 过滤）；fired=已发记录（徽标匹配用）。
    *  ts=Java 单调取号，webview 只应用更新的快照（多线程广播到达乱序防旧快照复活已移除项）*/
