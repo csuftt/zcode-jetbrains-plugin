@@ -83,6 +83,9 @@ class ZCodeProtocolClient private constructor(
     /** 已 v4 订阅的会话（幂等去重；帧到达时也以此为门禁，未订阅会话的帧不映射） */
     private val v4SubscribedSessions = ConcurrentHashMap.newKeySet<String>()
 
+    /** 帧到达计数（[V4FrameProbe] 诊断，见 handleNotification 的 v4/conversation/frame 分支） */
+    private val v4FrameProbe = ConcurrentHashMap<String, Long>()
+
     /** v4 增量帧 → legacy SessionEvent 映射（行表等状态集中此处，v4 面演进只改一类） */
     private val v4FrameMapper = V4FrameMapper()
 
@@ -453,6 +456,13 @@ class ZCodeProtocolClient private constructor(
             val sid = topic.removePrefix("conversation/")
             if (sid.length == topic.length || sid !in v4SubscribedSessions) return
             val frame = params["frame"]?.jsonObject ?: return
+            // 帧到达诊断（缺陷AO 终测：live 在快照后停更——区分"服务端没推帧"vs
+            // "帧到了没渲染"）：每会话首帧 + 每 20 帧打一条计数（STDOUT → idea.log）
+            val n = v4FrameProbe.merge(sid, 1L, Long::plus)
+            if (n != null && (n == 1L || n % 20L == 0L)) {
+                val pk = frame["payload"]?.jsonObject?.get("kind")?.jsonPrimitive?.jsonStringOrNull ?: "?"
+                println("[V4FrameProbe] $sid frame#$n payload=$pk")
+            }
             val events = try {
                 v4FrameMapper.mapFrame(sid, frame)
             } catch (e: Exception) {
@@ -732,6 +742,7 @@ class ZCodeProtocolClient private constructor(
      */
     fun unsubscribeConversationV4(sessionId: String, timeoutMs: Long = 5000) {
         v4SubscribedSessions.remove(sessionId)
+        v4FrameProbe.remove(sessionId)
         v4FrameMapper.cleanup(sessionId)
         try {
             request("v4/conversation/unsubscribe", buildJsonObject {
