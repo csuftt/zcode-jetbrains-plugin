@@ -95,6 +95,41 @@ describe('编辑场景弹窗实时渲染（running 期间的失败痕迹软化�
     expect(container.querySelector('.subagent-detail-failed')).toBeNull()
   })
 
+  it('成功铁证豁免：活动误标 error 但 Agent 最终报告在场且无错误详情 → 不显示失败', () => {
+    // 2026-09-01 实测场景：任务成功（rollout isError=false、报告在场），活动被
+    // 中途事件误标 error → 弹窗"执行失败"+成功内容自相矛盾。豁免条件：RPC
+    // success 或 agentOutput 在场且无 failErrorText
+    useStore.setState({
+      agents: [{ callID: 'call_edit', childSessionId: CHILD_SID, status: 'error', description: '编辑任务' }],
+      messages: [{
+        info: { id: 'm1', sessionID: 'sess_main', role: 'assistant', time: { created: 1 } },
+        parts: [{
+          type: 'tool', callID: 'call_edit', tool: 'Agent',
+          state: { status: 'error', output: '任务完成，三行内容完全正确。', time: { start: 1, end: 2 } },
+        }],
+      }],
+      subagents: [],
+    })
+    const { container } = render(<SubagentDetailDialog />)
+    expect(container.querySelector('.subagent-detail-failed')).toBeNull()
+  })
+
+  it('真失败不受豁免：state.error 在场且无 output → 失败条仍显示', () => {
+    useStore.setState({
+      agents: [{ callID: 'call_edit', childSessionId: CHILD_SID, status: 'error', description: '编辑任务' }],
+      messages: [{
+        info: { id: 'm1', sessionID: 'sess_main', role: 'assistant', time: { created: 1 } },
+        parts: [{
+          type: 'tool', callID: 'call_edit', tool: 'Agent',
+          state: { status: 'error', error: { message: '[1301] 内容审查拦截' }, time: { start: 1, end: 2 } },
+        }],
+      }],
+      subagents: [],
+    })
+    const { container } = render(<SubagentDetailDialog />)
+    expect(container.querySelector('.subagent-detail-failed')).toBeTruthy()
+  })
+
   it('权威替换后（transcript 无 error Read）：失败痕迹消失（对应用户"执行完刷新为成功"）', () => {
     // 活动收尾 + 权威转录到达（只有成功的 4 工具，error Read 不落库）
     useStore.setState({

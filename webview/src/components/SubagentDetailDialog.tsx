@@ -284,7 +284,14 @@ export function SubagentDetailDialog() {
   // 报告按钮：状态=已完成才显示（running 时报告未生成、error 时无完整报告可读），
   // 状态取三源之最先非空（流式聚合 / RPC 权威 / 转发活动，见数据分三层注释）
   const finalStatus = item?.status ?? info?.status ?? activity?.status
-  const failed = !running && (finalStatus === 'error' || finalStatus === 'failed')
+  // 成功铁证否决误标的失败（2026-09-01 实测：任务成功、报告在场，活动却被中途
+  // 事件误标 error——弹窗显示"执行失败"+假耗时，内容与状态自相矛盾）：
+  // a) RPC ended 的 status=success（服务端 ended 只收录成功条目，是权威认定）；
+  // b) Agent 工具有最终报告且无任何错误详情（真失败没有 output、只有 state.error，
+  //    或 output 是 "Agent failed: ..." 的失败收尾形态——错误详情以 output 承载）
+  const successEvidence = info?.status === 'success'
+    || (!!agentOutput && !failErrorText && !agentOutput.startsWith('Agent failed'))
+  const failed = !running && (finalStatus === 'error' || finalStatus === 'failed') && !successEvidence
   const reportReady = finalStatus === 'completed' && !!agentOutput
 
   return (

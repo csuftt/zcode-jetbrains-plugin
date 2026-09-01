@@ -200,6 +200,7 @@ class V4FrameMapper {
                             pendingEnd = if (state == "completedSuccess") {
                                 event("turn.completed", sessionId, ts, nextSeq(), turnId) { }
                             } else {
+                                println("[V4FrameMapper] snapshot turn.failed emitted: state=$state turnId=$turnId sid=$sessionId")
                                 event("turn.failed", sessionId, ts, nextSeq(), turnId) {
                                     put("error", buildJsonObject {
                                         put("type", "turn_state")
@@ -324,6 +325,9 @@ class V4FrameMapper {
             }
             // completedError / cancelled 等一切非成功终态按失败收口（前端有权威重拉自愈）
             else -> if (state.isNotBlank()) {
+                // 诊断（缺陷AO 追查）：turn.failed 的产出源与 state 值——真实终态 vs
+                // 未知的中间态误判，凭此行在 idea.log（STDOUT）区分
+                println("[V4FrameMapper] turn.failed emitted: state=$state turnId=$turnId sid=$sessionId")
                 sessionTurnActive[sessionId] = false
                 event("turn.failed", sessionId, ts, seq, turnId) {
                     put("error", buildJsonObject {
