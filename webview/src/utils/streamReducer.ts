@@ -263,7 +263,8 @@ function handleToolInputStreaming(
       type: 'tool',
       callID: callId,
       tool: p.toolName || 'unknown',
-      state: { status: 'pending', title: p.toolName, inputRaw: '' },
+      // start 先用事件到达时刻兜底：started 事件的 startedAt（服务端权威）到场即覆盖
+      state: { status: 'pending', title: p.toolName, inputRaw: '', time: { start: timestamp } },
     })
   } else if (p.kind === 'tool_input_delta') {
     if (tIdx < 0) return { messages, streamingMessageId, turnEnded: false }
@@ -290,7 +291,8 @@ function handleToolInputStreaming(
         type: 'tool',
         callID: callId,
         tool: p.toolName || p.toolCall?.name || 'unknown',
-        state: { status: 'pending', ...(input ? { input } : {}) },
+        // start 兜底同 tool_input_start（started 的 startedAt 到场即覆盖）
+        state: { status: 'pending', ...(input ? { input } : {}), time: { start: timestamp } },
       })
     }
   }
@@ -320,6 +322,7 @@ function handleToolUpdated(
     toolName?: string
     result?: { success?: boolean; content?: string; error?: string }
     startedAt?: number
+    endedAt?: number
     successCount?: number
     errorCount?: number
     input?: Record<string, unknown>
@@ -404,6 +407,12 @@ function handleToolUpdated(
           status,
           // 子代理工具的 scheduled 内联携带完整 input（主会话工具 inputOmitted 走 model 流）
           ...(p.input ? { input: p.input } : {}),
+          // part 常先由 tool_input_start 建立（无 time）——startedAt 在场即覆盖起点
+          // （服务端权威，工具重跑时会更新；本地 timestamp 只是兜底），否则 result
+          // 收尾双兜底成同一瞬间，实时耗时恒 0.0 秒（缺陷AN）
+          ...(p.startedAt
+            ? { time: { ...existing.state.time, start: p.startedAt } }
+            : {}),
         },
       }
     } else {
@@ -436,7 +445,14 @@ function handleToolUpdated(
           status: isError ? 'error' : 'completed',
           output,
           ...(p.result?.error ? { error: { message: p.result.error } } : {}),
-          time: { start: prevTime?.start ?? Date.now(), end: Date.now() },
+          // 服务端时间戳权威（v4 行自带 startedAt/endedAt，毫秒）：实时流里 prevTime
+          // 可能只是 input_start 的本地兜底，?? 链会把它错当真值短路掉 startedAt；
+          // 且订阅快照回放已完成工具时 end=Date.now() 距真实完成可能几小时——本地
+          // 时钟只在服务端字段缺失时兜底（缺陷AN）
+          time: {
+            start: p.startedAt ?? prevTime?.start ?? Date.now(),
+            end: p.endedAt ?? Date.now(),
+          },
         },
       }
       // 缺陷E推断：EnterPlanMode 成功 = 会话已进入 plan 模式（服务端此时刻不推 mode）
