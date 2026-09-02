@@ -22,6 +22,10 @@ import i18n from '@/i18n/config'
 /** 前端诊断日志直落 idea.log（Java __jsLog 通道——console.warn 不被 JCEF 转发，
  *  2026-09-01 缺陷AO 追查踩坑：诊断必须走此通道才可见） */
 function diagWarn(text: string): void {
+  // 桥未就绪（启动早期注入竞态 / node 测试环境）不发：此时 sendToJava 落 mock
+  // 兜底，__jsLog 无 mock 分支会弹"mock 不支持 op"错误
+  const w = typeof window === 'undefined' ? undefined : window as unknown as Record<string, unknown>
+  if (typeof w?.__ZCODE_CEF_QUERY__ !== 'function' && typeof w?.sendToJava !== 'function') return
   try { sendToJava({ op: '__jsLog', level: 'warn', text }) } catch { /* 诊断不设障 */ }
 }
 
@@ -3238,7 +3242,7 @@ function handleChildStreamBatch(
   //（session/subscribe 流不带 subagent.lifecycle，合成通知消息只在重拉时可见），
   // 即时收尾父会话活动 + 权威刷新。批内最后生命周期事件是新 turn.started
   //（多 turn 续轮：终态后又开了新回合）时跳过收尾——子代理整体仍在跑
-  if (childTurnEnded && lastLifecycle !== 'started' && key) {
+    if (childTurnEnded && lastLifecycle !== 'started' && key) {
     const ts = events[events.length - 1]?.timestamp ?? Date.now()
     if (childTurnFailed) {
       const lastTs = events[events.length - 1]?.timestamp

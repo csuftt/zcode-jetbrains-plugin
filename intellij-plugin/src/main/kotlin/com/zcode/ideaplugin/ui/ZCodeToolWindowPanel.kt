@@ -124,6 +124,9 @@ class ZCodeToolWindowPanel(
 
     /** 子会话事件推送计数（[v4-child-probe] 诊断日志，见 pushStreamEvent） */
     private val childEventProbe = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** 子会话事件被 subscribedSessions 门禁拦截的计数（[gate-drop] 诊断） */
+    private val gateDropProbe = java.util.concurrent.ConcurrentHashMap<String, Long>()
     // 全局监听器是否已注册
     @Volatile
     private var globalListenerRegistered = false
@@ -180,6 +183,12 @@ class ZCodeToolWindowPanel(
         sessionId: String,
         workspacePath: String,
     ) {
+        // 子会话 v4 订阅进行中则等它先落服务端（≤3s）：resume 抢在 v4 subscribe 之前
+        // 到达会把会话切到 legacy 投递，v4 增量帧全部退化为空壳（2026-09-02 diag
+        // 对照实验定案，"子会话实时流快照后停更"的根因）
+        childV4SubInFlight[sessionId]?.let { pending ->
+            try { pending.get(3, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { /* 超时放行 */ }
+        }
         val ok = resumeDeduper.resumeOnce(sessionId) {
             try {
                 val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
@@ -193,6 +202,10 @@ class ZCodeToolWindowPanel(
         }
         if (!ok) log.info("resume deduped-skip or failed, continuing: $sessionId")
     }
+
+    /** 子会话 v4 订阅进行中的信号（见 resumeSessionDeduped 的等待逻辑） */
+    private val childV4SubInFlight =
+        java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<Unit>>()
 
     // ============ 释放状态 ============
     @Volatile
@@ -3295,13 +3308,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (sessionId in subscribedSessions) {
             log.info("subscribeChild: child session $sessionId already subscribed, skipping")
             // 幂等跳过路径：v4 未订上（首订失败）则补试一次——否则该子会话永远停在
-            // 快照轮询，实时流无重试机会
+            // 快照轮询，实时流无重试机会。补试同样持有 in-flight 信号（防 resume 抢跑）
             if (!client.isConversationV4Subscribed(sessionId)) {
+                val retryDone = java.util.concurrent.CompletableFuture<Unit>()
+                childV4SubInFlight[sessionId] = retryDone
                 try {
                     client.subscribeConversationV4(sessionId)
                     log.info("subscribeChild: v4 conversation subscribed (retry) $sessionId")
                 } catch (e: Exception) {
                     log.info("subscribeChild: v4 retry still unavailable for $sessionId: ${e.message}")
+                } finally {
+                    childV4SubInFlight.remove(sessionId)
+                    retryDone.complete(Unit)
                 }
             }
             return buildJsonObject {
@@ -3311,14 +3329,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
-        // subscribe 要求会话 active，先 resume（同会话短窗去重）；运行中的子会话可能已 active，失败静默
-        resumeSessionDeduped(client, sessionId, workspacePath)
-
-        // legacy 订阅（0.16.5 对子会话恒成功但 0 事件投递，保留无害，兼容未来版本修复）
+        // ⚠️ 不 resume 也不做 legacy session/subscribe（2026-09-02 diag 六组对照实验定案）：
+        // 二者任一先于 v4 subscribe 到达服务端，都会把子会话切到 legacy 投递模式——
+        // 之后 v4 通道的增量帧全部退化为空壳（fromSeq→toSeq 前进而 deltas=[]，实时流
+        // "快照回放后停更"的根因）。v4 订阅自身不要求会话 active；消息读取链路
+        // （subagentMessages）的 resume 由 resumeSessionDeduped 的 in-flight 等待保证
+        // 排在 v4 订阅之后，这里只在订阅期间持有信号。
+        val subDone = java.util.concurrent.CompletableFuture<Unit>()
+        childV4SubInFlight[sessionId] = subDone
         return try {
-            client.subscribe(sessionId, onEvent = null)
             subscribedSessions.add(sessionId)
-            log.info("subscribeChild: child session event stream subscribed $sessionId")
             // v4 订阅：子会话实时流的根治通道（v4/conversation/frame 增量帧 → 映射回
             // legacy 事件 → pushStreamEvent 白名单放行 → 前端 childLiveMessages 归约）。
             // 失败降级为纯快照轮询（弹窗 3s 兜底由前端按 v4=false 自行启用），不阻断订阅应答
@@ -3339,6 +3359,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: Exception) {
             log.warn("subscribeChild: subscribe failed $sessionId: ${e.message}")
             errorResponse("子会话订阅失败: ${e.message}")
+        } finally {
+            childV4SubInFlight.remove(sessionId)
+            subDone.complete(Unit)
         }
     }
 
@@ -3372,7 +3395,17 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 面板已释放：dispose 摘监听器与杀进程之间存在竞态窗口，双保险在此拦断
         if (disposed) return
         // 多标签隔离：只推本面板订阅过的会话（其他标签的事件由各自的监听器推送）
-        if (sessionId !in subscribedSessions) return
+        if (sessionId !in subscribedSessions) {
+            // 诊断（子会话实时流停更追查）：子会话被门禁挡住的首次打点——
+            // 持续打点说明订阅簿记在任务中途被清（invalidateStaleSubscriptions 等）
+            if (sessionId.startsWith("sess_subagent")) {
+                val n = gateDropProbe.merge(sessionId, 1L, Long::plus)
+                if (n != null && (n == 1L || n % 50L == 0L)) {
+                    log.info("[gate-drop] $sessionId blocked by subscribedSessions gate, blocked=$n")
+                }
+            }
+            return
+        }
 
         // 子会话事件诊断计数（v4 实时流排查）：首条 + 每 500 条 INFO 摘要——
         // idea.log 有计数递增而 UI 不动 = 断在前端归约；计数停滞 = 断在 Java/协议层
@@ -3430,6 +3463,25 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
         // 普通 delta：进缓冲，启动节流 flusher
         streamBuffer.add(sessionId to eventJson)
+        // 积压自愈兜底（子会话实时流停更追查 2026-09-02）：flusher 若因未知原因
+        // 停摆（running 标志卡死/调度丢失），事件会永久滞留 buffer——积压超阈值时
+        // 就地 flush 并复位标志，宁可偶发一拍全量推也不静默断流
+        if (streamBuffer.size > 40) {
+            var revived = false
+            synchronized(streamFlushLock) {
+                if (streamFlusherRunning) {
+                    streamFlusherRunning = false
+                    revived = true
+                }
+            }
+            if (revived) {
+                log.warn("[stream] flusher stalled with ${streamBuffer.size} buffered events, flushing inline")
+                try { flushStreamBuffer() } catch (ex: Throwable) {
+                    log.warn("[stream] inline flush failed: ${ex.javaClass.name}: ${ex.message}")
+                }
+                return
+            }
+        }
         startStreamFlusher()
     }
 
@@ -3439,15 +3491,25 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (streamFlusherRunning) return
             streamFlusherRunning = true
         }
-        // 单线程调度池延迟 16ms 执行：替代此前每窗口裸建 Thread（sleep 即弃，
-        // 流式 60fps 下线程抖动明显），线程在首次调度时创建、复用常驻
-        streamFlushScheduler.schedule({
-            try {
-                flushStreamBuffer()
-            } finally {
-                synchronized(streamFlushLock) { streamFlusherRunning = false }
+        try {
+            // 单线程调度池延迟 16ms 执行：替代此前每窗口裸建 Thread（sleep 即弃，
+            // 流式 60fps 下线程抖动明显），线程在首次调度时创建、复用常驻
+            streamFlushScheduler.schedule({
+                try {
+                    flushStreamBuffer()
+                } finally {
+                    synchronized(streamFlushLock) { streamFlusherRunning = false }
+                }
+            }, 16, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (e: Throwable) {
+            // schedule 失败（池终止等）时必须复位标志并就地兜底 flush，
+            // 否则 streamFlusherRunning 永久 true → 后续全部事件滞留 buffer（静默断流）
+            synchronized(streamFlushLock) { streamFlusherRunning = false }
+            log.warn("[stream] flusher schedule failed (flushing inline): ${e.javaClass.name}: ${e.message}")
+            try { flushStreamBuffer() } catch (ex: Throwable) {
+                log.warn("[stream] inline flush failed: ${ex.javaClass.name}: ${ex.message}")
             }
-        }, 16, java.util.concurrent.TimeUnit.MILLISECONDS)
+        }
     }
 
     /** 流式缓冲 flush 调度器（面板级单线程，懒创建、守护线程） */
@@ -3497,8 +3559,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
         SwingUtilities.invokeLater {
             try {
                 jbCefBrowser.cefBrowser.executeJavaScript(js, "zcode-stream", 0)
-            } catch (e: Exception) {
-                log.warn("[stream] sendToJsDirect failed op=$op: ${e.message}")
+            } catch (e: Throwable) {
+                // Throwable 而非 Exception：EDT 里抛 Error（如 CEF 上下文失效）同样要留痕
+                log.warn("[stream] sendToJsDirect failed op=$op: ${e.javaClass.name}: ${e.message}")
             }
         }
     }

@@ -94,6 +94,17 @@ export interface DiagEntry { time: string; op: string; detail: string }
 const diagLog: DiagEntry[] = []
 const diagListeners = new Set<(entries: DiagEntry[]) => void>()
 
+/** 流式通道异常上报（console.error 不被 JCEF 转发，走 __jsLog 进 idea.log）*/
+function reportStreamError(channel: string, sessionId: string, type: string, err: unknown) {
+  console.error('[bridge] stream listener 抛错', err)
+  const w = typeof window === 'undefined' ? undefined : window as unknown as Record<string, unknown>
+  if (typeof w?.__ZCODE_CEF_QUERY__ !== 'function' && typeof w?.sendToJava !== 'function') return
+  try {
+    const text = err instanceof Error ? `${err.name}: ${err.message}\n${String(err.stack ?? '').slice(0, 400)}` : String(err).slice(0, 200)
+    sendToJava({ op: '__jsLog', level: 'warn', text: `[stream-err] ${channel} sid=${sessionId.slice(-8)} type=${type} ${text}` })
+  } catch { /* 上报不设障 */ }
+}
+
 function addDiag(op: string, detail: string) {
   const entry = { time: new Date().toLocaleTimeString(), op, detail }
   diagLog.push(entry)
@@ -112,6 +123,19 @@ export function getDiagLog(): DiagEntry[] {
 }
 
 export function initBridge(): void {
+  // 全局异常钩子（子会话实时流停更追查）：console.error 不被 JCEF 转发，
+  // 未捕获异常默认无迹可寻——转发到 idea.log（__jsLog 通道）
+  if (!(window as unknown as { __zcodeErrHooked?: boolean }).__zcodeErrHooked) {
+    ;(window as unknown as { __zcodeErrHooked?: boolean }).__zcodeErrHooked = true
+    const report = (label: string, e: unknown) => {
+      try {
+        const text = e instanceof Error ? `${e.name}: ${e.message}\n${String(e.stack ?? '').slice(0, 500)}` : String(e).slice(0, 300)
+        sendToJava({ op: '__jsLog', level: 'warn', text: `[webview-error] ${label} ${text}` })
+      } catch { /* 钩子自身不设障 */ }
+    }
+    window.addEventListener('error', (ev) => report('uncaught', ev.error ?? ev.message))
+    window.addEventListener('unhandledrejection', (ev) => report('rejection', ev.reason))
+  }
   window.zcodeBridge = {
     onMessage: (raw: unknown) => {
       let msg: JavaResponse
@@ -140,7 +164,7 @@ export function initBridge(): void {
           try {
             fn(msg.sessionId, msg.event)
           } catch (err) {
-            console.error('[bridge] stream listener 抛错', err)
+            reportStreamError('streamEvent', msg.sessionId, msg.event.type, err)
           }
         })
         return
@@ -152,14 +176,14 @@ export function initBridge(): void {
             try {
               fn(msg.sessionId, msg.events)
             } catch (err) {
-              console.error('[bridge] stream batch listener 抛错', err)
+              reportStreamError('streamBatch', msg.sessionId, msg.events.map((e) => e.type).slice(0, 5).join(','), err)
             }
           })
         } else {
           // 兜底：没有 batch 监听器时逐个推
           for (const evt of msg.events) {
             streamListeners.forEach((fn) => {
-              try { fn(msg.sessionId, evt) } catch (err) { console.error('[bridge] stream listener 抛错', err) }
+              try { fn(msg.sessionId, evt) } catch (err) { reportStreamError('streamEvent-fallback', msg.sessionId, evt.type, err) }
             })
           }
         }
@@ -1697,8 +1721,12 @@ flowchart LR
         ],
       }
     case 'subscribeChild':
-      // mock：子会话订阅 ack（无真实事件流，弹窗实时数据走 mock 消息/转发事件）
-      return { op: 'subscribedChild', sessionId: req.sessionId }
+      // mock：子会话订阅 ack（无真实事件流，弹窗实时数据走 mock 消息/转发事件）。
+      // v4:false = 前端三态守卫走降级轮询（配合 subagentMessages mock 分支）
+      return { op: 'subscribedChild', sessionId: req.sessionId, v4: false }
+    case '__jsLog':
+      // 诊断日志：桥未就绪期落 mock 时静默吞掉（mock 分支缺失会弹"mock 不支持 op"）
+      return { op: '__jsLogAck' }
     default:
       return { op: 'error', message: `mock 不支持 op: ${(req as { op: string }).op}` }
   }

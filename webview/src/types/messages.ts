@@ -758,6 +758,7 @@ export type JavaResponse =
   | { op: 'clipboardImage'; base64?: string; mediaType?: string }
   | { op: 'subscribed'; sessionId: string; alreadySubscribed?: boolean }
   | { op: 'subscribedChild'; sessionId: string; v4?: boolean }
+  | { op: '__jsLogAck' }
   | { op: 'stopped'; sessionId: string }
   | { op: 'streamEvent'; sessionId: string; event: StreamEvent }
   | { op: 'streamBatch'; sessionId: string; events: StreamEvent[] }

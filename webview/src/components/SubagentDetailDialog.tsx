@@ -4,10 +4,10 @@
  * 入口：底部状态面板"子代理"条目点击 / 主聊天 Agent 工具卡点击。
  *
  * 数据分三层（按运行状态取最优）：
- * - 运行中：每 3s 静默轮询 childMessages 快照（subagentMessages op：resume + 读）——
- *   子会话原生事件流服务端不投递（subscribeChild 实测无效），轮询是实时性的
- *   唯一可靠来源；childLiveMessages（事件流归约）保留为优先源，服务端若某天
- *   开始投递原生事件则自动升级为真·实时；
+ * - 运行中：childLiveMessages（v4 订阅的实时事件流归约，subscribeChild 建立）——
+ *   运行期绝不走 subagentMessages（resume + 读）：resume 会把子会话切到 legacy
+ *   投递、v4 增量帧退化为空壳（2026-09-02 diag 实验 7/8 定案，顺序无关）；
+ *   v4 不可用（订阅失败/老 CLI 降级）才启用 3s 静默轮询快照兜底；
  * - 已结束：childMessages——stopped 通知 / turn 结束自动拉取的权威全量转录；
  * - 兜底：subagentActivities 的实时工具列表（父会话转发的工具事件聚合，
  *   快照未返回时——如历史会话——至少展示工具过程）。
@@ -22,7 +22,7 @@ import { renderPartUnits } from './PartUnits'
 import { ScrollJumpButton } from './ScrollJumpButton'
 import { groupParts } from '@/utils/groupParts'
 import { getAgentToolOutput, getAgentToolErrorText, validSpan } from '@/utils/parseStatus'
-import { formatToolDuration } from '@/utils/time'
+import { clockTime, formatToolDuration } from '@/utils/time'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
 
@@ -133,6 +133,7 @@ export function SubagentDetailDialog() {
   const agents = useStore((s) => s.agents)
   const activities = useStore((s) => s.subagentActivities)
   const subagents = useStore((s) => s.subagents)
+  const subagentDefs = useStore((s) => s.subagentDefs)
   const childMessages = useStore((s) => s.childMessages)
   const childLiveMessages = useStore((s) => s.childLiveMessages)
   const loading = useStore((s) => s.childMessagesLoading)
@@ -230,20 +231,27 @@ export function SubagentDetailDialog() {
     prevRunningRef.current = running
   }, [running, childSessionId, loadChildMessages])
 
-  // 运行中的快照获取：v4 实时通道可用（subscribeChild 应答标志）时**不做 3s 轮询**——
-  // 实时流在场时轮询只添乱（用户无法区分数据来源；resume 运行中子会话也可能扰动
-  // 服务端流），只打开时拉一次快照作 live 空窗期的初始内容；v4 不可用（老 CLI 降级）
-  // 才保留 3s 轮询兜底。结束（running=false，事件流收尾时会再拉一次权威全量）或
-  // 关闭弹窗即停。手动刷新按钮不受影响。
-  const v4 = useStore((s) => (childSessionId ? !!s.childSessionV4[childSessionId] : false))
+  // 运行中的快照获取：v4 实时通道可用（subscribeChild 应答标志）时**完全不拉快照**——
+  // 初始内容已由 v4 订阅的 snapshot 帧回放（batch 进 childLiveMessages），而
+  // subagentMessages 链路的 session/resume 会把子会话切到 legacy 投递、v4 增量帧
+  // 从此退化为空壳（2026-09-02 diag 实验 7/8 定案：运行中 resume 必杀 v4 流，read
+  // 又必须 resume——所以运行中一个 resume 都不能发生）。v4 不可用（老 CLI 降级）
+  // 才保留打开首拉 + 3s 轮询兜底。结束（running=false，事件流收尾时会再拉一次
+  // 权威全量）或关闭弹窗即停。手动刷新按钮不受影响（用户主动杀流的代价由翻转
+  // 沿的权威重拉兜底）。
+  // 三态守卫：true=实时流在场；undefined=订阅未决（childSessionId 到位即触发本 effect，
+  // 而 subscribeChild 应答未回——此时照发 loadChildMessages 就是运行中 resume，2026-09-02
+  // demo18 实测：v4 订阅 500ms 后的 resume 照样把会话切 legacy、增量帧全空壳，diag 实验 7
+  // 同结论——顺序无关，运行期间一个 resume 都不能发生）；false=v4 不可用才降级轮询
+  const v4state = useStore((s) => (childSessionId ? s.childSessionV4[childSessionId] : undefined))
   useEffect(() => {
     if (!running || !childSessionId) return
-    // 打开即拉一次（v4 场景作初始内容；降级场景作为轮询首拍）
+    if (v4state !== false) return // 等待订阅定夺：未决期间不拉（resume 杀流），也不轮询
+    // 打开即拉一次（降级场景作为轮询首拍）
     loadChildMessages(childSessionId, true)
-    if (v4) return // 实时流在场：不轮询
     const timer = setInterval(() => loadChildMessages(childSessionId, true), 3000)
     return () => clearInterval(timer)
-  }, [running, childSessionId, v4, loadChildMessages])
+  }, [running, childSessionId, v4state, loadChildMessages])
 
   // Escape 关闭
   useEffect(() => {
@@ -266,6 +274,19 @@ export function SubagentDetailDialog() {
   const duration = span
     ? formatToolDuration(span.endedAt - span.startedAt)
     : liveStart ? formatToolDuration(Math.max(0, Date.now() - liveStart)) : ''
+  // 开始时刻（主界面 msg__footer-time 同款 clockTime：当天 HH:mm，跨天带日期）。
+  // 三源之最先非空——与耗时同源，时刻不存在时耗时也不存在，二者同现同隐
+  const startTs = item?.startedAt ?? info?.startedAt ?? activity?.startedAt
+  const startTime = startTs ? clockTime(startTs) : ''
+  // 模型（主界面 msg__footer-model 同款显示实际执行模型）：权威转录里最后一条
+  // assistant 的 modelID 最准（多 turn 取末条）；运行中 live 归约不产此字段，
+  // 回退子代理定义的 model（缺省=跟随主会话——不猜当前值，宁缺勿错，
+  // 结束后权威重拉自然补上）
+  const model = (display ?? []).reduce<string | undefined>((acc, m) =>
+    m.info.role === 'assistant' && m.info.modelID ? m.info.modelID : acc, undefined)
+    ?? (running
+      ? subagentDefs?.find((d) => d.name === (item?.subagentType ?? activity?.agentType ?? info?.subagentType))?.model
+      : undefined)
   const badge = statusText(item?.status, t)
   const toolCount = activity?.tools.length ?? 0
 
@@ -310,6 +331,8 @@ export function SubagentDetailDialog() {
                 </span>
               )}
               <span className={`subagent-detail-badge ${badge.cls}`}>{badge.text}</span>
+              {startTime && <span className="subagent-detail-meta-item">{startTime}</span>}
+              {model && <span className="subagent-detail-meta-item">{model}</span>}
               {duration && <span className="subagent-detail-meta-item">{duration}</span>}
               {toolCount > 0 && <span className="subagent-detail-meta-item">{t('tool.toolsCount', { count: toolCount })}</span>}
             </div>

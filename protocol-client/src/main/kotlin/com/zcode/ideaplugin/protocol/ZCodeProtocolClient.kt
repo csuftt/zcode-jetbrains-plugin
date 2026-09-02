@@ -83,6 +83,12 @@ class ZCodeProtocolClient private constructor(
     /** 已 v4 订阅的会话（幂等去重；帧到达时也以此为门禁，未订阅会话的帧不映射） */
     private val v4SubscribedSessions = ConcurrentHashMap.newKeySet<String>()
 
+    /** v4 帧累计映射产出事件数（[V4FrameProbe] 的 mapped 字段，见 handleNotification） */
+    private val v4MappedProbe = ConcurrentHashMap<String, Long>()
+
+    /** 已 dump 过空壳帧原文的会话（每会话一次，防刷屏） */
+    private val v4EmptyDumped = ConcurrentHashMap.newKeySet<String>()
+
     /** 帧到达计数（[V4FrameProbe] 诊断，见 handleNotification 的 v4/conversation/frame 分支） */
     private val v4FrameProbe = ConcurrentHashMap<String, Long>()
 
@@ -457,17 +463,32 @@ class ZCodeProtocolClient private constructor(
             if (sid.length == topic.length || sid !in v4SubscribedSessions) return
             val frame = params["frame"]?.jsonObject ?: return
             // 帧到达诊断（缺陷AO 终测：live 在快照后停更——区分"服务端没推帧"vs
-            // "帧到了没渲染"）：每会话首帧 + 每 20 帧打一条计数（STDOUT → idea.log）
+            // "帧到了没渲染"）：每会话首帧 + 每 100 帧打一条心跳计数（STDOUT → idea.log）。
+            // mapped=累计映射产出事件数——帧计数增长而 mapped 停滞 = 行表/映射层
+            // 把 delta 全部判空（如 rowId 未登记），推送层无从推起
             val n = v4FrameProbe.merge(sid, 1L, Long::plus)
-            if (n != null && (n == 1L || n % 20L == 0L)) {
-                val pk = frame["payload"]?.jsonObject?.get("kind")?.jsonPrimitive?.jsonStringOrNull ?: "?"
-                println("[V4FrameProbe] $sid frame#$n payload=$pk")
-            }
             val events = try {
                 v4FrameMapper.mapFrame(sid, frame)
             } catch (e: Exception) {
                 System.err.println("[ZCodeProtocolClient] v4 frame map error (frame dropped): ${e.javaClass.simpleName}: ${e.message}")
                 return
+            }
+            v4MappedProbe.merge(sid, events.size.toLong(), Long::plus)
+            if (n != null && (n == 1L || n % 100L == 0L)) {
+                val pk = frame["payload"]?.jsonObject?.get("kind")?.jsonPrimitive?.jsonStringOrNull ?: "?"
+                val ds = (frame["payload"]?.jsonObject?.get("deltas")?.jsonArray)?.size ?: -1
+                println("[V4FrameProbe] $sid frame#$n payload=$pk deltas=$ds mapped=${v4MappedProbe[sid] ?: 0L}")
+            }
+            // 空壳帧首遇 dump（增量零产出追查 2026-09-02）：payload.kind=deltas 但数组为空
+            // ——服务端 resync/recovery 的"已追平"应答。原文含 fromSeq/toSeq/deliveryKind/
+            // subscriptionId，直接暴露帧的路由身份与游标状态
+            if (frame["payload"]?.jsonObject?.get("kind")?.jsonPrimitive?.jsonStringOrNull == "deltas"
+                && (frame["payload"]?.jsonObject?.get("deltas")?.jsonArray ?: kotlinx.serialization.json.JsonArray(emptyList())).isEmpty()
+            ) {
+                val dumped = v4EmptyDumped.add(sid)
+                if (dumped) {
+                    println("[V4FrameProbe] empty-frame dump $sid: ${frame.toString().take(600)}")
+                }
             }
             for (ev in events) dispatchSessionEvent(ev)
         }
@@ -743,6 +764,7 @@ class ZCodeProtocolClient private constructor(
     fun unsubscribeConversationV4(sessionId: String, timeoutMs: Long = 5000) {
         v4SubscribedSessions.remove(sessionId)
         v4FrameProbe.remove(sessionId)
+        v4MappedProbe.remove(sessionId)
         v4FrameMapper.cleanup(sessionId)
         try {
             request("v4/conversation/unsubscribe", buildJsonObject {
