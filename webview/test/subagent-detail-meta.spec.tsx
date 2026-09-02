@@ -11,12 +11,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
+const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }))
 vi.mock('@/ipc/bridge', () => ({
-  sendToJava: () => {},
+  sendToJava: (req: unknown) => sendMock(req),
 }))
 
 import '@/i18n/config'
 import { SubagentDetailDialog } from '@/components/SubagentDetailDialog'
+import { SubagentReportDialog } from '@/components/SubagentReportDialog'
 import { useStore } from '@/store/useStore'
 import type { ZCodeMessage } from '@/types/messages'
 
@@ -41,6 +43,7 @@ function hhmm(ts: number): string {
 }
 
 beforeEach(() => {
+  sendMock.mockClear()
   useStore.setState({
     subagentDetail: 'call_meta',
     agents: [],
@@ -113,5 +116,42 @@ describe('子代理弹窗 meta：执行时刻与模型', () => {
     expect(screen.getByText('GLM-5.2')).toBeTruthy()
     // 无时刻无耗时：meta 区只有模型（无 HH:MM 形态项）
     expect(screen.queryByText(/^\d{2}:\d{2}$/)).toBeNull()
+  })
+
+  it('最终报告弹窗：头部显示时刻+模型+耗时（转录在场）', () => {
+    const start = Date.now() - 60_000
+    useStore.setState({
+      subagentReport: { callID: 'call_meta', title: '报告', markdown: '# done' },
+      agents: [{ callID: 'call_meta', childSessionId: CHILD_SID, status: 'completed', description: 'd', startedAt: start, endedAt: start + 30_000 }],
+      childMessages: { [CHILD_SID]: msgs('GLM-5.3') },
+    })
+    render(<SubagentReportDialog />)
+    expect(screen.getByText('GLM-5.3')).toBeTruthy()
+    expect(screen.getByText(hhmm(start))).toBeTruthy()
+    expect(screen.getByText(/秒$/)).toBeTruthy() // 耗时（formatToolDuration 产物，时刻是 HH:mm 不含"秒"）
+  })
+
+  it('最终报告弹窗：转录未拉过时模型回退子代理定义值', () => {
+    useStore.setState({
+      subagentReport: { callID: 'call_meta', title: '报告', markdown: '# done' },
+      agents: [{ callID: 'call_meta', childSessionId: CHILD_SID, status: 'completed', description: 'd', subagentType: 'coder' }],
+      childMessages: {},
+      subagentDefs: [{ name: 'coder', description: '', tools: [], disallowedTools: [], injectAgentsMd: true, mcpServers: [], systemPrompt: '', model: 'GLM-5.2' }],
+    })
+    render(<SubagentReportDialog />)
+    expect(screen.getByText('GLM-5.2')).toBeTruthy()
+  })
+
+  it('最终报告弹窗：转录缺失时自动静默补拉（底部栏直接开报告模型第一时间可显示）', async () => {
+    useStore.setState({
+      subagentReport: { callID: 'call_meta', title: '报告', markdown: '# done' },
+      agents: [{ callID: 'call_meta', childSessionId: CHILD_SID, status: 'completed', description: 'd', startedAt: Date.now() - 30_000, endedAt: Date.now() }],
+      childMessages: {},
+    })
+    render(<SubagentReportDialog />)
+    // 已完成子会话的 resume 无害；silent 拉取补转录 → 模型随转录到达出现
+    await vi.waitFor(() => {
+      expect(sendMock.mock.calls.some((c) => (c[0] as { op: string }).op === 'subagentMessages')).toBe(true)
+    })
   })
 })

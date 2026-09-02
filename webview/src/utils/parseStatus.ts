@@ -136,6 +136,22 @@ export function validSpan(s?: number, e?: number): { startedAt: number; endedAt:
 }
 
 /**
+ * 子会话转录里实际执行的模型（详情/报告弹窗头部 meta 共用）：
+ * 末条带 modelID 的 assistant 消息（多 turn 取最后回合的实际值）。
+ * live 归约消息不产 modelID（v4 帧无 model 字段）——返回 undefined 由
+ * 调用方决定回退（详情弹窗回退子代理定义值；报告弹窗只在完成后可开，
+ * 权威转录必有）。
+ */
+export function transcriptModel(messages: ZCodeMessage[] | undefined): string | undefined {
+  if (!messages) return undefined
+  let model: string | undefined
+  for (const m of messages) {
+    if (m.info.role === 'assistant' && m.info.modelID) model = m.info.modelID
+  }
+  return model
+}
+
+/**
  * 合并三个子代理数据源成 StatusPanel 列表（按 callID/toolCallId/parentToolCallId 关联）：
  * 1. parseAgents（消息历史，兜底——覆盖 RPC/流式都还没看到的早期阶段；起止时间
  *    取 Agent part 的 state.time，与工具命令卡同源，是耗时的首选来源）

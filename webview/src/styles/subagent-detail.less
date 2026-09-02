@@ -17,6 +17,11 @@
   z-index: 10000;
 }
 
+/* 叠开形态（报告/预览弹窗叠在详情弹窗之上）：下层已有遮罩，上层透明防双层变暗 */
+.subagent-detail-overlay--stacked {
+  background: transparent;
+}
+
 .subagent-detail-dialog {
   position: relative; /* 滚动跳转按钮（scroll-control-button absolute）的定位锚 */
   width: 760px;

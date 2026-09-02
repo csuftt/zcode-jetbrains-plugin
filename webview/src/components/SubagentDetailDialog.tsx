@@ -21,7 +21,7 @@ import { MarkdownBlock } from './MarkdownBlock'
 import { renderPartUnits } from './PartUnits'
 import { ScrollJumpButton } from './ScrollJumpButton'
 import { groupParts } from '@/utils/groupParts'
-import { getAgentToolOutput, getAgentToolErrorText, validSpan } from '@/utils/parseStatus'
+import { getAgentToolOutput, getAgentToolErrorText, transcriptModel, validSpan } from '@/utils/parseStatus'
 import { clockTime, formatToolDuration } from '@/utils/time'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
@@ -232,11 +232,14 @@ export function SubagentDetailDialog() {
     return () => clearInterval(timer)
   }, [running, childSessionId, v4state, loadChildMessages])
 
-  // Escape 关闭
+  // Escape 关闭（分层：报告/预览阅读弹窗叠开时 Esc 归最上层，本弹窗不动）
   useEffect(() => {
     if (!key) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeDetail()
+      if (e.key !== 'Escape') return
+      const { subagentReport, markdownPreview } = useStore.getState()
+      if (subagentReport || markdownPreview) return
+      closeDetail()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -258,11 +261,10 @@ export function SubagentDetailDialog() {
   const startTs = item?.startedAt ?? info?.startedAt ?? activity?.startedAt
   const startTime = startTs ? clockTime(startTs) : ''
   // 模型（主界面 msg__footer-model 同款显示实际执行模型）：权威转录里最后一条
-  // assistant 的 modelID 最准（多 turn 取末条）；运行中 live 归约不产此字段，
-  // 回退子代理定义的 model（缺省=跟随主会话——不猜当前值，宁缺勿错，
-  // 结束后权威重拉自然补上）
-  const model = (display ?? []).reduce<string | undefined>((acc, m) =>
-    m.info.role === 'assistant' && m.info.modelID ? m.info.modelID : acc, undefined)
+  // assistant 的 modelID 最准（多 turn 取末条，见 transcriptModel）；运行中 live
+  // 归约不产此字段，回退子代理定义的 model（缺省=跟随主会话——不猜当前值，
+  // 宁缺勿错，结束后权威重拉自然补上）
+  const model = transcriptModel(display)
     ?? (running
       ? subagentDefs?.find((d) => d.name === (item?.subagentType ?? activity?.agentType ?? info?.subagentType))?.model
       : undefined)

@@ -1723,11 +1723,12 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   closeSubagentDetail: () => set({ subagentDetail: null, childMessagesError: null }),
-  // 三类弹窗互斥：报告 → 过程（openSubagentDetail）→ 报告 可来回切换，Escape 只关一个
-  openSubagentReport: (r) => set({ subagentReport: r, subagentDetail: null, markdownPreview: null }),
+  // 弹窗分层（2026-09-02 缺陷修复）：报告/预览是"阅读层"，可叠在详情弹窗之上打开，
+  // 关闭阅读层后详情弹窗仍在（用户实测反馈：关了总结弹窗子代理弹窗也消失，不符直觉）。
+  // 阅读/预览两类之间仍互斥（同时只读一个）；openSubagentDetail 清阅读层（新焦点切换）。
+  openSubagentReport: (r) => set({ subagentReport: r, markdownPreview: null }),
   closeSubagentReport: () => set({ subagentReport: null }),
-  // 通用 Markdown 预览与子代理弹窗同层互斥：叠着开两个 overlay，点哪关哪会很怪
-  openMarkdownPreview: (p) => set({ markdownPreview: p, subagentDetail: null, subagentReport: null }),
+  openMarkdownPreview: (p) => set({ markdownPreview: p, subagentReport: null }),
   closeMarkdownPreview: () => set({ markdownPreview: null }),
 
   openChangelog: () => set({ changelogOpen: true }),

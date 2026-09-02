@@ -3,8 +3,9 @@
  *
  * 入口：Agent 工具卡头部按钮 / 详情弹窗头部按钮（仅状态=已完成）。
  * markdown 为打开时从 Agent 工具 part.state.output 取的快照——报告完成后
- * 不再变化，无需轮询。与详情弹窗互斥（见 store openSubagentReport）：
- * 报告 → 过程 → 报告 可通过头部按钮来回切换，Escape 只关当前弹窗。
+ * 不再变化，无需轮询。与详情弹窗分层叠开（2026-09-02 起，见 store
+ * openSubagentReport）：从详情里开报告，关报告后详情仍在；报告 → 过程
+ * 切换按钮走 openSubagentDetail（关报告开详情）。
  */
 
 import { useEffect, useRef } from 'react'
@@ -12,6 +13,8 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import { ScrollJumpButton } from './ScrollJumpButton'
+import { clockTime, formatToolDuration } from '@/utils/time'
+import { transcriptModel, validSpan } from '@/utils/parseStatus'
 import '../styles/subagent-detail.less'
 
 export function SubagentReportDialog() {
@@ -19,14 +22,47 @@ export function SubagentReportDialog() {
   const report = useStore((s) => s.subagentReport)
   const openSubagentDetail = useStore((s) => s.openSubagentDetail)
   const closeSubagentReport = useStore((s) => s.closeSubagentReport)
+  // 叠在详情弹窗之上时遮罩透明（hooks 须在所有 early return 之前——条件后调
+  // hook 会在开关弹窗时改变 hooks 数量，React 整树卸载，缺陷AH 同类坑）
+  const stacked = useStore((s) => !!s.subagentDetail)
+  const agents = useStore((s) => s.agents)
+  const subagents = useStore((s) => s.subagents)
+  const subagentDefs = useStore((s) => s.subagentDefs)
+  const childMessages = useStore((s) => s.childMessages)
+
+  // 头部 meta（与详情弹窗同款三源）：报告只在完成后可开，耗时取权威 span
+  // （无 live 计时）；模型取转录末条 assistant（从主聊天工具卡直接打开时转录
+  // 可能未拉过——回退子代理定义值，比空着好）
+  const key = report?.callID
+  const item = key ? agents.find((a) => a.callID === key) : undefined
+  const info = key ? subagents.find((s) => s.toolCallId === key) : undefined
+  const csid = item?.childSessionId ?? info?.childSessionId
+  const span = validSpan(item?.startedAt, item?.endedAt) ?? validSpan(info?.startedAt, info?.endedAt)
+  const startTime = (item?.startedAt ?? info?.startedAt) ? clockTime(item?.startedAt ?? info?.startedAt!) : ''
+  const duration = span ? formatToolDuration(span.endedAt - span.startedAt) : ''
+  const model = transcriptModel(csid ? childMessages[csid] : undefined)
+    ?? subagentDefs?.find((d) => d.name === (item?.subagentType ?? info?.subagentType))?.model
 
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  // Escape 关闭
+  // 转录缺失时静默补拉（底部栏点已完成子代理直接开报告——childMessages 尚未
+  // 拉过，模型第一时间显示不出，须等详情弹窗才触发的缺陷）：已完成子会话的
+  // resume 无害（运行期 resume 才杀 v4 流），silent 不闪 loading/error
+  const loadChildMessages = useStore((s) => s.loadChildMessages)
+  const loading = useStore((s) => s.childMessagesLoading)
+  const transcript = csid ? childMessages[csid] : undefined
+  useEffect(() => {
+    if (!report || !csid || transcript || loading) return
+    loadChildMessages(csid, true)
+  }, [report, csid, transcript, loading, loadChildMessages])
+
+  // Escape 关闭（分层：Markdown 预览弹窗叠开时 Esc 归它，本弹窗不动）
   useEffect(() => {
     if (!report) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeSubagentReport()
+      if (e.key !== 'Escape') return
+      if (useStore.getState().markdownPreview) return
+      closeSubagentReport()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -35,7 +71,7 @@ export function SubagentReportDialog() {
   if (!report) return null
 
   return (
-    <div className="subagent-detail-overlay" onClick={closeSubagentReport}>
+    <div className={`subagent-detail-overlay${stacked ? ' subagent-detail-overlay--stacked' : ''}`} onClick={closeSubagentReport}>
       <div className="subagent-detail-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="subagent-detail-header">
           <span className="codicon codicon-book subagent-detail-header__icon" />
@@ -45,6 +81,9 @@ export function SubagentReportDialog() {
             </span>
             <div className="subagent-detail-header__meta">
               <span className="subagent-detail-meta-item">{t('tool.subagent.finalReport')}</span>
+              {startTime && <span className="subagent-detail-meta-item">{startTime}</span>}
+              {model && <span className="subagent-detail-meta-item">{model}</span>}
+              {duration && <span className="subagent-detail-meta-item">{duration}</span>}
             </div>
           </div>
           {/* 切换到完整执行过程弹窗（互斥：本弹窗关闭）*/}
