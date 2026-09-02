@@ -536,6 +536,7 @@ function mockRespond(req: JavaRequest): void {
     const c1 = `call_web_search_${Date.now()}`
     const c2 = `call_web_fetch_${Date.now()}`
     const c3 = `call_web_404_${Date.now()}`
+    const c4 = `call_web_search_empty_${Date.now()}`
     setTimeout(() => push('turn.started', { turnNumber: 1, messageId: m1 }), 200)
     setTimeout(() => push('model.streaming', { kind: 'reasoning_delta', delta: '需要先搜索再抓取文档确认。', assistantMessageId: m1 }), 400)
     const d1 = runTool(m1, c1, 'WebSearch', { query: 'IntelliJ JCEF plugin open external link' }, searchOut, 600)
@@ -548,10 +549,13 @@ function mockRespond(req: JavaRequest): void {
       url: 'https://plugins.jetbrains.com/docs/marketplace/plugins-guidelines.html',
       prompt: '检查这个页面的条款。',
     }, fetchErr, d2 + 300)
-    setTimeout(() => push('model.streaming', { kind: 'text_delta', delta: '搜索与抓取完成（mock）：来源列表可点击、📖 弹窗可读全文。', assistantMessageId: m1 }), d3 + 200)
+    // 无来源回退态：搜索输出无 markdown 链接（提取 0 条 → 3 行短预览兜底）
+    const d4 = runTool(m1, c4, 'WebSearch', { query: '一个必然没有结果演示的查询词' },
+      'Web search results for query: "一个必然没有结果演示的查询词"\n\nNo results found.\nTry different keywords.', d3 + 300)
+    setTimeout(() => push('model.streaming', { kind: 'text_delta', delta: '搜索与抓取完成（mock）：来源列表可点击、📖 弹窗可读全文。', assistantMessageId: m1 }), d4 + 200)
     // completed 相对 result 多留 1.5s：给 dev 浏览器验收留出展开查看窗口
     //（mock 环境回合完成后流式消息即被重置，窗口太窄没法看完成态卡片）
-    setTimeout(() => push('turn.completed', { response: 'ok' }), d3 + 1700)
+    setTimeout(() => push('turn.completed', { response: 'ok' }), d4 + 1700)
     return
   }
 

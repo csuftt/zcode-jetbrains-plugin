@@ -76,13 +76,14 @@ describe('WebSearch 卡片', () => {
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://plugins.jetbrains.com/docs/intellij/embedded-browser-jcef.html')
   })
 
-  it('📖 点击 → openMarkdownPreview（弹窗拿全文与 query 元信息）', () => {
+  it('📖 点击 → 弹窗标题带 query（空白收敛+40字截断）、全文渲染', () => {
     render(<ToolCallCard part={webPart('WebSearch', { query: 'jcef plugin' }, SEARCH_OUT)} />)
     fireEvent.click(screen.getByTitle('弹窗查看结果'))
     const preview = useStore.getState().markdownPreview
     expect(preview).not.toBeNull()
+    expect(preview!.title).toBe('网页搜索 · jcef plugin')
+    expect(preview!.meta).toBeUndefined()
     expect(preview!.markdown).toBe(SEARCH_OUT)
-    expect(preview!.meta).toBe('jcef plugin')
   })
 
   it('无链接输出（如空结果）→ 回退 3 行短预览 + 截断指示', () => {
@@ -109,6 +110,15 @@ describe('WebFetch 卡片', () => {
     fireEvent.click(screen.getByTitle('打开原网页'))
     expect(openExternalUrlMock).toHaveBeenCalledWith(input.url)
     expect(screen.getByTitle('弹窗查看结果')).toBeTruthy()
+  })
+
+  it('🌐 只在完成态显示（运行中不出现——结果未出，跳原页诉求不成立）', () => {
+    const running: ToolPart = {
+      ...webPart('WebFetch', input, ''),
+      state: { ...webPart('WebFetch', input, '').state, status: 'running' },
+    }
+    render(<ToolCallCard part={running} />)
+    expect(screen.queryByTitle('打开原网页')).toBeNull()
   })
 
   it('展开后显示 URL 行（可点）与提问段；无来源列表时输出走短预览', () => {

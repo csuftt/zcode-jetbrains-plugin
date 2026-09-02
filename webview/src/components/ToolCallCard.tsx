@@ -263,8 +263,10 @@ export function ToolCallCard({ part }: Props) {
     openMarkdownPreview({
       title: tool === 'WebFetch'
         ? t('tool.webFetchTitle', { domain: extractDomain(webUrl) })
-        : toolDisplayName(tool, t),
-      meta: webUrl || (typeof input?.query === 'string' ? input.query : undefined),
+        : t('tool.webSearchTitle', {
+          query: (typeof input?.query === 'string' ? input.query : '').replace(/\s+/g, ' ').trim().slice(0, 40) || toolDisplayName(tool, t),
+        }),
+      meta: webUrl || undefined,
       markdown: state.output,
     })
   }
@@ -367,8 +369,9 @@ export function ToolCallCard({ part }: Props) {
             <span className="codicon codicon-book" />
           </button>
         )}
-        {/* WebFetch 打开原网页（🌐）：系统浏览器直达（openExternal 桥带 url 形态）*/}
-        {tool === 'WebFetch' && webUrl && (
+        {/* WebFetch 打开原网页（🌐，完成态）：系统浏览器直达（openExternal 桥带 url 形态；
+            运行中不显示——结果未出，跳原页的诉求不成立，方案 3.1）*/}
+        {tool === 'WebFetch' && webUrl && state.status === 'completed' && (
           <button
             className="tool-card__action"
             title={t('tool.viewPage')}

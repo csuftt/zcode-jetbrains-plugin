@@ -90,8 +90,8 @@
   "webUrl": "URL",
   "webQuery": "Query",
   "webPrompt": "Prompt",
-  "webSources": "Sources",
   "viewFullResult": "View full result",
-  "webFetchTitle": "Web Fetch · {{domain}}"
+  "webFetchTitle": "Web Fetch · {{domain}}",
+  "webSearchTitle": "Web Search · {{query}}"
 }
 

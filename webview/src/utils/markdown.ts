@@ -167,6 +167,20 @@ const PURIFY_CONFIG = {
   ADD_ATTR: ['target', 'rel'],
 }
 
+// 非 http(s) 协议的链接按纯文本渲染（unwrap 掉 <a>，保留文字）：mailto/ftp/相对路径等
+// 在 JCEF 里要么无处可去要么点了无反应（可点样式+静默吞点击误导用户）。
+// 危险协议（javascript: 等）DOMPurify 已先行剥除，这里只处理"合法但不可跳转"的残余。
+const SAFE_LINK = /^https?:\/\//i
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.nodeName === 'A') {
+    const href = node.getAttribute('href') || ''
+    if (href && !SAFE_LINK.test(href)) {
+      const text = node.ownerDocument!.createTextNode(node.textContent || '')
+      node.replaceWith(text)
+    }
+  }
+})
+
 // ============ 渲染入口 ============
 
 /**

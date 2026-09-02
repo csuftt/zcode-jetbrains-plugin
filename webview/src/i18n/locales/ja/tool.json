@@ -90,8 +90,8 @@
   "webUrl": "URL",
   "webQuery": "検索語",
   "webPrompt": "プロンプト",
-  "webSources": "ソース",
   "viewFullResult": "全文を表示",
-  "webFetchTitle": "ウェブ取得 · {{domain}}"
+  "webFetchTitle": "ウェブ取得 · {{domain}}",
+  "webSearchTitle": "ウェブ検索 · {{query}}"
 }
 

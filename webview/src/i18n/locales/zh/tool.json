@@ -90,8 +90,8 @@
   "webUrl": "网址",
   "webQuery": "搜索词",
   "webPrompt": "提问",
-  "webSources": "来源",
   "viewFullResult": "查看完整结果",
-  "webFetchTitle": "网页获取 · {{domain}}"
+  "webFetchTitle": "网页获取 · {{domain}}",
+  "webSearchTitle": "网页搜索 · {{query}}"
 }
 

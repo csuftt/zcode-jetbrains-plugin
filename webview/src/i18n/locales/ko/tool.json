@@ -90,8 +90,8 @@
   "webUrl": "URL",
   "webQuery": "검색어",
   "webPrompt": "프롬프트",
-  "webSources": "출처",
   "viewFullResult": "전체 결과 보기",
-  "webFetchTitle": "웹 가져오기 · {{domain}}"
+  "webFetchTitle": "웹 가져오기 · {{domain}}",
+  "webSearchTitle": "웹 검색 · {{query}}"
 }
 
