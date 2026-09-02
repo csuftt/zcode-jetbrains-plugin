@@ -267,11 +267,10 @@ class ZCodeProtocolClient private constructor(
                 handleServerRequest(msg)
             }
             // 是通知（session/event 等）
+            // 注：此处与 handleNotification 的 session/event 分支原有三层诊断 println
+            // （通知到达/事件接收/监听器匹配），为"切会话丢流式"排查埋点——该问题已由
+            // 全局监听器机制根治，埋点于 0.3.1 收尾摘除（实测 10 分钟 1092 事件 ≈ 3300 行日志洪水）
             method != null && id == null -> {
-                // 诊断：确认通知到达 dispatchMessage
-                if (method == "session/event") {
-                    println("[ZCodeProtocolClient] dispatchMessage: session/event notification arrived, forwarding to handleNotification")
-                }
                 handleNotification(method, msg["params"]?.jsonObject ?: JsonObject(emptyMap()))
             }
             else -> {
@@ -420,12 +419,8 @@ class ZCodeProtocolClient private constructor(
     private fun handleNotification(method: String, params: JsonObject) {
         if (method == "session/event") {
             val event = SessionEvent.fromNotification(params)
-            // 诊断：确认事件到达 + sessionId 匹配
-            val registered = eventListeners.keys
-            println("[ZCodeProtocolClient] session/event received: type=${event.type} sessionId=${event.sessionId} registeredSessions=${registered}")
-            // 通知该 session 的监听器
+            // 通知该 session 的监听器（诊断埋点已摘：见 dispatchMessage 通知分支注释）
             val listeners = eventListeners[event.sessionId]
-            println("[ZCodeProtocolClient] matched ${listeners?.size ?: 0} listener(s)")
             listeners?.forEach { it(event) }
             // 通知全局监听器
             globalListeners.forEach { it(event) }
