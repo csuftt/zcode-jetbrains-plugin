@@ -5,7 +5,7 @@
  *   - 默认展示最新版（page=0）：v 徽章 / 节标题（标准节加 emoji）/ 列表项 / 引言段
  *   - 双语条目：中文段在前英文段在后，中间有语言分隔线
  *   - ←/→ 翻页、Esc 关闭（键盘 capture）；点遮罩关闭
- *   - ≤10 版圆点导航（active 圆点）；>10 版文本页码
+ *   - 页码文本（当前 / 总数）恒显；≤10 版另有圆点导航（active 圆点），>10 版仅页码
  */
 
 // @vitest-environment jsdom
@@ -85,14 +85,16 @@ describe('ChangelogDialog 渲染', () => {
     expect(onClose).toHaveBeenCalledTimes(2)
   })
 
-  it('≤10 版圆点导航，active 圆点跟随翻页', () => {
+  it('≤10 版圆点导航 + 页码文本，active 圆点与页码跟随翻页', () => {
     render(<ChangelogDialog entries={twoEntries} onClose={() => {}} />)
     const dots = document.querySelectorAll('.changelog-dialog__dot')
     expect(dots.length).toBe(2)
     expect(dots[0].classList.contains('changelog-dialog__dot--active')).toBe(true)
+    expect(screen.getByText('1 / 2')).toBeTruthy()
     fireEvent.click(dots[1])
     expect(dots[1].classList.contains('changelog-dialog__dot--active')).toBe(true)
     expect(screen.getByText('v9.9.8')).toBeTruthy()
+    expect(screen.getByText('2 / 2')).toBeTruthy()
   })
 
   it('>10 版改文本页码（n / total）', () => {

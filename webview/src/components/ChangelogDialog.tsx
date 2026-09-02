@@ -6,7 +6,7 @@
  * 触发：App 顶层——升级后首次打开自动弹（已读标记走 persist kv 通道存 IDE
  *   PropertiesComponent——内置 server 随机端口导致 localStorage 跨重启失效）；
  *   欢迎页版本角标 / 设置页「版本记录」手动打开。
- * 交互：←/→ 翻页、Esc / 点遮罩关闭；≤10 版圆点导航，>10 版文本页码。
+ * 交互：←/→ 翻页、Esc / 点遮罩关闭；≤10 版圆点导航，页码文本（当前/总数）恒显。
  * props 驱动（entries 可注入，测试用；缺省真实 CHANGELOG_DATA）。
  */
 
@@ -148,7 +148,7 @@ export function ChangelogDialog({ entries = CHANGELOG_DATA, onClose }: Props) {
           >
             <span className="codicon codicon-chevron-left" />
           </button>
-          {total <= 10 ? (
+          {total <= 10 && (
             <div className="changelog-dialog__dots" role="tablist">
               {entries.map((_, i) => (
                 <button
@@ -160,11 +160,10 @@ export function ChangelogDialog({ entries = CHANGELOG_DATA, onClose }: Props) {
                 />
               ))}
             </div>
-          ) : (
-            <span className="changelog-dialog__page-text">
-              {t('app.changelog.page', { current: page + 1, total })}
-            </span>
           )}
+          <span className="changelog-dialog__page-text" aria-live="polite">
+            {t('app.changelog.page', { current: page + 1, total })}
+          </span>
           <button
             type="button"
             className="changelog-dialog__nav-btn"
