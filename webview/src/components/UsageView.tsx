@@ -89,18 +89,18 @@ function AppUsageTab() {
     { label: t('usage.app.stat.activeDays'), value: s?.activeDays != null ? String(s.activeDays) : '' },
   ].filter((x) => x.value !== '')
 
-  // 每日模型曲线：日期轴对齐补 0，按总量取前 3（调色板仅 3 色曲线才可辨）
+  // 每日模型曲线：日期轴对齐补 0，按总量取前 6（调色板 6 色 + 图例，超出的模型看下方明细表）
   const daily = appUsage?.dailyModelUsage ?? []
   const dailyIds = [...new Set(daily.flatMap((d) => (d.models ?? []).map((m) => m.modelId ?? '?')))]
-  const top3Ids = new Set(
+  const topIds = new Set(
     dailyIds
       .map((id) => ({ id, total: daily.reduce((n, d) => n + ((d.models ?? []).find((m) => m.modelId === id)?.totalTokens ?? 0), 0) }))
       .sort((a, b) => b.total - a.total)
-      .slice(0, 3)
+      .slice(0, 6)
       .map((x) => x.id),
   )
   const series: ChartSeries[] = dailyIds
-    .filter((id) => top3Ids.has(id))
+    .filter((id) => topIds.has(id))
     .map((id) => ({
       name: id,
       values: daily.map((d) => (d.models ?? []).find((m) => m.modelId === id)?.totalTokens ?? 0),

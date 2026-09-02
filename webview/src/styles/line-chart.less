@@ -1,4 +1,5 @@
 .line-chart {
+  position: relative; /* 悬停浮层绝对定位的锚 */
   width: 100%;
 
   &--empty {
@@ -39,4 +40,119 @@
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+
+/* ---------- 图例（曲线下方：色点 + 系列名）---------- */
+
+.lc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  margin-top: 2px;
+  padding-left: 44px; /* 与绘图区左缘对齐（PAD_L）*/
+
+  &__item {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  &__dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+  }
+
+  &__name {
+    font-size: 10px;
+    color: var(--chart-axis);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+  }
+}
+
+/* ---------- 悬停参考线与数据点 ---------- */
+
+.lc-hover-line {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+
+.lc-dot {
+  stroke: var(--bg-primary, #fff);
+  stroke-width: 1.5;
+}
+
+/* ---------- 悬停浮层（各系列数值 + 总计）---------- */
+
+.lc-tooltip {
+  position: absolute;
+  z-index: 100;
+  min-width: 130px;
+  max-width: 240px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: var(--dropdown-bg, #252526);
+  border: 1px solid var(--dropdown-border, #454545);
+  box-shadow: var(--shadow-dropdown, 0 -4px 12px rgba(0, 0, 0, 0.4));
+  /* 向右偏移跟随参考线；不拦指针，避免进出浮层导致悬停闪烁 */
+  margin-left: 8px;
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary, #ccc);
+
+  &__x {
+    margin-bottom: 2px;
+    color: var(--chart-axis);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+
+    &--total {
+      margin-top: 3px;
+      padding-top: 3px;
+      border-top: 1px solid var(--dropdown-border, #454545);
+      font-weight: 600;
+
+      .lc-tooltip__name {
+        /* 与上方模型名对齐（跳过色点列 7px + 间距 5px）*/
+        margin-left: 12px;
+      }
+    }
+  }
+
+  &__dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+  }
+
+  &__name {
+    flex: 1;
+    min-width: 0;
+    margin-right: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__val {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
 }

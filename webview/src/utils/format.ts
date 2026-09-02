@@ -87,3 +87,10 @@ export function formatXLabel(t: string, granularity?: string): string {
   const sp = t.lastIndexOf(' ')
   return sp >= 0 ? t.slice(sp + 1) : t // HH:mm
 }
+
+/** 悬停浮层用的完整 x 标签：hourly 保留日期（MM-DD HH:mm），daily 与轴标签相同 */
+export function formatXLabelFull(t: string, granularity?: string): string {
+  if (granularity === 'daily') return t.slice(5) // MM-DD
+  // hourly 原始形态 'yyyy-MM-dd HH:mm'（16+ 字符）→ MM-dd HH:mm；无日期部分则原样
+  return t.length >= 16 ? t.slice(5) : t
+}

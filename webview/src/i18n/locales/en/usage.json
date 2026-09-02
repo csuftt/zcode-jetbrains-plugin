@@ -62,7 +62,8 @@
     "colCount": "Call count"
   },
   "chart": {
-    "empty": "No data"
+    "empty": "No data",
+    "total": "Total"
   },
   "context": {
     "titleUsage": "Context usage",

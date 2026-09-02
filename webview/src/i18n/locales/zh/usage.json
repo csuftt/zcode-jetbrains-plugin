@@ -62,7 +62,8 @@
     "colCount": "调用次数"
   },
   "chart": {
-    "empty": "暂无数据"
+    "empty": "暂无数据",
+    "total": "总计"
   },
   "context": {
     "titleUsage": "上下文用量",
