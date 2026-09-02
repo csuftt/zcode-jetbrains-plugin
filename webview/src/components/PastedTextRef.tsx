@@ -10,9 +10,11 @@
  * 中性灰色调，区别于文件引用（蓝）/技能（紫）。
  */
 
-import { memo } from 'react'
+import { memo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ScrollJumpButton } from './ScrollJumpButton'
 import '../styles/pasted-text-ref.less'
+import '../styles/text-preview-dialog.less'
 
 export interface PastedTextItem {
   id: string
@@ -56,24 +58,35 @@ function PastedTextRefInner({ item, onPreview, onRemove }: Props) {
 
 export const PastedTextRef = memo(PastedTextRefInner)
 
-/** 预览弹窗（复用全局 .modal-overlay/.modal-content；Escape 在 InputBox 全局监听关闭）*/
+/** 预览弹窗（头部行+下沉内容区+滚动跳转按钮，骨架样式 text-preview-dialog.less；Escape 在 InputBox 全局监听关闭）*/
 export function PastedTextPreview({ item, onClose }: { item: PastedTextItem; onClose: () => void }) {
   const { t } = useTranslation()
+  const bodyRef = useRef<HTMLPreElement>(null)
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
       <div
-        className="modal-content pasted-text-preview"
+        className="modal-content text-preview-dialog pasted-text-preview"
         role="dialog"
         aria-label={t('input.pasted.previewAriaLabel')}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>{t('input.pasted.previewTitle', { count: item.chars })}</h3>
-        <pre className="pasted-text-preview__body">{item.text}</pre>
-        <div className="modal-actions">
-          <button className="modal-btn modal-btn-primary" onClick={onClose} type="button">
-            {t('input.pasted.close')}
+        <div className="text-preview-dialog__header">
+          <span className="codicon codicon-note text-preview-dialog__icon" />
+          <span className="text-preview-dialog__title">
+            {t('input.pasted.previewTitle', { count: item.chars })}
+          </span>
+          <button
+            className="text-preview-dialog__close"
+            onClick={onClose}
+            title={t('input.pasted.close')}
+            aria-label={t('input.pasted.close')}
+            type="button"
+          >
+            <span className="codicon codicon-close" />
           </button>
         </div>
+        <pre ref={bodyRef} className="text-preview-dialog__body text-preview-dialog__body--mono">{item.text}</pre>
+        <ScrollJumpButton containerRef={bodyRef} />
       </div>
     </div>
   )

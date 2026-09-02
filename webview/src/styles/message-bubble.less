@@ -216,33 +216,5 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ===== 用户消息全文弹窗（壳复用全局 .modal-overlay/.modal-content；宽度比例对齐子代理详情弹窗）=====
-   双类选择器提特异性：.modal-content 自带 max-width:420px（历史删除确认框），
-   同特异性下按加载顺序谁后谁赢、不可靠，必须显式压过。
-   __body 必须是顶层单类选择器：嵌套 &__body 会编译成 .modal-content.msg-fulltext__body
-   （要求元素同时带两个类，pre 不匹配 → 高度约束与 overflow 全部失效，内容撑破弹窗无滚动） */
-.modal-content.msg-fulltext {
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  width: 760px;
-  max-width: 92vw;
-  max-height: 82vh;
-}
-
-.msg-fulltext__body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  margin: 0 0 16px;
-  padding: 12px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-secondary);
-}
+/* 用户消息全文弹窗：骨架与样式已迁 text-preview-dialog.less（头部行 + 下沉内容区），
+   .msg-fulltext 类名保留作测试/宽度挂点 */

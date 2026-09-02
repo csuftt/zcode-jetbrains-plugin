@@ -81,44 +81,5 @@
   }
 }
 
-/* ===== 预览弹窗（壳复用全局 .modal-overlay/.modal-content）===== */
-.pasted-text-preview {
-  max-width: 640px;
-  width: min(640px, 92vw);
-  display: flex;
-  flex-direction: column;
-
-  &__body {
-    background: var(--code-bg);
-    border: 1px solid var(--border-secondary);
-    border-radius: 4px;
-    padding: 10px;
-    margin: 0 0 16px;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--color-tool-value);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 50vh;
-    overflow-y: auto;
-
-    // 暗色细滚动条
-    &::-webkit-scrollbar {
-      width: 6px;
-    }
-    &::-webkit-scrollbar-thumb {
-      background: var(--scrollbar-thumb);
-      border-radius: 3px;
-    }
-  }
-}
-
-/* 关闭按钮主色（.modal-btn 基类在 history-view.less）*/
-.modal-btn-primary {
-  background: var(--accent-primary);
-  color: #fff;
-
-  &:hover {
-    background: var(--accent-primary-hover);
-  }
-}
+/* 预览弹窗：骨架与样式已迁 text-preview-dialog.less（头部行 + 下沉内容区），
+   .pasted-text-preview 类名保留作宽度挂点（640px，在共享样式里三类覆盖）*/

@@ -33,6 +33,7 @@ import { clockTime, compactTokens, formatDuration } from '@/utils/time'
 import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
 import { KV_HYDRATED_EVENT } from '@/utils/persist'
 import { useTick } from '@/hooks/useTick'
+import { ScrollJumpButton } from './ScrollJumpButton'
 import { CompactionSummaryCard } from './CompactionSummaryCard'
 import { TimelineSeparator } from './TimelineSeparator'
 import {
@@ -44,6 +45,7 @@ import {
 } from './PartUnits'
 import { groupParts } from '@/utils/groupParts'
 import '../styles/message-bubble.less'
+import '../styles/text-preview-dialog.less'
 
 interface Props {
   message: ZCodeMessage
@@ -192,6 +194,7 @@ function UserTextPreviewDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const bodyRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -204,18 +207,28 @@ function UserTextPreviewDialog({
   return createPortal(
     <div className="modal-overlay" role="presentation" onClick={onClose}>
       <div
-        className="modal-content msg-fulltext"
+        className="modal-content text-preview-dialog msg-fulltext"
         role="dialog"
         aria-label={t('chat.message.fullTextAria')}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>{t('chat.message.fullTextTitle', { lines, count: text.length })}</h3>
-        <pre className="msg-fulltext__body">{text}</pre>
-        <div className="modal-actions">
-          <button className="modal-btn modal-btn-primary" onClick={onClose} type="button">
-            {t('chat.message.closeFull')}
+        <div className="text-preview-dialog__header">
+          <span className="codicon codicon-comment-discussion text-preview-dialog__icon" />
+          <span className="text-preview-dialog__title">
+            {t('chat.message.fullTextTitle', { lines, count: text.length })}
+          </span>
+          <button
+            className="text-preview-dialog__close"
+            onClick={onClose}
+            title={t('chat.message.closeFull')}
+            aria-label={t('chat.message.closeFull')}
+            type="button"
+          >
+            <span className="codicon codicon-close" />
           </button>
         </div>
+        <pre ref={bodyRef} className="text-preview-dialog__body msg-fulltext__body">{text}</pre>
+        <ScrollJumpButton containerRef={bodyRef} />
       </div>
     </div>,
     document.body,

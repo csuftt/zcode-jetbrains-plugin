@@ -1,0 +1,112 @@
+/**
+ * 文本预览弹窗共用骨架（粘贴文本预览 / 用户消息全文，2026-09-02 改版）
+ *
+ * 形态对齐 subagent-detail 的头部行式弹窗：标题行（图标 + 标题统计 + 右上 ✕）+
+ * 分隔线 + 下沉内容区；去掉旧版的「外壳边框 + 内容区再一圈边框」双层框和底部
+ * 整行「关闭」按钮（Escape / 点遮罩 / ✕ 三路关闭已覆盖）。
+ *
+ * 坑（自 message-bubble 旧实现迁移）：
+ *   - 全局 .modal-content 自带 max-width:420px / padding:20px，本文件一律用
+ *     .modal-content.text-preview-dialog 双类压特异性，宽度覆盖（pasted 640px）
+ *     用三类，不依赖加载顺序。
+ *   - __body/--mono 保持顶层单类选择器：嵌到 .modal-content 下会编译成交集
+ *     选择器（pre 不带 modal-content 类 → 高度约束与 overflow 全失效，内容撑破）。
+ */
+
+.modal-content.text-preview-dialog {
+  position: relative; /* 滚动跳转按钮（ScrollJumpButton absolute）的定位锚 */
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 0; /* 压掉全局 20px：头部/内容区自带内距 */
+  overflow: hidden; /* 圆角裁切头部分隔线与滚动区 */
+  width: 760px;
+  max-width: 92vw;
+  max-height: 82vh;
+}
+
+.modal-content.text-preview-dialog.pasted-text-preview {
+  width: min(640px, 92vw);
+  max-height: 70vh;
+}
+
+/* ===== 头部行 ===== */
+
+.text-preview-dialog__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.text-preview-dialog__icon {
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+
+.text-preview-dialog__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.text-preview-dialog__close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+
+  .codicon {
+    font-size: 13px;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+/* ===== 下沉内容区：无内框，靠底色一档差区分（暗更深 / 亮微灰）===== */
+
+.text-preview-dialog__body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  background: var(--code-bg);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+
+  /* 粘贴文本原文可能是日志/代码，等宽展示 */
+  &--mono {
+    font-family: var(--font-mono);
+    color: var(--color-tool-value);
+  }
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
+  }
+}
