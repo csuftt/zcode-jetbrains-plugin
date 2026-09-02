@@ -13,12 +13,19 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react'
 
 import '@/i18n/config'
-import { StarSupportSection, GITHUB_REPO_URL } from '@/components/StarSupportSection'
+import { StarSupportSection } from '@/components/StarSupportSection'
 
-vi.mock('@/ipc/bridge', () => ({ sendToJava: vi.fn() }))
-vi.mock('@/utils/clipboard', () => ({ copyText: vi.fn() }))
+vi.mock('@/ipc/bridge', () => ({
+  sendToJava: vi.fn(),
+  GITHUB_REPO_URL: 'https://github.com/csuftt/zcode-jetbrains-plugin',
+}))
+vi.mock('@/utils/clipboard', async (importOriginal) => {
+  // 只 mock copyText（断言复制内容用）；useCopyFeedback 是纯 React hook，透传真实现
+  const actual = await importOriginal<typeof import('@/utils/clipboard')>()
+  return { copyText: vi.fn(), useCopyFeedback: actual.useCopyFeedback }
+})
 
-import { sendToJava } from '@/ipc/bridge'
+import { sendToJava, GITHUB_REPO_URL } from '@/ipc/bridge'
 import { copyText } from '@/utils/clipboard'
 
 const mockedSend = vi.mocked(sendToJava)

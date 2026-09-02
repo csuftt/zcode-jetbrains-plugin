@@ -821,6 +821,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "createSession" -> handleCreateSession(msg)
                         "subscribe" -> handleSubscribe(msg)
                         "subscribeChild" -> handleSubscribeChild(msg)
+                        "unsubscribeChild" -> handleUnsubscribeChild(msg)
                         "stop" -> handleStop(msg)
                         "listFiles" -> handleListFiles(msg)
                         "listCommands" -> handleListCommands(msg)
@@ -3362,6 +3363,28 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } finally {
             childV4SubInFlight.remove(sessionId)
             subDone.complete(Unit)
+        }
+    }
+
+    /**
+     * 子会话退订（前端 lifecycle stopped 终点触发）：v4 订阅、V4FrameMapper 行表、
+     * 探针计数随 unsubscribeConversationV4 一并收敛（best-effort——失败只记日志
+     * 不报错，连接级开销可忽略；子代理复活续跑会经 subscribeChild 重新订阅）。
+     */
+    private fun handleUnsubscribeChild(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        subscribedSessions.remove(sessionId)
+        try {
+            val client = project.zCodeService().getClient()
+            client.unsubscribeConversationV4(sessionId)
+            log.info("unsubscribeChild: v4 conversation unsubscribed $sessionId")
+        } catch (e: Exception) {
+            log.info("unsubscribeChild: unsubscribe failed for $sessionId (ignorable): ${e.message}")
+        }
+        return buildJsonObject {
+            put("op", "unsubscribedChild")
+            put("sessionId", sessionId)
         }
     }
 

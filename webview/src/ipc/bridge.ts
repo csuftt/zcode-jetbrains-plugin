@@ -16,6 +16,10 @@
 
 import type { JavaRequest, JavaResponse, StreamEvent, EnvStatus, ZCodeMessage } from '@/types/messages'
 
+/** 仓库地址（「打开仓库」展示/复制/mock 打开共用；生产 openExternal 由 Java 侧
+ *  硬编码常量权威决定，不由前端传参——零注入面，改地址须两侧同步）*/
+export const GITHUB_REPO_URL = 'https://github.com/csuftt/zcode-jetbrains-plugin'
+
 // ============ 全局类型声明 ============
 
 declare global {
@@ -773,7 +777,7 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       return { op: 'imageCopied', ok: true }
     case 'openExternal':
       // mock：生产走 Java BrowserUtil 调系统浏览器，dev 浏览器环境退化为新标签页打开
-      window.open('https://github.com/csuftt/zcode-jetbrains-plugin', '_blank')
+      window.open(GITHUB_REPO_URL, '_blank')
       return { op: 'externalOpened' }
     case 'listModels':
       // 模拟 ~/.zcode/v2/config.json 的 provider 注册表（验收模型下拉用；内置套餐带 plan 标记；
@@ -1724,6 +1728,9 @@ flowchart LR
       // mock：子会话订阅 ack（无真实事件流，弹窗实时数据走 mock 消息/转发事件）。
       // v4:false = 前端三态守卫走降级轮询（配合 subagentMessages mock 分支）
       return { op: 'subscribedChild', sessionId: req.sessionId, v4: false }
+    case 'unsubscribeChild':
+      // mock：子代理终点退订 ack（无真实订阅可清）
+      return { op: 'unsubscribedChild', sessionId: req.sessionId }
     case '__jsLog':
       // 诊断日志：桥未就绪期落 mock 时静默吞掉（mock 分支缺失会弹"mock 不支持 op"）
       return { op: '__jsLogAck' }

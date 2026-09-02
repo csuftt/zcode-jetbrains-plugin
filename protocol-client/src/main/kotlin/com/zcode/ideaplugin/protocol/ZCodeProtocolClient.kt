@@ -463,31 +463,33 @@ class ZCodeProtocolClient private constructor(
             if (sid.length == topic.length || sid !in v4SubscribedSessions) return
             val frame = params["frame"]?.jsonObject ?: return
             // 帧到达诊断（缺陷AO 终测：live 在快照后停更——区分"服务端没推帧"vs
-            // "帧到了没渲染"）：每会话首帧 + 每 100 帧打一条心跳计数（STDOUT → idea.log）。
+            // "帧到了没渲染"）：每会话首帧 + 每 100 帧打一条心跳计数。
             // mapped=累计映射产出事件数——帧计数增长而 mapped 停滞 = 行表/映射层
             // 把 delta 全部判空（如 rowId 未登记），推送层无从推起
             val n = v4FrameProbe.merge(sid, 1L, Long::plus)
             val events = try {
                 v4FrameMapper.mapFrame(sid, frame)
             } catch (e: Exception) {
-                System.err.println("[ZCodeProtocolClient] v4 frame map error (frame dropped): ${e.javaClass.simpleName}: ${e.message}")
+                ProtocolLog.error("[ZCodeProtocolClient] v4 frame map error (frame dropped): ${e.javaClass.simpleName}: ${e.message}")
                 return
             }
             v4MappedProbe.merge(sid, events.size.toLong(), Long::plus)
+            val payload = frame["payload"]?.jsonObject
             if (n != null && (n == 1L || n % 100L == 0L)) {
-                val pk = frame["payload"]?.jsonObject?.get("kind")?.jsonPrimitive?.jsonStringOrNull ?: "?"
-                val ds = (frame["payload"]?.jsonObject?.get("deltas")?.jsonArray)?.size ?: -1
-                println("[V4FrameProbe] $sid frame#$n payload=$pk deltas=$ds mapped=${v4MappedProbe[sid] ?: 0L}")
+                val pk = payload?.get("kind")?.jsonPrimitive?.jsonStringOrNull ?: "?"
+                val ds = (payload?.get("deltas")?.jsonArray)?.size ?: -1
+                ProtocolLog.debug("[V4FrameProbe] $sid frame#$n payload=$pk deltas=$ds mapped=${v4MappedProbe[sid] ?: 0L}")
             }
             // 空壳帧首遇 dump（增量零产出追查 2026-09-02）：payload.kind=deltas 但数组为空
             // ——服务端 resync/recovery 的"已追平"应答。原文含 fromSeq/toSeq/deliveryKind/
             // subscriptionId，直接暴露帧的路由身份与游标状态
-            if (frame["payload"]?.jsonObject?.get("kind")?.jsonPrimitive?.jsonStringOrNull == "deltas"
-                && (frame["payload"]?.jsonObject?.get("deltas")?.jsonArray ?: kotlinx.serialization.json.JsonArray(emptyList())).isEmpty()
+            if (payload != null
+                && payload["kind"]?.jsonPrimitive?.jsonStringOrNull == "deltas"
+                && (payload["deltas"]?.jsonArray ?: kotlinx.serialization.json.JsonArray(emptyList())).isEmpty()
             ) {
                 val dumped = v4EmptyDumped.add(sid)
                 if (dumped) {
-                    println("[V4FrameProbe] empty-frame dump $sid: ${frame.toString().take(600)}")
+                    ProtocolLog.debug("[V4FrameProbe] empty-frame dump $sid: ${frame.toString().take(600)}")
                 }
             }
             for (ev in events) dispatchSessionEvent(ev)

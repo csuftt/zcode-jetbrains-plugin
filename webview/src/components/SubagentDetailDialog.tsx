@@ -26,26 +26,6 @@ import { clockTime, formatToolDuration } from '@/utils/time'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
 
-/**
- * 分组单元 → 共享渲染管线（与主聊天 AssistantBubble 同一实现：组卡/单卡/
- * ThinkingBlock 可折叠思考/图片），按 2026-08-30 决策对齐主界面且**不做完成轮折叠**。
- * text 单元的空文本过滤与完成态报告折叠行是弹窗特有逻辑，由调用方处理。
- * streaming：live 源末条 assistant 消息（实时流打字机光标反馈，等待时的可见交互）。
- */
-function UnitRenderer({
-  unit,
-  parts,
-  streaming,
-  softenError,
-}: {
-  unit: ReturnType<typeof groupParts>[number]
-  parts: ZCodeMessage['parts']
-  streaming?: boolean
-  softenError?: boolean
-}) {
-  return <>{renderPartUnits([unit], parts, streaming, softenError)[0]}</>
-}
-
 /** 状态徽标文案 */
 function statusText(status: string | undefined, t: TFunction): { text: string; cls: string } {
   switch (status) {
@@ -98,19 +78,18 @@ function Transcript({
               {msg.info.role === 'user' ? t('tool.subagent.roleTask') : 'AI'}
             </div>
             <div className="subagent-detail-msg-body">
-              {/* 连续同类工具聚组 + reasoning/图片 全走共享渲染管线（同主聊天）；
+              {/* 连续同类工具聚组 + reasoning/图片 全走共享渲染管线（同主聊天），
+                  整批一次调用（renderPartUnits 内部按 parts 推导思考展开/末条流式）；
                   text 空文本跳过；完成态末条报告折叠为入口行（弹窗特有）；
                   live 源末条 assistant 消息带 streaming（打字机光标，等待中的可见交互） */}
-              {groupParts(msg.parts).map((unit) =>
-                unit.kind === 'single' && unit.part.type === 'text' && !unit.part.text.trim() ? null
-                : collapsed && unit.kind === 'single' && unit.part.type === 'text' ? null
-                : <UnitRenderer
-                    key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index}
-                    unit={unit}
-                    parts={msg.parts}
-                    streaming={isLive && running && !collapsed && i === messages.length - 1 && msg.info.role === 'assistant'}
-                    softenError={running}
-                  />,
+              {renderPartUnits(
+                groupParts(msg.parts).filter((unit) => {
+                  if (unit.kind !== 'single' || unit.part.type !== 'text') return true
+                  return !(!unit.part.text.trim() || collapsed)
+                }),
+                msg.parts,
+                isLive && running && !collapsed && i === messages.length - 1 && msg.info.role === 'assistant',
+                running,
               )}
               {collapsed && (
                 <div className="subagent-detail-report-collapsed" onClick={() => onOpenReport(reportText)}>
@@ -418,15 +397,9 @@ export function SubagentDetailDialog() {
                 </div>
               )}
               <div className="subagent-detail-tools">
-                {/* 转发的工具事件列表同样聚组（回退场景常见：Explore 连续读多文件）*/}
-                {groupParts(activity!.tools).map((unit) => (
-                  <UnitRenderer
-                    key={unit.kind === 'toolGroup' ? `${unit.group}-${unit.startIndex}` : unit.index}
-                    unit={unit}
-                    parts={activity!.tools}
-                    softenError={running}
-                  />
-                ))}
+                {/* 转发的工具事件列表同样聚组（回退场景常见：Explore 连续读多文件）；
+                    running 期间 softenError：组卡 error 工具降级「↻ 重试中」 */}
+                {renderPartUnits(groupParts(activity!.tools), activity!.tools, undefined, running)}
               </div>
             </>
           )}

@@ -1,3 +1,6 @@
+/* 轴标签/图例/浮层时刻用的 10px 是图表专用微字号，刻意小于四档体系最小档
+ * --fs-hint（紧贴数据可视化、信息密度高），不走 var(--fs-*)。*/
+
 .line-chart {
   position: relative; /* 悬停浮层绝对定位的锚 */
   width: 100%;
@@ -8,7 +11,7 @@
     justify-content: center;
     height: 110px;
     color: var(--text-secondary, #888);
-    font-size: 12px;
+    font-size: var(--fs-body);
   }
 
   &__svg {
@@ -105,7 +108,7 @@
   /* 向右偏移跟随参考线；不拦指针，避免进出浮层导致悬停闪烁 */
   margin-left: 8px;
   pointer-events: none;
-  font-size: 11px;
+  font-size: var(--fs-hint);
   line-height: 1.5;
   color: var(--text-primary, #ccc);
 

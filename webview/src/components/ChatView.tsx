@@ -18,6 +18,7 @@ import { WaitingIndicator } from './WaitingIndicator'
 import { WelcomeScreen } from './WelcomeScreen'
 import { MessageAnchorRail } from './MessageAnchorRail'
 import { ConversationSearch } from './ConversationSearch'
+import { NEAR_BOTTOM_PX, HIDE_DELAY_MS, UP_GHOST_MS } from './ScrollJumpButton'
 import { isAgentNotification } from '@/utils/parseNotification'
 import '../styles/chat-view.less'
 import '../styles/compaction.less'
@@ -35,10 +36,6 @@ interface Props {
   /** 关闭搜索面板 */
   onSearchClose?: () => void
 }
-
-/** 上滑余震窗（与 ScrollJumpButton 同值）：滚轮上滑后的短窗内 scroll/wheel 的
- *  "还在底部附近"判定不可信——既不恢复跟滚也不隐藏/切向刚显示的 ↑ */
-const UP_GHOST_MS = 600
 
 /** 计算最后一条消息的内容指纹（流式增长时变化 → 触发滚动）*/
 function lastMessageFingerprint(messages: ZCodeMessage[]): string {
@@ -77,7 +74,7 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
   const handleScroll = () => {
     const el = containerRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
     // 上滑后的短窗内不因"到底判定"恢复跟滚（流式置底/微小回弹会立刻拉回用户）
     if (!(nearBottom && Date.now() - lastUpWheelAt.current < UP_GHOST_MS)) {
       userScrolledUp.current = !nearBottom
@@ -104,13 +101,13 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
       if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current)
       setScrollBtnDirection('up')
       setScrollBtnVisible(true)
-      scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), 1500)
+      scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), HIDE_DELAY_MS)
       return
     }
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     // 已在底部附近，下滑无意义不显示（wheel 先于 scroll 触发，此时 scrollTop 还未更新）；
     // 上滑余震窗内的惯性/微抖反向事件直接忽略（隐藏或切向 ↓ 都会打断刚显示的 ↑）
-    if (e.deltaY > 0 && distanceFromBottom < 80) {
+    if (e.deltaY > 0 && distanceFromBottom < NEAR_BOTTOM_PX) {
       if (Date.now() - lastUpWheelAt.current >= UP_GHOST_MS) setScrollBtnVisible(false)
       return
     }
@@ -118,7 +115,7 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
       if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current)
       setScrollBtnDirection('down')
       setScrollBtnVisible(true)
-      scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), 1500)
+      scrollHideTimer.current = setTimeout(() => setScrollBtnVisible(false), HIDE_DELAY_MS)
     }
   }
 

@@ -41,6 +41,10 @@ export type ConnectionStatus = 'connecting' | 'connected' | 'mock' | 'error'
 /** GLM 套餐 providerId（有 apiKey 可查额度；悬浮栏与额度定时轮询共用判定）*/
 export const GLM_PLAN_PROVIDER = 'builtin:bigmodel-coding-plan'
 
+/** 子代理失败判定白名单（缺陷AO，2026-09-01）：仅这些 status 词判失败，
+ *  未知词只当"未识别"跳过——此前"非成功白名单即失败"会把服务端新词误读成失败 */
+const SUBAGENT_FAILURE_STATUSES = ['failed', 'error', 'interrupted', 'aborted', 'cancelled']
+
 /** GLM 额度自动刷新间隔（ms）——悬浮栏/用量页「上次刷新」的更新节奏 */
 const QUOTA_POLL_INTERVAL = 60_000
 
@@ -1827,6 +1831,15 @@ function subscribeChildSession(childSessionId: string): void {
   })
 }
 
+/**
+ * 子代理 stopped 终点退订（fire-and-forget，无需应答处理）：Java 侧收敛 v4 订阅、
+ * V4FrameMapper 行表与探针计数。退订失败无害（连接级开销可忽略）；复活续跑场景
+ * （stopped 后 lifecycle 再 started）经 subscribeChildSession 注册路径重新订阅。
+ */
+function unsubscribeChildSession(childSessionId: string): void {
+  sendToJava({ op: 'unsubscribeChild', sessionId: childSessionId })
+}
+
 // ===== 子代理权威状态轮询（兜底：不依赖事件时序）=====
 let subagentPollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -2402,7 +2415,7 @@ export function handleResponse(
         // 失败判定白名单化（2026-09-01 缺陷AO 追查）：未知 status 词只当"未识别"跳过，
         // 不再有破坏性效果——此前"非成功白名单即失败"会把服务端新词（如 stopped/done）
         // 误读成失败并锁死活动（markActivityOutcome 只翻 running，error 定格）
-        const failed = ['failed', 'error', 'interrupted', 'aborted', 'cancelled'].includes(s)
+        const failed = SUBAGENT_FAILURE_STATUSES.includes(s)
         if (failed) diagWarn(`[subagent-mark-failed] src=rpc key=${it.toolCallId} status=${s}`)
         activities = markActivityOutcome(activities, it.toolCallId, failed, Date.now())
       }
@@ -2462,6 +2475,14 @@ export function handleResponse(
     case 'subscribedChild': // 子会话订阅 ack：记录 v4 通道可用性（弹窗据此停用快照轮询）
       if (typeof msg.v4 === 'boolean' && msg.sessionId) {
         set({ childSessionV4: { ...get().childSessionV4, [msg.sessionId]: msg.v4 } })
+      }
+      break
+
+    case 'unsubscribedChild': // 终点退订 ack：清 v4 通道标志（防 stale 标志让三态守卫误判在场）
+      if (msg.sessionId && msg.sessionId in get().childSessionV4) {
+        const next = { ...get().childSessionV4 }
+        delete next[msg.sessionId]
+        set({ childSessionV4: next })
       }
       break
 
@@ -3162,7 +3183,7 @@ function applySubagentLifecycle(
     // 后台代理的 Agent 工具启动即返回（result 早于活动创建，markActivityOutcome
     // 当时无对象可标记），不在这里收尾会卡 running 直到主回合 turnEnded
     const failStatus = (lc.status ?? '').toLowerCase()
-    const failed = ['failed', 'error', 'interrupted', 'aborted', 'cancelled'].includes(failStatus)
+    const failed = SUBAGENT_FAILURE_STATUSES.includes(failStatus)
     if (failed) diagWarn(`[subagent-mark-failed] src=lifecycle key=${key} status=${failStatus}`)
     if (key) {
       const activities = markActivityOutcome(st.subagentActivities, key, failed, timestamp)
@@ -3172,6 +3193,9 @@ function applySubagentLifecycle(
     if (st.subagentDetail && st.childSessionKeys[lc.childSessionId] === st.subagentDetail) {
       st.loadChildMessages(lc.childSessionId)
     }
+    // 终点退订（spec 二.4）：stopped 后 v4 订阅/行表/探针计数随 Java 侧收敛。
+    // 放在 loadChildMessages 之后——权威转录先落，退订只断增量帧不影响读取
+    unsubscribeChildSession(lc.childSessionId)
   }
 }
 
@@ -3242,7 +3266,7 @@ function handleChildStreamBatch(
   //（session/subscribe 流不带 subagent.lifecycle，合成通知消息只在重拉时可见），
   // 即时收尾父会话活动 + 权威刷新。批内最后生命周期事件是新 turn.started
   //（多 turn 续轮：终态后又开了新回合）时跳过收尾——子代理整体仍在跑
-    if (childTurnEnded && lastLifecycle !== 'started' && key) {
+  if (childTurnEnded && lastLifecycle !== 'started' && key) {
     const ts = events[events.length - 1]?.timestamp ?? Date.now()
     if (childTurnFailed) {
       const lastTs = events[events.length - 1]?.timestamp

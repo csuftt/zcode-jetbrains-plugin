@@ -6,30 +6,15 @@
  * 复制反馈走按钮内联状态（文案短暂切换，不引全局 toast——设置页无 toast 通道）。
  */
 
-import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { sendToJava } from '@/ipc/bridge'
-import { copyText } from '@/utils/clipboard'
-
-/** 复制与展示用（「打开」走 Java 侧硬编码常量，不由前端传参，零注入面） */
-export const GITHUB_REPO_URL = 'https://github.com/csuftt/zcode-jetbrains-plugin'
-
-/** 复制反馈文案停留时长（超时回弹默认文案） */
-const COPY_FEEDBACK_MS = 1500
+import { sendToJava, GITHUB_REPO_URL } from '@/ipc/bridge'
+import { copyText, useCopyFeedback } from '@/utils/clipboard'
 
 export function StarSupportSection() {
   const { t } = useTranslation()
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const restoreTimer = useRef<number | undefined>(undefined)
+  const { state: copyState, showResult } = useCopyFeedback()
 
-  useEffect(() => () => window.clearTimeout(restoreTimer.current), [])
-
-  const handleCopy = async () => {
-    const ok = await copyText(GITHUB_REPO_URL)
-    setCopyState(ok ? 'copied' : 'failed')
-    window.clearTimeout(restoreTimer.current)
-    restoreTimer.current = window.setTimeout(() => setCopyState('idle'), COPY_FEEDBACK_MS)
-  }
+  const handleCopy = () => showResult(() => copyText(GITHUB_REPO_URL))
 
   return (
     <>
@@ -48,11 +33,11 @@ export function StarSupportSection() {
           <span>{t('settings.other.support.starBtn')}</span>
         </button>
         <button type="button" className="other-settings__support-btn" onClick={handleCopy}>
-          <span className={`codicon ${copyState === 'copied' ? 'codicon-check' : 'codicon-copy'}`} />
+          <span className={`codicon ${copyState === 'ok' ? 'codicon-check' : 'codicon-copy'}`} />
           <span>
-            {copyState === 'copied'
+            {copyState === 'ok'
               ? t('settings.other.support.copied')
-              : copyState === 'failed'
+              : copyState === 'fail'
                 ? t('settings.other.support.copyFailed')
                 : t('settings.other.support.copyBtn')}
           </span>

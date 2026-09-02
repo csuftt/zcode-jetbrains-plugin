@@ -13,12 +13,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { RefObject } from 'react'
 
-const NEAR_BOTTOM_PX = 80
-const HIDE_DELAY_MS = 1500
+/** 滚动跳转共享参数（ChatView 主界面与弹窗按钮两处挂接方式不同，值必须同源）*/
+export const NEAR_BOTTOM_PX = 80
+export const HIDE_DELAY_MS = 1500
 /** 上滑余震窗：滚轮上滑后的短窗内，scroll/wheel 的"还在底部附近"判定都不可信
  *  （起步第一格 scrollTop 离底 <80px、触摸板惯性有反向小事件）——既不恢复跟滚
  *  也不隐藏/切向刚显示的 ↑ 按钮 */
-const UP_GHOST_MS = 600
+export const UP_GHOST_MS = 600
 
 export function ScrollJumpButton({
   containerRef,

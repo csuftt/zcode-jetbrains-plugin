@@ -13,15 +13,15 @@
  * 放大进 MermaidModal 全屏弹窗，右上角工具栏（复制代码 | 复制图片 | 缩小 | 百分比 | 放大 | 关闭）。
  * 复制图片：SVG 按 viewBox 2x 位图化成 PNG 写剪贴板（填主题背景色，防透明底粘到白底应用看不清）。
  * 弹窗布局：图小于视口时水平+垂直居中（flex + margin:auto 安全居中，溢出时正常滚动）。
- * 拖动平移：内容溢出时手型（grab）按住拖动滚动，步进缩放 10%，范围 20%–300%。
- * 弹窗内滚轮缩放（向上放大/向下缩小，每格 ±10%，以鼠标位置为锚点）。
+ * 拖动平移：内容溢出时手型（grab）按住拖动滚动，步进缩放 25%，范围 20%–300%。
+ * 弹窗内滚轮缩放（向上放大/向下缩小，每格 ±25%，以鼠标位置为锚点）。
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import mermaid from 'mermaid'
-import { copyText } from '@/utils/clipboard'
+import { copyText, useCopyFeedback } from '@/utils/clipboard'
 import { sendToJava, onMessage, isInJcef } from '@/ipc/bridge'
 import type { JavaRequest } from '@/types/messages'
 import '../styles/markdown.less'
@@ -193,19 +193,11 @@ function CopyButton({
   className?: string
 }) {
   const { t } = useTranslation()
-  const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle')
-  const timerRef = useRef(0)
-  useEffect(() => () => window.clearTimeout(timerRef.current), [])
-  const onClick = async () => {
-    const ok = await doCopy()
-    setState(ok ? 'ok' : 'fail')
-    window.clearTimeout(timerRef.current)
-    timerRef.current = window.setTimeout(() => setState('idle'), COPY_DONE_MS)
-  }
+  const { state, showResult } = useCopyFeedback(COPY_DONE_MS)
   return (
     <button
       className={`${className ?? ''} mermaid-copy-${state}`.trim()}
-      onClick={onClick}
+      onClick={() => showResult(doCopy)}
       title={state === 'ok' ? t('chat.mermaid.copied') : state === 'fail' ? t('chat.mermaid.copyFailed') : title}
     >
       <span
@@ -328,7 +320,7 @@ export function MermaidBlock({ code, streaming = false }: Props) {
  *   （不用 align-items:center：溢出时它会裁掉顶部滚不到）。
  * 拖动：内容溢出时光标变手型（grab），按住拖动平移滚动（window 级监听，拖出窗口不断线）。
  * 缩放：svg 容器宽度百分比（zoom=1 铺满弹窗、≥聊天区宽度；放大后溢出可横向滚动）
- * 滚轮：向上放大/向下缩小（每格 ±10%），以鼠标位置为锚点（缩放后鼠标下的内容点不动）。
+ * 滚轮：向上放大/向下缩小（每格 ±25%），以鼠标位置为锚点（缩放后鼠标下的内容点不动）。
  *   注意 React 的 onWheel 是 passive 监听，preventDefault() 无效，须原生 addEventListener。
  */
 function MermaidModal({
