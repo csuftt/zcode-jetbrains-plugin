@@ -18,9 +18,10 @@ import type { TFunction } from 'i18next'
 import type { ToolPart } from '@/types/messages'
 import { relativeTime, formatToolDuration } from '@/utils/time'
 import { parsePartialToolInput, lineCount, tailLines } from '@/utils/partialToolInput'
+import { extractWebSources, extractDomain } from '@/utils/webSources'
 import { isBackgroundTaskOutput } from '@/utils/backgroundTask'
 import { toolErrorText } from '@/utils/parseStatus'
-import { sendToJava } from '@/ipc/bridge'
+import { sendToJava, openExternalUrl } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { useTick } from '@/hooks/useTick'
 import { FileIcon } from './FileIcon'
@@ -238,6 +239,36 @@ export function ToolCallCard({ part }: Props) {
     if (filePath) sendToJava({ op: 'refreshFile', filePath })
   }
 
+  // 网页工具（WebSearch/WebFetch）：输出是数 KB markdown 长文，卡片只留轻量视图
+  //（来源链接列表 / 短预览），全文走头部 📖 弹窗（对齐 Skill/ExitPlanMode 家族模式）
+  const isWebTool = tool === 'WebFetch' || tool === 'WebSearch'
+  const webUrl = isWebTool && typeof input?.url === 'string' ? input.url : ''
+  const webSources = useMemo(
+    () => (isWebTool && state.output ? extractWebSources(state.output) : []),
+    [isWebTool, state.output],
+  )
+  // 输出短预览（无来源链接可列时的回退视图；截断指示与 StreamPreview 同款）
+  const webOutPreview = useMemo(() => {
+    if (!isWebTool || !state.output) return ''
+    const lines = state.output.split('\n')
+    return lines.length <= 3 ? state.output : `${lines.slice(0, 3).join('\n')}\n⋯`
+  }, [isWebTool, state.output])
+  const handleOpenWebPage = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (webUrl) openExternalUrl(webUrl)
+  }
+  const handleViewWebResult = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!state.output) return
+    openMarkdownPreview({
+      title: tool === 'WebFetch'
+        ? t('tool.webFetchTitle', { domain: extractDomain(webUrl) })
+        : toolDisplayName(tool, t),
+      meta: webUrl || (typeof input?.query === 'string' ? input.query : undefined),
+      markdown: state.output,
+    })
+  }
+
   // Read 工具不需要展开（只有文件名 + 点击打开，不渲染 output）；
   // Skill 输入/输出全在头部 📖 弹窗，展开区仅流式原始输入/出错时有内容；
   // ExitPlanMode 同款：plan 全文走 📖 弹窗，完成后无展开区（流式中仍可看原始片段）
@@ -332,6 +363,28 @@ export function ToolCallCard({ part }: Props) {
                 markdown: String(input.plan),
               })
             }}
+          >
+            <span className="codicon codicon-book" />
+          </button>
+        )}
+        {/* WebFetch 打开原网页（🌐）：系统浏览器直达（openExternal 桥带 url 形态）*/}
+        {tool === 'WebFetch' && webUrl && (
+          <button
+            className="tool-card__action"
+            title={t('tool.viewPage')}
+            aria-label={t('tool.viewPage')}
+            onClick={handleOpenWebPage}
+          >
+            <span className="codicon codicon-globe" />
+          </button>
+        )}
+        {/* web 结果弹窗阅读：输出 markdown 全文走 📖 弹窗（对齐 Skill/子代理报告入口）*/}
+        {isWebTool && hasOutput && (
+          <button
+            className="tool-card__action"
+            title={t('tool.viewWebResult')}
+            aria-label={t('tool.viewWebResult')}
+            onClick={handleViewWebResult}
           >
             <span className="codicon codicon-book" />
           </button>
@@ -432,6 +485,66 @@ export function ToolCallCard({ part }: Props) {
               <pre className="tool-card__code">{rawInput}</pre>
             </div>
           )}
+          {/* 网页工具（WebSearch/WebFetch）：输入友好展示替代裸 JSON；
+              输出来源链接列表（点击调系统浏览器）或 3 行短预览，全文走 📖 弹窗 */}
+          {isWebTool && input && (
+            <>
+              {webUrl && (
+                <div className="tool-card__section">
+                  <div className="tool-card__label">{t('tool.webUrl')}</div>
+                  <div
+                    className="tool-card__weburl"
+                    title={webUrl}
+                    onClick={handleOpenWebPage}
+                  >
+                    <span className="codicon codicon-globe" />
+                    <span className="tool-card__weburl-text">{webUrl}</span>
+                  </div>
+                </div>
+              )}
+              {typeof input.prompt === 'string' && input.prompt.trim() && (
+                <div className="tool-card__section">
+                  <div className="tool-card__label">{t('tool.webPrompt')}</div>
+                  <pre className="tool-card__code tool-card__prompt">{input.prompt}</pre>
+                </div>
+              )}
+              {typeof input.query === 'string' && input.query.trim() && (
+                <div className="tool-card__section">
+                  <div className="tool-card__label">{t('tool.webQuery')}</div>
+                  <pre className="tool-card__code tool-card__prompt">{input.query}</pre>
+                </div>
+              )}
+              {hasOutput && (
+                <div className="tool-card__section">
+                  <div className="tool-card__label tool-card__label--with-action">
+                    {t('tool.output')}
+                    <button className="tool-card__full-btn" onClick={handleViewWebResult}>
+                      {t('tool.viewFullResult')}
+                      <span className="codicon codicon-book" />
+                    </button>
+                  </div>
+                  {webSources.length > 0 ? (
+                    <ul className="web-source-list">
+                      {webSources.map((s) => (
+                        <li
+                          key={s.url}
+                          className="web-source-item"
+                          title={s.url}
+                          onClick={() => openExternalUrl(s.url)}
+                        >
+                          <span className="codicon codicon-link web-source-item__icon" />
+                          <span className="web-source-item__domain">{s.domain}</span>
+                          <span className="web-source-item__title">{s.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <pre className="tool-card__code">{webOutPreview}</pre>
+                  )}
+                </div>
+              )}
+            </>
+          )}
           {/* Bash：终端风格（命令 + 输出）*/}
           {tool === 'Bash' && (
             <>
@@ -465,8 +578,9 @@ export function ToolCallCard({ part }: Props) {
           )}
           {/* 其他工具：JSON 输入/输出。Skill 无展开区内容（技能名在头部摘要、
               技能文档走 📖 弹窗）；Agent 类输出（最终报告）同样只走头部弹窗按钮；
-              ExitPlanMode 的 plan 全文走 📖 弹窗，展开区不渲染 input JSON */}
-          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && tool !== 'ExitPlanMode' && (
+              ExitPlanMode 的 plan 全文走 📖 弹窗，展开区不渲染 input JSON；
+              web 双工具走上方专用分支（input 友好展示 + 来源列表/短预览）*/}
+          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && tool !== 'ExitPlanMode' && !isWebTool && (
             <>
               {state.input && Object.keys(state.input).length > 0 && (
                 <div className="tool-card__section">

@@ -84,4 +84,14 @@
   },
   "viewPlan": "View plan details",
   "planTitle": "Execution Plan"
+,
+  "viewWebResult": "View result in dialog",
+  "viewPage": "Open page in browser",
+  "webUrl": "URL",
+  "webQuery": "Query",
+  "webPrompt": "Prompt",
+  "webSources": "Sources",
+  "viewFullResult": "View full result",
+  "webFetchTitle": "Web Fetch · {{domain}}"
 }
+

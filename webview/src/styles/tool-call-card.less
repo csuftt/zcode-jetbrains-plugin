@@ -706,3 +706,134 @@
     opacity: 1;
   }
 }
+
+/* ============ 网页工具（WebSearch/WebFetch）============ */
+
+/* label 行带动作按钮（输出 + 查看完整结果）：按钮靠右 */
+.tool-card__label--with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tool-card__full-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .codicon {
+    font-size: 12px;
+  }
+}
+
+/* WebFetch 输入 URL 行：等宽 + 单行省略，点击调系统浏览器打开原页 */
+.tool-card__weburl {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-tool-value);
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: var(--bg-hover);
+
+    .tool-card__weburl-text {
+      color: var(--text-primary);
+    }
+  }
+
+  .codicon {
+    font-size: 13px;
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+  }
+}
+
+.tool-card__weburl-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* WebSearch 来源链接列表：域名 + 标题条目，点击调系统浏览器 */
+.web-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.web-source-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  & + & {
+    border-top: 1px solid var(--border-secondary);
+  }
+
+  &__icon {
+    font-size: 12px;
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    align-self: center;
+  }
+
+  &__domain {
+    flex-shrink: 0;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--text-tertiary);
+  }
+
+  &__title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  &:hover &__title {
+    color: var(--text-primary);
+  }
+}

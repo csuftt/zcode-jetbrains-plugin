@@ -13,6 +13,7 @@ import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BlockSection, splitMarkdownBlocks } from './BlockSection'
 import { copyText } from '@/utils/clipboard'
+import { openExternalUrl } from '@/ipc/bridge'
 import '../styles/markdown.less'
 
 interface Props {
@@ -46,10 +47,21 @@ export function MarkdownBlock({ markdown, streaming = false }: Props) {
     }, COPY_DONE_MS)
   }, [t])
 
+  // 外链点击接管：renderMarkdown 产出 <a target=_blank>，但 JCEF 没挂
+  // onBeforePopup 拦截层，原生点击要么无反应要么把 webview 导航走——
+  // 事件委托 preventDefault 后走 openExternalUrl（协议白名单 + Java 侧二次校验）
+  const handleLink = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href]')
+    if (!anchor) return
+    e.preventDefault()
+    const href = anchor.getAttribute('href') || ''
+    if (href) openExternalUrl(href)
+  }, [])
+
   if (blocks.length === 0) return null
 
   return (
-    <div className="markdown-body" onClick={handleCopy}>
+    <div className="markdown-body" onClick={handleCopy} onClickCapture={handleLink}>
       {blocks.map((block, i) => (
         <BlockSection
           key={i}

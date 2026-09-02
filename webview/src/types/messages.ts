@@ -405,8 +405,9 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'locateSession'; sessionId: string }
   /** mermaid 复制图片：PNG 纯 base64 → Java 系统剪贴板（JCEF 的 clipboard.write 图片不可靠的降级通道）*/
   | { op: 'copyImage'; dataBase64: string }
-  /** 打开本项目 GitHub 仓库（设置页开源支持区块）：目标 URL 硬编码 Java 侧，op 不带参数零注入面 */
-  | { op: 'openExternal' }
+  /** 调系统浏览器打开外链。无 url = 打开本项目 GitHub 仓库（设置页开源支持区块）；
+   *  带 url = 网页工具卡/来源链接/markdown 链接的跳转（Java 侧 http/https 白名单二次校验）*/
+  | { op: 'openExternal'; url?: string }
 
 /** 可切换的模型选项（来自 ~/.zcode/v2/config.json 的 provider 注册表）*/
 export interface ModelOption {

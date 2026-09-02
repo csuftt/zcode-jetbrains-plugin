@@ -84,4 +84,14 @@
   },
   "viewPlan": "查閱計畫詳細內容",
   "planTitle": "執行計畫"
+,
+  "viewWebResult": "彈窗查看結果",
+  "viewPage": "開啟原始網頁",
+  "webUrl": "網址",
+  "webQuery": "搜尋詞",
+  "webPrompt": "提問",
+  "webSources": "來源",
+  "viewFullResult": "查看完整結果",
+  "webFetchTitle": "網頁取得 · {{domain}}"
 }
+

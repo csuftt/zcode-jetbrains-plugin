@@ -84,4 +84,14 @@
   },
   "viewPlan": "查阅计划详情",
   "planTitle": "执行计划"
+,
+  "viewWebResult": "弹窗查看结果",
+  "viewPage": "打开原网页",
+  "webUrl": "网址",
+  "webQuery": "搜索词",
+  "webPrompt": "提问",
+  "webSources": "来源",
+  "viewFullResult": "查看完整结果",
+  "webFetchTitle": "网页获取 · {{domain}}"
 }
+

@@ -874,7 +874,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "showDiff" -> handleShowDiff(msg)
                         "refreshFile" -> handleRefreshFile(msg)
                         "createTab" -> handleCreateTab()
-                        "openExternal" -> handleOpenExternal()
+                        "openExternal" -> handleOpenExternal(msg)
                         "toggleBrowserPane" -> handleToggleBrowserPane()
                         "setTabTitle" -> handleSetTabTitle(msg)
                         "clearTabSession" -> handleClearTabSession()
@@ -3758,11 +3758,24 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * 打开本项目 GitHub 仓库（设置页「开源与支持」区块）：系统默认浏览器直达仓库页。
-     * op 不携带 url 参数、目标硬编码伴生对象常量——语义即"打开本项目仓库"，零注入面。
+     * 打开外部网页（系统默认浏览器）。两种形态：
+     * - 无 url 参数：打开本项目 GitHub 仓库（设置页「开源与支持」区块，语义即"打开本项目仓库"）；
+     * - 带 url：网页工具卡/来源链接/markdown 链接的跳转（WebFetch 原页、WebSearch 来源等）。
+     * 协议白名单 http/https 与前端 bridge 侧双重校验：file:/javascript: 等一律拒绝（防注入）。
      */
-    private fun handleOpenExternal(): JsonObject {
-        BrowserUtil.browse(GITHUB_REPO_URL)
+    private fun handleOpenExternal(msg: JsonObject): JsonObject {
+        val url = msg["url"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+        val target = if (url == null) {
+            GITHUB_REPO_URL
+        } else {
+            val trimmed = url.trim()
+            if (!trimmed.matches(Regex("(?i)^https?://.+"))) {
+                log.warn("openExternal rejected non-http(s) url: ${LogRedactor.redact(trimmed).take(120)}")
+                return errorResponse("unsupported url scheme")
+            }
+            trimmed
+        }
+        BrowserUtil.browse(target)
         return buildJsonObject { put("op", "externalOpened") }
     }
 

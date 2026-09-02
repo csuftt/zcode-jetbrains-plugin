@@ -84,4 +84,14 @@
   },
   "viewPlan": "計画の詳細を表示",
   "planTitle": "実行計画"
+,
+  "viewWebResult": "ダイアログで結果を表示",
+  "viewPage": "ブラウザでページを開く",
+  "webUrl": "URL",
+  "webQuery": "検索語",
+  "webPrompt": "プロンプト",
+  "webSources": "ソース",
+  "viewFullResult": "全文を表示",
+  "webFetchTitle": "ウェブ取得 · {{domain}}"
 }
+

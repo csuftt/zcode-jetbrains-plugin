@@ -237,6 +237,20 @@ export function sendToJava(req: JavaRequest): void {
   mockRespond(req)
 }
 
+/** 外链协议白名单（与 Java 端 handleOpenExternal 同口径）：非 http(s) 一律拒绝，
+ *  防 file:/javascript: 等注入面（markdown/搜索结果里的链接不可信）*/
+const EXTERNAL_URL_SAFE = /^https?:\/\//i
+
+/**
+ * 调系统浏览器打开外部网页（网页工具卡 🌐 按钮、WebSearch 来源条目、markdown 链接点击）。
+ * 前端先过协议白名单，Java 侧二次校验后 BrowserUtil.browse。
+ */
+export function openExternalUrl(url: string): void {
+  const trimmed = url.trim()
+  if (!EXTERNAL_URL_SAFE.test(trimmed)) return
+  sendToJava({ op: 'openExternal', url: trimmed })
+}
+
 // ============ 环境检测 ============
 
 /** 是否在 JCEF 环境中（Java 端注入了桥） */
@@ -452,6 +466,92 @@ function mockRespond(req: JavaRequest): void {
     const doneB = streamTool(m2, callB, fileB, 'src/demo/BatchFileB.ts', doneA + 300)
     setTimeout(() => push('model.streaming', { kind: 'text_delta', delta: '两个文件已写入（mock）。', assistantMessageId: m2 }), doneB + 200)
     setTimeout(() => push('turn.completed', { response: 'ok' }), doneB + 400)
+    return
+  }
+
+  // send 文本 "#web"：模拟 WebSearch + WebFetch（含 404 错误形态），验收网页工具卡
+  //（头部 🌐/📖 按钮、来源链接列表、无链接回退预览、弹窗全文渲染）
+  if (req.op === 'send' && req.text.trim() === '#web') {
+    const turnId = `turn_web_${Date.now()}`
+    const m1 = `msg_web_m1_${Date.now()}`
+    let seq = 0
+    const push = (type: string, payload: Record<string, unknown>) => {
+      streamListeners.forEach((fn) =>
+        fn(req.sessionId, { type, seq: seq++, sessionId: req.sessionId, turnId, timestamp: Date.now(), payload } as unknown as StreamEvent))
+    }
+    const runTool = (
+      msgId: string, callId: string, toolName: string,
+      input: Record<string, unknown>, resultContent: string, t0: number,
+    ) => {
+      const fullJson = JSON.stringify(input)
+      setTimeout(() => push('model.streaming', { kind: 'tool_input_start', toolCallId: callId, toolName, assistantMessageId: msgId }), t0)
+      setTimeout(() => push('model.streaming', { kind: 'tool_input_delta', toolCallId: callId, delta: fullJson, assistantMessageId: msgId }), t0 + 400)
+      setTimeout(() => push('model.streaming', { kind: 'tool_call', toolCallId: callId, toolName, assistantMessageId: msgId, input }), t0 + 700)
+      setTimeout(() => push('tool.updated', { kind: 'started', toolCallId: callId, toolName }), t0 + 800)
+      setTimeout(() => push('tool.updated', {
+        kind: 'result', toolCallId: callId,
+        result: { success: true, content: resultContent },
+      }), t0 + 1600)
+      return t0 + 1700
+    }
+    // 真实形态输出（rollout 实抓同构）：上游 trace 转储 + 整理后结果列表 + Sources
+    const searchOut = [
+      'Web search results for query: "IntelliJ JCEF plugin open external link"',
+      '',
+      'Summary:',
+      '**🌐 Z.ai Built-in Tool: web_search_prime**',
+      '',
+      '**Input:**',
+      '```json',
+      '{"content_size":"medium","location":"cn","search_query":"IntelliJ JCEF plugin open external link"}',
+      '```',
+      '*Executing on server...*',
+      '',
+      'Here are the search results for your query:',
+      '',
+      '1. **[Plugin implemented using JCEF API - How to open hyperlinks in an external browser](https://intellij-support.jetbrains.com/hc/en-us/community/posts/360009678839)** (JetBrains Support)',
+      '   - A developer with a JCEF-based plugin asks how to open hyperlinks in an external browser.',
+      '',
+      '2. **[Embedded Browser (JCEF) | IntelliJ Platform Plugin SDK](https://plugins.jetbrains.com/docs/intellij/embedded-browser-jcef.html)** (Official Docs)',
+      '   - Covers intercepting navigation via CefDisplayHandler.onAddressChange().',
+      '',
+      '3. **[JCEF reference guide (jcef.md) on GitHub](https://github.com/hltj/intellij/blob/master/reference_guide/jcef.md?plain=1)**',
+      '',
+      'Sources:',
+      '- [Embedded Browser (JCEF)](https://plugins.jetbrains.com/docs/intellij/embedded-browser-jcef.html)',
+      '- [JetBrains Support](https://intellij-support.jetbrains.com/hc/en-us/community/posts/360009678839)',
+    ].join('\n')
+    const fetchOut = [
+      '## 直接回答',
+      '',
+      '**没有**。该指南中不存在任何禁止插件在其自身 UI 内打开外部网站的条款。',
+      '',
+      '相关条款（针对 Marketplace 页面，非插件 UI）：',
+      '- 1.7 外链须有效且与插件相关',
+      '- 3.3 开源插件须提供源码链接',
+      '',
+      '详见 [审核指南](https://plugins.jetbrains.com/docs/marketplace/jetbrains-marketplace-approval-guidelines.html)。',
+    ].join('\n')
+    const fetchErr = 'The server returned HTTP 404 Not Found.\n\nThe response body was not retrieved. If this URL requires authentication, use an authenticated MCP tool or `gh` for GitHub instead of WebFetch.'
+    const c1 = `call_web_search_${Date.now()}`
+    const c2 = `call_web_fetch_${Date.now()}`
+    const c3 = `call_web_404_${Date.now()}`
+    setTimeout(() => push('turn.started', { turnNumber: 1, messageId: m1 }), 200)
+    setTimeout(() => push('model.streaming', { kind: 'reasoning_delta', delta: '需要先搜索再抓取文档确认。', assistantMessageId: m1 }), 400)
+    const d1 = runTool(m1, c1, 'WebSearch', { query: 'IntelliJ JCEF plugin open external link' }, searchOut, 600)
+    setTimeout(() => push('model.streaming', { kind: 'reasoning_delta', delta: '找到官方文档了，抓取全文。', assistantMessageId: m1 }), d1 + 100)
+    const d2 = runTool(m1, c2, 'WebFetch', {
+      url: 'https://plugins.jetbrains.com/docs/marketplace/jetbrains-marketplace-approval-guidelines.html',
+      prompt: '有没有禁止插件 UI 内打开外部链接的条款？',
+    }, fetchOut, d1 + 300)
+    const d3 = runTool(m1, c3, 'WebFetch', {
+      url: 'https://plugins.jetbrains.com/docs/marketplace/plugins-guidelines.html',
+      prompt: '检查这个页面的条款。',
+    }, fetchErr, d2 + 300)
+    setTimeout(() => push('model.streaming', { kind: 'text_delta', delta: '搜索与抓取完成（mock）：来源列表可点击、📖 弹窗可读全文。', assistantMessageId: m1 }), d3 + 200)
+    // completed 相对 result 多留 1.5s：给 dev 浏览器验收留出展开查看窗口
+    //（mock 环境回合完成后流式消息即被重置，窗口太窄没法看完成态卡片）
+    setTimeout(() => push('turn.completed', { response: 'ok' }), d3 + 1700)
     return
   }
 
@@ -777,7 +877,7 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       return { op: 'imageCopied', ok: true }
     case 'openExternal':
       // mock：生产走 Java BrowserUtil 调系统浏览器，dev 浏览器环境退化为新标签页打开
-      window.open(GITHUB_REPO_URL, '_blank')
+      window.open(req.url || GITHUB_REPO_URL, '_blank')
       return { op: 'externalOpened' }
     case 'listModels':
       // 模拟 ~/.zcode/v2/config.json 的 provider 注册表（验收模型下拉用；内置套餐带 plan 标记；
