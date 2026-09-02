@@ -149,18 +149,24 @@ export function initBridge(): void {
         console.error('[bridge] onMessage 解析失败', e, raw)
         return
       }
-      // 诊断：打印收到的消息类型
+      // 诊断：addDiag 进内存环形缓冲（生产保留，getDiagLog 可导出排查流问题）；
+      // console 输出仅 dev——JCEF 不转发 console（实测定论），生产打印无落点还白做
+      // 每批次的事件类型数组拼接（流式期间每 16ms 一批），用 DEV 分支让构建裁掉
       if (msg.op === 'streamEvent') {
         const kind = 'kind' in msg.event.payload ? msg.event.payload.kind : ''
         addDiag('streamEvent', `${msg.event.type} ${kind}`)
-        console.log('[bridge] ← streamEvent', msg.event.type, kind)
+        if (import.meta.env.DEV) console.log('[bridge] ← streamEvent', msg.event.type, kind)
       } else if (msg.op === 'streamBatch') {
-        const types = msg.events.map((e) => e.type + ('kind' in e.payload ? `(${e.payload.kind})` : ''))
-        addDiag('streamBatch', `${msg.events.length}条: ${types.slice(0, 5).join(',')}`)
-        console.log('[bridge] ← streamBatch', msg.events.length, 'events:', types.join(','))
+        if (import.meta.env.DEV) {
+          const types = msg.events.map((e) => e.type + ('kind' in e.payload ? `(${e.payload.kind})` : ''))
+          addDiag('streamBatch', `${msg.events.length}条: ${types.slice(0, 5).join(',')}`)
+          console.log('[bridge] ← streamBatch', msg.events.length, 'events:', types.join(','))
+        } else {
+          addDiag('streamBatch', `${msg.events.length}条`)
+        }
       } else {
         addDiag(msg.op, '')
-        console.log('[bridge] ←', msg.op)
+        if (import.meta.env.DEV) console.log('[bridge] ←', msg.op)
       }
       // 流式事件走独立通道（单个或批量）
       if (msg.op === 'streamEvent') {
