@@ -23,6 +23,74 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    "version": "0.3.1",
+    "date": "2026-09-02",
+    "zh": {
+      "sections": [
+        {
+          "title": "新增",
+          "items": [
+            "**子代理详情页全面改版**：执行记录弹窗 UI 对齐主界面——思考过程、图片、工具组卡同款渲染，头部新增执行时刻与所用模型，工具卡实时显示真实耗时，整体排版更紧凑；数据源切换到与官方客户端一致的 v4 实时订阅通道，执行状态判定准确、实时流全程稳定（订阅失败自动降级快照轮询）。",
+            "**网页搜索 / 获取工具卡友好渲染**：WebSearch 与 WebFetch 工具卡不再显示裸 JSON——输入内容友好展示，搜索结果带可点击的来源链接列表，网页全文收进弹窗查看；消息正文中的网页链接改为系统浏览器打开，不再在插件内跳转。",
+            "**Mermaid 图表复制与放大增强**：图表上方新增工具栏，可一键复制代码或复制为高清 PNG 图片（自动适配深浅主题底色）；放大弹窗支持拖动平移，滚轮缩放步进加大更跟手。",
+            "**用量曲线悬停浮层与图例**：设置 → 用量的每日 Token 曲线新增悬停浮层（各模型数值降序对比）与颜色图例，同图对比模型数从 3 个扩展到 6 个。",
+            "**长内容弹窗滚动跳转按钮**：子代理报告、文本预览、消息全文等长弹窗统一新增 ↑ 置顶 / ↓ 置底按钮，停止滚动 1.5 秒后自动淡出。",
+            "**设置页 GitHub 入口**：其他设置新增「开源与支持」区块，一键直达仓库页点 Star 或复制地址。"
+          ]
+        },
+        {
+          "title": "修复",
+          "items": [
+            "**流式渲染 Mermaid 图表白屏**：流式输出中图表形态切换可能触发页面整体白屏（React 崩溃），已修复。",
+            "**弹窗叠开连带关闭**：在子代理详情上打开最终报告 / 阅读弹窗不再连带关闭详情弹窗；Esc 现在只关闭最上层。",
+            "**锚点导航出现点击无效的圆点**：压缩摘要消息不再生成锚点圆点。",
+            "**IDE 日志噪音收敛**：摘除诊断期遗留的高频埋点日志（此前 10 分钟可写入 3000+ 行 idea.log）。"
+          ]
+        },
+        {
+          "title": "变更",
+          "items": [
+            "**Token 数紧凑显示**：消息统计与子代理通知卡的 token 数改为紧凑可读格式（如 461.6k / 4.3k），精确数值悬停可见。",
+            "**设置页视觉统一**：各设置视图字号统一为四档体系，输入栏下拉整体紧凑化，整体视觉更协调。",
+            "**阅读类弹窗改版**：粘贴文本预览与消息全文弹窗改为头部行形态（图标 + 标题统计 + 关闭），内容区底色下沉区分层次；压缩摘要全文弹窗补上滚动跳转按钮；版本更新弹窗一屏化、页码恒显。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "**Subagent detail page overhaul**: The execution log dialog now matches the main chat UI — thinking blocks, images and grouped tool cards rendered the same way, with execution time and model shown in the header, live tool durations, and a tighter layout. Its data source moved to the v4 live subscription channel used by the official client, keeping status accurate and the live stream stable throughout (with automatic fallback to snapshot polling).",
+            "**Friendly rendering for web search / fetch tool cards**: WebSearch and WebFetch cards no longer show raw JSON — inputs are displayed readably, search results come with a clickable source list, and full page content opens in a dialog. Web links in message bodies now open in the system browser instead of navigating inside the plugin.",
+            "**Mermaid diagram copy & zoom enhancements**: A toolbar above diagrams copies the code or a high-resolution PNG (theme background applied automatically). The zoom dialog supports drag panning, and the wheel zoom step is larger.",
+            "**Usage chart hover overlay & legend**: The daily token chart in Settings → Usage gains a hover overlay (per-model values, sorted) and a color legend; the number of comparable models per chart grows from 3 to 6.",
+            "**Scroll-to-top/bottom buttons in long dialogs**: Long dialogs (subagent report, text preview, full message text, etc.) now share ↑ top / ↓ bottom jump buttons that fade out 1.5 seconds after scrolling stops.",
+            "**GitHub entry in settings**: A new \"Open source & support\" section under Other settings links straight to the repository page for starring or copying the URL."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "**White screen when streaming Mermaid diagrams**: A diagram shape change during streaming could crash the page and blank the whole UI; fixed.",
+            "**Stacked dialogs closing together**: Opening the final report or a reading dialog above the subagent detail no longer closes the detail dialog; Esc now closes only the topmost layer.",
+            "**Dead anchor dots**: Compaction summary messages no longer create anchor dots that did nothing when clicked.",
+            "**IDE log noise reduction**: High-frequency diagnostic logging left over from debugging has been removed (it could write 3000+ lines into idea.log in 10 minutes)."
+          ]
+        },
+        {
+          "title": "Changed",
+          "items": [
+            "**Compact token counts**: Token counts in message stats and subagent notification cards now use a compact format (e.g. 461.6k / 4.3k); exact values are visible on hover.",
+            "**Unified settings visuals**: Font sizes across the settings views are unified into a four-tier system, and the input bar dropdowns are more compact.",
+            "**Reading dialog redesign**: The pasted-text preview and full-message dialogs now use a header-row form (icon + title stats + close) with a sunken content area; the compaction summary dialog gains scroll jump buttons; the version dialog fits on one screen and keeps its page number visible."
+          ]
+        }
+      ]
+    }
+  },
+  {
     "version": "0.3.0",
     "date": "2026-08-31",
     "zh": {
