@@ -167,6 +167,160 @@
   }
 }
 
+/* ===== 锚点历史入口节点（轨道终点）+ 全量消息弹窗 ===== */
+/* 与圆点同族的 12px 节点：内嵌 CSS 三横线列表图标（codicon 在此尺寸不可读）*/
+.anchor-history-node {
+  --node-line: var(--text-secondary);
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 50%);
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-primary);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 2;
+  transition: all 0.15s;
+
+  /* 三横线图标：6×6px 内三条 1px 线（0-1 / 2.5-3.5 / 5-6）*/
+  &::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px;
+    height: 6px;
+    background:
+      linear-gradient(var(--node-line), var(--node-line)) 0 0 / 100% 1px no-repeat,
+      linear-gradient(var(--node-line), var(--node-line)) 0 2.5px / 100% 1px no-repeat,
+      linear-gradient(var(--node-line), var(--node-line)) 0 5px / 100% 1px no-repeat;
+  }
+
+  &:hover,
+  &.is-open {
+    transform: translate(-50%, 50%) scale(1.3);
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    --node-line: var(--bg-elevated);
+  }
+}
+
+/* 全量消息历史弹窗（rail 右侧、自底部节点向上展开）*/
+.anchor-history-popover {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: 0;
+  width: 320px;
+  max-width: calc(100vw - 60px);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
+  z-index: 110;
+  animation: anchor-tooltip-fade-in 0.15s ease;
+}
+
+.anchor-history-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 10px;
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+
+.anchor-history-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.anchor-history-count {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-right: auto;
+}
+
+.anchor-history-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+
+  & .codicon {
+    font-size: 13px;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.anchor-history-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.anchor-history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  &.is-active {
+    background: var(--bg-hover);
+    border-left-color: var(--accent-primary);
+  }
+}
+
+.anchor-history-meta {
+  display: block;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
+}
+
+.anchor-history-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ===== 滚动跳转按钮（cc-gui ScrollControl 移植）=====
    单按钮：滚轮上滑显示↑置顶 / 下滑显示↓置底，
    停止滚动 1.5s 或回到底部后淡出 */

@@ -1536,10 +1536,12 @@ export const useStore = create<StoreState>((set, get) => ({
       // 不插则目标轮整段没有用户气泡，回合结束重拉才出现（0.3.2 真机反馈）。
       // goalRefresh 增量合并时 user 真身与流式 assistant 撞 turn.started 的
       // messageId 被滤掉，乐观版一直顶到回合结束全量重拉被真身替换
+      // 乐观卡从零起：服务端按 target 独立记账（replace 换目标统计清零，
+      // 曾继承旧目标耗时导致卡片不重置，0.3.2 真机反馈）
       const localId = `local_u_${Date.now()}`
       optimisticGoalUserMsg = { sid, msgId: localId }
       set((s) => ({
-        goal: { targetId: '', objective: trimmedObjective, status: 'active', tokensUsed: prev?.tokensUsed ?? 0, timeUsedSeconds: prev?.timeUsedSeconds ?? 0, iterationCount: 1, syncedAt: Date.now() },
+        goal: { targetId: '', objective: trimmedObjective, status: 'active', tokensUsed: 0, timeUsedSeconds: 0, iterationCount: 1, syncedAt: Date.now() },
         messages: [...s.messages, {
           info: { role: 'user', time: { created: Date.now() }, id: localId, sessionID: sid },
           parts: [{ type: 'text', text: trimmedObjective }],
@@ -4081,18 +4083,26 @@ function toGoalState(
   const s = (goalStats ?? null) as Record<string, unknown> | null
   if (!t && !s) return null
   const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-  const objective = typeof t?.objective === 'string' ? t.objective : prev?.objective ?? ''
+  const newTargetId = typeof t?.targetID === 'string' ? t.targetID : typeof t?.targetId === 'string' ? t.targetId : null
+  // 目标切换（replace 新 target）：服务端按 target 独立记账（sqlite 实测
+  // session_target 每行独立 tokens_used/time_used_seconds），新目标统计从零起
+  // ——统计 0/摘要缺失是真实值，不能回退 prev 旧目标的值（|| 链曾把权威 0 吞成
+  // 旧值，replace 后卡片耗时永远不重置，0.3.2 真机反馈）。乐观占位 targetId=''
+  // 不算切换（统计本就从零）
+  const switched = prev != null && newTargetId != null && prev.targetId !== '' && prev.targetId !== newTargetId
+  const fallback = switched ? null : prev ?? null
+  const objective = typeof t?.objective === 'string' ? t.objective : fallback?.objective ?? ''
   if (!objective && !t) return prev ?? null
   return {
-    targetId: typeof t?.targetID === 'string' ? t.targetID : typeof t?.targetId === 'string' ? t.targetId : prev?.targetId ?? '',
+    targetId: newTargetId ?? fallback?.targetId ?? '',
     objective,
-    summaryTitle: (t?.summaryTitle as string | null | undefined) ?? prev?.summaryTitle ?? null,
-    status: typeof t?.status === 'string' ? t.status : prev?.status ?? 'active',
-    tokensUsed: num(t?.tokensUsed) || num(s?.tokensUsed) || (prev?.tokensUsed ?? 0),
-    timeUsedSeconds: num(t?.timeUsedSeconds) || num(s?.timeUsedSeconds) || (prev?.timeUsedSeconds ?? 0),
-    tokenBudget: (typeof t?.tokenBudget === 'number' ? t.tokenBudget : null) ?? prev?.tokenBudget ?? null,
-    iterationCount: num(s?.iterationCount) || num(t?.iterationCount) || (prev?.iterationCount ?? 1),
-    toolCallCount: num(s?.toolCallCount) || prev?.toolCallCount,
+    summaryTitle: (t?.summaryTitle as string | null | undefined) ?? fallback?.summaryTitle ?? null,
+    status: typeof t?.status === 'string' ? t.status : fallback?.status ?? 'active',
+    tokensUsed: num(t?.tokensUsed) || num(s?.tokensUsed) || (fallback?.tokensUsed ?? 0),
+    timeUsedSeconds: num(t?.timeUsedSeconds) || num(s?.timeUsedSeconds) || (fallback?.timeUsedSeconds ?? 0),
+    tokenBudget: (typeof t?.tokenBudget === 'number' ? t.tokenBudget : null) ?? fallback?.tokenBudget ?? null,
+    iterationCount: num(s?.iterationCount) || num(t?.iterationCount) || (fallback?.iterationCount ?? 1),
+    toolCallCount: num(s?.toolCallCount) || fallback?.toolCallCount,
     // 走秒基准：本地从该时刻起在服务端值上递增显示（事件间隔内可见流逝）
     syncedAt: Date.now(),
   }

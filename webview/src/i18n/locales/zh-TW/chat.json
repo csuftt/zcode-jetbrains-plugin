@@ -76,6 +76,14 @@
     "close": "關閉 (Esc)",
     "closeAria": "關閉搜尋"
   },
+  "anchorHistory": {
+    "button": "使用者訊息歷史",
+    "buttonAria": "檢視使用者訊息歷史",
+    "title": "使用者訊息",
+    "count": "{{count}} 則",
+    "noText": "（無文字內容）",
+    "jumpAria": "跳到該訊息"
+  },
   "welcome": {
     "version": "ZCode 版本",
     "sendMsg": "給 ZCode 傳送訊息"
@@ -107,7 +115,9 @@
     "action": {
       "pause": "暫停目標",
       "resume": "繼續目標",
-      "clear": "清除目標"
+      "clear": "清除目標",
+      "collapse": "摺疊卡片",
+      "expand": "展開卡片"
     },
     "usageHint": "目前會話沒有目標。用法：/goal <目標描述> 設定；/goal pause 暫停；/goal resume 繼續；/goal clear 清除",
     "verifying": "第 {{count}} 輪校驗中",

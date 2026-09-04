@@ -76,6 +76,14 @@
     "close": "닫기 (Esc)",
     "closeAria": "검색 닫기"
   },
+  "anchorHistory": {
+    "button": "사용자 메시지 기록",
+    "buttonAria": "사용자 메시지 기록 보기",
+    "title": "사용자 메시지",
+    "count": "{{count}}개",
+    "noText": "(텍스트 없음)",
+    "jumpAria": "이 메시지로 이동"
+  },
   "welcome": {
     "version": "ZCode 버전",
     "sendMsg": "ZCode에 메시지 보내기"
@@ -107,7 +115,9 @@
     "action": {
       "pause": "목표 일시 중지",
       "resume": "목표 재개",
-      "clear": "목표 해제"
+      "clear": "목표 해제",
+      "collapse": "카드 접기",
+      "expand": "카드 펼치기"
     },
     "usageHint": "이 세션에는 목표가 없습니다. 사용법: /goal <목표> 설정, /goal pause 일시 중지, /goal resume 재개, /goal clear 해제",
     "verifying": "라운드 {{count}} 검증 중",

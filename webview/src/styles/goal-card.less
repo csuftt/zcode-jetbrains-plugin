@@ -26,6 +26,8 @@
 }
 
 // ============ 状态卡本体 ============
+// 状态色系（靶子图标 + 左侧色条同色表达）：active 琥珀金脉冲 / paused 灰 /
+// complete 绿 / budget_limited 橙（0.3.2 真机反馈：双图标融合为靶子兼承状态）
 .goal-card {
   display: flex;
   align-items: center;
@@ -34,10 +36,17 @@
   border-radius: 6px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-secondary);
-  border-left: 3px solid var(--button-primary);
+  border-left: 3px solid #d7ba7d;
   font-size: 12px;
   color: var(--text-primary);
   min-width: 0; // 允许子级省略号收缩
+  user-select: none; // 折叠条点击展开/按钮快速连点不选中文字
+
+  // 折叠迷你条（0.3.2：展开遮挡消息）：靶子图标 + 轮次·用时单行，整卡点击展开
+  &--collapsed {
+    padding: 3px 8px;
+    cursor: pointer;
+  }
 
   &--paused {
     border-left-color: var(--text-secondary);
@@ -52,19 +61,32 @@
     border-left-color: var(--editorWarning-foreground, #ff9800);
   }
 
-  &__status {
+  // 靶子图标（与 /goal 命令 chip 同款）：颜色随状态，active 呼吸脉冲
+  &__target {
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
-    color: var(--button-primary);
+    color: #d7ba7d;
 
     .codicon {
       font-size: 14px;
     }
   }
 
-  // 活跃中呼吸点：目标在自动续跑，一眼可辨
-  &__status--pulse {
+  &--paused &__target {
+    color: var(--text-secondary);
+  }
+
+  &--done &__target {
+    color: var(--testing-runPassed-iconForeground, #4caf50);
+  }
+
+  &--warn &__target {
+    color: var(--editorWarning-foreground, #ff9800);
+  }
+
+  // 活跃中呼吸：目标在自动续跑，一眼可辨
+  &__target--pulse {
     animation: goal-pulse 2s ease-in-out infinite;
   }
 
@@ -78,6 +100,7 @@
   }
 
   &__objective {
+    flex: 1;
     min-width: 0;
     font-weight: 500;
     line-height: 1.4;
@@ -99,10 +122,36 @@
     font-size: 11px;
     color: var(--text-secondary);
     white-space: nowrap;
+    // 等宽数字：走秒/token 估算轮中持续变化，比例数字（1 vs 4）宽度不等会抖
+    font-variant-numeric: tabular-nums;
+  }
+
+  // 数字段固定占位：位数变化（9s→10s、59s→1m0s、9.9k→10k）不推挤卡宽
+  &__stat-num {
+    display: inline-block;
+  }
+
+  &__stat-duration {
+    min-width: 5ch; // "1h23m"（12h34m 罕见，超界一次后稳定）
+  }
+
+  &__stat-tokens {
+    min-width: 11ch; // "888.8k tokens"
   }
 
   &__stat-sep {
     opacity: 0.6;
+  }
+
+  // 折叠迷你条的单行统计（第 N 轮 · 用时）：等宽数字防走秒抖宽
+  &__mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   // 校验中指示（run_finished → 下一轮 run_started 之间的窗口）：
@@ -115,6 +164,7 @@
     font-size: 11px;
     color: var(--text-secondary);
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   &__verify-spin {

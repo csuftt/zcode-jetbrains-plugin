@@ -127,6 +127,38 @@ describe('目标模式', () => {
     expect(useStore.getState().goal?.timeUsedSeconds).toBe(60)
   })
 
+  it('replace 换目标：统计/摘要/轮次不继承旧目标（服务端按 target 独立记账）', () => {
+    // 旧目标真身（有真实 targetId 与统计；target.tokensUsed 非零时 target 权威）
+    dispatch({
+      op: 'goalManaged', sessionId: 'sess_g', action: 'set',
+      target: MOCK_TARGET, goalStats: { iterationCount: 4, tokensUsed: 5000, timeUsedSeconds: 90 },
+    })
+    expect(useStore.getState().goal?.tokensUsed).toBe(1000)
+    // 换新目标：新 targetId + 统计 0（真实值，尚未记账）、摘要未生成
+    dispatch({
+      op: 'goalManaged', sessionId: 'sess_g', action: 'replace',
+      target: { ...MOCK_TARGET, targetID: 'target_new', objective: '新目标', summaryTitle: null, tokensUsed: 0, timeUsedSeconds: 0 },
+      goalStats: { iterationCount: 1, tokensUsed: 0, timeUsedSeconds: 0 },
+    })
+    const goal = useStore.getState().goal
+    expect(goal?.objective).toBe('新目标')
+    // 权威 0 不得被 || 链吞成旧目标值（replace 后耗时/token 永不重置的根因）
+    expect(goal?.tokensUsed).toBe(0)
+    expect(goal?.timeUsedSeconds).toBe(0)
+    expect(goal?.iterationCount).toBe(1)
+    expect(goal?.summaryTitle).toBeNull()
+  })
+
+  it('goalManage set 乐观卡统计从零起（不继承旧目标）', () => {
+    useStore.setState({ goal: { targetId: 'target_old', objective: '旧目标', status: 'active', tokensUsed: 5000, timeUsedSeconds: 90, iterationCount: 4, syncedAt: Date.now() } })
+    useStore.getState().goalManage('set', '新目标')
+    const goal = useStore.getState().goal
+    expect(goal?.objective).toBe('新目标')
+    expect(goal?.tokensUsed).toBe(0)
+    expect(goal?.timeUsedSeconds).toBe(0)
+    expect(goal?.iterationCount).toBe(1)
+  })
+
   it('goalManaged error：置 lastError 并下发 show 校准', () => {
     useStore.getState().goalManage('set', '目标B')
     dispatch({ op: 'goalManaged', sessionId: 'sess_g', action: 'set', error: 'Cannot manage goals while a prompt is running' })

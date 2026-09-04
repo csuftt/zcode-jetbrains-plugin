@@ -76,6 +76,14 @@
     "close": "Close (Esc)",
     "closeAria": "Close search"
   },
+  "anchorHistory": {
+    "button": "User message history",
+    "buttonAria": "View user message history",
+    "title": "User messages",
+    "count": "{{count}} total",
+    "noText": "(no text)",
+    "jumpAria": "Jump to this message"
+  },
   "welcome": {
     "version": "ZCode version",
     "sendMsg": "Send a message to ZCode"
@@ -107,7 +115,9 @@
     "action": {
       "pause": "Pause goal",
       "resume": "Resume goal",
-      "clear": "Clear goal"
+      "clear": "Clear goal",
+      "collapse": "Collapse card",
+      "expand": "Expand card"
     },
     "usageHint": "No goal in this session. Usage: /goal <description> to set; /goal pause; /goal resume; /goal clear",
     "verifying": "Verifying round {{count}}",
