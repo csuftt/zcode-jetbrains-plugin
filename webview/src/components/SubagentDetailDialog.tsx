@@ -20,8 +20,10 @@ import { useStore } from '@/store/useStore'
 import { MarkdownBlock } from './MarkdownBlock'
 import { renderPartUnits } from './PartUnits'
 import { ScrollJumpButton } from './ScrollJumpButton'
+import { TimelineSeparator } from './TimelineSeparator'
 import { groupParts } from '@/utils/groupParts'
 import { getAgentToolOutput, getAgentToolErrorText, transcriptModel, validSpan } from '@/utils/parseStatus'
+import { findTimelinePart } from '@/utils/parseNotification'
 import { clockTime, formatToolDuration } from '@/utils/time'
 import type { ZCodeMessage } from '@/types/messages'
 import '../styles/subagent-detail.less'
@@ -65,6 +67,15 @@ function Transcript({
   return (
     <div className="subagent-detail-transcript">
       {messages.map((msg, i) => {
+        // timeline marker 消息（role=assistant + timeline part，主界面 MessageBubble
+        // 同款分流）：子会话首条的 model_change 无 fromModel——创建时固有的
+        // "以模型 X 开始"标记，v4 实时流不含它，legacy 快照读回才有，照渲染即
+        // 头部多出的空 AI 行 → 跳过；其余（中途压缩/真实切换）渲染横线分隔卡
+        const timelinePart = findTimelinePart(msg.parts)
+        if (timelinePart) {
+          if (timelinePart.timelineType === 'model_change' && !timelinePart.fromModel) return null
+          return <TimelineSeparator key={msg.info.id || i} part={timelinePart} />
+        }
         const reportText = msg.parts
           .filter((p) => p.type === 'text')
           .map((p) => p.text)
@@ -232,13 +243,13 @@ export function SubagentDetailDialog() {
     return () => clearInterval(timer)
   }, [running, childSessionId, v4state, loadChildMessages])
 
-  // Escape 关闭（分层：报告/预览阅读弹窗叠开时 Esc 归最上层，本弹窗不动）
+  // Escape 关闭（分层：Markdown 预览阅读层叠开时 Esc 归最上层，本弹窗不动；
+  // 报告与详情互斥切换不可能同开，无让位分支）
   useEffect(() => {
     if (!key) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      const { subagentReport, markdownPreview } = useStore.getState()
-      if (subagentReport || markdownPreview) return
+      if (useStore.getState().markdownPreview) return
       closeDetail()
     }
     document.addEventListener('keydown', onKey)

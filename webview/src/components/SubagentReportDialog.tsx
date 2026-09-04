@@ -3,9 +3,9 @@
  *
  * 入口：Agent 工具卡头部按钮 / 详情弹窗头部按钮（仅状态=已完成）。
  * markdown 为打开时从 Agent 工具 part.state.output 取的快照——报告完成后
- * 不再变化，无需轮询。与详情弹窗分层叠开（2026-09-02 起，见 store
- * openSubagentReport）：从详情里开报告，关报告后详情仍在；报告 → 过程
- * 切换按钮走 openSubagentDetail（关报告开详情）。
+ * 不再变化，无需轮询。与详情弹窗互斥切换（2026-09-02 用户定案：过程↔结论
+ * 是切换关系，从详情开报告即关详情；工具 📖 的 Markdown 预览才是叠加阅读层）。
+ * 「查看完整执行过程」按钮走 openSubagentDetail（关报告开详情，同一切换语义）。
  */
 
 import { useEffect, useRef } from 'react'
@@ -22,9 +22,6 @@ export function SubagentReportDialog() {
   const report = useStore((s) => s.subagentReport)
   const openSubagentDetail = useStore((s) => s.openSubagentDetail)
   const closeSubagentReport = useStore((s) => s.closeSubagentReport)
-  // 叠在详情弹窗之上时遮罩透明（hooks 须在所有 early return 之前——条件后调
-  // hook 会在开关弹窗时改变 hooks 数量，React 整树卸载，缺陷AH 同类坑）
-  const stacked = useStore((s) => !!s.subagentDetail)
   const agents = useStore((s) => s.agents)
   const subagents = useStore((s) => s.subagents)
   const subagentDefs = useStore((s) => s.subagentDefs)
@@ -56,13 +53,11 @@ export function SubagentReportDialog() {
     loadChildMessages(csid, true)
   }, [report, csid, transcript, loading, loadChildMessages])
 
-  // Escape 关闭（分层：Markdown 预览弹窗叠开时 Esc 归它，本弹窗不动）
+  // Escape 关闭（预览与报告互斥不可能同开，无让位分支）
   useEffect(() => {
     if (!report) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (useStore.getState().markdownPreview) return
-      closeSubagentReport()
+      if (e.key === 'Escape') closeSubagentReport()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -71,7 +66,7 @@ export function SubagentReportDialog() {
   if (!report) return null
 
   return (
-    <div className={`subagent-detail-overlay${stacked ? ' subagent-detail-overlay--stacked' : ''}`} onClick={closeSubagentReport}>
+    <div className="subagent-detail-overlay" onClick={closeSubagentReport}>
       <div className="subagent-detail-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="subagent-detail-header">
           <span className="codicon codicon-book subagent-detail-header__icon" />

@@ -376,9 +376,10 @@ export default function App() {
 
       {/* 子代理详情弹窗（底部子代理栏 / Agent 工具卡点击打开，store 自管理开关）*/}
       <SubagentDetailDialog />
-      {/* 子代理报告弹窗（工具卡/详情弹窗头部按钮打开，可叠在详情弹窗之上，关闭后详情仍在）*/}
+      {/* 子代理报告弹窗（与详情弹窗互斥切换：过程↔结论 来回切）*/}
       <SubagentReportDialog />
-      {/* 通用 Markdown 预览弹窗（工具卡输出全文阅读，如 Skill 文档/网页工具结果；同上分层叠开）*/}
+      {/* 通用 Markdown 预览弹窗（工具卡输出全文阅读，如 Skill 文档/网页工具结果；
+          叠在详情弹窗之上的阅读层，关闭后详情仍在）*/}
       <MarkdownPreviewDialog />
       {/* 版本更新弹窗（条件渲染：每次打开从最新版页开始；关闭即记已读当前版本）*/}
       {changelogOpen && (

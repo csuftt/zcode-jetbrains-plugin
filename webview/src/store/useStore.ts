@@ -1723,10 +1723,13 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   closeSubagentDetail: () => set({ subagentDetail: null, childMessagesError: null }),
-  // 弹窗分层（2026-09-02 缺陷修复）：报告/预览是"阅读层"，可叠在详情弹窗之上打开，
-  // 关闭阅读层后详情弹窗仍在（用户实测反馈：关了总结弹窗子代理弹窗也消失，不符直觉）。
-  // 阅读/预览两类之间仍互斥（同时只读一个）；openSubagentDetail 清阅读层（新焦点切换）。
-  openSubagentReport: (r) => set({ subagentReport: r, markdownPreview: null }),
+  // 弹窗分层（2026-09-02 缺陷修复 + 用户定案细化）：
+  // - 报告弹窗 = 详情弹窗的"互斥切换"（过程↔结论 头部按钮来回切——从详情开报告
+  //   即关详情，从报告切过程同理，不叠两层）
+  // - Markdown 预览（工具 📖：网页结果/Skill 文档）= 详情之上的"阅读层"叠加，
+  //   关预览后详情仍在（用户实测要的保留场景）
+  // - 阅读与预览两类互斥（同时只读一个）
+  openSubagentReport: (r) => set({ subagentReport: r, subagentDetail: null, markdownPreview: null }),
   closeSubagentReport: () => set({ subagentReport: null }),
   openMarkdownPreview: (p) => set({ markdownPreview: p, subagentReport: null }),
   closeMarkdownPreview: () => set({ markdownPreview: null }),
