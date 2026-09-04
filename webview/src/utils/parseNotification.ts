@@ -76,6 +76,13 @@ export function isAgentNotification(info: MessageInfo): boolean {
  * 决定展示"），故不能只按 hidden 过滤，要先排除通知。
  */
 export function isHiddenSyntheticMessage(info: MessageInfo): boolean {
+  // 目标模式合成消息（2026-09 diag-goal3.py 实测）：goal-continuation（续跑轮
+  // "Continue working toward the active session goal" 提示）与 goal_state_change
+  // （目标清除通知）。metadata.visibility=model-only，无顶层 synthetic 标记，
+  // 下方判据拦不住，须前置识别——目标轨迹由 GoalCard + 校验分隔卡承载，不进消息流
+  const meta = info.metadata as { source?: string; visibility?: string } | undefined
+  if (meta?.visibility === 'model-only'
+    && (meta.source === 'goal-continuation' || meta.source === 'goal_state_change')) return true
   if (info.synthetic !== true) return false
   return !isAgentNotification(info)
 }

@@ -1057,6 +1057,19 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       return { op: 'thoughtLevelSet', sessionId: req.sessionId, thoughtLevel: req.thoughtLevel } as any
     case 'setMode':
       return { op: 'modeSet', sessionId: req.sessionId, mode: req.mode } as any
+    case 'goalManage':
+      // mock：show 回 active 目标全量；clear 回无 target；其余动作状态翻转
+      if (req.action === 'show' || req.action === 'set' || req.action === 'replace' || req.action === 'pause' || req.action === 'resume') {
+        return {
+          op: 'goalManaged', sessionId: req.sessionId, action: req.action,
+          target: {
+            targetID: 'target_mock', objective: 'mock：把登录页重构为组合式 API 并保持测试通过',
+            status: req.action === 'pause' ? 'paused' : 'active', tokensUsed: 18320, timeUsedSeconds: 96, tokenBudget: null,
+          },
+          goalStats: { iterationCount: 2, tokensUsed: 18320, timeUsedSeconds: 96, tokenBudget: null, contextUsed: 18320, contextWindow: 1000000, toolCallCount: 7 },
+        } as any
+      }
+      return { op: 'goalManaged', sessionId: req.sessionId, action: req.action } as any
     case 'pickFiles':
       // mock：模拟 FileChooser 选了 1 个文件（走 filesToInput 推送链路，InputBox 加 chip）
       return { op: 'filesToInput', refs: ['@mock/README.md'] } as any

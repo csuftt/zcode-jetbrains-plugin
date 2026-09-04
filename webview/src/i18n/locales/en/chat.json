@@ -88,6 +88,31 @@
   },
   "timeline": {
     "modelChanged": "Model switched",
-    "event": "Timeline event"
+    "event": "Timeline event",
+    "goalPassed": "Goal verified",
+    "goalNotSatisfied": "Goal not met, continuing",
+    "goalIteration": "Iteration {{iteration}}"
+  },
+  "goal": {
+    "status": {
+      "active": "Goal active",
+      "paused": "Paused",
+      "complete": "Goal complete",
+      "budgetLimited": "Usage limit reached"
+    },
+    "stats": {
+      "iteration": "Iteration {{count}}",
+      "tokens": "{{tokens}} tokens"
+    },
+    "action": {
+      "pause": "Pause goal",
+      "resume": "Resume goal",
+      "clear": "Clear goal"
+    },
+    "usageHint": "No goal in this session. Usage: /goal <description> to set; /goal pause; /goal resume; /goal clear",
+    "commandDesc": "Set a long-running goal: AI iterates and self-verifies until achieved",
+    "chipTip": "Goal mode: type the objective and send — it does not enter the chat",
+    "verifying": "Verifying round {{count}}",
+    "verifyingTip": "This round is done, checking goal progress"
   }
 }

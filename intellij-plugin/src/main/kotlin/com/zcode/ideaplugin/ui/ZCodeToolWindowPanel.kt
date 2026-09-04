@@ -864,6 +864,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "getSettings" -> handleGetSettings(msg)
                         "setThoughtLevel" -> handleSetThoughtLevel(msg)
                         "setMode" -> handleSetMode(msg)
+                        "goalManage" -> handleGoalManage(msg)
                         "pickFiles" -> handlePickFiles(msg)
                         "getUsage" -> handleGetUsage(msg)
                         "getQuota" -> handleGetQuota(msg)
@@ -2786,6 +2787,47 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * op=goalManage — 目标模式管理（session/goal 封装，2026-09 协议实测定案）
+     *
+     * action: set|replace|pause|resume|clear|show；set/replace 须带 objective。
+     * 响应统一回带服务端 snapshot 提取的 target（objective/status/统计全量）与
+     * goalStats——前端目标状态卡以 target 为准，goalStats 补充轮次统计。
+     * 目标的实时变化不经此 op：走 session.updated 事件 payload（action/target），
+     * 事件转发链路原样透传，前端 streamReducer 直接消费。
+     */
+    private fun handleGoalManage(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val action = msg["action"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 action")
+        val objective = msg["objective"]?.jsonPrimitive?.contentOrNull
+        val client = project.zCodeService().getClient()
+        return try {
+            val result = client.goal(sessionId, action, objective)
+            val snapshot = result["snapshot"]?.jsonObject
+            buildJsonObject {
+                put("op", "goalManaged")
+                put("sessionId", sessionId)
+                put("action", action)
+                result["response"]?.let { put("response", it) }
+                result["startedTurn"]?.let { put("startedTurn", it) }
+                snapshot?.get("session")?.jsonObject?.get("target")?.let { put("target", it) }
+                snapshot?.get("goalStats")?.let { put("goalStats", it) }
+            }
+        } catch (e: Exception) {
+            log.warn("Goal manage failed: $action, ${e.message}")
+            // 带原 op 的错误回执（前端 goalManaged error 分支回滚乐观状态 + show 校准），
+            // 不走通用 errorResponse——那里没有会话上下文，回滚不了目标卡
+            buildJsonObject {
+                put("op", "goalManaged")
+                put("sessionId", sessionId)
+                put("action", action)
+                put("error", e.message ?: "goal manage failed")
+            }
+        }
+    }
+
+    /**
      * op=pickFiles — 附件按钮：弹 IDEA 原生文件选择器，选中项以 @绝对路径 推给输入框
      *
      * 不用 webview 原生 <input type=file>：Chromium fakepath 拿不到绝对路径，
@@ -3060,12 +3102,32 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 前端流式静默对账探测（看门狗只读快照判定回合是否已在服务端结束）：
         // 原样回传 reconcile 标记，前端区分"权威全量落地"与"对账只读"
         val reconcile = msg["reconcile"]?.jsonPrimitive?.booleanOrNull ?: false
+        // 目标模式轮边界定向刷新（run_started/cleared 触发）：回显标记，前端绕开
+        // streaming 守卫做增量合并（常规 turnEnded 重拉会撞续轮 streaming 窗口被丢，
+        // 校验分隔卡因此滞后到 goal 全部结束——0.3.2 实测）
+        val goalRefresh = msg["goalRefresh"]?.jsonPrimitive?.booleanOrNull ?: false
+        // 目标模式状态随首拉恢复（切会话即有，前端无需二次请求）；对账探测不重复读。
+        // fail-soft：无目标/读失败时缺省字段，前端 goal 状态保持 null
+        var goalTarget: JsonElement? = null
+        var goalStats: JsonElement? = null
+        if (!reconcile) {
+            try {
+                val goalState = project.zCodeService().getClient().readGoalState(sessionId)
+                goalTarget = goalState["target"]
+                goalStats = goalState["goalStats"]
+            } catch (e: Exception) {
+                log.debug("goal state read skipped: ${e.message}")
+            }
+        }
         log.info("messages returned ${messages.size} item(s)${if (reconcile) " (reconcile probe)" else ""}")
         return buildJsonObject {
             put("op", "messages")
             put("sessionId", sessionId)
             put("messages", messages)
+            goalTarget?.let { put("goalTarget", it) }
+            goalStats?.let { put("goalStats", it) }
             if (reconcile) put("reconcile", true)
+            if (goalRefresh) put("goalRefresh", true)
         }
     }
 

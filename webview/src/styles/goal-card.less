@@ -1,0 +1,182 @@
+// 目标模式：状态卡（悬浮）+ 输入框命令 chip
+// 状态色调：active 主题色脉冲 / paused 灰 / complete 绿 / budget_limited 橙
+
+// ============ 悬浮容器（ChatView 右上角，ZCode 客户端同款位置）============
+.goal-card-float {
+  position: absolute;
+  top: 12px;
+  right: 18px;
+  z-index: 30; // 搜索浮层 50 之下：搜索打开时让位下移（--below-search）
+  max-width: min(560px, 72%);
+  pointer-events: none; // 容器不挡消息点击，卡本体恢复
+  display: flex;
+  justify-content: flex-end;
+
+  // 会话内搜索浮层打开时（同占右上），目标卡下移避让
+  &--below-search {
+    top: 58px;
+  }
+
+  .goal-card {
+    pointer-events: auto;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    background: color-mix(in srgb, var(--bg-secondary, #252526) 92%, transparent);
+    backdrop-filter: blur(4px);
+  }
+}
+
+// ============ 状态卡本体 ============
+.goal-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-left: 3px solid var(--button-primary);
+  font-size: 12px;
+  color: var(--text-primary);
+  min-width: 0; // 允许子级省略号收缩
+
+  &--paused {
+    border-left-color: var(--text-secondary);
+    opacity: 0.85;
+  }
+
+  &--done {
+    border-left-color: var(--testing-runPassed-iconForeground, #4caf50);
+  }
+
+  &--warn {
+    border-left-color: var(--editorWarning-foreground, #ff9800);
+  }
+
+  &__status {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    color: var(--button-primary);
+
+    .codicon {
+      font-size: 14px;
+    }
+  }
+
+  // 活跃中呼吸点：目标在自动续跑，一眼可辨
+  &__status--pulse {
+    animation: goal-pulse 2s ease-in-out infinite;
+  }
+
+  // 两行主区（0.3.2 真机反馈：单行太挤）——目标文本行 + 统计行
+  &__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__objective {
+    min-width: 0;
+    font-weight: 500;
+    line-height: 1.4;
+    // 长目标最多三行（title 悬浮看全文），行末省略
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+  }
+
+  // 统计行：轮次·耗时·token（校验中指示独立成行，不与此行共排——
+  // 共排时整行过宽把卡片顶宽，0.3.2 真机反馈）
+  &__stats {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  &__stat-sep {
+    opacity: 0.6;
+  }
+
+  // 校验中指示（run_finished → 下一轮 run_started 之间的窗口）：
+  // 轮结束后台正在做目标校验，结果随下一轮开始/终态落地
+  &__verify {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  &__verify-spin {
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--border-secondary);
+    border-top-color: var(--button-primary);
+    border-radius: 50%;
+    animation: goal-spin 0.9s linear infinite;
+  }
+
+  &__actions {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  &__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+
+    .codicon {
+      font-size: 13px;
+    }
+
+    &:hover {
+      background: var(--bg-hover, rgba(128, 128, 128, 0.15));
+      color: var(--text-primary);
+    }
+
+    &--clear:hover {
+      color: var(--inputError-foreground, #f66);
+    }
+  }
+}
+
+// 斜杠下拉里的靶子图标（goal 条目，琥珀金与命令 chip 呼应；chip 样式见 skill-ref.less .cmd-ref--goal）
+.input-box__slash-icon--goal {
+  color: #d7ba7d;
+}
+
+@keyframes goal-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes goal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

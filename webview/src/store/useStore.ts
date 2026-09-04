@@ -14,8 +14,8 @@
 
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput } from '@/types/messages'
-import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, looksLikeQuotaError } from '@/utils/streamReducer'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, GoalState } from '@/types/messages'
+import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import i18n from '@/i18n/config'
 
@@ -162,6 +162,7 @@ function sessionResetBase(): Partial<StoreState> {
     streamingMessageId: null,
     waitingSince: null,
     queuedMessages: [],
+    goal: null,
     todos: [],
     agents: [],
     fileChanges: [],
@@ -190,6 +191,9 @@ let serverActiveTurnId: string | null = null
 let lastCompletedTurnId: string | null = null
 /** locateSession 在途应答的解析器（单槽，见 locateSessionTab）*/
 let pendingTabLocate: ((found: boolean) => void) | null = null
+/** goal set 乐观插入的用户消息（error 回执时回滚删除用；成功开轮后由全量
+ *  重拉的服务端真身自然替换，槽位随下一次 set 覆盖） */
+let optimisticGoalUserMsg: { sid: string; msgId: string } | null = null
 /** 本轮压缩态是否被服务端 activeTurnKind 确认过（滞后读数不算）：只允许"确认过
  *  后的缺失"清除压缩指示器——旧版 zcode.cjs 不上报该字段，无条件清会把 /compact
  *  的指示器在首个轮询样本就抹掉（维持旧客户端"字段缺失不动作"语义） */
@@ -302,6 +306,8 @@ interface StoreState {
   pendingFirstScheduledFireAt: number | null
   /** 待命态定时任务暂存：创建确认时先把会话建好（真实 sid 归属，防空串态跨标签串显），建好自动落库 */
   pendingScheduleCreation: { text: string; fireAt: number; providerId?: string; modelId?: string; keepCurrent?: boolean } | null
+  /** 待命态目标暂存：新标签无会话时 /goal set 先建会话（控制轮需要会话语境），建好自动下发 */
+  pendingGoalCreation: { objective: string } | null
   /** 已归档会话（回收站视图，独立于 sessions；用户进入「已归档」tab 时拉取）*/
   archivedSessions: SessionInfo[]
   /** 已归档列表加载中（tab 切换/归档后刷新的 loading 态）*/
@@ -369,6 +375,13 @@ interface StoreState {
   backgroundTasks: BackgroundTaskMap
   /** 排队消息（streaming 中 Enter 入队，回合结束自动发队头）*/
   queuedMessages: QueuedMessage[]
+  /**
+   * 目标模式状态（session/goal，2026-09 协议实测定案）：null=无目标。
+   * 数据三路：messages 首拉（session.target）恢复 + goalManaged 响应 +
+   * session.updated 目标 payload（action/target/previousTarget）实时推进。
+   * 注意 status 是服务端 target 的四态（active/paused/budget_limited/complete）。
+   */
+  goal: GoalState | null
   /** 定时消息（全量镜像，UI 按 currentSessionId 过滤；权威列表在 Java 侧）*/
   scheduledMessages: ScheduledMessageItem[]
   /** 已发定时消息记录（Java 持久化镜像）：历史重拉/重启后按 sessionId+text 匹配补「定时执行」徽标 */
@@ -570,6 +583,12 @@ interface StoreState {
   setThoughtLevel: (level: string) => void
   /** 切换权限模式（session/setMode，不记忆——模式是即时意图，避免 plan 粘性）*/
   setMode: (mode: string) => void
+  /**
+   * 目标模式管理（session/goal）：set/replace 带 objective，pause/resume/clear
+   * 不带。服务端引擎自治（set/resume 自动开轮、每轮结束自动校验续跑），本操作
+   * 只下发控制意图；实时状态由 session.updated 目标 payload 推送。
+   */
+  goalManage: (action: 'set' | 'replace' | 'pause' | 'resume' | 'clear' | 'show', objective?: string) => void
   /** 把 persist 记忆的思考级别下发给指定会话（available 就绪且值仍有效时才生效）*/
   applyThoughtLevelIfReady: (sessionId: string) => void
   /** 拉取当前会话的上下文用量 */
@@ -708,6 +727,7 @@ export const useStore = create<StoreState>((set, get) => ({
   pendingFirstAttachments: null,
   pendingFirstScheduledFireAt: null,
   pendingScheduleCreation: null,
+  pendingGoalCreation: null,
   archivedSessions: [],
   archivedLoading: false,
 
@@ -738,6 +758,7 @@ export const useStore = create<StoreState>((set, get) => ({
   compacting: false,
   backgroundTasks: {},
   queuedMessages: [],
+  goal: null,
   scheduledMessages: [],
   firedHistory: [],
   lastScheduledListTs: 0,
@@ -1485,6 +1506,55 @@ export const useStore = create<StoreState>((set, get) => ({
     sendToJava({ op: 'setMode', sessionId: sid, mode })
   },
 
+  goalManage: (action, objective) => {
+    const sid = get().currentSessionId
+    if (!sid) {
+      // 待命态（新标签无会话）：设目标先建会话（同定时任务暂存模式，createSession
+      // 响应后自动补发）；非 set 动作无会话语境，给用法提示
+      if ((action === 'set' || action === 'replace') && objective?.trim()) {
+        set({ pendingGoalCreation: { objective: objective.trim() } })
+        get().createSession()
+      } else {
+        set({ lastError: i18n.t('chat.goal.usageHint') })
+      }
+      return
+    }
+    // 无参 /goal（show）：有目标卡就刷新校准；无目标给用法提示（卡不出现，
+    // 需要一句可见反馈，复用 lastError 错误条）
+    if (action === 'show' && !get().goal) {
+      set({ lastError: i18n.t('chat.goal.usageHint') })
+      return
+    }
+    // trim 与乐观卡一致（协议侧也 trim，但空参 Usage 提示由 UI 先拦）
+    const trimmedObjective = objective?.trim()
+    // 乐观更新（响应 goalManaged 权威落地；服务端拦截时 error 回执回滚）：
+    // set/replace 立即出卡，pause/resume 即时翻转状态钮
+    const prev = get().goal
+    if ((action === 'set' || action === 'replace') && trimmedObjective) {
+      // 乐观用户消息：set 落库的 user 消息只含目标文本（/goal 前缀服务端剥掉，
+      // sqlite 实测 2026-09-03），事件流 turn.started 又只建 assistant 流式消息——
+      // 不插则目标轮整段没有用户气泡，回合结束重拉才出现（0.3.2 真机反馈）。
+      // goalRefresh 增量合并时 user 真身与流式 assistant 撞 turn.started 的
+      // messageId 被滤掉，乐观版一直顶到回合结束全量重拉被真身替换
+      const localId = `local_u_${Date.now()}`
+      optimisticGoalUserMsg = { sid, msgId: localId }
+      set((s) => ({
+        goal: { targetId: '', objective: trimmedObjective, status: 'active', tokensUsed: prev?.tokensUsed ?? 0, timeUsedSeconds: prev?.timeUsedSeconds ?? 0, iterationCount: 1, syncedAt: Date.now() },
+        messages: [...s.messages, {
+          info: { role: 'user', time: { created: Date.now() }, id: localId, sessionID: sid },
+          parts: [{ type: 'text', text: trimmedObjective }],
+        }],
+      }))
+    } else if (action === 'pause' && prev) {
+      set({ goal: { ...prev, status: 'paused' } })
+    } else if (action === 'resume' && prev) {
+      set({ goal: { ...prev, status: 'active' } })
+    } else if (action === 'clear') {
+      set({ goal: null })
+    }
+    sendToJava({ op: 'goalManage', sessionId: sid, action, objective: trimmedObjective })
+  },
+
   applyThoughtLevelIfReady: (sessionId) => {
     // 同一会话只下发一次（settings 可能在切会话/切模型后多次到达）
     if (get().thoughtLevelAppliedForSession === sessionId) return
@@ -2120,6 +2190,8 @@ export function handleResponse(
       const pendingFirstFireAt = get().pendingFirstScheduledFireAt
       // 待命态定时任务暂存（createSessionForSchedule 置入）同样须在 set 清空前取出
       const pendingSchedule = get().pendingScheduleCreation
+      // 待命态目标暂存（goalManage 无会话分支置入）同上
+      const pendingGoal = get().pendingGoalCreation
       // 待命态预选值（currentMode/thoughtLevel 无会话时的本地记录），下方 set 复位前捕获
       const preselectedMode = get().currentMode
       const standbyThought = get().thoughtLevel
@@ -2149,6 +2221,8 @@ export function handleResponse(
           pendingFirstAttachments: null,
           pendingFirstScheduledFireAt: null,
           pendingScheduleCreation: null,
+          // pendingGoalCreation 不在此清：订阅回执（case 'subscribed'）消费（时序见下方
+          // pendingGoal 兜底注释），set 会先于回执执行
           ...sessionResetBase(),
           compacting: false,
           backgroundTasks: {},
@@ -2193,6 +2267,21 @@ export function handleResponse(
             fireAt: pendingSchedule.fireAt,
             ...(pendingSchedule.modelId ? { providerId: pendingSchedule.providerId, modelId: pendingSchedule.modelId } : {}),
           })
+        }
+        // 待命态目标补发：等 subscribe 回执（case 'subscribed'）再下发。Kotlin 侧
+        // 各 op 在线程池并发执行（executeOnPooledThread），subscribe（resume+subscribe
+        // 两个 RPC）慢于 goalManage 时，goal 控制轮的 turn.started 会在订阅白名单生效
+        // 前到达而被 pushStreamEvent 丢弃，后续 delta 无流式消息可落 → 新会话实时流
+        // 整段断流，直到回合结束重拉才渲染（0.3.2 真机实测根因）。兜底：回执 2.5s
+        // 未到也发（订阅失败时事件本就收不到，goalManaged 回执仍能出目标卡）
+        if (pendingGoal) {
+          setTimeout(() => {
+            const p = get().pendingGoalCreation
+            if (p && get().currentSessionId === sid) {
+              set({ pendingGoalCreation: null })
+              get().goalManage('set', p.objective)
+            }
+          }, 2500)
         }
         // 新会话也按记忆模型下发 setModel（等 models 就绪，由 applyModelIfReady 内部判断）。
         // 懒创建首条消息在途时跳过独立 setModel：它与首回合在服务端赛跑会撞 -32603
@@ -2245,7 +2334,7 @@ export function handleResponse(
         }
       } else {
         // 异常响应（无 sessionId）：复位标志与暂存，防卡死
-        set({ creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null })
+        set({ creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null, pendingGoalCreation: null })
       }
       get().loadSessions()
       break
@@ -2382,6 +2471,19 @@ export function handleResponse(
         }
         break
       }
+      // 目标模式轮边界定向刷新（scheduleGoalRefresh 触发）：streaming 中不丢弃
+      //（续轮窗口，常规重拉守卫会丢——校验分隔卡滞后的根因），增量合并；非
+      // streaming 走权威全量落地（终态/cleared 后回合已静）
+      if (msg.goalRefresh) {
+        if (msg.sessionId === get().currentSessionId) {
+          if (get().streaming) {
+            mergeGoalRefreshSnapshot(msg, set, get)
+          } else {
+            applyMessagesSnapshot(msg, set, get)
+          }
+        }
+        break
+      }
       if (msg.sessionId === get().currentSessionId) {
         // 流式进行中到达的重拉响应 = 过期快照：turn 结束触发的 300ms 延迟重拉，
         // 会落后于排队消息自动发出后已开启的新 turn（idea.log 2026-08-15 时序证据：
@@ -2479,8 +2581,16 @@ export function handleResponse(
       }
       break
 
-    case 'subscribed':
+    case 'subscribed': {
+      // 待命态目标补发（订阅已生效，goal 控制轮事件从第一条起可达——时序背景见
+      // case 'createSession' 的 pendingGoal 注释；2.5s 兜底定时器与本处幂等竞速）
+      const pendingGoal = get().pendingGoalCreation
+      if (pendingGoal && msg.sessionId === get().currentSessionId) {
+        set({ pendingGoalCreation: null })
+        get().goalManage('set', pendingGoal.objective)
+      }
       break
+    }
     case 'subscribedChild': // 子会话订阅 ack：记录 v4 通道可用性（弹窗据此停用快照轮询）
       if (typeof msg.v4 === 'boolean' && msg.sessionId) {
         set({ childSessionV4: { ...get().childSessionV4, [msg.sessionId]: msg.v4 } })
@@ -2572,7 +2682,7 @@ export function handleResponse(
         modelTogglingId: null,
         // 浏览器设置请求失败（如插件未安装）：页面内联提示（browserBusy 在途时才归属该页）
         ...(get().browserBusy ? { browserBusy: null, browserError: msg.message } : {}),
-        ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null } : {}),
+        ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null, pendingGoalCreation: null } : {}),
       })
       console.error('[store] Java 错误:', msg.message)
       // 错误清 streaming 后继续发队列下一条（排队意图明确；持续失败时用户可删队列项）；
@@ -2924,6 +3034,29 @@ export function handleResponse(
     case 'modeSet':
       set({ currentMode: msg.mode })
       break
+
+    case 'goalManaged': {
+      // 目标操作权威回执：target/goalStats 落地；服务端拦截（plan 模式/回合
+      // 运行中）时 error 回执提示并拉 show 校准回滚乐观更新。切会话后的迟到响应丢弃
+      const sid = get().currentSessionId
+      if (msg.sessionId && sid && msg.sessionId !== sid) break
+      if (msg.error) {
+        // 乐观用户消息随目标卡一并回滚（服务端拒绝时目标轮不开，乐观消息永远不会
+        // 被服务端真身替换，不删会一直挂着）
+        if (optimisticGoalUserMsg && optimisticGoalUserMsg.sid === (msg.sessionId ?? sid)) {
+          const doomed = optimisticGoalUserMsg.msgId
+          optimisticGoalUserMsg = null
+          set({ messages: get().messages.filter((m) => m.info.id !== doomed) })
+        }
+        set({ lastError: msg.error })
+        sendToJava({ op: 'goalManage', sessionId: msg.sessionId ?? sid, action: 'show' })
+        break
+      }
+      optimisticGoalUserMsg = null
+      const next = toGoalState(msg.target, msg.goalStats, get().goal)
+      set({ goal: next })
+      break
+    }
 
     case 'usage': {
       // 流式轮询期间切会话：旧会话的迟到响应直接丢弃，避免污染新会话圆环
@@ -3552,6 +3685,13 @@ function handleStreamBatchDirect(
         applySubagentLifecycle(lc, event.timestamp, set, get)
         continue
       }
+      // 目标模式 payload（action/target/previousTarget）：目标状态实时推进——
+      // set/run_started/status_updated/cleared 等全部走此通道（diag-goal.py 实测）
+      const gp = asGoalTargetPayload(event.payload)
+      if (gp) {
+        applyGoalTargetPayload(gp, event.sessionId, set, get)
+        continue
+      }
       // 后台任务完成通知（zcode.cjs 任务生命周期推送，实测字段：taskId/toolCallId/
       // toolName/taskKind/status=running|completed|failed...）：toolCallId 精确匹配
       // 指示器（通知带 toolCallId，兜底 taskId 反查），状态离开 running → 标记
@@ -3726,6 +3866,12 @@ function handleStreamEvent(
     const lc = asSubagentLifecycle(event.payload)
     if (lc) {
       applySubagentLifecycle(lc, event.timestamp, set, get)
+      return
+    }
+    // 目标模式 payload（同批量路径）
+    const gp = asGoalTargetPayload(event.payload)
+    if (gp) {
+      applyGoalTargetPayload(gp, event.sessionId, set, get)
       return
     }
     // 后台任务完成通知（同批量路径）：toolCallId 精确匹配（兜底 taskId 反查）+
@@ -3921,9 +4067,145 @@ function stripLeadingModelChangeMarkers(messages: ZCodeMessage[]): ZCodeMessage[
   return i > 0 ? messages.slice(i) : messages
 }
 
+/**
+ * 归一目标状态（服务端 target + goalStats → GoalState）：goalStats 无
+ * objective/status，目标文本与状态只来自 target；两源任一缺失时取另一源，
+ * 全空返回 null（无目标）。
+ */
+function toGoalState(
+  target: unknown,
+  goalStats: unknown,
+  prev?: GoalState | null,
+): GoalState | null {
+  const t = (target ?? null) as Record<string, unknown> | null
+  const s = (goalStats ?? null) as Record<string, unknown> | null
+  if (!t && !s) return null
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  const objective = typeof t?.objective === 'string' ? t.objective : prev?.objective ?? ''
+  if (!objective && !t) return prev ?? null
+  return {
+    targetId: typeof t?.targetID === 'string' ? t.targetID : typeof t?.targetId === 'string' ? t.targetId : prev?.targetId ?? '',
+    objective,
+    summaryTitle: (t?.summaryTitle as string | null | undefined) ?? prev?.summaryTitle ?? null,
+    status: typeof t?.status === 'string' ? t.status : prev?.status ?? 'active',
+    tokensUsed: num(t?.tokensUsed) || num(s?.tokensUsed) || (prev?.tokensUsed ?? 0),
+    timeUsedSeconds: num(t?.timeUsedSeconds) || num(s?.timeUsedSeconds) || (prev?.timeUsedSeconds ?? 0),
+    tokenBudget: (typeof t?.tokenBudget === 'number' ? t.tokenBudget : null) ?? prev?.tokenBudget ?? null,
+    iterationCount: num(s?.iterationCount) || num(t?.iterationCount) || (prev?.iterationCount ?? 1),
+    toolCallCount: num(s?.toolCallCount) || prev?.toolCallCount,
+    // 走秒基准：本地从该时刻起在服务端值上递增显示（事件间隔内可见流逝）
+    syncedAt: Date.now(),
+  }
+}
+
+/**
+ * 目标模式 payload 落地（session.updated 实时推进，批量/单推两路共用）：
+ * 用 target 全量覆盖 + goalStats 缺省时的统计保持。usage_accounted（token
+ * 计账）等仅统计变化的事件也走全量（payload.target 本是完整对象）。
+ * 非当前会话的事件忽略（多标签隔离与现有事件门禁一致）。
+ *
+ * 轮边界联动（0.3.2 实测修复）：run_finished → 卡片转"校验中"（verifying）；
+ * run_started / cleared / 终态 complete → 定向重拉 messages（goalRefresh）——
+ * 常规 turnEnded 重拉会撞续轮 streaming 守卫被丢，校验分隔卡（timeline part，
+ * 仅落库不进事件流）会滞后到 goal 全部结束才可见。
+ */
+function applyGoalTargetPayload(
+  gp: { action: string; target: Record<string, unknown> | null },
+  sessionId: string,
+  set: (partial: Partial<StoreState>) => void,
+  get: () => StoreState,
+) {
+  const st = get()
+  if (sessionId && sessionId !== st.currentSessionId) return
+  const next = toGoalState(gp.target, undefined, st.goal)
+  if (next) {
+    // 校验窗口：run_finished（一轮跑完）→ 下一轮 run_started / 终态清除
+    next.verifying = gp.action === 'run_finished' && next.status !== 'complete' ? true : undefined
+    set({ goal: next })
+  } else {
+    set({ goal: null })
+  }
+  if (gp.action === 'run_started' || gp.action === 'cleared' || next?.status === 'complete') {
+    scheduleGoalRefresh(sessionId)
+  }
+}
+
+/**
+ * 目标模式轮边界定向重拉（防抖合并）：延迟 800ms 等校验 part 落库稳定。
+ * 与常规 turnEnded 重拉的区别：goalRefresh 标记让 case 'messages' 在 streaming
+ * 中不丢弃，改走增量合并（新消息插到流式消息前，不顶掉流式内容）。
+ */
+let goalRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleGoalRefresh(sessionId: string) {
+  if (goalRefreshTimer) clearTimeout(goalRefreshTimer)
+  goalRefreshTimer = setTimeout(() => {
+    goalRefreshTimer = null
+    const st = useStore.getState()
+    if (st.currentSessionId !== sessionId) return
+    sendToJava({ op: 'messages', sessionId, workspacePath: st.currentWorkspacePath, goalRefresh: true })
+  }, 800)
+}
+
+/** user 消息纯文本（goal 乐观消息与服务端真身的同文本判据） */
+function userTextOf(m: ZCodeMessage): string {
+  return (m.parts ?? [])
+    .filter((p) => p.type === 'text')
+    .map((p) => (p as { text?: string }).text ?? '')
+    .join('')
+}
+
+/**
+ * goalRefresh 快照的增量合并（streaming 中的专用路径）：只取前端还没有的消息
+ * （上一轮的校验分隔卡/控制消息），插到流式消息之前——全量替换会抹掉流式内容
+ * （同 case 'messages' streaming 守卫的断流/叠字风险），追加到末尾则时间倒挂。
+ */
+function mergeGoalRefreshSnapshot(
+  msg: { messages: ZCodeMessage[]; goalTarget?: unknown; goalStats?: unknown },
+  set: (partial: Partial<StoreState>) => void,
+  get: () => StoreState,
+) {
+  const st = get()
+  const existing = new Set(st.messages.map((m) => m.info.id))
+  const incoming = mergeTurnMessages(
+    stripLeadingModelChangeMarkers(
+      msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
+    ),
+  ).filter((m) => !existing.has(m.info.id))
+  // goal set 乐观用户消息（local_u_）与服务端真身同文本双条防护：常规路径 user
+  // 真身与流式 assistant 撞 turn.started 的 messageId 被上方 id 集合滤掉（无害，
+  // 乐观版顶着），此兜底覆盖 turn.started 未带 messageId（fallback id 不撞）的场景
+  const incomingUserTexts = new Set(
+    incoming.filter((m) => m.info.role === 'user').map(userTextOf),
+  )
+  let base = st.messages
+  if (incomingUserTexts.size > 0) {
+    const deduped = base.filter(
+      (m) => !(m.info.role === 'user' && m.info.id.startsWith('local_u_') && incomingUserTexts.has(userTextOf(m))),
+    )
+    if (deduped.length !== base.length) base = deduped
+  }
+  const patch: Partial<StoreState> = {}
+  if (incoming.length > 0) {
+    const idx = base.findIndex((m) => m.info.id === st.streamingMessageId)
+    patch.messages = idx >= 0
+      ? [...base.slice(0, idx), ...incoming, ...base.slice(idx)]
+      : [...base, ...incoming]
+  } else if (base !== st.messages) {
+    patch.messages = base
+  }
+  // goal 统计校准（token/轮次随轮边界刷新；verifying 由事件流维护——目标仍
+  // active 且此前校验中则保持，同 applyMessagesSnapshot 的快照保持规则）
+  if ('goalTarget' in msg || 'goalStats' in msg) {
+    const next = toGoalState(msg.goalTarget, msg.goalStats, st.goal)
+    if (next && st.goal?.verifying && next.status === 'active') next.verifying = true
+    patch.goal = next
+  }
+  if (Object.keys(patch).length > 0) set(patch)
+}
+
 /** messages 响应的权威落地（常规重拉与对账收尾共用） */
 function applyMessagesSnapshot(
-  msg: { messages: ZCodeMessage[] },
+  msg: { messages: ZCodeMessage[]; goalTarget?: unknown; goalStats?: unknown },
   set: (partial: Partial<StoreState>) => void,
   get: () => StoreState,
 ) {
@@ -3944,6 +4226,16 @@ function applyMessagesSnapshot(
     messages: visibleMessages,
     loadingMessages: false,
     ...refreshStatus(msg.messages, activities, st.subagents),
+  }
+  // 目标模式状态随快照恢复（Kotlin 端 session/read → session.target+goalStats；
+  // 对账探测响应不带 goal 字段，保持现值）
+  if ('goalTarget' in msg || 'goalStats' in msg) {
+    const next = toGoalState(msg.goalTarget, msg.goalStats, st.goal)
+    // 快照不含"校验中"信号（事件流独有）：目标仍 active 且此前校验中 → 保持显示
+    //（run_started 事件显式清除；回合结束 300ms 常规重拉曾把 verifying 冲掉，
+    // 轮间隙 30s+ 的"校验中"指示因此闪失——0.3.2 真机实测）
+    if (next && st.goal?.verifying && next.status === 'active') next.verifying = true
+    patch.goal = next
   }
   // currentModel 为 null 时从消息推断（兼容历史会话 / CLI 默认模型，解除空会话发送限制）
   if (!get().currentModel) {

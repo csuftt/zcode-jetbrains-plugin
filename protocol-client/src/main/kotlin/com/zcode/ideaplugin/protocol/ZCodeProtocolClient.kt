@@ -1170,6 +1170,41 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * session/goal — 目标模式管理（长目标自动续跑，2026-09 协议实测定案）
+     *
+     * 服务端引擎自治：set/resume 后自动启动第一轮，之后每轮结束 runtime 内部
+     * 自动校验（continueActiveTargetLoop）并决定续跑/收尾，宿主零驱动责任。
+     * 目标状态实时推送走 session/event 的 session.updated（payload 带
+     * action/target/previousTarget），事件转发链路原样透传，无需本方法参与。
+     *
+     * 行为（zcode.cjs Qcn handler）：
+     * - set/replace: objective 必填；plan 模式只回提示不启动轮；回合运行中报错（pause 例外）
+     * - pause: 状态转 paused 并 abort 当前活跃 turn
+     * - resume: 状态转 active，空闲时自动开续跑轮
+     * - clear: 清除目标
+     * - show: 返回目标文本
+     *
+     * @return 应答 result {response, snapshot(含 goalStats/todoGroups), startedTurn?}
+     */
+    fun goal(
+        sessionId: String,
+        action: String,
+        objective: String? = null,
+        inputId: String? = null,
+        timeoutMs: Long = 10000
+    ): JsonObject {
+        val params = buildJsonObject {
+            put("sessionId", sessionId)
+            put("action", action)
+            objective?.takeIf { it.isNotBlank() }?.let { put("objective", it) }
+            inputId?.let { put("inputId", it) }
+        }
+        val r = request("session/goal", params, timeoutMs)
+        requireOk(r)
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * mcp/list — 列 MCP 服务器及连接状态
      *
      * 响应（zcode.cjs LNe/mU schema）：{statuses: {<name>: {status, transport,
@@ -1285,6 +1320,25 @@ class ZCodeProtocolClient private constructor(
         val r = requestWithRetry("session/read", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
         requireOk(r)
         return r["result"]?.jsonObject?.get("settings")?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * session/read — 目标状态提取（goal 恢复用）
+     *
+     * 实测（diag-goal*.py）：session/read 的 result.session.target（nullable，与
+     * TUI 侧 schema 同款：objective/summaryTitle/status/tokensUsed/timeUsedSeconds/
+     * tokenBudget）+ result.goalStats（统计 + iterationCount）。无目标时 target
+     * 为 null/缺失。goalStats 无 objective/status——目标文本与状态只在此 target。
+     */
+    fun readGoalState(sessionId: String, timeoutMs: Long = 10000): JsonObject {
+        val params = buildJsonObject { put("sessionId", sessionId) }
+        val r = requestWithRetry("session/read", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+        requireOk(r)
+        val result = r["result"]?.jsonObject
+        return buildJsonObject {
+            result?.get("session")?.jsonObject?.get("target")?.let { put("target", it) }
+            result?.get("goalStats")?.let { put("goalStats", it) }
+        }
     }
 
     /**

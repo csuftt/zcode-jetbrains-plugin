@@ -132,7 +132,8 @@ export interface StepFinishPart {
 /**
  * 时间线分隔符 part（2026-08-21 RPC 实测，/compact 排查）：
  * marker 消息（role=assistant）的核心 part，官方语义 display:"separator"。
- * timelineType 已见 context_compaction（上下文压缩）与 model_change（模型切换）。
+ * timelineType 已见 context_compaction（上下文压缩）、model_change（模型切换）
+ * 与 goal_verification（目标校验，2026-09 diag-goal3.py 实测）。
  */
 export interface TimelinePart {
   type: 'timeline'
@@ -146,6 +147,13 @@ export interface TimelinePart {
   /** model_change：切换前后模型（服务端实测字段为 modelId 小写 d，modelID 为老类型定义笔误保留兼容）*/
   fromModel?: { modelID?: string; modelId?: string; label?: string; variant?: string }
   toModel?: { modelID?: string; modelId?: string; label?: string; variant?: string }
+  /** goal_verification：目标校验（消息 id 形如 msg_goal_verify_<targetId>_<iteration>）*/
+  targetId?: string
+  verificationId?: string
+  goalIteration?: number
+  verification?: { passed: boolean; reason?: string; nextAction?: string | null }
+  anchorMessageId?: string
+  anchorTurnId?: string
   time?: { start: number; end?: number }
   [key: string]: unknown
 }
@@ -210,6 +218,31 @@ export interface MessageInfo {
    * part 级有），不能靠 isHiddenSyntheticMessage 过滤，须专门识别渲染。
    */
   summary?: { title?: string; body?: string }
+}
+
+// ============ 目标模式（session/goal，2026-09 实测） ============
+
+/**
+ * 目标模式状态（服务端 target 对象 + goalStats 轮次统计的合并视图）。
+ * target 实测字段：objective/summaryTitle/status/tokensUsed/timeUsedSeconds/
+ * tokenBudget（nullable）；goalStats 补充 iterationCount/toolCallCount。
+ * status 为服务端四态；v4 快照还有更细的 verifying/notSatisfied 中间态，
+ * legacy 消息流只见四态 + goal_verification 分隔卡（校验过程以卡片呈现）。
+ */
+export interface GoalState {
+  targetId: string
+  objective: string
+  summaryTitle?: string | null
+  status: 'active' | 'paused' | 'budget_limited' | 'complete' | string
+  tokensUsed: number
+  timeUsedSeconds: number
+  tokenBudget?: number | null
+  iterationCount: number
+  toolCallCount?: number
+  /** 轮末校验进行中（run_finished → 下一轮 run_started 之间）：卡片显示"校验中" */
+  verifying?: boolean
+  /** 服务端统计值落地时刻（本地走秒基准；active 时 timeUsedSeconds + 流逝秒递增显示）*/
+  syncedAt?: number
 }
 
 export interface TokenBreakdown {
@@ -303,7 +336,7 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 拉取已归档会话列表 */
   | { op: 'listArchivedSessions'; workspacePath?: string }
   /** reconcile=true：流式静默对账探测（看门狗只读快照，响应带 reconcile 标记） */
-  | { op: 'messages'; sessionId: string; workspacePath?: string; reconcile?: boolean }
+  | { op: 'messages'; sessionId: string; workspacePath?: string; reconcile?: boolean; goalRefresh?: boolean }
   | { op: 'subagents'; sessionId: string }
   | { op: 'subagentMessages'; sessionId: string; workspacePath?: string }
   | { op: 'send'; sessionId: string; text: string; workspacePath?: string; providerId?: string; modelId?: string; attachments?: ImageAttachmentInput[] }
@@ -330,6 +363,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'getSettings'; sessionId: string }
   | { op: 'setThoughtLevel'; sessionId: string; thoughtLevel: string }
   | { op: 'setMode'; sessionId: string; mode: string }
+  /** 目标模式管理（session/goal 封装）：set/replace 带 objective，其余动作不带 */
+  | { op: 'goalManage'; sessionId: string; action: 'set' | 'replace' | 'pause' | 'resume' | 'clear' | 'show'; objective?: string }
   | { op: 'pickFiles' }
   | { op: 'getUsage'; sessionId: string }
   | { op: 'getQuota' }
@@ -501,8 +536,10 @@ export interface SlashCommand {
   description?: string
   /** 类型：skill=技能（SKILL.md），command=命令（.md）*/
   kind: 'skill' | 'command'
-  /** 来源：user / workspace / plugin */
+  /** 来源：user / workspace / plugin / builtin */
   source?: string
+  /** 专属图标（codicon 类名，如 codicon-target）；缺省按 kind 取 wand/terminal */
+  icon?: string
 }
 
 /**
@@ -753,9 +790,11 @@ export type JavaResponse =
   | { op: 'gotoSessionOpened' }
   /** 定位应答：found=true 时 Java 已激活宿主标签（发起标签只需切回聊天视图）；false=无宿主标签 */
   | { op: 'sessionTabLocated'; sessionId: string; found: boolean }
-  | { op: 'messages'; sessionId: string; messages: ZCodeMessage[]; reconcile?: boolean }
+  | { op: 'messages'; sessionId: string; messages: ZCodeMessage[]; reconcile?: boolean; goalRefresh?: boolean; goalTarget?: unknown; goalStats?: unknown }
   | { op: 'subagents'; sessionId: string; data: SubagentsResult; error?: string }
   | { op: 'subagentMessages'; sessionId: string; messages: ZCodeMessage[]; error?: string }
+  /** 目标操作回执：target/goalStats 为服务端 snapshot 提取；error=服务端拦截/失败（乐观更新回滚）*/
+  | { op: 'goalManaged'; sessionId: string; action: string; response?: string; startedTurn?: boolean; target?: unknown; goalStats?: unknown; error?: string }
   | { op: 'sendAccepted'; sessionId: string; accepted: string; cliResponse?: unknown }
   /** getClipboardImage 响应：base64 缺省 = 剪贴板无图片（Java 侧读取失败同样返回空）*/
   | { op: 'clipboardImage'; base64?: string; mediaType?: string }

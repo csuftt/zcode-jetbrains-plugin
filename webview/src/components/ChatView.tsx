@@ -18,6 +18,7 @@ import { WaitingIndicator } from './WaitingIndicator'
 import { WelcomeScreen } from './WelcomeScreen'
 import { MessageAnchorRail } from './MessageAnchorRail'
 import { ConversationSearch } from './ConversationSearch'
+import { GoalCard } from './GoalCard'
 import { NEAR_BOTTOM_PX, HIDE_DELAY_MS, UP_GHOST_MS } from './ScrollJumpButton'
 import { isAgentNotification } from '@/utils/parseNotification'
 import '../styles/chat-view.less'
@@ -167,6 +168,10 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
   if (messages.length === 0 && !waiting) {
     return (
       <div className="messages-shell">
+        {/* 目标模式状态卡（右上角悬浮，ZCode 客户端同款位置；无目标不渲染）*/}
+        <div className={`goal-card-float${searchOpen ? ' goal-card-float--below-search' : ''}`}>
+          <GoalCard />
+        </div>
         <WelcomeScreen />
       </div>
     )
@@ -175,6 +180,10 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
   return (
     <div className="messages-shell">
       <MessageAnchorRail messages={messages} containerRef={containerRef} />
+      {/* 目标模式状态卡（右上角悬浮；搜索浮层打开时下移避让）*/}
+      <div className={`goal-card-float${searchOpen ? ' goal-card-float--below-search' : ''}`}>
+        <GoalCard />
+      </div>
       {/* 会话内搜索浮层（消息变化即重扫：fingerprint 覆盖流式追加与切会话重拉）*/}
       <ConversationSearch
         open={!!searchOpen}

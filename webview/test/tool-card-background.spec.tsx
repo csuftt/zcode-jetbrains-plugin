@@ -47,8 +47,9 @@ describe('ToolCallCard 后台任务标识', () => {
     useStore.setState({ backgroundTasks: { call_bg_1: { id: 'exec_bg_1', startedAt } } })
     render(<ToolCallCard part={bashPart('call_bg_1')} />)
     expect(screen.getByText('后台运行中')).toBeTruthy()
-    // 45 秒运行时间（formatToolDuration 秒格式：{{count}} 秒）
-    expect(screen.getByText(/45\.0 秒/)).toBeTruthy()
+    // 45 秒运行时间（formatToolDuration 秒格式：{{count}} 秒）；
+    // 小数位放宽（render 与 Date.now 间的毫秒差，慢机不误伤）
+    expect(screen.getByText(/45\.\d+ 秒/)).toBeTruthy()
   })
 
   it('toolCallId 不匹配 → 不显示后台徽标（普通状态徽标）', () => {

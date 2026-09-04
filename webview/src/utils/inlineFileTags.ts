@@ -17,6 +17,14 @@ import { getFileIcon, getFolderIcon } from '@/utils/fileIcons'
 import { splitReference, basename, refTooltip } from '@/components/FileRef'
 
 const CHIP_CLASS = 'file-ref--inline'
+const CMD_CHIP_CLASS = 'cmd-ref--inline'
+
+/** 命令 chip 的类型 → 图标与配色 class（goal=靶子琥珀 / command=终端绿 / skill=笔紫）*/
+const CMD_META: Record<string, { icon: string; variant: string }> = {
+  goal: { icon: 'codicon-target', variant: 'goal' },
+  command: { icon: 'codicon-terminal', variant: 'command' },
+  skill: { icon: 'codicon-wand', variant: 'skill' },
+}
 
 /** HTML 属性/文本转义（路径拼进 innerHTML 前必须）*/
 function escapeHtml(str: string): string {
@@ -81,6 +89,55 @@ export function insertChipAtCursor(el: HTMLElement, path: string): void {
   const space = document.createTextNode(' ')
   chip.after(space)
 
+  if (sel) {
+    const after = document.createRange()
+    after.setStartAfter(space)
+    after.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(after)
+  }
+}
+
+// ============ 内联命令 chip（斜杠命令/技能/goal，0.3.2 真机反馈：命令入输入框）============
+
+/**
+ * 构造内联命令 chip 的 HTML（/ 下拉选中后插进输入框，替代顶部附件栏 chip）。
+ * 序列化（serializeEditor）回 /name 前缀文本：goal 走 doSend 正则拦截，
+ * 命令/技能由服务端 CLI 解析。
+ */
+export function buildCommandChipHTML(name: string, kind: 'goal' | 'command' | 'skill', description?: string): string {
+  const meta = CMD_META[kind] ?? CMD_META.command
+  const tip = description ? `/${name} — ${description}` : `/${name}`
+  return (
+    `<span class="cmd-ref cmd-ref--inline cmd-ref--${meta.variant}" contenteditable="false" data-cmd="${escapeHtml(name)}" data-tip="${escapeHtml(tip)}">` +
+    `<span class="codicon ${meta.icon} cmd-ref__icon"></span>` +
+    `<span class="cmd-ref__name">${escapeHtml(name)}</span>` +
+    `<button class="cmd-ref__remove" type="button" tabindex="-1">✕</button>` +
+    `</span>`
+  )
+}
+
+/** 在当前光标位置插入内联命令 chip（chip 后补空格，光标移空格后可继续输入）*/
+export function insertCommandChipAtCursor(el: HTMLElement, name: string, kind: 'goal' | 'command' | 'skill', description?: string): void {
+  el.focus()
+  const sel = window.getSelection()
+  let range: Range
+  if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
+    range = sel.getRangeAt(0)
+    range.deleteContents()
+    range.collapse(true)
+  } else {
+    range = document.createRange()
+    range.selectNodeContents(el)
+    range.collapse(false)
+  }
+  const tpl = document.createElement('template')
+  tpl.innerHTML = buildCommandChipHTML(name, kind, description)
+  const chip = tpl.content.firstElementChild as HTMLElement | null
+  if (!chip) return
+  range.insertNode(chip)
+  const space = document.createTextNode(' ')
+  chip.after(space)
   if (sel) {
     const after = document.createRange()
     after.setStartAfter(space)
@@ -201,7 +258,8 @@ export function convertCompletedPaths(el: HTMLElement, includeTrailing = false):
 
 /**
  * 序列化编辑器内容为纯文本（发送用）：
- * 内联 chip → @data-path（含 #L10-20 行号引用），BR/DIV → 换行。
+ * 内联文件 chip → @data-path（含 #L10-20 行号引用），内联命令 chip → /data-cmd，
+ * BR/DIV → 换行。
  */
 export function serializeEditor(el: HTMLElement): string {
   let out = ''
@@ -214,6 +272,10 @@ export function serializeEditor(el: HTMLElement): string {
     const elm = node as HTMLElement
     if (elm.classList?.contains(CHIP_CLASS)) {
       out += `@${elm.getAttribute('data-path') ?? ''}`
+      return
+    }
+    if (elm.classList?.contains(CMD_CHIP_CLASS)) {
+      out += `/${elm.getAttribute('data-cmd') ?? ''}`
       return
     }
     if (elm.isContentEditable === false) return

@@ -87,3 +87,87 @@
     }
   }
 }
+
+// ============ 内联命令 chip（/ 下拉选中后插进输入框，0.3.2 真机反馈）============
+// goal=靶子琥珀 / command=终端绿 / skill=笔紫，与下拉条目图标配色一致；
+// 序列化（serializeEditor）回 /name 前缀。行内适配同 .file-ref--inline。
+.cmd-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  vertical-align: middle;
+  user-select: none;
+  margin: 0 1px;
+  position: relative;
+
+  // codicon 基础样式 (0,2,0) 压单类 font-size（skill-ref 同坑），后代选择器提权
+  .codicon {
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  &__icon {
+    opacity: 0.85;
+  }
+
+  &__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    line-height: 1;
+  }
+
+  &__remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 0 0 2px;
+    opacity: 0.6;
+    line-height: 1;
+
+    &:hover {
+      opacity: 1;
+      color: var(--status-error);
+    }
+  }
+
+  // 编辑区 overflow:auto 会裁剪 CSS ::after tooltip——JS 挂 body（同 file-ref--inline）
+  &:hover::after {
+    display: none;
+  }
+
+  &--command {
+    background: rgba(78, 201, 176, 0.12);
+    border: 1px solid rgba(78, 201, 176, 0.3);
+    color: #4ec9b0;
+
+    .cmd-ref__remove {
+      color: #4ec9b0;
+    }
+  }
+
+  &--skill {
+    background: rgba(179, 157, 219, 0.15);
+    border: 1px solid rgba(179, 157, 219, 0.3);
+    color: #b39ddb;
+
+    .cmd-ref__remove {
+      color: #b39ddb;
+    }
+  }
+
+  &--goal {
+    background: rgba(215, 186, 125, 0.14);
+    border: 1px solid rgba(215, 186, 125, 0.35);
+    color: #d7ba7d;
+
+    .cmd-ref__remove {
+      color: #d7ba7d;
+    }
+  }
+}

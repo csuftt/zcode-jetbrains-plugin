@@ -518,6 +518,40 @@ export function asSubagentLifecycle(payload: StreamEventPayload): SubagentLifecy
 }
 
 /**
+ * session.updated 的目标模式 payload（2026-09 diag-goal.py 实测）：
+ * target 变化（set/status_updated/cleared/usage_accounted/run_started/
+ * run_finished/summary_updated）经 legacy 事件流以 session.updated 类型推送，
+ * payload = {action, source: command|tool|runtime, target, previousTarget?}。
+ * 目标清除时 target 为 null（action=cleared）。
+ */
+export interface GoalTargetPayload {
+  action: 'set' | 'status_updated' | 'cleared' | 'usage_accounted' | 'run_started' | 'run_finished' | 'summary_updated' | string
+  source?: string
+  target: {
+    targetID?: string
+    sessionId?: string
+    objective?: string
+    summaryTitle?: string | null
+    status?: 'active' | 'paused' | 'budget_limited' | 'complete' | string
+    tokenBudget?: number | null
+    tokensUsed?: number
+    timeUsedSeconds?: number
+    [key: string]: unknown
+  } | null
+  previousTarget?: GoalTargetPayload['target']
+}
+
+/** 是目标模式 payload（有 action+target 键）则返回结构化 payload，否则 null */
+export function asGoalTargetPayload(payload: StreamEventPayload): GoalTargetPayload | null {
+  const p = payload as Partial<GoalTargetPayload>
+  if (p && typeof p.action === 'string' && 'target' in p
+    && (p.target === null || typeof p.target === 'object')) {
+    return p as GoalTargetPayload
+  }
+  return null
+}
+
+/**
  * 把一个子代理 tool.updated 事件累积到 activities（纯函数，不可变更新）。
  * scheduled/started → 建/更新 ToolPart（子代理事件内联完整 input，无 inputOmitted）；
  * result/error → 收尾；任何 kind 都顺带补齐归属元信息与聚合状态。

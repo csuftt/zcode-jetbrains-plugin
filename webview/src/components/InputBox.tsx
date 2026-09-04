@@ -40,7 +40,7 @@ import { AgentSelect, AgentColorDot } from './AgentSelect'
 import { PromptEnhancerDialog } from './PromptEnhancerDialog'
 import { sendToJava, onMessage } from '@/ipc/bridge'
 import type { JavaResponse, SlashCommand, AgentDef, ImageAttachmentInput } from '@/types/messages'
-import { insertChipAtCursor, convertCompletedPaths, serializeEditor } from '@/utils/inlineFileTags'
+import { insertChipAtCursor, insertCommandChipAtCursor, convertCompletedPaths, serializeEditor } from '@/utils/inlineFileTags'
 import { KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
 import { readEnhanceConfig, ENHANCE_CONFIG_CHANGED_EVENT } from '@/utils/enhanceConfig'
 import { PastedTextRef, PastedTextPreview, type PastedTextItem } from './PastedTextRef'
@@ -167,6 +167,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const agents = useStore((s) => s.subagentDefs)
   const selectedAgent = useStore((s) => s.selectedAgent)
   const selectAgentAction = useStore((s) => s.selectAgent)
+  // 目标模式（/goal 前缀拦截转控制意图）
+  const goalManage = useStore((s) => s.goalManage)
 
   // ============ 模型图片能力（带图发送提示）============
   const models = useStore((s) => s.models)
@@ -446,6 +448,30 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     )
       return
 
+    // 目标模式拦截（/goal）：goal 命令 chip（序列化成 /goal 前缀文本）或直接键入
+    // /goal 均转 goalManage 控制意图，不进对话流；目标卡（GoalCard）悬浮在聊天区
+    // 右上角展示状态。子命令：pause/resume/clear；无参 = 状态提示
+    if (fileRefs.length === 0 && skillRefs.length === 0 && pastedTexts.length === 0 && images.length === 0 && !selectedAgent) {
+      const m = text.match(/^\/goal(?:\s+([\s\S]+))?$/)
+      if (m) {
+        const goalArg = m[1]?.trim() ?? ''
+        if (!goalArg) {
+          goalManage('show')
+        } else if (/^pause$/i.test(goalArg)) {
+          goalManage('pause')
+        } else if (/^resume$/i.test(goalArg)) {
+          goalManage('resume')
+        } else if (/^clear$/i.test(goalArg)) {
+          goalManage('clear')
+        } else {
+          goalManage('set', goalArg)
+        }
+        clearEditor()
+        setSlashQuery(null)
+        return
+      }
+    }
+
     const fullText = assembleRefsText(text)
     // 纯图片消息：无正文时补占位文本（对齐 cc-gui 的 [Uploaded N image(s)]——
     // 服务端 content 恒有值、模型端占位语义无歧义）
@@ -649,14 +675,14 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     }, 0)
   }, [])
 
-  /** 内联 chip 的 ✕ 删除（编辑器内动态 DOM，事件委托）*/
+  /** 内联 chip 的 ✕ 删除（编辑器内动态 DOM，事件委托；文件 chip 与命令 chip 共用）*/
   const handleEditorClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement
-    const closeBtn = target.closest('.file-ref__remove')
+    const closeBtn = target.closest('.file-ref__remove, .cmd-ref__remove')
     if (!closeBtn) return
     e.preventDefault()
     e.stopPropagation()
-    closeBtn.closest('.file-ref--inline')?.remove()
+    closeBtn.closest('.file-ref--inline, .cmd-ref--inline')?.remove()
     // chip 被删后 mouseout 不再触发（元素已脱离 DOM），tooltip 须主动清掉
     document.getElementById(INLINE_CHIP_TIP_ID)?.remove()
     tipChipRef.current = null
@@ -705,12 +731,12 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     }
     const hideTip = () => document.getElementById(INLINE_CHIP_TIP_ID)?.remove()
     const onOver = (e: MouseEvent) => {
-      const chip = (e.target as HTMLElement)?.closest?.('.file-ref--inline') as HTMLElement | null
+      const chip = (e.target as HTMLElement)?.closest?.('.file-ref--inline, .cmd-ref--inline') as HTMLElement | null
       if (chip) showTip(chip)
     }
     const onOut = (e: MouseEvent) => {
-      const from = (e.target as HTMLElement)?.closest?.('.file-ref--inline')
-      const to = (e.relatedTarget as HTMLElement)?.closest?.('.file-ref--inline')
+      const from = (e.target as HTMLElement)?.closest?.('.file-ref--inline, .cmd-ref--inline')
+      const to = (e.relatedTarget as HTMLElement)?.closest?.('.file-ref--inline, .cmd-ref--inline')
       if (from && !to) hideTip()
     }
     el.addEventListener('mouseover', onOver)
@@ -930,7 +956,11 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   /** / 下拉混合条目：命令 / 技能 / 子智能体（用户拍板：子智能体跟命令技能同下拉）*/
   const filteredSlashItems = useMemo<SlashItem[]>(() => {
     const q = slashQuery === null ? '' : slashQuery.toLowerCase()
-    const base: SlashItem[] = slashItems.filter(
+    // 内置目标模式命令（官方客户端同款 /goal，靶子图标）：磁盘扫描出同名时不重复添加
+    const builtin: SlashItem[] = slashItems.some((c) => c.name === 'goal')
+      ? []
+      : [{ name: 'goal', description: t('chat.goal.commandDesc'), kind: 'command' as const, source: 'builtin', icon: 'codicon-target' }]
+    const base: SlashItem[] = [...builtin, ...slashItems].filter(
       (c) =>
         !q ||
         c.name.toLowerCase().includes(q) ||
@@ -949,7 +979,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     return [...base, ...agentItems].sort(
       (a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9),
     )
-  }, [slashItems, slashQuery, agents])
+  }, [slashItems, slashQuery, agents, t])
 
   // / 下拉打开时懒加载子智能体清单（首次；ZCode 客户端可能改过文件，每次打开刷新）
   const loadAgentsAction = useStore((s) => s.loadAgents)
@@ -986,7 +1016,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     el.focus()
   }
 
-  /** 选中下拉项：命令/技能 = SkillRef chip；子智能体 = 设为发送目标（发送时拼 @<name>）*/
+  /** 选中下拉项：命令/技能/goal = 内联命令 chip（插进输入框，序列化回 /name 前缀；
+   * goal 的 /goal 前缀由 doSend 正则拦截转 goalManage）；子智能体 = 设为发送目标（发送时拼 @<name>）*/
   function selectSlash(item: SlashItem) {
     setSlashQuery(null)
     if (item.kind === 'agent') {
@@ -994,10 +1025,19 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       removeSlashTriggerText()
       return
     }
-    // 先加 chip（确保 UI 更新不受 DOM 操作异常影响）
-    setSkillRefs((prev) => (prev.some((x) => x.name === item.name) ? prev : [...prev, item]))
-    // 再清除输入框里的 /xxx 文本（容错：失败不影响 chip）
+    // 先删 /xxx 触发文本（光标停在原位），再在光标处插内联 chip（0.3.2 真机反馈：
+    // 不再挂顶部附件栏）。顺序不能反：先插 chip 再删会把光标推到 chip 后、定位错乱；
+    // 且 remove 的降级分支（textContent 全量替换）发生在插 chip 前才不会抹掉 chip。
+    // chip 的 DOM 插入不触发 onInput，手动同步 hasText
     removeSlashTriggerText()
+    const el = editorRef.current
+    if (el) {
+      const kind = item.kind === 'command' && item.name === 'goal' && item.source === 'builtin'
+        ? 'goal'
+        : item.kind
+      insertCommandChipAtCursor(el, item.name, kind, item.description)
+      setHasText(true)
+    }
   }
 
   // 监听文件列表响应
@@ -1176,11 +1216,13 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         {/* 定时消息（指定时间执行的提示词卡片，按时间升序；在排队消息上方）*/}
         <ScheduledMessages onReschedule={openReschedulePicker} />
 
+        {/* 目标模式状态卡已移至 ChatView 右上角悬浮（ZCode 客户端同款位置）*/}
+
         {/* 排队消息（streaming 中 Enter 入队的，回合结束自动发送）*/}
         <MessageQueue onEdit={editQueuedToInput} />
 
-        {/* 选中子智能体 chip + 技能引用 chips（紫色调，笔图标）+ 文件引用 chips（蓝色）
-            + 粘贴文本（灰色）+ 粘贴图片缩略图。对齐 cc-gui ChatInputBoxHeader：
+        {/* 选中子智能体 chip + 文件引用 chips（蓝色）+ 粘贴文本（灰色）+ 粘贴图片缩略图。
+            技能/命令/goal chip 已内联进输入框（0.3.2 真机反馈）。对齐 cc-gui ChatInputBoxHeader：
             AttachmentList 在 ContextBar 之上，不贴输入框 */}
         {(selectedAgent || skillRefs.length > 0 || fileRefs.length > 0 || pastedTexts.length > 0 || images.length > 0) && (
           <div className="input-box__refs">
@@ -1598,8 +1640,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                   ) : (
                     <span
                       className={`codicon ${
-                        c.kind === 'skill' ? 'codicon-wand' : 'codicon-terminal'
-                      } input-box__slash-icon input-box__slash-icon--${c.kind}`}
+                        c.icon ?? (c.kind === 'skill' ? 'codicon-wand' : 'codicon-terminal')
+                      } input-box__slash-icon input-box__slash-icon--${c.icon ? 'goal' : c.kind}`}
                     />
                   )}
                   <span className="input-box__slash-main">

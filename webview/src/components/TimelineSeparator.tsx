@@ -87,6 +87,38 @@ export function TimelineSeparator({ part }: Props) {
     )
   }
 
+  if (part.timelineType === 'goal_verification') {
+    // 目标校验结果（每轮结束服务端独立校验一次）：通过=收尾分隔；未通过=续跑
+    // 前的"下一轮行动"锚点。reason 全文走 title 悬停（卡片只放结论一行）
+    const v = part.verification
+    if (!v) return null
+    const passed = v.passed
+    const iter = part.goalIteration
+    return (
+      <div className="tl-sep">
+        <span className="tl-sep__line" />
+        <span className="tl-sep__text">
+          <span
+            className="tl-sep__label"
+            title={v.reason ?? undefined}
+          >
+            <span className={`codicon ${passed ? 'codicon-pass' : 'codicon-refresh'}`} />
+            {passed
+              ? t('chat.timeline.goalPassed')
+              : t('chat.timeline.goalNotSatisfied')}
+          </span>
+          {iter != null && (
+            <span className="tl-sep__meta">{t('chat.timeline.goalIteration', { iteration: iter })}</span>
+          )}
+          {!passed && v.nextAction && (
+            <span className="tl-sep__meta" title={v.nextAction}>{v.nextAction}</span>
+          )}
+        </span>
+        <span className="tl-sep__line" />
+      </div>
+    )
+  }
+
   return (
     <div className="tl-sep">
       <span className="tl-sep__line" />

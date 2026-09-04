@@ -88,6 +88,31 @@
   },
   "timeline": {
     "modelChanged": "모델 전환됨",
-    "event": "타임라인 이벤트"
+    "event": "타임라인 이벤트",
+    "goalPassed": "목표 검증 통과",
+    "goalNotSatisfied": "목표 미달성, 계속 진행",
+    "goalIteration": "{{iteration}}회차"
+  },
+  "goal": {
+    "status": {
+      "active": "목표 진행 중",
+      "paused": "일시 중지됨",
+      "complete": "목표 완료",
+      "budgetLimited": "사용량 한도 도달"
+    },
+    "stats": {
+      "iteration": "{{count}}회차",
+      "tokens": "{{tokens}} 토큰"
+    },
+    "action": {
+      "pause": "목표 일시 중지",
+      "resume": "목표 재개",
+      "clear": "목표 해제"
+    },
+    "usageHint": "이 세션에는 목표가 없습니다. 사용법: /goal <목표> 설정, /goal pause 일시 중지, /goal resume 재개, /goal clear 해제",
+    "commandDesc": "장기 목표 설정: AI가 여러 라운드에 걸쳐 자동 추진·자체 검증합니다",
+    "chipTip": "골 모드: 목표를 입력하고 전송 (대화에 들어가지 않음)",
+    "verifying": "라운드 {{count}} 검증 중",
+    "verifyingTip": "이번 라운드 작업이 완료되어 목표 달성을 검증 중입니다"
   }
 }

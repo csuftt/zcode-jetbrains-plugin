@@ -88,6 +88,31 @@
   },
   "timeline": {
     "modelChanged": "模型已切换",
-    "event": "时间线事件"
+    "event": "时间线事件",
+    "goalPassed": "目标校验通过",
+    "goalNotSatisfied": "目标未达成，继续推进",
+    "goalIteration": "第 {{iteration}} 轮"
+  },
+  "goal": {
+    "status": {
+      "active": "目标进行中",
+      "paused": "已暂停",
+      "complete": "目标已完成",
+      "budgetLimited": "已达用量上限"
+    },
+    "stats": {
+      "iteration": "第 {{count}} 轮",
+      "tokens": "{{tokens}} tokens"
+    },
+    "action": {
+      "pause": "暂停目标",
+      "resume": "继续目标",
+      "clear": "清除目标"
+    },
+    "usageHint": "当前会话没有目标。用法：/goal <目标描述> 设定；/goal pause 暂停；/goal resume 继续；/goal clear 清除",
+    "commandDesc": "设定长目标：AI 自动多轮推进并自校验，直到达成",
+    "chipTip": "目标模式：输入目标描述后发送，不进入对话流",
+    "verifying": "第 {{count}} 轮校验中",
+    "verifyingTip": "本轮工作已完成，正在校验目标达成情况"
   }
 }
