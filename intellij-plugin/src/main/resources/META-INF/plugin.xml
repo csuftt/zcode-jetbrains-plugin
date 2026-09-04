@@ -2,7 +2,7 @@
      <idea-plugin> 无 icon 属性，放 /icons/ 下不生效；ToolWindow 图标走 ZCodeIcons.ZcGui -->
 <idea-plugin>
     <id>com.zcode.ideaplugin.zcode-assistant</id>
-    <name>ZC GUI</name>
+    <name>ZC GUI (AI Chat for ZCode)</name>
     <vendor email="csuftt@users.noreply.github.com" url="https://github.com/csuftt/zcode-jetbrains-plugin">ZC GUI</vendor>
 
     <description><![CDATA[
