@@ -19,9 +19,14 @@ import { splitReference, basename, refTooltip } from '@/components/FileRef'
 const CHIP_CLASS = 'file-ref--inline'
 const CMD_CHIP_CLASS = 'cmd-ref--inline'
 
-/** 命令 chip 的类型 → 图标与配色 class（goal=靶子琥珀 / command=终端绿 / skill=笔紫）*/
+/** 内联命令 chip 类型：goal/compact 为内置命令专属图标，command/skill 通用 */
+export type CmdChipKind = 'goal' | 'compact' | 'command' | 'skill'
+
+/** 命令 chip 的类型 → 图标与配色 class（goal=靶子琥珀 / compact=归档橙 /
+ *  command=终端绿 / skill=笔紫，与下拉条目图标配色一致；init 用户拍板用通用绿）*/
 const CMD_META: Record<string, { icon: string; variant: string }> = {
   goal: { icon: 'codicon-target', variant: 'goal' },
+  compact: { icon: 'codicon-archive', variant: 'compact' },
   command: { icon: 'codicon-terminal', variant: 'command' },
   skill: { icon: 'codicon-wand', variant: 'skill' },
 }
@@ -105,7 +110,7 @@ export function insertChipAtCursor(el: HTMLElement, path: string): void {
  * 序列化（serializeEditor）回 /name 前缀文本：goal 走 doSend 正则拦截，
  * 命令/技能由服务端 CLI 解析。
  */
-export function buildCommandChipHTML(name: string, kind: 'goal' | 'command' | 'skill', description?: string): string {
+export function buildCommandChipHTML(name: string, kind: CmdChipKind, description?: string): string {
   const meta = CMD_META[kind] ?? CMD_META.command
   const tip = description ? `/${name} — ${description}` : `/${name}`
   return (
@@ -118,7 +123,7 @@ export function buildCommandChipHTML(name: string, kind: 'goal' | 'command' | 's
 }
 
 /** 在当前光标位置插入内联命令 chip（chip 后补空格，光标移空格后可继续输入）*/
-export function insertCommandChipAtCursor(el: HTMLElement, name: string, kind: 'goal' | 'command' | 'skill', description?: string): void {
+export function insertCommandChipAtCursor(el: HTMLElement, name: string, kind: CmdChipKind, description?: string): void {
   el.focus()
   const sel = window.getSelection()
   let range: Range

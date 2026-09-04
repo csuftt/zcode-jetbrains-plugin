@@ -110,9 +110,12 @@
       "clear": "ゴールを解除"
     },
     "usageHint": "このセッションにはゴールがありません。使い方: /goal <目標> で設定、/goal pause で一時停止、/goal resume で再開、/goal clear で解除",
-    "commandDesc": "長期目標を設定：AI が複数ラウンドで自動推進・自己検証します",
-    "chipTip": "ゴールモード：目標を入力して送信（チャットには流入しません）",
     "verifying": "第 {{count}} ラウンド検証中",
     "verifyingTip": "このラウンドの作業が完了し、目標達成を検証しています"
+  },
+  "builtinCommands": {
+    "goal": "長期目標を設定：AI が複数ラウンドで自動推進・自己検証します",
+    "init": "AGENTS.md プロジェクト指示ファイルを初期化",
+    "compact": "会話履歴を圧縮してコンテキスト容量を解放"
   }
 }

@@ -110,9 +110,12 @@
       "clear": "Clear goal"
     },
     "usageHint": "No goal in this session. Usage: /goal <description> to set; /goal pause; /goal resume; /goal clear",
-    "commandDesc": "Set a long-running goal: AI iterates and self-verifies until achieved",
-    "chipTip": "Goal mode: type the objective and send — it does not enter the chat",
     "verifying": "Verifying round {{count}}",
     "verifyingTip": "This round is done, checking goal progress"
+  },
+  "builtinCommands": {
+    "goal": "Set a long-running goal: AI iterates and self-verifies until achieved",
+    "init": "Initialize the AGENTS.md project instructions file",
+    "compact": "Compact conversation history to free up context space"
   }
 }

@@ -89,8 +89,9 @@
 }
 
 // ============ 内联命令 chip（/ 下拉选中后插进输入框，0.3.2 真机反馈）============
-// goal=靶子琥珀 / command=终端绿 / skill=笔紫，与下拉条目图标配色一致；
-// 序列化（serializeEditor）回 /name 前缀。行内适配同 .file-ref--inline。
+// goal=靶子琥珀 / compact=归档橙 / command=终端绿 / skill=笔紫（init 用通用绿），
+// 与下拉条目图标配色一致；序列化（serializeEditor）回 /name 前缀。
+// 行内适配同 .file-ref--inline。
 .cmd-ref {
   display: inline-flex;
   align-items: center;
@@ -168,6 +169,16 @@
 
     .cmd-ref__remove {
       color: #d7ba7d;
+    }
+  }
+
+  &--compact {
+    background: rgba(206, 145, 120, 0.13);
+    border: 1px solid rgba(206, 145, 120, 0.32);
+    color: #ce9178;
+
+    .cmd-ref__remove {
+      color: #ce9178;
     }
   }
 }

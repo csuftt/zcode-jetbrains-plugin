@@ -110,9 +110,12 @@
       "clear": "清除目標"
     },
     "usageHint": "目前會話沒有目標。用法：/goal <目標描述> 設定；/goal pause 暫停；/goal resume 繼續；/goal clear 清除",
-    "commandDesc": "設定長目標：AI 自動多輪推進並自校驗，直到達成",
-    "chipTip": "目標模式：輸入目標描述後發送，不進入對話流",
     "verifying": "第 {{count}} 輪校驗中",
     "verifyingTip": "本輪工作已完成，正在校驗目標達成情況"
+  },
+  "builtinCommands": {
+    "goal": "設定長目標：AI 自動多輪推進並自校驗，直到達成",
+    "init": "初始化 AGENTS.md 專案指令檔",
+    "compact": "壓縮對話歷史，釋放上下文空間"
   }
 }

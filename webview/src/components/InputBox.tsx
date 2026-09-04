@@ -40,7 +40,7 @@ import { AgentSelect, AgentColorDot } from './AgentSelect'
 import { PromptEnhancerDialog } from './PromptEnhancerDialog'
 import { sendToJava, onMessage } from '@/ipc/bridge'
 import type { JavaResponse, SlashCommand, AgentDef, ImageAttachmentInput } from '@/types/messages'
-import { insertChipAtCursor, insertCommandChipAtCursor, convertCompletedPaths, serializeEditor } from '@/utils/inlineFileTags'
+import { insertChipAtCursor, insertCommandChipAtCursor, convertCompletedPaths, serializeEditor, type CmdChipKind } from '@/utils/inlineFileTags'
 import { KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
 import { readEnhanceConfig, ENHANCE_CONFIG_CHANGED_EVENT } from '@/utils/enhanceConfig'
 import { PastedTextRef, PastedTextPreview, type PastedTextItem } from './PastedTextRef'
@@ -61,6 +61,18 @@ interface ImageAttachment extends ImageAttachmentResult {
 type SlashItem =
   | SlashCommand
   | { name: string; description: string; kind: 'agent'; agent: AgentDef }
+
+/**
+ * 内置命令元数据（goal 前端独有需前置条目；init/compact 由 Kotlin 扫描器内置
+ * 清单提供——SlashCommandScanner BUILTIN_COMMANDS，注入专属图标与 i18n 描述后
+ * 下拉即生效，扫描条目本身无 icon 字段曾致下拉图标不生效）。init 用户拍板用
+ * 通用命令图标（无 icon，兜底终端绿）。i18n 描述见 chat.builtinCommands.*。
+ */
+const BUILTIN_COMMANDS: { name: string; icon?: string }[] = [
+  { name: 'goal', icon: 'codicon-target' },
+  { name: 'init' },
+  { name: 'compact', icon: 'codicon-archive' },
+]
 
 /**
  * 粘贴折叠阈值：≥10 行或 ≥500 字符的粘贴文本折叠为顶部 chip（点击预览），
@@ -956,11 +968,30 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   /** / 下拉混合条目：命令 / 技能 / 子智能体（用户拍板：子智能体跟命令技能同下拉）*/
   const filteredSlashItems = useMemo<SlashItem[]>(() => {
     const q = slashQuery === null ? '' : slashQuery.toLowerCase()
-    // 内置目标模式命令（官方客户端同款 /goal，靶子图标）：磁盘扫描出同名时不重复添加
-    const builtin: SlashItem[] = slashItems.some((c) => c.name === 'goal')
-      ? []
-      : [{ name: 'goal', description: t('chat.goal.commandDesc'), kind: 'command' as const, source: 'builtin', icon: 'codicon-target' }]
-    const base: SlashItem[] = [...builtin, ...slashItems].filter(
+    // 内置命令：goal 前置补全（扫描器不列）；init/compact 已由扫描器内置清单提供，
+    // 注入专属图标与 i18n 描述（扫描条目无 icon、描述为英文硬编码）。
+    // 只认 source==='builtin' 的扫描条目——用户/插件自定义同名命令先扫先得，不覆盖
+    const builtinMeta = new Map(BUILTIN_COMMANDS.map((b) => [b.name, b]))
+    const injected: SlashItem[] = slashItems.map((c) => {
+      if (c.source !== 'builtin') return c
+      const b = builtinMeta.get(c.name)
+      if (!b) return c
+      return {
+        ...c,
+        description: t(`chat.builtinCommands.${c.name}`),
+        ...(b.icon ? { icon: b.icon } : {}),
+      }
+    })
+    const builtin: SlashItem[] = BUILTIN_COMMANDS
+      .filter((b) => !injected.some((c) => c.name === b.name))
+      .map((b) => ({
+        name: b.name,
+        description: t(`chat.builtinCommands.${b.name}`),
+        kind: 'command' as const,
+        source: 'builtin' as const,
+        ...(b.icon ? { icon: b.icon } : {}),
+      }))
+    const base: SlashItem[] = [...builtin, ...injected].filter(
       (c) =>
         !q ||
         c.name.toLowerCase().includes(q) ||
@@ -1032,8 +1063,10 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     removeSlashTriggerText()
     const el = editorRef.current
     if (el) {
-      const kind = item.kind === 'command' && item.name === 'goal' && item.source === 'builtin'
-        ? 'goal'
+      // 内置命令以命令名作 chip kind（goal/compact 专属图标；CMD_META 未配的
+      // ——如 init，用户拍板用通用图标——兜底 terminal 绿），磁盘命令/技能走通用 kind
+      const kind: CmdChipKind = item.kind === 'command' && item.source === 'builtin'
+        ? (item.name as CmdChipKind)
         : item.kind
       insertCommandChipAtCursor(el, item.name, kind, item.description)
       setHasText(true)
@@ -1641,7 +1674,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                     <span
                       className={`codicon ${
                         c.icon ?? (c.kind === 'skill' ? 'codicon-wand' : 'codicon-terminal')
-                      } input-box__slash-icon input-box__slash-icon--${c.icon ? 'goal' : c.kind}`}
+                        // 有专属图标的内置命令按命令名取配色 modifier（goal/init/compact）
+                      } input-box__slash-icon input-box__slash-icon--${c.icon ? c.name : c.kind}`}
                     />
                   )}
                   <span className="input-box__slash-main">
