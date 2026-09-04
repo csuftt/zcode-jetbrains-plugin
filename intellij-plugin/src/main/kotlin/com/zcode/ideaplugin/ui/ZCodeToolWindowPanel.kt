@@ -802,7 +802,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (op == "__jsLog") {
                 val level = msg["level"]?.jsonPrimitive?.content ?: "?"
                 val text = msg["text"]?.jsonPrimitive?.content ?: ""
-                log.warn("[webview-console] [$level] ${LogRedactor.redact(text)}")
+                // 崩溃/错误通道（console.error/onerror/rejection 及显式 warn）保 warn 保证
+                // 默认级别可见；显式 info/debug（前端诊断日志）落 info，不以 warn
+                // 噪声进用户 idea.log（idea.log 默认 INFO 阈值，info 级取证仍可见）
+                if (level == "info" || level == "debug" || level == "log") {
+                    log.info("[webview-console] [$level] ${LogRedactor.redact(text)}")
+                } else {
+                    log.warn("[webview-console] [$level] ${LogRedactor.redact(text)}")
+                }
                 return
             }
             // 高频热路径：debug 级防 log 风暴（idea.log 已知瓶颈，排查时开 debug 看）
