@@ -6,6 +6,50 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.3.2] - 2026-09-04
+
+中文:
+
+### 新增
+
+- **目标模式（/goal）**：输入 `/goal` 设定长目标，AI 自动分轮推进、逐轮校验进度，无需逐步催促；目标卡实时展示当前轮次、校验结论与累计耗时，支持中途停止。多轮流式断连、校验卡滞后等伴随问题已一并修复。
+- **会话编辑历史**：最后一轮用户消息支持编辑重发——在消息操作中选择编辑，修改后自动回退到该轮并重新生成；用户消息同时新增复制按钮。
+- **内置命令专属图标**：斜杠命令下拉中的 init、compact 等内置命令显示专属图标，与自定义命令直观区分。
+
+### 修复
+
+- **加载历史会话失败（Session is not active）**：新版 CLI 会话驻留池上限 16 个，且已打开的会话持续占用不自动释放，占满后打开更多会话必然失败。插件现会在接近上限时提前提醒；失败时错误条给出「重启 IDE 释放槽位」的明确指引，并不再触发 IDE 红色错误弹窗。
+- **子代理弹窗运行中刷新致实时流中断**：子代理执行过程中点击刷新会导致实时流停更，已修复。
+- **子代理弹窗切换与标记细节**：执行记录与最终报告改为互斥切换、阅读类预览叠加显示（Esc 逐层关闭）；模型切换的时间线标记在部分场景缺失或错位的问题一并修正。
+- **模型切换分隔卡**：切换模型后分隔卡被后续消息重拉顶掉、连续多次切换未折叠、置顶注册卡残留、超长模型名顶宽、切换过程无反馈等问题修复。
+
+### 变更
+
+- **插件显示名更新**：更名 ZC GUI (AI Chat for ZCode)，随本版在 IDE 插件列表与 Marketplace 生效。
+- **输入框下拉按钮视觉统一**：底部模型 / 思考级别 / 子智能体三个下拉按钮的图标与文字视觉档位统一。
+- **锚点轨道历史入口改版**：历史入口节点改为立体图层图标，更醒目易识别。
+
+English:
+
+### Added
+
+- **Goal mode (/goal)**: Set a long-term goal with `/goal` and the AI works through it round by round with automatic verification — no need to prompt each step. A goal card shows the current round, verification results and elapsed time in real time, and can be stopped midway. Related multi-round streaming and lagging verification-card issues are fixed in the same release.
+- **Edit conversation history**: The last user message can now be edited and resent — pick "Edit" from the message menu, adjust the text, and the conversation rewinds to that turn and regenerates. A copy button is also added to user messages.
+- **Dedicated icons for built-in commands**: Built-in slash commands such as init and compact now show their own icons in the command dropdown, clearly distinct from custom commands.
+
+### Fixed
+
+- **History session loading failure (Session is not active)**: The new CLI keeps at most 16 resident sessions, and opened sessions hold their slots indefinitely — once full, opening more sessions always fails. The plugin now warns as the limit approaches; on failure the error bar shows clear "restart the IDE to free slots" guidance, and the IDE red error dialog is no longer triggered.
+- **Subagent dialog refresh killed the live stream**: Clicking refresh while a subagent was running interrupted its live updates; fixed.
+- **Subagent dialog switching and marker details**: Execution log and final report now switch exclusively, reading previews overlay on top (Esc closes layer by layer); model-change timeline markers missing or misplaced in some scenarios are also fixed.
+- **Model switch separator card**: Fixed the separator card being wiped by later full reloads, consecutive switches not folding, residual top registration card, oversized model names stretching the card, and missing feedback during deferred switches.
+
+### Changed
+
+- **Plugin display name updated**: Renamed to ZC GUI (AI Chat for ZCode), effective in the IDE plugin list and Marketplace with this release.
+- **Unified look for input dropdown buttons**: The three dropdown buttons at the bottom (model / thought level / subagent) now share consistent icon and text styling.
+- **Anchor track history entry revamped**: The history entry node now uses a layered 3D icon, more noticeable and easier to click.
+
 ## [0.3.1] - 2026-09-02
 
 中文:
