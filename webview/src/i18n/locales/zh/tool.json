@@ -70,7 +70,6 @@
     "roleTask": "任务",
     "finalReport": "子代理最终报告",
     "finalReportCollapsed": "最终报告已生成，点击弹窗阅读",
-    "refreshNow": "立即刷新（每 3 秒自动刷新）",
     "reloadFull": "重新加载完整记录",
     "viewFinalReport": "弹窗阅读最终报告",
     "viewFullProcess": "查看完整执行过程",

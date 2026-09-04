@@ -227,8 +227,9 @@ export function SubagentDetailDialog() {
   // 从此退化为空壳（2026-09-02 diag 实验 7/8 定案：运行中 resume 必杀 v4 流，read
   // 又必须 resume——所以运行中一个 resume 都不能发生）。v4 不可用（老 CLI 降级）
   // 才保留打开首拉 + 3s 轮询兜底。结束（running=false，事件流收尾时会再拉一次
-  // 权威全量）或关闭弹窗即停。手动刷新按钮不受影响（用户主动杀流的代价由翻转
-  // 沿的权威重拉兜底）。
+  // 权威全量）或关闭弹窗即停。手动入口同样受守卫（handleRefresh：运行中不发了，
+  // 按钮本身也只在非运行中渲染——用户实测点刷新即断流，"主动杀流由翻转沿兜底"
+  // 的取舍不成立：live 冻结到回合结束，显示上无从感知"兜底"何时来）。
   // 三态守卫：true=实时流在场；undefined=订阅未决（childSessionId 到位即触发本 effect，
   // 而 subscribeChild 应答未回——此时照发 loadChildMessages 就是运行中 resume，2026-09-02
   // demo18 实测：v4 订阅 500ms 后的 resume 照样把会话切 legacy、增量帧全空壳，diag 实验 7
@@ -284,6 +285,9 @@ export function SubagentDetailDialog() {
 
   const handleRefresh = () => {
     if (!childSessionId) return
+    // 与自动路径同守卫：运行中 + v4 在场/未决时发 loadChildMessages = resume 杀流。
+    // header 按钮已只在非运行中渲染，这里是错误态重试/空态加载入口的兜底
+    if (running && v4state !== false) return
     loadChildMessages(childSessionId)
     triggerSpin()
   }
@@ -329,10 +333,13 @@ export function SubagentDetailDialog() {
               {toolCount > 0 && <span className="subagent-detail-meta-item">{t('tool.toolsCount', { count: toolCount })}</span>}
             </div>
           </div>
-          {childSessionId && (
+          {/* 手动重拉完整记录：只在非运行中出现——运行中实时流就是最新数据，
+              点刷新只会触发 resume 杀流（断流实测 2026-09-04）；降级轮询场景
+              3s 自动拉也不需要它 */}
+          {!running && childSessionId && (
             <button
               className="subagent-detail-icon-btn"
-              data-tip={running ? t('tool.subagent.refreshNow') : t('tool.subagent.reloadFull')}
+              data-tip={t('tool.subagent.reloadFull')}
               onClick={handleRefresh}
             >
               <span className={`codicon codicon-refresh ${loading || refreshSpin ? 'spin' : ''}`} />

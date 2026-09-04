@@ -70,7 +70,6 @@
     "roleTask": "작업",
     "finalReport": "서브에이전트 최종 보고서",
     "finalReportCollapsed": "최종 보고서가 생성되었습니다. 클릭하여 대화상자에서 읽기",
-    "refreshNow": "지금 새로 고침(3초마다 자동 새로 고침)",
     "reloadFull": "전체 기록 다시 로드",
     "viewFinalReport": "대화상자에서 최종 보고서 읽기",
     "viewFullProcess": "전체 실행 과정 보기",

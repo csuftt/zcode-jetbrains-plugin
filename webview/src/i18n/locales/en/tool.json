@@ -70,7 +70,6 @@
     "roleTask": "Task",
     "finalReport": "Subagent Final Report",
     "finalReportCollapsed": "Final report is ready, click to read it in a dialog",
-    "refreshNow": "Refresh now (auto-refreshes every 3 seconds)",
     "reloadFull": "Reload full history",
     "viewFinalReport": "Read final report in dialog",
     "viewFullProcess": "View full execution",

@@ -70,7 +70,6 @@
     "roleTask": "任務",
     "finalReport": "子代理最終報告",
     "finalReportCollapsed": "最終報告已生成，點選彈窗閱讀",
-    "refreshNow": "立即重新整理（每 3 秒自動重新整理）",
     "reloadFull": "重新載入完整記錄",
     "viewFinalReport": "彈窗閱讀最終報告",
     "viewFullProcess": "檢視完整執行過程",

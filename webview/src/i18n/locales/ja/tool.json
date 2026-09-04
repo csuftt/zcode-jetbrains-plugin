@@ -70,7 +70,6 @@
     "roleTask": "タスク",
     "finalReport": "サブエージェント最終レポート",
     "finalReportCollapsed": "最終レポートが生成されました。クリックしてダイアログで閲覧",
-    "refreshNow": "今すぐ更新（3 秒ごとに自動更新）",
     "reloadFull": "完全な記録を再読み込み",
     "viewFinalReport": "ダイアログで最終レポートを閲覧",
     "viewFullProcess": "完全な実行過程を表示",
