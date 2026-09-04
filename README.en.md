@@ -40,6 +40,8 @@ This project has exactly one goal: **use ZCode's core capabilities where you wri
 
 **Process visibility** — live task list (TodoWrite) progress, subagent (Agent) panel with execution-process / final-report popups, file-change stats (click to open in the editor, inline before/after diff), AskUserQuestion interaction dialogs, plan-mode (ExitPlanMode) approval dialogs
 
+**Goal mode** — set a long-running goal with `/goal` and it drives itself across multiple turns: after each turn the server independently verifies progress (timeline separator cards show pass/fail plus the next action), auto-continuing until the goal is met; the corner goal card tracks iterations / elapsed time / verifying status in real time, with pause / resume / replace / confirm-to-clear controls, and goal state survives restarts
+
 **Embedded browser** — the Header globe button expands a browser column to the right of the chat area: multiple tabs (globally shared, persist across sessions), back / forward / refresh / address bar / free-size viewport (DevTools device-toolbar style virtual screen) / DevTools / open externally; the plugin hosts the browser-use reverse protocol, so the AI can drive this browser — navigate, screenshot, execute JS, run playwright locators and CUA mouse/keyboard actions — with zero configuration
 
 **Runtime control** — model dropdown (builtin channels follow the active channel in the ZCode client; manual refresh inside the dropdown), permission mode (build / edit / plan / yolo) and thinking level (per model), adjustable; preselectable in the standby state (before a session exists), applied when the session is created; context-capacity ring (usage breakdown + cache hits), 5-hour / weekly quota queries
@@ -82,6 +84,12 @@ It is more than a built-in browser — the plugin implements the ZCode app-serve
 | ![Subagent execution](docs/screenshots/subagent-detail.png) | ![Subagent final report](docs/screenshots/subagent-report.png) |
 | **Plan-mode approval (ExitPlanMode): full plan in Markdown + approve / reject feedback; approving exits plan mode and starts execution** | |
 | ![Plan-mode approval](docs/screenshots/plan-mode.png) | |
+
+**Goal mode (/goal auto-continuing turns)**
+
+| Multi-turn progress: per-turn verification separator cards (not passed → next action) + goal card iterations / elapsed / verifying | All turns done: final verification passed, goal card switches to complete |
+| :---: | :---: |
+| ![Goal mode in progress](docs/screenshots/goal-processing.png) | ![Goal mode complete](docs/screenshots/goal-done.png) |
 
 **Input enhancements & multi-tasking**
 
