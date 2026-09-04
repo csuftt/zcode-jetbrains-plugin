@@ -109,8 +109,7 @@
       "budgetLimited": "Usage limit reached"
     },
     "stats": {
-      "iteration": "Iteration {{count}}",
-      "tokens": "{{tokens}} tokens"
+      "iteration": "Iteration {{count}}"
     },
     "action": {
       "pause": "Pause goal",
@@ -121,7 +120,12 @@
     },
     "usageHint": "No goal in this session. Usage: /goal <description> to set; /goal pause; /goal resume; /goal clear",
     "verifying": "Verifying round {{count}}",
-    "verifyingTip": "This round is done, checking goal progress"
+    "verifyingTip": "This round is done, checking goal progress",
+    "confirmClear": {
+      "title": "Clear goal",
+      "message": "Clearing stops goal mode; iterations and stats will no longer be shown. Clear the current goal?",
+      "confirm": "Clear"
+    }
   },
   "builtinCommands": {
     "goal": "Set a long-running goal: AI iterates and self-verifies until achieved",

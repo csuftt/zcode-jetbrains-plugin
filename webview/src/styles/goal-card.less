@@ -90,18 +90,23 @@
     animation: goal-pulse 2s ease-in-out infinite;
   }
 
-  // 两行主区（0.3.2 真机反馈：单行太挤）——目标文本行 + 统计行
+  // 两行主区（0.3.2 真机反馈：单行太挤）——目标文本行 + 统计行。
+  // 子行按内容宽收缩（默认 stretch 会把统计行拉成父容器全宽 → 测量锚定
+  // 拿到的是被目标文案撑开的父宽，卡宽锁死满宽，0.3.2 真机二次反馈）
   &__main {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: 2px;
   }
 
   &__objective {
     flex: 1;
-    min-width: 0;
+    // 底部操作行过窄时的宽度保底（一行约 13 字，3 行覆盖多数目标全文；
+    // 操作行更宽时 JS 锚定值接管）——卡宽不再随目标文案变化
+    min-width: 160px;
     font-weight: 500;
     line-height: 1.4;
     // 长目标最多三行（title 悬浮看全文），行末省略
@@ -112,8 +117,17 @@
     word-break: break-word;
   }
 
-  // 统计行：轮次·耗时·token（校验中指示独立成行，不与此行共排——
-  // 共排时整行过宽把卡片顶宽，0.3.2 真机反馈）
+  // 底部一行：统计 + 操作按钮同排（真机三连报卡宽——按钮独占右侧整列时，
+  // 图标+文案区+按钮列三层叠加在窄面板里近满宽；并入底行后卡宽只由这一行主导）
+  &__footer {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  // 统计行：轮次·耗时（token 展示已移除——占宽，ZCode 客户端同款只留两项；
+  // 校验中指示独立成行，不与此行共排——共排时整行过宽把卡片顶宽，0.3.2 真机反馈）
   &__stats {
     flex-shrink: 0;
     display: inline-flex;
@@ -122,21 +136,17 @@
     font-size: 11px;
     color: var(--text-secondary);
     white-space: nowrap;
-    // 等宽数字：走秒/token 估算轮中持续变化，比例数字（1 vs 4）宽度不等会抖
+    // 等宽数字：走秒轮中持续变化，比例数字（1 vs 4）宽度不等会抖
     font-variant-numeric: tabular-nums;
   }
 
-  // 数字段固定占位：位数变化（9s→10s、59s→1m0s、9.9k→10k）不推挤卡宽
+  // 数字段固定占位：位数变化（9s→10s、59s→1m0s）不推挤卡宽
   &__stat-num {
     display: inline-block;
   }
 
   &__stat-duration {
     min-width: 5ch; // "1h23m"（12h34m 罕见，超界一次后稳定）
-  }
-
-  &__stat-tokens {
-    min-width: 11ch; // "888.8k tokens"
   }
 
   &__stat-sep {

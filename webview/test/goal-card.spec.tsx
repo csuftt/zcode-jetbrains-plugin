@@ -6,7 +6,7 @@
  */
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, fireEvent } from '@testing-library/react'
+import { render, fireEvent, act } from '@testing-library/react'
 import { GoalCard } from '@/components/GoalCard'
 
 const sentRequests: Array<Record<string, unknown>> = []
@@ -118,29 +118,9 @@ describe('GoalCard', () => {
     expect(container.querySelector('.goal-card__verify')).toBeNull()
   })
 
-  it('轮中 token 加流式输出估算增量（active 且非校验间隙）', () => {
-    // 服务端轮中零推送（diag 实测），本地按流式字符量粗估增量与耗时走秒对齐
+  it('轮中 token 估算已随展示移除：流式消息不参与统计行（0.3.2 真机反馈：占宽）', () => {
     useStore.setState({
       goal: { ...GOAL, tokensUsed: 10000 } as never,
-      streaming: true,
-      streamingMessageId: 'm_stream',
-      messages: [{
-        info: { role: 'assistant', id: 'm_stream', time: { created: 1 } } as never,
-        parts: [
-          { type: 'text', text: 'a'.repeat(600) },
-          { type: 'reasoning', text: 'b'.repeat(300) },
-          { type: 'tool', callID: 'c1', tool: 'Read', state: { inputRaw: 'c'.repeat(600) } } as never,
-        ],
-      }],
-    })
-    const { container } = render(<GoalCard />)
-    // (600 + 300 + 600/2) / 3 = 400 估算 → 10000 + 400 = 10.4k
-    expect(container.querySelector('.goal-card__stats')?.textContent).toContain('10.4k')
-  })
-
-  it('校验间隙（verifying）不加估算（权威值已含本轮输出，避免双计）', () => {
-    useStore.setState({
-      goal: { ...GOAL, tokensUsed: 10000, verifying: true } as never,
       streaming: true,
       streamingMessageId: 'm_stream',
       messages: [{
@@ -149,8 +129,10 @@ describe('GoalCard', () => {
       }],
     })
     const { container } = render(<GoalCard />)
-    expect(container.querySelector('.goal-card__stats')?.textContent).toContain('10k')
-    expect(container.querySelector('.goal-card__stats')?.textContent).not.toContain('10.2k')
+    const stats = container.querySelector('.goal-card__stats')?.textContent ?? ''
+    expect(stats).toContain('第 2 轮')
+    expect(stats).not.toContain('token')
+    expect(stats).not.toContain('10k')
   })
 
   it('active 态本地走秒：syncedAt 基准上递增显示', () => {
@@ -203,6 +185,50 @@ describe('GoalCard', () => {
     first.unmount()
     const second = render(<GoalCard belowSearch />)
     expect(second.container.querySelector('.goal-card-float--below-search')).not.toBeNull()
+  })
+
+  it('清除目标：二次确认弹窗（portal 挂 body），确认才发 clear', () => {
+    useStore.setState({ goal: GOAL as never })
+    const { container } = render(<GoalCard />)
+    const clearBtn = container.querySelector('.goal-card__btn--clear') as HTMLButtonElement
+    fireEvent.click(clearBtn)
+    // 未确认前不发请求；弹窗 portal 到 body（同归档按钮模式）
+    expect(sentRequests.some((r) => r.op === 'goalManage' && r.action === 'clear')).toBe(false)
+    const modal = document.body.querySelector('.modal-content') as HTMLElement
+    expect(modal).not.toBeNull()
+    expect(modal.textContent).toContain('清除目标')
+    // 取消：关弹窗不发
+    fireEvent.click(modal.querySelector('.modal-btn-cancel') as HTMLButtonElement)
+    expect(document.body.querySelector('.modal-content')).toBeNull()
+    expect(sentRequests.some((r) => r.op === 'goalManage' && r.action === 'clear')).toBe(false)
+    // 再开，确认：发 clear + 关弹窗
+    fireEvent.click(clearBtn)
+    const modal2 = document.body.querySelector('.modal-content') as HTMLElement
+    const confirmBtn = Array.from(modal2.querySelectorAll('.modal-btn')).find(
+      (b) => !b.className.includes('cancel'),
+    ) as HTMLButtonElement
+    fireEvent.click(confirmBtn)
+    expect(sentRequests.some((r) => r.op === 'goalManage' && r.action === 'clear')).toBe(true)
+    expect(document.body.querySelector('.modal-content')).toBeNull()
+  })
+
+  it('目标文本定宽为底部操作行宽（卡宽不随文案长短变化）', () => {
+    useStore.setState({ goal: GOAL as never })
+    const view = render(<GoalCard />)
+    // jsdom 零尺寸：layoutEffect 测得 0 不定宽（首帧保护）
+    expect(view.container.querySelector('.goal-card__objective')?.getAttribute('style')).toBeFalsy()
+    // mock 底部操作行（统计+按钮同排）实测宽，store 更新（依赖变化）触发重测
+    // → objective 定宽同值
+    const footer = view.container.querySelector('.goal-card__footer') as HTMLDivElement
+    vi.spyOn(footer, 'getBoundingClientRect').mockReturnValue({
+      width: 206, x: 0, y: 0, top: 0, left: 0, right: 206, bottom: 0, height: 16, toJSON: () => ({}),
+    } as DOMRect)
+    // 裸 store 更新须 act 包裹，重渲染+layoutEffect 才在断言前完成
+    act(() => {
+      useStore.setState({ goal: { ...GOAL, iterationCount: 3 } as never })
+    })
+    const objective = view.container.querySelector('.goal-card__objective') as HTMLDivElement
+    expect(objective.getAttribute('style')).toContain('width: 206px')
   })
 
   it('i18n 文案存在（zh）', () => {

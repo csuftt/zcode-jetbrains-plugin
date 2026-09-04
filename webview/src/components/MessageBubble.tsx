@@ -79,6 +79,13 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
   if (timelinePart) {
     return <TimelineSeparator part={timelinePart} />
   }
+  // 非流式空壳 assistant（零内容零 token）：goal 记账/校验轮 turn.started 建
+  // 立的乐观消息，真身（纯 timeline 消息）被增量合并滤掉时残留，渲染成
+  // "已工作 0 秒 / 0 in 0 out" 的 footer 空壳（0.3.2 真机反馈）——无可读内容
+  // 直接不渲染（流式中的空消息是"思考中"占位，保留）
+  if (!isUser && !streaming && (parts ?? []).length === 0) {
+    return null
+  }
   if (isUser) {
     const userText = collectUserText(parts)
     // 乐观消息自带 scheduledFireAt（真发时本地构造）；服务端读回（历史重拉/后台直发打开标签）

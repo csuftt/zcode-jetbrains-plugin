@@ -109,8 +109,7 @@
       "budgetLimited": "사용량 한도 도달"
     },
     "stats": {
-      "iteration": "{{count}}회차",
-      "tokens": "{{tokens}} 토큰"
+      "iteration": "{{count}}회차"
     },
     "action": {
       "pause": "목표 일시 중지",
@@ -121,7 +120,12 @@
     },
     "usageHint": "이 세션에는 목표가 없습니다. 사용법: /goal <목표> 설정, /goal pause 일시 중지, /goal resume 재개, /goal clear 해제",
     "verifying": "라운드 {{count}} 검증 중",
-    "verifyingTip": "이번 라운드 작업이 완료되어 목표 달성을 검증 중입니다"
+    "verifyingTip": "이번 라운드 작업이 완료되어 목표 달성을 검증 중입니다",
+    "confirmClear": {
+      "title": "목표 지우기",
+      "message": "지우면 골 모드가 중지되고 라운드와 통계가 더 이상 표시되지 않습니다. 현재 목표를 지우시겠습니까?",
+      "confirm": "지우기"
+    }
   },
   "builtinCommands": {
     "goal": "장기 목표 설정: AI가 여러 라운드에 걸쳐 자동 추진·자체 검증합니다",

@@ -460,11 +460,17 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     )
       return
 
+    const fullText = assembleRefsText(text)
     // 目标模式拦截（/goal）：goal 命令 chip（序列化成 /goal 前缀文本）或直接键入
     // /goal 均转 goalManage 控制意图，不进对话流；目标卡（GoalCard）悬浮在聊天区
-    // 右上角展示状态。子命令：pause/resume/clear；无参 = 状态提示
-    if (fileRefs.length === 0 && skillRefs.length === 0 && pastedTexts.length === 0 && images.length === 0 && !selectedAgent) {
-      const m = text.match(/^\/goal(?:\s+([\s\S]+))?$/)
+    // 右上角展示状态。子命令：pause/resume/clear；无参 = 状态提示。
+    // 匹配对象是拼装后的 fullText：长目标提示词会触发粘贴折叠（≥10 行/≥500 字符
+    // 不进正文、存 pastedTexts 拼在正文后），旧守卫把 pastedTexts 排除导致拦截失效、
+    // /goal 走普通发送（0.3.2 真机反馈）。fileRefs/skillRefs 拼在正文最前，@ 前缀
+    // 自然匹配不上 ^\/goal，行为不变；带图片/子智能体发送目标时不拦截（objective
+    // 是纯文本，图片无法随 goal 下发）。
+    if (images.length === 0 && !selectedAgent) {
+      const m = fullText.match(/^\/goal(?:\s+([\s\S]+))?$/)
       if (m) {
         const goalArg = m[1]?.trim() ?? ''
         if (!goalArg) {
@@ -479,12 +485,11 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
           goalManage('set', goalArg)
         }
         clearEditor()
+        setPastedTexts([])
         setSlashQuery(null)
         return
       }
     }
-
-    const fullText = assembleRefsText(text)
     // 纯图片消息：无正文时补占位文本（对齐 cc-gui 的 [Uploaded N image(s)]——
     // 服务端 content 恒有值、模型端占位语义无歧义）
     let finalText =

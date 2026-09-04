@@ -3753,8 +3753,11 @@ function handleStreamBatchDirect(
       turnHasModelOutput = false
       armSwitchStallHint(sessionId, set, get)
     }
-    // 压缩回合不建流式 assistant 消息（同单推路径：零 delta 空气泡，CompactingIndicator 表达）
-    if (event.type !== 'turn.started' || !get().compacting) {
+    // 压缩回合不建流式 assistant 消息（同单推路径：零 delta 空气泡，CompactingIndicator 表达）；
+    // goal 校验轮同款（verifying 窗口内服务端起 completion verifier 回合，~10s 零
+    // delta——建了就是空气泡+工作中 footer，校验完消失 = 间歇闪屏，0.3.2 真机反馈；
+    // 校验态由 GoalCard"校验中"行表达）
+    if (event.type !== 'turn.started' || (!get().compacting && !get().goal?.verifying)) {
       const result = applyStreamEvent(messages, event, streamingMessageId)
       messages = result.messages
       streamingMessageId = result.streamingMessageId
@@ -3938,6 +3941,16 @@ function handleStreamEvent(
   // 零 delta（实测 63s+ 事件真空），建了就是空气泡；压缩态由 CompactingIndicator
   // 表达，回合结束重拉落地摘要卡/分隔卡
   if (event.type === 'turn.started' && get().compacting) {
+    set({ streaming: true, waitingSince: null })
+    return
+  }
+
+  // goal 校验轮同款守卫：run_finished（verifying=true）到下一 run_started 之间，
+  // 服务端起 completion verifier 回合（实测 ~10s，落库纯 timeline 消息）——流式
+  // 零 delta，turn.started 建的乐观空壳会渲染成空气泡+工作中 footer，校验完
+  // 随全量落地消失，每轮一次的出现/消失即"间歇闪屏"（0.3.2 真机反馈）。校验
+  // 态由 GoalCard 的"校验中"行表达，此处只置流式标志不建消息
+  if (event.type === 'turn.started' && get().goal?.verifying) {
     set({ streaming: true, waitingSince: null })
     return
   }
@@ -4175,19 +4188,33 @@ function mergeGoalRefreshSnapshot(
   get: () => StoreState,
 ) {
   const st = get()
-  const existing = new Set(st.messages.map((m) => m.info.id))
+  // 同 id 的本地空壳（goal 记账/校验轮 turn.started 建立的乐观 assistant，零
+  // delta 残留，id 与落库真身相同）用 incoming 权威版替换——真身带 timeline
+  // part 走分隔卡渲染；旧逻辑按 id 一律滤掉真身，空壳顶位渲染成
+  // "已工作 0 秒 / 0 in 0 out" 的 footer 气泡（0.3.2 真机反馈）
+  const replaceableIds = new Set<string>()
   const incoming = mergeTurnMessages(
     stripLeadingModelChangeMarkers(
       msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
     ),
-  ).filter((m) => !existing.has(m.info.id))
+  ).filter((m) => {
+    const hit = st.messages.find((x) => x.info.id === m.info.id)
+    if (!hit) return true
+    if (hit.info.role === 'assistant' && (hit.parts ?? []).length === 0) {
+      replaceableIds.add(m.info.id)
+      return true
+    }
+    return false
+  })
   // goal set 乐观用户消息（local_u_）与服务端真身同文本双条防护：常规路径 user
   // 真身与流式 assistant 撞 turn.started 的 messageId 被上方 id 集合滤掉（无害，
   // 乐观版顶着），此兜底覆盖 turn.started 未带 messageId（fallback id 不撞）的场景
   const incomingUserTexts = new Set(
     incoming.filter((m) => m.info.role === 'user').map(userTextOf),
   )
-  let base = st.messages
+  let base = replaceableIds.size > 0
+    ? st.messages.filter((x) => !replaceableIds.has(x.info.id))
+    : st.messages
   if (incomingUserTexts.size > 0) {
     const deduped = base.filter(
       (m) => !(m.info.role === 'user' && m.info.id.startsWith('local_u_') && incomingUserTexts.has(userTextOf(m))),

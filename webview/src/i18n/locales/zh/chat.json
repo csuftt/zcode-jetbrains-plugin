@@ -109,8 +109,7 @@
       "budgetLimited": "已达用量上限"
     },
     "stats": {
-      "iteration": "第 {{count}} 轮",
-      "tokens": "{{tokens}} tokens"
+      "iteration": "第 {{count}} 轮"
     },
     "action": {
       "pause": "暂停目标",
@@ -121,7 +120,12 @@
     },
     "usageHint": "当前会话没有目标。用法：/goal <目标描述> 设定；/goal pause 暂停；/goal resume 继续；/goal clear 清除",
     "verifying": "第 {{count}} 轮校验中",
-    "verifyingTip": "本轮工作已完成，正在校验目标达成情况"
+    "verifyingTip": "本轮工作已完成，正在校验目标达成情况",
+    "confirmClear": {
+      "title": "清除目标",
+      "message": "清除后将停止目标模式，轮次与统计不再显示。确定清除当前目标吗？",
+      "confirm": "清除"
+    }
   },
   "builtinCommands": {
     "goal": "设定长目标：AI 自动多轮推进并自校验，直到达成",

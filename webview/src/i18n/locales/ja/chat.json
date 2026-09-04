@@ -109,8 +109,7 @@
       "budgetLimited": "使用量上限に到達"
     },
     "stats": {
-      "iteration": "第 {{count}} 周",
-      "tokens": "{{tokens}} トークン"
+      "iteration": "第 {{count}} 周"
     },
     "action": {
       "pause": "ゴールを一時停止",
@@ -121,7 +120,12 @@
     },
     "usageHint": "このセッションにはゴールがありません。使い方: /goal <目標> で設定、/goal pause で一時停止、/goal resume で再開、/goal clear で解除",
     "verifying": "第 {{count}} ラウンド検証中",
-    "verifyingTip": "このラウンドの作業が完了し、目標達成を検証しています"
+    "verifyingTip": "このラウンドの作業が完了し、目標達成を検証しています",
+    "confirmClear": {
+      "title": "目標をクリア",
+      "message": "クリアするとゴールモードが停止し、ラウンドと統計は表示されなくなります。現在の目標をクリアしますか？",
+      "confirm": "クリア"
+    }
   },
   "builtinCommands": {
     "goal": "長期目標を設定：AI が複数ラウンドで自動推進・自己検証します",
