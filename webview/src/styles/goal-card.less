@@ -104,9 +104,9 @@
 
   &__objective {
     flex: 1;
-    // 底部操作行过窄时的宽度保底（一行约 13 字，3 行覆盖多数目标全文；
-    // 操作行更宽时 JS 锚定值接管）——卡宽不再随目标文案变化
-    min-width: 160px;
+    // 统计行过窄时的宽度保底（一行约 18 字，3 行覆盖绝大多数目标全文；
+    // 统计行更宽时 JS 锚定值接管）——卡宽不再随目标文案变化
+    min-width: 220px;
     font-weight: 500;
     line-height: 1.4;
     // 长目标最多三行（title 悬浮看全文），行末省略
@@ -115,15 +115,6 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
     word-break: break-word;
-  }
-
-  // 底部一行：统计 + 操作按钮同排（真机三连报卡宽——按钮独占右侧整列时，
-  // 图标+文案区+按钮列三层叠加在窄面板里近满宽；并入底行后卡宽只由这一行主导）
-  &__footer {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
   }
 
   // 统计行：轮次·耗时（token 展示已移除——占宽，ZCode 客户端同款只留两项；
