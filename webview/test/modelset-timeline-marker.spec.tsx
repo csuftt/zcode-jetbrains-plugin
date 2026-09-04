@@ -48,6 +48,7 @@ beforeEach(() => {
   useStore.setState({
     currentSessionId: SID,
     streaming: false,
+    syntheticModelChanges: {},
     currentModel: { modelId: 'GLM-5.3', providerId: 'builtin:bigmodel-coding-plan' },
     modelSwitchPrevModel: { modelId: 'GLM-5.3', providerId: 'builtin:bigmodel-coding-plan' },
     messages: [
@@ -130,5 +131,247 @@ describe('modelSet 合成切换分隔卡', () => {
     })
     expect(timelineCards()).toHaveLength(0)
     expect(useStore.getState().currentModel?.modelId).toBe('GLM-5.3')
+  })
+
+  it('延迟切换：回合结束重拉快照无 marker，合成卡被顶掉后补挂回来', () => {
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5.3-Flash',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    expect(timelineCards()).toHaveLength(1)
+    // 回合结束重拉：服务端 marker 下次 send 才落库，快照里没有 model_change
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [
+        { info: { role: 'user', id: 'u1', time: { created: 1 } }, parts: [{ type: 'text', text: 'hi' }] },
+        { info: { role: 'assistant', id: 'a1', time: { created: 2 } }, parts: [{ type: 'text', text: 'hello' }] },
+      ],
+    })
+    const cards = timelineCards()
+    expect(cards).toHaveLength(1)
+    expect(cards[0].info.id).toMatch(/^synthetic-model-change-/)
+    expect(useStore.getState().messages[useStore.getState().messages.length - 1].info.id)
+      .toMatch(/^synthetic-model-change-/)
+    // 暂存保留，等下一次重拉出现真身后摘除
+    expect(useStore.getState().syntheticModelChanges[SID]).toHaveLength(1)
+  })
+
+  it('后续重拉出现服务端 marker 真身：合成卡摘除，不双条', () => {
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5.3-Flash',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    // 首次重拉无 marker → 补挂
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [
+        { info: { role: 'user', id: 'u1', time: { created: 1 } }, parts: [{ type: 'text', text: 'hi' }] },
+      ],
+    })
+    expect(timelineCards()).toHaveLength(1)
+    // 下一次 send 后 marker 落库，回合结束重拉带真身
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [
+        { info: { role: 'user', id: 'u2', time: { created: 3 } }, parts: [{ type: 'text', text: 'next' }] },
+        {
+          info: { role: 'assistant', id: 'm_real', time: { created: 4 } },
+          parts: [{ type: 'timeline', timelineType: 'model_change', toModel: { modelId: 'GLM-5.3-Flash' } }],
+        },
+        { info: { role: 'assistant', id: 'a2', time: { created: 5 } }, parts: [{ type: 'text', text: 'ok' }] },
+      ],
+    })
+    const cards = timelineCards()
+    expect(cards).toHaveLength(1)
+    expect(cards[0].info.id).toBe('m_real')
+    expect(useStore.getState().syntheticModelChanges[SID]).toHaveLength(0)
+  })
+
+  it('连续切换折叠：A→B 后再 B→C，只留一张卡，from 锚定起点 to 最新', () => {
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5.3-Flash',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5-Turbo',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    const cards = timelineCards()
+    expect(cards).toHaveLength(1)
+    const part = cards[0].parts.find((p) => p.type === 'timeline') as {
+      fromModel?: { modelId?: string }
+      toModel?: { modelId?: string }
+    }
+    expect(part.fromModel?.modelId).toBe('GLM-5.3')
+    expect(part.toModel?.modelId).toBe('GLM-5-Turbo')
+    expect(useStore.getState().syntheticModelChanges[SID]).toHaveLength(1)
+  })
+
+  it('连续切换切回起点：净变化为零，卡整体隐藏', () => {
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5.3-Flash',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    expect(timelineCards()).toHaveLength(1)
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5.3',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    expect(timelineCards()).toHaveLength(0)
+    expect(useStore.getState().syntheticModelChanges[SID]).toHaveLength(0)
+    expect(useStore.getState().messages.some((m) => String(m.info.id).startsWith('synthetic-model-change-'))).toBe(false)
+  })
+
+  it('两次切换之间发过消息（尾部非合成卡）：不折叠，追加新卡锚定新起点', () => {
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5.3-Flash',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    // 模拟之间发生了 send：快照无 marker 落地补挂 A→B 后，又有新消息进流
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [
+        { info: { role: 'user', id: 'u1', time: { created: 1 } }, parts: [{ type: 'text', text: 'hi' }] },
+        { info: { role: 'assistant', id: 'a1', time: { created: 2 } }, parts: [{ type: 'text', text: 'hello' }] },
+      ],
+    })
+    useStore.setState({
+      messages: [
+        ...useStore.getState().messages,
+        { info: { role: 'user', id: 'u9', time: { created: 9 } }, parts: [{ type: 'text', text: 'next q' }] },
+      ],
+    })
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5-Turbo',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    const cards = timelineCards()
+    expect(cards).toHaveLength(2)
+    const part = cards[1].parts.find((p) => p.type === 'timeline') as {
+      fromModel?: { modelId?: string }
+      toModel?: { modelId?: string }
+    }
+    expect(part.fromModel?.modelId).toBe('GLM-5.3-Flash')
+    expect(part.toModel?.modelId).toBe('GLM-5-Turbo')
+    expect(useStore.getState().syntheticModelChanges[SID]).toHaveLength(2)
+  })
+
+  it('初始注册（prev==目标，如 applyModelIfReady 自动下发）不合成卡', () => {
+    // applyModelIfReady 先置 currentModel=目标再发 setModel → 应答时 prev==to（A→A）
+    useStore.setState({ modelSwitchPrevModel: null })
+    messageHandler!({
+      op: 'modelSet',
+      sessionId: SID,
+      modelId: 'GLM-5.3',
+      providerId: 'builtin:bigmodel-coding-plan',
+    })
+    expect(timelineCards()).toHaveLength(0)
+    expect(useStore.getState().syntheticModelChanges[SID] ?? []).toHaveLength(0)
+    // currentModel 等状态翻转照常
+    expect(useStore.getState().currentModel?.modelId).toBe('GLM-5.3')
+  })
+
+  it('服务端无 fromModel 的初始注册 marker（会话置顶）：主界面整条隐藏', async () => {
+    const { MessageBubble } = await import('@/components/MessageBubble')
+    const { render } = await import('@testing-library/react')
+    const { container } = render(
+      <MessageBubble
+        message={{
+          info: { role: 'assistant', id: 'm_init', sessionID: SID, time: { created: 5 } },
+          parts: [{
+            type: 'timeline',
+            timelineType: 'model_change',
+            toModel: { modelId: 'GLM-5.3', label: 'builtin:bigmodel-coding-plan/GLM-5.3' },
+          }],
+        }}
+      />,
+    )
+    expect(container.querySelectorAll('.tl-sep')).toHaveLength(0)
+    expect(container.textContent).toBe('')
+  })
+
+  it('快照置顶带 fromModel 的注册 marker（新 CLI 形态）被剔除，中间真实切换保留', () => {
+    // 新 CLI 实测（2026-09-03 db.sqlite）：置顶 marker 带 fromModel（默认→注册），
+    // 「无 fromModel」判据失效，须按位置剔除
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [
+        {
+          info: { role: 'assistant', id: 'm_reg', time: { created: 1 } },
+          parts: [{
+            type: 'timeline',
+            timelineType: 'model_change',
+            fromModel: { modelId: 'GLM-5.3', label: 'builtin:bigmodel-coding-plan/GLM-5.3' },
+            toModel: { modelId: 'GLM-5.3-Flash', label: 'builtin:bigmodel-coding-plan/GLM-5.3-Flash' },
+          }],
+        },
+        { info: { role: 'user', id: 'u1', time: { created: 2 } }, parts: [{ type: 'text', text: 'hi' }] },
+        { info: { role: 'assistant', id: 'a1', time: { created: 3 } }, parts: [{ type: 'text', text: 'hello' }] },
+      ],
+    })
+    // 置顶注册 marker 被剔除
+    expect(timelineCards()).toHaveLength(0)
+    expect(useStore.getState().messages[0].info.id).toBe('u1')
+    // 中间真实切换（首条消息之后）保留
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [
+        { info: { role: 'user', id: 'u1', time: { created: 2 } }, parts: [{ type: 'text', text: 'hi' }] },
+        {
+          info: { role: 'assistant', id: 'm_mid', time: { created: 3 } },
+          parts: [{
+            type: 'timeline',
+            timelineType: 'model_change',
+            fromModel: { modelId: 'GLM-5.3-Flash' },
+            toModel: { modelId: 'GLM-5-Turbo' },
+          }],
+        },
+        { info: { role: 'assistant', id: 'a1', time: { created: 4 } }, parts: [{ type: 'text', text: 'hello' }] },
+      ],
+    })
+    const cards = timelineCards()
+    expect(cards).toHaveLength(1)
+    expect(cards[0].info.id).toBe('m_mid')
+  })
+
+  it('from==to 的净零 marker（服务端连相同模型注册重放也记）：渲染层隐藏', async () => {
+    const { MessageBubble } = await import('@/components/MessageBubble')
+    const { render } = await import('@testing-library/react')
+    const { container } = render(
+      <MessageBubble
+        message={{
+          info: { role: 'assistant', id: 'm_zero', sessionID: SID, time: { created: 6 } },
+          parts: [{
+            type: 'timeline',
+            timelineType: 'model_change',
+            fromModel: { modelId: 'GLM-5.3-Flash', label: 'builtin/GLM-5.3-Flash' },
+            toModel: { modelId: 'GLM-5.3-Flash', label: 'builtin/GLM-5.3-Flash' },
+          }],
+        }}
+      />,
+    )
+    expect(container.querySelectorAll('.tl-sep')).toHaveLength(0)
   })
 })

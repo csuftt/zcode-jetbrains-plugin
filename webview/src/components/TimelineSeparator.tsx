@@ -57,6 +57,12 @@ export function TimelineSeparator({ part }: Props) {
   }
 
   if (part.timelineType === 'model_change') {
+    // 无 fromModel = 老服务端「以模型 X 开始」固有标记；from==to = 净零切换
+    // （实测 2026-09-03 db.sqlite：服务端连相同模型的注册重放也记 marker）——
+    // 两者都无信息量，整条隐藏
+    const fromId = part.fromModel?.modelId ?? part.fromModel?.modelID
+    const toId = part.toModel?.modelId ?? part.toModel?.modelID
+    if (!part.fromModel || (fromId && fromId === toId)) return null
     const from = modelLabel(part.fromModel)
     const to = modelLabel(part.toModel)
     return (

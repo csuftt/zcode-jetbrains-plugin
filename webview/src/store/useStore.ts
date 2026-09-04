@@ -400,6 +400,10 @@ interface StoreState {
   modelPendingSwitch: { sessionId: string; modelId: string; providerId: string } | null
   /** 切换前模型（modelSetPending 回滚选中态用；modelSet/modelSetFailed 清除）*/
   modelSwitchPrevModel: { modelId: string; providerId: string } | null
+  /** 合成 model_change 分隔卡暂存（按会话）：服务端 marker 下次 send 才落库，期间
+   * 的重拉整包替换会顶掉合成卡，重拉落地时按此补挂；快照出现同目标 marker 即移除（防双条）。
+   * 连续切换（消息流尾部仍是合成卡）折叠为一张：新卡顶旧卡、from 锚定链条起点，切回起点则隐藏 */
+  syntheticModelChanges: Record<string, ZCodeMessage[]>
   /** 信息条（区别于 lastError 的非错误提示：延迟切模型等），modelSet/modelSetFailed/切会话清除 */
   lastNotice: string | null
   /** createSession 级别补发被推迟暂存的级别（等 modelSet 落定后按新模型下发，防 -32603 竞态）*/
@@ -754,6 +758,7 @@ export const useStore = create<StoreState>((set, get) => ({
   modelSwitchInFlightAt: null,
   modelPendingSwitch: null,
   modelSwitchPrevModel: null,
+  syntheticModelChanges: {},
   lastNotice: null,
   pendingThoughtLevel: null,
   contextUsage: null,
@@ -2759,33 +2764,80 @@ export function handleResponse(
         lastNotice: null,
         // 模型切换分隔卡（2026-09-02 实测：服务端 marker 在下一次 send 才落库、
         // 不走流式事件推送）——切换成功瞬间本地合成一条即时反馈；插入点=消息流
-        // 尾部，与服务端将来落库位置一致（切换后第一条新消息之前），任何历史
-        // 重拉整包替换会以服务端真身无缝接管，不产生双条。流式中到达的延迟补发
-        //（罕见：补发恰逢下一回合已开跑）跳过——插入位置会错到流式消息之后，
-        // 服务端真身由回合结束重拉显示
+        // 尾部，与服务端将来落库位置一致（切换后第一条新消息之前）。延迟切换路径
+        // 合成卡插入后紧跟回合结束重拉，而快照里还没有 marker——整包替换会顶掉
+        // 合成卡，靠 syntheticModelChanges 暂存在重拉落地时补挂（applyMessagesSnapshot）
+        // 流式中到达的延迟补发（罕见：补发恰逢下一回合已开跑）跳过——插入位置会错到
+        // 流式消息之后，服务端真身由回合结束重拉显示。
+        // 连续切换折叠：消息流末尾仍是未被服务端真身接管的合成卡（两次切换之间
+        // 没发过消息）→ 本次切换顶掉旧卡、from 锚定链条起点模型；切回起点
+        // （净变化为零）→ 卡整体隐藏
         ...(get().streaming
           ? {}
-          : {
-              messages: [
-                ...get().messages,
-                {
+          : (() => {
+              const sid = msg.sessionId ?? get().currentSessionId ?? ''
+              const pending = get().syntheticModelChanges[sid] ?? []
+              const msgs = get().messages
+              const lastId = msgs.length ? String(msgs[msgs.length - 1].info.id ?? '') : ''
+              const lastCardIdx = lastId.startsWith('synthetic-model-change-')
+                ? pending.findIndex((c) => String(c.info.id ?? '') === lastId)
+                : -1
+              if (lastCardIdx >= 0) {
+                const anchor = pending[lastCardIdx].parts.find((p) => p.type === 'timeline')?.fromModel
+                const rest = pending.filter((_, i) => i !== lastCardIdx)
+                if (anchor?.modelId && anchor.modelId === msg.modelId) {
+                  return {
+                    messages: msgs.slice(0, -1),
+                    syntheticModelChanges: { ...get().syntheticModelChanges, [sid]: rest },
+                  }
+                }
+                const card: ZCodeMessage = {
                   info: {
                     role: 'assistant',
                     id: `synthetic-model-change-${Date.now()}`,
-                    sessionID: msg.sessionId ?? get().currentSessionId ?? '',
+                    sessionID: sid,
                     time: { created: Date.now() },
                   },
                   parts: [{
                     type: 'timeline',
                     timelineType: 'model_change',
-                    ...(prevModelForMarker
-                      ? { fromModel: { modelId: prevModelForMarker.modelId, label: prevModelForMarker.modelId } }
+                    ...(anchor
+                      ? { fromModel: { modelId: anchor.modelId, label: anchor.label ?? anchor.modelId } }
                       : {}),
                     toModel: { modelId: msg.modelId, label: msg.modelId },
                   }],
+                }
+                return {
+                  messages: [...msgs.slice(0, -1), card],
+                  syntheticModelChanges: { ...get().syntheticModelChanges, [sid]: [...rest, card] },
+                }
+              }
+              // 初始注册不合成：插件建会话/切会话时 applyModelIfReady 自动下发的
+              // setModel（currentModel 已先被置为目标 → prev==to，如 A→A）与服务端
+              // 落库的无 fromModel marker 同源，都非真实切换，无信息量不插卡
+              if (!prevModelForMarker || prevModelForMarker.modelId === msg.modelId) return {}
+              const card: ZCodeMessage = {
+                info: {
+                  role: 'assistant',
+                  id: `synthetic-model-change-${Date.now()}`,
+                  sessionID: sid,
+                  time: { created: Date.now() },
                 },
-              ],
-            }),
+                parts: [{
+                  type: 'timeline',
+                  timelineType: 'model_change',
+                  fromModel: { modelId: prevModelForMarker.modelId, label: prevModelForMarker.modelId },
+                  toModel: { modelId: msg.modelId, label: msg.modelId },
+                }],
+              }
+              return {
+                messages: [...msgs, card],
+                syntheticModelChanges: {
+                  ...get().syntheticModelChanges,
+                  [sid]: [...pending, card],
+                },
+              }
+            })()),
       })
       // 切换模型后立即刷新用量，圆环 size 随新模型窗口更新（不用等下次对话结束）
       setTimeout(() => get().loadUsage(), 500)
@@ -3846,6 +3898,29 @@ useStore.subscribe((s, prev) => {
 // 终止帧收尾，转圈永不停；用户手动 stop 也因回合已结束而空转。看门狗用
 // messages 快照对账兜底这条"服务端跑完、前端不知道"的断链。
 
+/**
+ * 剔除消息流顶部的 model_change marker（2026-09-03 db.sqlite 实测）：置顶 marker =
+ * 插件建会话后 applyModelIfReady 自动 setModel 注册持久模型的固有落库（服务端记
+ * 「会话默认模型→注册模型」），不是用户切换——新 CLI 近期版本还带 fromModel
+ * （连 from==to 都记），「无 fromModel」判据失效，改按位置判定：真实切换必然
+ * 发生在首条消息之后，顶部的连续 marker 整段剔除不渲染
+ */
+function stripLeadingModelChangeMarkers(messages: ZCodeMessage[]): ZCodeMessage[] {
+  let i = 0
+  while (i < messages.length) {
+    const m = messages[i]
+    const parts = m.parts ?? []
+    const isMarker =
+      m.info.role === 'assistant' &&
+      parts.length > 0 &&
+      parts.every((p) => p.type === 'timeline') &&
+      parts.some((p) => p.type === 'timeline' && p.timelineType === 'model_change')
+    if (!isMarker) break
+    i++
+  }
+  return i > 0 ? messages.slice(i) : messages
+}
+
 /** messages 响应的权威落地（常规重拉与对账收尾共用） */
 function applyMessagesSnapshot(
   msg: { messages: ZCodeMessage[] },
@@ -3858,7 +3933,9 @@ function applyMessagesSnapshot(
   // 同轮 turn 的多条 assistant step 合并为一条（耗时/token 取整轮），
   // 否则重拉后"已工作"塌缩成最后一个 step 的耗时
   const visibleMessages = mergeTurnMessages(
-    msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
+    stripLeadingModelChangeMarkers(
+      msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
+    ),
   )
   // 通知扫描：转录里出现 task-notification 而活动还停在 running（子会话流与
   // 生命周期钩子都错过的场合，如重启恢复）→ 自愈收尾并拉权威列表补齐
@@ -3879,6 +3956,34 @@ function applyMessagesSnapshot(
     if (mode) patch.currentMode = mode
   }
   if (activities !== st.subagentActivities) patch.subagentActivities = activities
+  // 合成 model_change 分隔卡的存活接管：延迟切换（缺陷AC）在回合结束后补发落地，
+  // 合成卡插入后紧跟回合结束重拉——快照里还没有 marker（服务端下次 send 才落库），
+  // 整包替换会顶掉合成卡。此处补挂暂存中快照未见真身的合成卡；快照出现同目标
+  // 模型的 marker 即认为服务端真身已落库，从暂存移除（防双条，由真身接管显示）
+  const pendingSynthetic = st.syntheticModelChanges[get().currentSessionId ?? '']
+  if (pendingSynthetic?.length) {
+    // 匹配扫描用 strip 后的数组：顶部注册 marker（被剔除不显示）不参与真身判定，
+    // 否则会把「切回注册模型」的延迟合成卡误摘（真身 marker 尚未落库，卡就丢了）
+    const serverMarkerTos = new Set(
+      visibleMessages.flatMap((m) =>
+        (m.parts ?? []).flatMap((p) =>
+          p.type === 'timeline' && p.timelineType === 'model_change'
+            ? [p.toModel?.modelId ?? p.toModel?.modelID].filter((v): v is string => !!v)
+            : [],
+        ),
+      ),
+    )
+    const keep = pendingSynthetic.filter(
+      (c) => !c.parts.some((p) => p.type === 'timeline' && serverMarkerTos.has(p.toModel?.modelId ?? '')),
+    )
+    if (keep.length !== pendingSynthetic.length) {
+      patch.syntheticModelChanges = {
+        ...st.syntheticModelChanges,
+        [get().currentSessionId ?? '']: keep,
+      }
+    }
+    if (keep.length > 0) patch.messages = [...(patch.messages as ZCodeMessage[]), ...keep]
+  }
   set(patch)
   if (activities !== st.subagentActivities) get().loadSubagents()
 }
