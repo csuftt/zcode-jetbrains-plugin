@@ -295,6 +295,38 @@ describe('目标模式', () => {
     }
   })
 
+  it('续跑轮流式断头自愈（0.3.2 真机 goal 多轮缺陷）：verifying 吞壳后 delta 到达补建流式壳', () => {
+    // 事件顺序实锤：run_finished（verifying=true）→ 下一工作轮 turn.started
+    // 先于 run_started(session.updated) 到达 → verifying 守卫吞壳（防校验器
+    // 空气泡）→ 此前正文 delta 因无 streamingMessageId 全丢 = 整轮无流式、
+    // 轮末重拉才整段渲染。修复：产出型 delta 到达即就地补建流式壳（id 用
+    // 协议 assistantMessageId，与落库真身同 id，轮末对账天然去重）
+    dispatchStreamEvent('session.updated', { action: 'run_finished', source: 'runtime', target: { ...MOCK_TARGET, status: 'active' } })
+    expect(useStore.getState().goal?.verifying).toBe(true)
+    dispatchStreamEvent('turn.started', { messageId: 'm_user_next' })
+    expect(useStore.getState().streaming).toBe(true)
+    expect(useStore.getState().streamingMessageId).toBeNull()
+    dispatchStreamEvent('model.streaming', { kind: 'text_delta', delta: '第 2 轮', assistantMessageId: 'm_a_real' })
+    dispatchStreamEvent('model.streaming', { kind: 'text_delta', delta: '开始执行', assistantMessageId: 'm_a_real' })
+    const st = useStore.getState()
+    expect(st.streamingMessageId).toBe('m_a_real')
+    const shell = st.messages.find((m) => m.info.id === 'm_a_real')
+    expect(shell?.info.role).toBe('assistant')
+    expect((shell?.parts?.[0] as { text?: string })?.text).toBe('第 2 轮开始执行')
+  })
+
+  it('校验器回合零 delta 不建壳（吞壳守卫保持：空气泡/闪屏不回归）', () => {
+    useStore.setState({ streaming: false, streamingMessageId: null })
+    dispatchStreamEvent('session.updated', { action: 'run_finished', source: 'runtime', target: { ...MOCK_TARGET, status: 'active' } })
+    const before = useStore.getState().messages.length
+    dispatchStreamEvent('turn.started', { messageId: 'm_verify_turn' })
+    expect(useStore.getState().messages.length).toBe(before)
+    // 校验窗口结束（run_started 到达）仍无产出 → 无壳
+    dispatchStreamEvent('session.updated', { action: 'run_started', source: 'runtime', target: { ...MOCK_TARGET, iterationCount: 2 } })
+    expect(useStore.getState().messages.length).toBe(before)
+    expect(useStore.getState().streamingMessageId).toBeNull()
+  })
+
   it('goalRefresh 响应：streaming 中增量合并（校验卡插到流式消息前，不顶掉流内容）', () => {
     const userMsg: ZCodeMessage = { info: { role: 'user', id: 'm_user', time: { created: 1 } } as never, parts: [{ type: 'text', text: 'go' }] }
     const streamMsg: ZCodeMessage = { info: { role: 'assistant', id: 'm_stream', time: { created: 2 } } as never, parts: [{ type: 'text', text: '正在写' }] }

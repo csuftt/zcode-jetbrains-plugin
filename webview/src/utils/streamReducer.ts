@@ -76,7 +76,7 @@ export function applyStreamEvent(
     }
 
     case 'model.streaming':
-      return handleModelStreaming(messages, streamingMessageId, event.timestamp, payload)
+      return handleModelStreaming(messages, streamingMessageId, event, payload)
 
     case 'tool.updated':
       return handleToolUpdated(messages, streamingMessageId, event.timestamp, payload)
@@ -166,23 +166,37 @@ function closeOpenReasoning(parts: MessagePart[], timestamp: number): void {
 function handleModelStreaming(
   messages: ZCodeMessage[],
   streamingMessageId: string | null,
-  timestamp: number,
+  event: StreamEvent,
   payload: StreamEvent['payload'],
 ): { messages: ZCodeMessage[]; streamingMessageId: string | null; turnEnded: boolean; modeEvent?: ModeEvent } {
-  if (!streamingMessageId) {
-    // 还没收到 turn.started（异常），创建一个临时消息
-    return { messages, streamingMessageId, turnEnded: false }
-  }
-
-  const p = payload as { kind: string; delta?: string }
+  const p = payload as { kind: string; delta?: string; assistantMessageId?: string }
   const kind = p.kind
   const delta = p.delta || ''
+
+  if (!streamingMessageId) {
+    // turn.started 未建壳而产出型 delta 已到达 = 实际工作轮，就地补建流式壳
+    // 恢复流式链（goal 续跑轮实测 turn.started 先于 run_started 到达，上一轮
+    // run_finished 置的 verifying 未清，守卫吞壳防校验器空气泡——缺陷AW；
+    // delta 全丢即整轮断头，轮末重拉才整段渲染）。壳 id 优先协议
+    // assistantMessageId（与落库真身同 id，轮末对账天然去重），缺省回退
+    // stream_ 命名空间；校验器回合零 delta 永不进此分支
+    const productive =
+      kind === 'text_delta' || kind === 'reasoning_delta' ||
+      kind === 'tool_input_start' || kind === 'tool_input_delta' ||
+      kind === 'tool_input_end' || kind === 'tool_call'
+    if (!productive) return { messages, streamingMessageId, turnEnded: false }
+    const shellId = p.assistantMessageId || `stream_${event.turnId || event.seq}`
+    if (!messages.some((m) => m.info.id === shellId)) {
+      messages = [...messages, createAssistantMessage(event, shellId)]
+    }
+    streamingMessageId = shellId
+  }
 
   // 工具输入流式（zcode 协议：tool_input_start → tool_input_delta → tool_input_end / tool_call）：
   // 模型生成工具参数时实时下发，回合中即可展示"在运行什么命令/读写什么文件"（缺陷F）
   if (kind === 'tool_input_start' || kind === 'tool_input_delta' ||
       kind === 'tool_input_end' || kind === 'tool_call') {
-    return handleToolInputStreaming(messages, streamingMessageId, timestamp, payload)
+    return handleToolInputStreaming(messages, streamingMessageId, event.timestamp, payload)
   }
 
   const idx = messages.findIndex((m) => m.info.id === streamingMessageId)
@@ -202,7 +216,7 @@ function handleModelStreaming(
       parts[parts.length - 1] = { ...lastPart, text: lastPart.text + delta }
     } else {
       // 新建 text part（正文出现 = 前一段思考结束，收尾思考计时）
-      closeOpenReasoning(parts, timestamp)
+      closeOpenReasoning(parts, event.timestamp)
       parts.push({ type: 'text', text: delta })
     }
   } else if (kind === 'reasoning_delta') {
@@ -210,7 +224,7 @@ function handleModelStreaming(
       parts[parts.length - 1] = { ...lastPart, text: lastPart.text + delta }
     } else {
       // 新建 reasoning part，记下思考开始时刻（耗时统计用）
-      parts.push({ type: 'reasoning', text: delta, time: { start: timestamp } })
+      parts.push({ type: 'reasoning', text: delta, time: { start: event.timestamp } })
     }
   } else {
     return { messages, streamingMessageId, turnEnded: false }

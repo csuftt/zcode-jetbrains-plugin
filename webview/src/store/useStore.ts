@@ -4313,6 +4313,21 @@ function scheduleGoalRefresh(sessionId: string) {
   }, 800)
 }
 
+/** goal 校验消息判据（timeline goal_verification part，两阶段落库的唯一消息形态） */
+function isGoalVerifyMessage(m: ZCodeMessage): boolean {
+  return (m.parts ?? []).some(
+    (p) => p.type === 'timeline' && (p as { timelineType?: string }).timelineType === 'goal_verification',
+  )
+}
+
+/** 校验消息的 verification 内容（两阶段落库回填前为空，内容比较判据） */
+function goalVerificationOf(m: ZCodeMessage): unknown {
+  const p = (m.parts ?? []).find(
+    (x) => x.type === 'timeline' && (x as { timelineType?: string }).timelineType === 'goal_verification',
+  )
+  return (p as { verification?: unknown }).verification ?? null
+}
+
 /** user 消息纯文本（goal 乐观消息与服务端真身的同文本判据） */
 function userTextOf(m: ZCodeMessage): string {
   return (m.parts ?? [])
@@ -4337,6 +4352,12 @@ function mergeGoalRefreshSnapshot(
   // part 走分隔卡渲染；旧逻辑按 id 一律滤掉真身，空壳顶位渲染成
   // "已工作 0 秒 / 0 in 0 out" 的 footer 气泡（0.3.2 真机反馈）
   const replaceableIds = new Set<string>()
+  // 校验消息两阶段落库（sqlite 实测：工作轮结束即建占位、verification 空，
+  // 校验完成 ~7-20s 后才回填）——回填版须覆盖本地 pending 空形态（否则校验卡
+  // 滞后到下一轮轮末重拉，缺陷AY）。但必须**原位覆盖**且仅内容变化时替换：
+  // 挪到 incoming 统一插入位（流式消息前）会把已就位的校验卡每轮拔起、
+  // 全部堆叠到最新轮次处（缺陷AY 修复回归，0.3.2 真机第二轮实测）
+  const backfillById = new Map<string, ZCodeMessage>()
   const incoming = mergeTurnMessages(
     stripLeadingModelChangeMarkers(
       msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
@@ -4347,6 +4368,12 @@ function mergeGoalRefreshSnapshot(
     if (hit.info.role === 'assistant' && (hit.parts ?? []).length === 0) {
       replaceableIds.add(m.info.id)
       return true
+    }
+    if (isGoalVerifyMessage(hit) && isGoalVerifyMessage(m)) {
+      if (JSON.stringify(goalVerificationOf(hit)) !== JSON.stringify(goalVerificationOf(m))) {
+        backfillById.set(m.info.id, m)
+      }
+      return false
     }
     return false
   })
@@ -4359,6 +4386,10 @@ function mergeGoalRefreshSnapshot(
   let base = replaceableIds.size > 0
     ? st.messages.filter((x) => !replaceableIds.has(x.info.id))
     : st.messages
+  // 校验回填原位覆盖（位置不动、只换内容——插入式替换会造成历史校验卡堆叠）
+  if (backfillById.size > 0) {
+    base = base.map((x) => backfillById.get(x.info.id) ?? x)
+  }
   if (incomingUserTexts.size > 0) {
     const deduped = base.filter(
       (m) => !(m.info.role === 'user' && m.info.id.startsWith('local_u_') && incomingUserTexts.has(userTextOf(m))),

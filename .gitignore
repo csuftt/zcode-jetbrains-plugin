@@ -48,6 +48,9 @@ npm-debug.log*
 # ===== GUI 测试截图（临时验收产物）=====
 gui-test-screenshots/
 
+# ===== goal 模式真机测试 scratch（临时 demo，不入库）=====
+/goal-multi-round-demo/
+
 # ===== webview 构建产物（不入库：npm build 生成，见 build.sh；避免 hash 文件名每次变更污染历史）=====
 intellij-plugin/src/main/resources/webview/
 intellij-plugin/src/main/resources/webview-single/
