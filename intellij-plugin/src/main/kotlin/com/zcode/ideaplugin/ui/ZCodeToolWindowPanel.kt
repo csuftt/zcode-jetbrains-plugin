@@ -193,6 +193,8 @@ class ZCodeToolWindowPanel(
             try {
                 val ws = com.zcode.ideaplugin.protocol.model.Workspace(workspacePath)
                 client.resume(sessionId, ws)
+                // 驻留账本记账（缺陷BA）：服务端把会话载入 16 上限的驻留集合
+                project.zCodeService().residentLedger.touch(sessionId)
                 log.info("resume succeeded: $sessionId (workspace=$workspacePath)")
                 true
             } catch (e: Exception) {
@@ -904,7 +906,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         put("envStatus", com.zcode.ideaplugin.env.ZCodeEnvChecker.statusJson(e.status))
                     })
                 } catch (e: Exception) {
-                    log.error("op=$op handling failed", e)
+                    // 驻留槽位满（缺陷BA）：预期内失败降级 warn 不带堆栈（防 IDE 红色弹窗）
+                    if (isSessionNotActiveError(e)) {
+                        log.warn("op=$op failed: resident pool likely full: ${e.message}")
+                    } else {
+                        log.error("op=$op handling failed", e)
+                    }
                     sendToJs(errorResponse("处理失败: ${e.message}"))
                 }
             }
@@ -2960,6 +2967,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     log.info("send hit hung turn (-32010), retrying after stop: $sessionId")
                 } else {
                     client.resume(sessionId, com.zcode.ideaplugin.protocol.model.Workspace(workspacePath))
+                    project.zCodeService().residentLedger.touch(sessionId)
                     log.info("send hit cold session (-32004), retrying after resume: $sessionId")
                 }
                 // 后端换代场景（进程重启后 send 才触发 getClient 重建）：订阅簿记此时才
@@ -2973,7 +2981,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 }
                 client.send(sessionId, text, workspacePath, providerId = providerId, modelId = modelId, attachments = attachments)
             } catch (e2: Exception) {
-                log.error("send failed (still failing after recovery retry)", e2)
+                // -32004（槽位满时 LRU 踢掉刚 resume 的会话自己，缺陷BA）：恢复链路内
+                // 的预期失败降级 warn 不带堆栈，防 IDE 红色错误弹窗（新会话发送也走这里）
+                if (isSessionNotActiveError(e2)) {
+                    log.warn("send still failing after recovery retry: resident pool likely full: ${e2.message}")
+                } else {
+                    log.error("send failed (still failing after recovery retry)", e2)
+                }
                 return errorResponse("发送失败: ${e2.message}")
             }
         }
@@ -3249,7 +3263,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /** client 换代则清空订阅簿记（两个 subscribe 入口调用；换代后首访触发）*/
     private fun invalidateStaleSubscriptions(client: com.zcode.ideaplugin.protocol.ZCodeProtocolClient) {
         if (subscribedClientRef === client) return
-        log.info("Protocol client changed (app-server restarted), resetting subscription bookkeeping")
+        // 首次记录（引用为 null）≠ 换代：多标签下每个 panel 各有一份簿记，新标签首次
+        // subscribe 必走这里——打 "app-server restarted" 会把进程排查带偏（2026-09-04
+        // 排查驻留淘汰缺陷时实踩：三次 "changed" 全是新标签首订，进程从未重启）
+        if (subscribedClientRef == null) {
+            log.info("First subscription bookkeeping on this panel, recording client reference")
+        } else {
+            log.info("Protocol client changed (app-server restarted), resetting subscription bookkeeping")
+        }
         subscribedClientRef = client
         globalListenerRegistered = false
         subscribedSessions.clear()
@@ -3278,6 +3299,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
         globalListenerRegistered = true
         log.info("Global event listener registered")
     }
+
+    /** -32004 驻留槽位满判定（预期内失败，各链路据此降级日志/走友好提示，与 send/getSettings 现有判定同形）*/
+    private fun isSessionNotActiveError(e: Throwable): Boolean =
+        e.message?.let {
+            it.contains("-32004") || it.contains("Session is not active", ignoreCase = true)
+        } == true
 
     /**
      * 订阅会话的流式事件（阶段 2.4 核心）
@@ -3310,6 +3337,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
+        // 驻留水位检查（缺陷BA）：app-server 驻留 16 上限，占坑永久（被订阅会话不参与
+        // 空闲清理、无退订 RPC）、超限淘汰有"踢刚载入会话自己"的服务端排序缺陷。越过
+        // 阈值在应答里带警告，前端 toast 引导重启 IDE 释放槽位
+        val residentPoolWarning = project.zCodeService().residentLedger.checkBeforeOpen(sessionId)
+
         // subscribe 要求会话 active，先 resume（同会话短窗去重：messages 链路并发 resume 只排一次队）
         resumeSessionDeduped(client, sessionId, workspacePath)
 
@@ -3317,8 +3349,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
         try {
             client.subscribe(sessionId, onEvent = null)
             subscribedSessions.add(sessionId)
-            log.info("subscribe session $sessionId succeeded (events via global listener)")
+            log.info("subscribe session $sessionId succeeded (events via global listener)${if (residentPoolWarning) " (resident pool warning)" else ""}")
         } catch (e: Exception) {
+            // 驻留槽位满（缺陷BA）：预期内失败（占坑永久、16 上限），已由前端 hint 引导
+            // 重启释放——降级 warn 不带堆栈，避免触发 IDE 红色错误弹窗惊扰用户
+            if (isSessionNotActiveError(e)) {
+                log.warn("subscribe failed: resident pool likely full (reopen IDE to free slots): ${e.message}")
+                return errorResponse("订阅失败: ${e.message}")
+            }
             log.error("subscribe session $sessionId failed", e)
             // 忙窗口超时（缺陷AB）：应答仍即时回错误，后台延迟重试——事件流经全局监听器
             // 转发，重试成功后无需额外通知（事件自然开始流动）
@@ -3329,6 +3367,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject {
             put("op", "subscribed")
             put("sessionId", sessionId)
+            if (residentPoolWarning) put("residentPoolWarning", true)
         }
     }
 

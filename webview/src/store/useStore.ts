@@ -293,6 +293,9 @@ interface StoreState {
   lastError: string | null
   projectPath: string
 
+  /** 驻留水位提醒（缺陷BA）：Java 账本预计打开会话后越过服务端驻留阈值时由 subscribed 应答置位 */
+  residentPoolNotice: string | null
+
   // 运行环境（node / zcode.cjs / 凭证三件套）
   /** null = 尚未检测完成（init 异步拉取）；allOk=false 时主界面显示环境提醒条 */
   envStatus: EnvStatus | null
@@ -679,6 +682,8 @@ interface StoreState {
   /** 清除错误（错误栏关闭按钮）*/
   clearError: () => void
   clearNotice: () => void
+  /** 清除驻留水位提醒（toast 自动消失/手动关闭）*/
+  clearResidentPoolNotice: () => void
   /** 设置 EnvBanner「去设置」的跳转意图（BasicSettingsView 消费后清除）*/
   setPendingSettingsSection: (section: 'env' | 'agents' | null) => void
   /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
@@ -740,6 +745,7 @@ let bridgeInitialized = false
 export const useStore = create<StoreState>((set, get) => ({
   connectionStatus: 'connecting',
   lastError: null,
+  residentPoolNotice: null,
   projectPath: '',
   envStatus: null,
   envSaving: false,
@@ -1828,6 +1834,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   clearError: () => set({ lastError: null }),
 
+  clearResidentPoolNotice: () => set({ residentPoolNotice: null }),
+
   clearNotice: () => set({ lastNotice: null }),
 
   setPendingSettingsSection: (section) => set({ pendingSettingsSection: section }),
@@ -2662,6 +2670,11 @@ export function handleResponse(
       break
 
     case 'subscribed': {
+      // 驻留水位提醒（缺陷BA）：Java 账本预计打开该会话后越过服务端驻留阈值。
+      // 同水位 Java 侧只带一次标志，前端置位后由 toast 自动消失/手动关闭清除
+      if (msg.residentPoolWarning && !get().residentPoolNotice) {
+        set({ residentPoolNotice: i18n.t('app.residentPoolWarning') })
+      }
       // 待命态目标补发（订阅已生效，goal 控制轮事件从第一条起可达——时序背景见
       // case 'createSession' 的 pendingGoal 注释；2.5s 兜底定时器与本处幂等竞速）
       const pendingGoal = get().pendingGoalCreation
@@ -2722,7 +2735,10 @@ export function handleResponse(
       // 建会话失败（Java 外层 catch 回 error）：复位懒创建标志与暂存消息（防卡死、防误重试）
       // -32004（Session is not active）追加人话提示：CLI 升级/重启后的新进程里会话
       // 未激活，此前用户只看到协议原文不知道该怎么办（2026-08-19 升级中断实测）
-      const sessionInactive = /Session is not active/i.test(msg.message)
+      // -32004 家族（缺陷BA）："Session is not active"（既有会话被 LRU 踢出驻留）与
+      // "Session not found"（新建会话撞槽位满被整体挤出、尚不可 resume）同因不同文，
+      // 按错误码/两种文案匹配，统一追加槽位指引
+      const sessionInactive = /-32004|Session is not active|Session not found/i.test(msg.message)
       // -32010（A prompt is already running）：服务端回合悬挂，Java 已自动 stop+重发，
       // 走到前端说明自愈失败——提示可操作文案；且跳过 flushQueue（服务端 prompt 状态
       // 未清前队列下一条大概率再撞，会连环报错，2026-08-20 实测）
@@ -2735,12 +2751,14 @@ export function handleResponse(
       // 浏览器数据操作在途时一并取消其兜底定时器，防后续误报超时
       if (get().browserBusy) Array.from(browserBusyTimers.keys()).forEach(cancelBrowserBusyTimer)
       set({
+        // 人话指引放句首、协议原文挪进括号（缺陷BA）：错误条空间有限，指引垫在
+        // 句尾会被截断——用户先看到"怎么办"，原文只作存证
         lastError: sessionInactive
-          ? `${msg.message}；${i18n.t('app.sessionInactiveHint')}`
+          ? `${i18n.t('app.sessionInactiveHint')}（${msg.message}）`
           : promptRunning
-            ? `${msg.message}；${i18n.t('app.promptRunningHint')}`
+            ? `${i18n.t('app.promptRunningHint')}（${msg.message}）`
             : resumeBusy
-              ? `${msg.message}；${i18n.t('app.resumeBusyHint')}`
+              ? `${i18n.t('app.resumeBusyHint')}（${msg.message}）`
               : msg.message,
         // 环境前置检查失败（EnvCheckException/envSave 验证失败）：附带 envStatus 刷新提醒条
         ...(msg.envStatus ? { envStatus: msg.envStatus } : {}),

@@ -23,6 +23,13 @@ interface ZCodeService {
     /** 获取协议客户端（懒启动） */
     fun getClient(): ZCodeProtocolClient
 
+    /**
+     * 服务端会话驻留水位账本（缺陷BA 缓解）：app-server 驻留会话 16 上限，超限
+     * 淘汰且有"踢刚载入会话自己"的排序缺陷（打开历史会话报 -32004 的根因）。
+     * 面板 resume 成功后记账、打开新会话前查水位，越过阈值提醒用户。
+     */
+    val residentLedger: com.zcode.ideaplugin.ui.ResidentLedger
+
     /** 客户端是否已启动 */
     fun isStarted(): Boolean
 

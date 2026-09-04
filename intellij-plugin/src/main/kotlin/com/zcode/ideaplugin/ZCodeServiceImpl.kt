@@ -124,6 +124,9 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
     @Volatile
     private var client: ZCodeProtocolClient? = null
 
+    /** 会话驻留水位账本（与 app-server 进程同生命周期，换代即清，见 ResidentLedger）*/
+    override val residentLedger = com.zcode.ideaplugin.ui.ResidentLedger()
+
     private val lock = ReentrantLock()
 
     /** 所有已注册面板（多标签页，每个标签一个）*/
@@ -254,6 +257,8 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                 )
             }
             client = newClient
+            // 新 app-server 进程的驻留集合从零开始：账本与提醒状态一并重置
+            residentLedger.invalidateAll()
             // 协议就绪即注册反向请求 handler（幂等）。注册点放在这里而非仅面板初始化：
             // 面板初始化时环境未就绪会抛 EnvCheckException 跳过注册，若不在此补注册，
             // 用户配好环境后 handler 永远缺席（Mac 首启 PATH 探测失败即触发过）
@@ -322,6 +327,8 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         lock.withLock {
             client?.close()
             client = null
+            // 进程将被杀，驻留集合随之消亡：账本清零（下次 getClient 重建亦会重置，双保险）
+            residentLedger.invalidateAll()
             // handler 注册标志随旧实例作废：getClient 换代后 registerProtocolHandlersLocked
             // 须在新 client 上重挂 askUser / browser-use handler。旧版不重置——环境变更
             // 触发 shutdown 后新 client 缺 handler，AskUserQuestion 被服务端自动 decline、

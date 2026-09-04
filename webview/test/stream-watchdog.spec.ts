@@ -81,11 +81,19 @@ beforeEach(() => {
 })
 
 describe('store：-32004 冷会话错误提示', () => {
-  it('Session is not active 错误追加恢复提示', () => {
+  it('Session is not active 错误追加恢复提示（指引前置、原文在括号内）', () => {
     messageHandler!({ op: 'error', message: '发送失败: [-32004] Session is not active: sess_x' })
     const lastError = useStore.getState().lastError || ''
     expect(lastError).toContain('Session is not active')
-    expect(lastError).toContain('历史') // 提示里引导从历史列表重开
+    expect(lastError).toContain('槽位') // 提示解释服务端会话槽位上限语义（缺陷BA）
+    expect(lastError.indexOf('槽位')).toBeLessThan(lastError.indexOf('Session is not active')) // 指引在句首（缺陷BA 四轮）
+  })
+
+  it('Session not found 变体同样追加槽位指引（新建会话撞槽位满，缺陷BA 五轮）', () => {
+    messageHandler!({ op: 'error', message: '发送失败: [-32004] Session not found: sess_y' })
+    const lastError = useStore.getState().lastError || ''
+    expect(lastError).toContain('Session not found')
+    expect(lastError).toContain('槽位')
   })
 
   it('普通错误不追加提示，原样展示', () => {

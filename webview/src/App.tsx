@@ -141,6 +141,15 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [toast])
 
+  // 驻留水位提醒（缺陷BA）：停留久一些让用户读到引导文案，14s 自动消失
+  const residentPoolNotice = useStore((s) => s.residentPoolNotice)
+  const clearResidentPoolNotice = useStore((s) => s.clearResidentPoolNotice)
+  useEffect(() => {
+    if (!residentPoolNotice) return
+    const timer = setTimeout(clearResidentPoolNotice, 14000)
+    return () => clearTimeout(timer)
+  }, [residentPoolNotice, clearResidentPoolNotice])
+
   useEffect(() => {
     init()
   }, [init])
@@ -324,6 +333,18 @@ export default function App() {
 
       {/* 轻量 toast */}
       {toast && <div className="app__toast">{toast}</div>}
+
+      {/* 驻留水位提醒（缺陷BA）：通栏信息条（与 notice-bar 同构）——悬浮 toast 在窄
+          面板下被挤成窄卡多行且关闭钮悬空（六轮用户反馈），通栏能用满面板宽度；
+          停留 14s 自动消失（上方 useEffect）*/}
+      {residentPoolNotice && (
+        <div className="app__notice-bar">
+          <span>⚠️ {residentPoolNotice}</span>
+          <button className="app__error-close" onClick={clearResidentPoolNotice} aria-label={t('app.errorCloseAria')}>
+            <span className="codicon codicon-close" />
+          </button>
+        </div>
+      )}
 
       {/* 新建会话二次确认 */}
       {confirmNewSession && (

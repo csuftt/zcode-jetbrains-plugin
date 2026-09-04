@@ -798,7 +798,8 @@ export type JavaResponse =
   | { op: 'sendAccepted'; sessionId: string; accepted: string; cliResponse?: unknown }
   /** getClipboardImage 响应：base64 缺省 = 剪贴板无图片（Java 侧读取失败同样返回空）*/
   | { op: 'clipboardImage'; base64?: string; mediaType?: string }
-  | { op: 'subscribed'; sessionId: string; alreadySubscribed?: boolean }
+  /** subscribed 附带驻留水位警告：Java 侧账本预计打开后越过提醒阈值（16 上限，缺陷BA）*/
+  | { op: 'subscribed'; sessionId: string; alreadySubscribed?: boolean; residentPoolWarning?: boolean }
   | { op: 'subscribedChild'; sessionId: string; v4?: boolean }
   | { op: 'unsubscribedChild'; sessionId: string }
   | { op: '__jsLogAck' }

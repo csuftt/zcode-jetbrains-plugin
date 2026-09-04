@@ -71,17 +71,22 @@ body {
     border-top: 1px solid color-mix(in srgb, var(--status-error) 40%, transparent);
     flex-shrink: 0;
 
-    /* 文字占满剩余空间，关闭按钮靠右 */
+    /* 文字占满剩余空间、最多两行（缺陷BA）：单行 ellipsis 会把句中句尾的
+       可操作指引截掉；line-clamp 超两行仍收省略号，防超长错误撑爆面板 */
     > span:first-child {
       flex: 1;
       min-width: 0;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      word-break: break-word;
     }
   }
 
-  /* 信息条（延迟切模型等非错误提示）：与 error-bar 同构，warning 配色 */
+  /* 信息条（延迟切模型/驻留水位提醒等非错误提示）：与 error-bar 同构，warning 配色。
+     文字自然换行不裁剪（缺陷BA 六轮：水位文案长，单行 ellipsis/两行钳制都会截掉
+     重启指引；通栏内容有界，多行可接受） */
   &__notice-bar {
     display: flex;
     align-items: center;
@@ -96,9 +101,7 @@ body {
     > span:first-child {
       flex: 1;
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      word-break: break-word;
     }
 
     /* 复用 error-bar 的关闭按钮，配色换 warning */
@@ -136,21 +139,31 @@ body {
     }
   }
 
-  /* toast（轻量提示：暂未支持等）*/
+  /* toast（轻量提示）：限宽防长文案挤成窄条，flex 布局给可能的多行留余地 */
   &__toast {
     position: fixed;
     top: 60px;
     left: 50%;
     transform: translateX(-50%);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    max-width: min(680px, calc(100vw - 48px));
     background: var(--bg-elevated);
     border: 1px solid var(--border-primary);
     color: var(--text-secondary);
-    padding: 8px 16px;
-    border-radius: 6px;
+    padding: 10px 14px;
+    border-radius: 8px;
     font-size: 13px;
+    line-height: 1.6;
     box-shadow: var(--shadow-card);
     z-index: 9999;
     animation: app-toast-in 0.2s ease;
+
+    > span {
+      flex: 1;
+      min-width: 0;
+    }
   }
 }
 

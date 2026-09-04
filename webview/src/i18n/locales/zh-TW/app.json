@@ -5,7 +5,7 @@
   "backendApiError": "模型服務錯誤（HTTP {{statusCode}}）：{{message}}",
   "turnFailed": "本輪執行失敗：{{message}}",
   "turnFailedNoDetail": "本輪執行失敗（伺服器未返回錯誤詳情）",
-  "sessionInactiveHint": "會話在伺服器端不活躍（CLI 升級或重啟後的新程序尚未啟用它），插件會自動恢復後重發；若仍失敗，請從歷史列表重新開啟該會話",
+  "sessionInactiveHint": "會話槽位已滿（伺服器上限 16，已開啟的會話不會自動釋放）：重啟 IDE 釋放槽位後，重新傳送訊息或從歷史列表重新開啟會話即可",
   "modelSwitchDeferred": "模型切換將在本輪結束後生效：{{model}}",
   "modelCaptchaGated": "體驗套餐模型的介面需完成人機驗證（滑塊），插件無法代為完成，請選擇個人套餐或 API Key 渠道的模型",
   "modelSwitchStallHint": "切換模型後的首個回合已等待 1 分鐘仍無任何輸出，可能被服務端掛起（多為模型服務端瞬時故障）：可停止後重發，或切回原模型再試",
@@ -93,5 +93,6 @@
     "cliNotFound": "未在標準安裝位置找到 zcode.cjs，請確認已安裝 ZCode 用戶端",
     "credsMissing": "設定檔不存在：{{arg}}（請將 ZCode 用戶端升級到最新版並重新登入，或新增 API Key 型模型後重新檢測）",
     "credsInvalid": "設定檔無可用憑證：{{arg}}（oauth 登入憑證為加密儲存；請將 ZCode 用戶端升級到最新版並重新登入，或新增 API Key 型模型後重新檢測）"
-  }
+  },
+  "residentPoolWarning": "已連續開啟較多會話，接近伺服器槽位上限（16）：已開啟的會話持續占用、不自動釋放，更早的歷史會話可能載入失敗。建議重啟 IDE 釋放槽位"
 }

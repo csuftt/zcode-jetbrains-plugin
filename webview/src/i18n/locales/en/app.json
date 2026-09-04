@@ -5,7 +5,7 @@
   "backendApiError": "Model API error (HTTP {{statusCode}}): {{message}}",
   "turnFailed": "Turn failed: {{message}}",
   "turnFailedNoDetail": "Turn failed (no error detail returned)",
-  "sessionInactiveHint": "The session is inactive on the server (common after a CLI upgrade/restart); the plugin resumes it automatically and retries. If it still fails, reopen the session from the history list and send again",
+  "sessionInactiveHint": "Session slots are full (server limit 16; opened sessions never auto-release): restart the IDE to free the slots, then resend your message or reopen the session from the history list",
   "modelSwitchDeferred": "Model switch will take effect after the current turn: {{model}}",
   "modelCaptchaGated": "Trial-plan models require CAPTCHA (slider) human verification, which the plugin cannot complete. Pick a personal-plan or API-key model instead.",
   "modelSwitchStallHint": "The first turn after a model switch has produced no output for over a minute and may be stuck server-side (usually a transient model-server outage): stop and resend, or switch back to the previous model.",
@@ -128,5 +128,6 @@
     },
     "riskCritical": "Critical Risk",
     "riskHigh": "High Risk"
-  }
+  },
+  "residentPoolWarning": "Many sessions opened — nearing the server's slot limit (16). Opened sessions never auto-release; older ones may fail to load. Restart the IDE to free slots"
 }
