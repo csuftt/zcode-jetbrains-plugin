@@ -168,45 +168,36 @@
 }
 
 /* ===== 锚点历史入口节点（轨道终点）+ 全量消息弹窗 ===== */
-/* 与圆点同族的 12px 节点：内嵌 CSS 三横线列表图标（codicon 在此尺寸不可读）*/
+/* codicon-layers 立体叠层图标直接充当节点：不套圆圈（12px 内互挤），
+   透明底 + 次级文字色，hover/is-open 亮强调色并放大 */
 .anchor-history-node {
-  --node-line: var(--text-secondary);
   position: absolute;
   bottom: 0;
   left: 50%;
   transform: translate(-50%, 50%);
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-  border-radius: 50%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-primary);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
   pointer-events: auto;
   cursor: pointer;
   z-index: 2;
   transition: all 0.15s;
 
-  /* 三横线图标：6×6px 内三条 1px 线（0-1 / 2.5-3.5 / 5-6）*/
-  &::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 6px;
-    height: 6px;
-    background:
-      linear-gradient(var(--node-line), var(--node-line)) 0 0 / 100% 1px no-repeat,
-      linear-gradient(var(--node-line), var(--node-line)) 0 2.5px / 100% 1px no-repeat,
-      linear-gradient(var(--node-line), var(--node-line)) 0 5px / 100% 1px no-repeat;
+  /* span.codicon（0,2,1）压 codicon.css 的 .codicon[class*='codicon-'] 简写（0,2,0）*/
+  & span.codicon {
+    font-size: 13px;
   }
 
   &:hover,
   &.is-open {
-    transform: translate(-50%, 50%) scale(1.3);
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-    --node-line: var(--bg-elevated);
+    transform: translate(-50%, 50%) scale(1.2);
+    color: var(--accent-primary);
   }
 }
 
@@ -278,6 +269,18 @@
 .anchor-history-list {
   overflow-y: auto;
   padding: 4px;
+}
+
+/* 弹窗滚动条（与主界面消息区同款 8px 瘦条）*/
+.anchor-history-list::-webkit-scrollbar {
+  width: 8px;
+}
+.anchor-history-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.anchor-history-list::-webkit-scrollbar-thumb {
+  background: var(--border-primary);
+  border-radius: 4px;
 }
 
 .anchor-history-item {

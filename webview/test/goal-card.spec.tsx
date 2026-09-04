@@ -212,14 +212,15 @@ describe('GoalCard', () => {
     expect(document.body.querySelector('.modal-content')).toBeNull()
   })
 
-  it('目标文本定宽为统计行宽（卡宽不随文案长短变化）', () => {
+  it('目标文本定宽为底部操作行宽（卡宽不随文案长短变化）', () => {
     useStore.setState({ goal: GOAL as never })
     const view = render(<GoalCard />)
     // jsdom 零尺寸：layoutEffect 测得 0 不定宽（首帧保护）
     expect(view.container.querySelector('.goal-card__objective')?.getAttribute('style')).toBeFalsy()
-    // mock 统计行实测宽，store 更新（依赖变化）触发重测 → objective 定宽同值
-    const stats = view.container.querySelector('.goal-card__stats') as HTMLDivElement
-    vi.spyOn(stats, 'getBoundingClientRect').mockReturnValue({
+    // mock 底部操作行（统计+按钮同排）实测宽，store 更新（依赖变化）触发重测
+    // → objective 定宽同值
+    const footer = view.container.querySelector('.goal-card__footer') as HTMLDivElement
+    vi.spyOn(footer, 'getBoundingClientRect').mockReturnValue({
       width: 206, x: 0, y: 0, top: 0, left: 0, right: 206, bottom: 0, height: 16, toJSON: () => ({}),
     } as DOMRect)
     // 裸 store 更新须 act 包裹，重渲染+layoutEffect 才在断言前完成

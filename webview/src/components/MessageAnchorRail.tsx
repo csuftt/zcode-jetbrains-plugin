@@ -1,7 +1,8 @@
 /**
  * 消息锚点导航（cc-gui MessageAnchorRail 移植）
  *
- * - 只取 user 消息生成圆点（位置 4%~96%，单条时固定在顶部）
+ * - 只取 user 消息生成圆点（位置 4%~92%，单条时固定在顶部；底部 8% 让位
+ *   历史入口节点）
  * - 无 user 消息不渲染；>30 条均匀抽样（保留首尾）
  * - IntersectionObserver 高亮当前（视口上 32% 区域第一条）
  * - 点击平滑滚动到目标（停在视口上 28% 处）
@@ -14,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage } from '@/types/messages'
 import { isAgentNotification, isCompactSummaryMessage } from '@/utils/parseNotification'
+import { ScrollJumpButton } from './ScrollJumpButton'
 import '../styles/chat-view.less'
 
 interface Props {
@@ -96,8 +98,8 @@ export function MessageAnchorRail({ messages, containerRef }: Props) {
     const sampled = userMsgs.length > max ? sampleItems(userMsgs, max) : userMsgs
     return sampled.map((m, idx) => ({
       id: m.info.id,
-      // 单锚点放顶部（避免除以 0），多个时均匀分布在 4%~96%
-      position: sampled.length === 1 ? 0.04 : 0.04 + (idx / (sampled.length - 1)) * 0.92,
+      // 单锚点放顶部（避免除以 0），多个时均匀分布在 4%~92%（尾端让位历史节点）
+      position: sampled.length === 1 ? 0.04 : 0.04 + (idx / (sampled.length - 1)) * 0.88,
       preview: extractText(m, 300),
     }))
   }, [messages])
@@ -185,6 +187,7 @@ export function MessageAnchorRail({ messages, containerRef }: Props) {
         onMouseLeave={() => setNodeHover(false)}
         onClick={() => setHistoryOpen((v) => !v)}
       >
+        <span className="codicon codicon-layers" aria-hidden="true" />
         {nodeHover && <div className="anchor-tooltip">{t('chat.anchorHistory.button')}</div>}
       </button>
       <div className="messages-anchor-track" />
@@ -233,6 +236,8 @@ export function MessageAnchorRail({ messages, containerRef }: Props) {
               </button>
             ))}
           </div>
+          {/* 滚动跳转按钮（↑置顶/↓置底，滚轮触发浮现，对齐主界面/子代理弹窗）*/}
+          <ScrollJumpButton containerRef={historyListRef} />
         </div>
       )}
     </div>

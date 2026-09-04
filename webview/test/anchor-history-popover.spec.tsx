@@ -86,6 +86,18 @@ describe('锚点历史按钮与弹窗', () => {
     expect(container.querySelector('.anchor-history-count')!.textContent).toContain('35')
   })
 
+  it('圆点分布上限收到 92%（尾端让位底部历史节点）；弹窗内挂滚动跳转按钮', () => {
+    const { container } = renderRail(makeUserMsgs(5))
+    const dots = Array.from(container.querySelectorAll<HTMLDivElement>('.messages-anchor-dot'))
+    const tops = dots.map((d) => parseFloat(d.style.top))
+    expect(Math.min(...tops)).toBeCloseTo(4, 5)
+    expect(Math.max(...tops)).toBeLessThanOrEqual(92)
+
+    fireEvent.click(container.querySelector('.anchor-history-node')!)
+    // 滚轮触发浮现的 ↑/↓ 跳转按钮常驻 DOM（is-visible 过渡显隐）
+    expect(container.querySelectorAll('.scroll-control-button').length).toBeGreaterThanOrEqual(1)
+  })
+
   it('压缩摘要消息不进弹窗列表', () => {
     const { container } = renderRail([userMsg('u1', '第一个问题'), compactSummaryMsg('c1'), userMsg('u2', '第二个问题')])
     fireEvent.click(container.querySelector('.anchor-history-node')!)

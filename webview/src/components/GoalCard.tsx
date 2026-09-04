@@ -11,8 +11,9 @@
  * （靶子图标 + 第 N 轮 · 用时，点击整条展开），展开态 actions 区提供折叠钮，
  * 折叠态走 persist kv 记忆（zcode.goalCardCollapsed，重启保留）。曾实现过
  * 整卡拖动，真机反馈"难控制位置"已移除——位置固定右上角。
- * 卡宽稳定（真机反馈：不随目标文案变化）：目标文本定宽为统计行实测宽度，
- * 长文案在固定宽度内换行（最多三行），卡片宽度只由统计行主导。
+ * 卡宽稳定（真机反馈三连修：不随目标文案变化）：目标文本定宽为底部操作行
+ * （统计+按钮同排）实测宽度，长文案在固定宽度内换行（最多三行），卡片宽度
+ * 只由该行主导；按钮并入底行不独占右侧列（窄面板下三层叠加近满宽）。
  * token 不展示（真机反馈：占宽，ZCode 客户端同款只留轮次与耗时）——曾实现
  * 轮中字符量粗估增量（estimateStreamingTokens），随展示一并移除。
  *
@@ -90,10 +91,10 @@ export function GoalCard({ belowSearch = false }: { belowSearch?: boolean }) {
   }
 
   /* ============ 卡宽稳定（0.3.2 真机反馈：宽度不随目标文案变化） ============ */
-  // 目标文本定宽为统计行宽：卡片 shrink-to-fit 的宽度即由统计行主导（文案不再
+  // 目标文本定宽为底部操作行宽：卡片 shrink-to-fit 的宽度即由该行主导（文案不再
   // 参与撑宽），长文案在固定宽度内换行（最多三行 clamp 不变），高度随行数自适应。
-  // 纯 CSS 无法"以另一行宽度定宽"，测量统计行写入文本宽度；走秒在 min-width
-  // 占位内变化不改变统计行宽，无需逐帧重测。轮次位数/语言切换会改变统计行宽，
+  // 纯 CSS 无法"以另一行宽度定宽"，测量底部操作行写入文本宽度；走秒在 min-width
+  // 占位内变化不改变该行宽，无需逐帧重测。轮次位数/语言切换会改变该行宽，
   // 列入依赖。
   const statsRef = useRef<HTMLDivElement>(null)
   const [textWidth, setTextWidth] = useState<number | null>(null)
@@ -137,11 +138,11 @@ export function GoalCard({ belowSearch = false }: { belowSearch?: boolean }) {
           </span>
         </div>
       ) : (
-        <div className={`goal-card goal-card--${meta.tone}`}>
+          <div className={`goal-card goal-card--${meta.tone}`}>
           {targetIcon}
           <div className="goal-card__main">
             {/* 目标文本：最多三行（长目标完整可读，悬浮 title 看全文）；宽度锚定
-             * 统计行（首帧未测得时暂不定宽，layoutEffect 同帧修正，无闪动）*/}
+             * 底部操作行（首帧未测得时暂不定宽，layoutEffect 同帧修正，无闪动）*/}
             <div
               className="goal-card__objective"
               title={goal.objective}
@@ -149,12 +150,43 @@ export function GoalCard({ belowSearch = false }: { belowSearch?: boolean }) {
             >
               {goal.summaryTitle || goal.objective}
             </div>
-            <div className="goal-card__stats" ref={statsRef}>
-              {t('chat.goal.stats.iteration', { count: goal.iterationCount })}
-              <span className="goal-card__stat-sep">·</span>
-              {/* 数字段固定占位（tabular-nums 等宽 + min-width）：走秒轮中持续
-               * 变化，无占位会不断推挤卡宽（0.3.2 真机反馈）*/}
-              <span className="goal-card__stat-num goal-card__stat-duration">{formatDuration(shownSeconds)}</span>
+            {/* 底部一行：统计 + 操作按钮同排——按钮不再独占右侧整列（真机三连报
+             * 卡宽：图标+文案区+按钮列三层叠加在窄面板里近满宽） */}
+            <div className="goal-card__footer" ref={statsRef}>
+              <div className="goal-card__stats">
+                {t('chat.goal.stats.iteration', { count: goal.iterationCount })}
+                <span className="goal-card__stat-sep">·</span>
+                {/* 数字段固定占位（tabular-nums 等宽 + min-width）：走秒轮中持续
+                 * 变化，无占位会不断推挤卡宽（0.3.2 真机反馈）*/}
+                <span className="goal-card__stat-num goal-card__stat-duration">{formatDuration(shownSeconds)}</span>
+              </div>
+              <span className="goal-card__actions">
+                <button className="goal-card__btn" onClick={() => toggleCollapse(true)} title={t('chat.goal.action.collapse')}>
+                  <span className="codicon codicon-chevron-up" />
+                </button>
+                {(goal.status === 'active' || goal.status === 'budget_limited') && (
+                  <button
+                    className="goal-card__btn"
+                    onClick={() => goalManage('pause')}
+                    title={t('chat.goal.action.pause')}
+                    disabled={streaming && !isActive}
+                  >
+                    <span className="codicon codicon-debug-pause" />
+                  </button>
+                )}
+                {goal.status === 'paused' && (
+                  <button className="goal-card__btn" onClick={() => goalManage('resume')} title={t('chat.goal.action.resume')}>
+                    <span className="codicon codicon-play" />
+                  </button>
+                )}
+                <button
+                  className="goal-card__btn goal-card__btn--clear"
+                  onClick={() => setConfirmingClear(true)}
+                  title={t('chat.goal.action.clear')}
+                >
+                  <span className="codicon codicon-close" />
+                </button>
+              </span>
             </div>
             {/* 校验中：独立一行，置于卡片最后一行（不插在目标与统计中间）；
              * 转圈图标放文字之后（0.3.2 真机反馈）*/}
@@ -165,33 +197,6 @@ export function GoalCard({ belowSearch = false }: { belowSearch?: boolean }) {
               </div>
             )}
           </div>
-          <span className="goal-card__actions">
-            <button className="goal-card__btn" onClick={() => toggleCollapse(true)} title={t('chat.goal.action.collapse')}>
-              <span className="codicon codicon-chevron-up" />
-            </button>
-            {(goal.status === 'active' || goal.status === 'budget_limited') && (
-              <button
-                className="goal-card__btn"
-                onClick={() => goalManage('pause')}
-                title={t('chat.goal.action.pause')}
-                disabled={streaming && !isActive}
-              >
-                <span className="codicon codicon-debug-pause" />
-              </button>
-            )}
-            {goal.status === 'paused' && (
-              <button className="goal-card__btn" onClick={() => goalManage('resume')} title={t('chat.goal.action.resume')}>
-                <span className="codicon codicon-play" />
-              </button>
-            )}
-            <button
-              className="goal-card__btn goal-card__btn--clear"
-              onClick={() => setConfirmingClear(true)}
-              title={t('chat.goal.action.clear')}
-            >
-              <span className="codicon codicon-close" />
-            </button>
-          </span>
         </div>
       )}
       {/* 清除目标二次确认（portal 挂 body：float 容器 pointer-events:none 会闷死
