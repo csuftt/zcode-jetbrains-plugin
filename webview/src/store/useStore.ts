@@ -14,6 +14,7 @@
 
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
+import { parseGoalCommand } from '@/utils/goalCommand'
 import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, GoalState } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
@@ -1368,13 +1369,16 @@ export const useStore = create<StoreState>((set, get) => ({
       get().stopStreaming()
     } else {
       set({ queuedMessages: q.filter((m) => m.id !== id) })
-      // 立即发送保持定时语义（徽标+指定执行模型），否则 queued 的定时消息在这里会丢标记
-      get().sendMessage(target.text, target.attachments, target.scheduledFireAt != null
-        ? {
-            scheduledFireAt: target.scheduledFireAt,
-            ...(target.scheduledModelId ? { scheduledProviderId: target.scheduledProviderId, scheduledModelId: target.scheduledModelId } : {}),
-          }
-        : undefined)
+      // 立即发送保持定时语义（徽标+指定执行模型），否则 queued 的定时消息在这里会丢标记；
+      // /goal 命令文本转 goalManage（普通 send 会把命令原文发给模型，goal 引擎不触发）
+      if (!dispatchScheduledGoalText(target.text, target.scheduledFireAt, get)) {
+        get().sendMessage(target.text, target.attachments, target.scheduledFireAt != null
+          ? {
+              scheduledFireAt: target.scheduledFireAt,
+              ...(target.scheduledModelId ? { scheduledProviderId: target.scheduledProviderId, scheduledModelId: target.scheduledModelId } : {}),
+            }
+          : undefined)
+      }
     }
   },
 
@@ -1386,11 +1390,18 @@ export const useStore = create<StoreState>((set, get) => ({
     if (item.sessionId && get().currentSessionId === item.sessionId) {
       // 本面板正看该会话：直接走受理路径发送（与到点受理同一段代码，sendMessage 内部
       // 含 scheduledFired 上报），并 ack 让 Java 移除待发项——不再发 scheduledSendNow
-      // （那会再走一轮 Java 分派推送，本面板二次受理导致重复发送）
-      get().sendMessage(item.text, undefined, {
-        scheduledFireAt: item.fireAt,
-        ...(item.modelId ? { scheduledProviderId: item.providerId, scheduledModelId: item.modelId } : {}),
-      })
+      // （那会再走一轮 Java 分派推送，本面板二次受理导致重复发送）；
+      // /goal 命令文本空闲时先转 goalManage（流式中服务端会拒绝 goal 操作，
+      // 改走 sendMessage 入队、回合结束 flushQueue 再拦截；fired 上报在
+      // dispatchScheduledGoalText 内）
+      if (!get().streaming && dispatchScheduledGoalText(item.text, item.fireAt, get)) {
+        // 已按 goal 命令处理
+      } else {
+        get().sendMessage(item.text, undefined, {
+          scheduledFireAt: item.fireAt,
+          ...(item.modelId ? { scheduledProviderId: item.providerId, scheduledModelId: item.modelId } : {}),
+        })
+      }
       sendToJava({ op: 'scheduledDueAck', id: item.id })
     } else {
       // 会话在别的标签/未打开：交 Java 分派（findPanelForSession 推送或开标签/直发兜底）
@@ -1416,12 +1427,15 @@ export const useStore = create<StoreState>((set, get) => ({
     if (get().streaming || get().queuedMessages.length === 0) return
     const [next, ...rest] = get().queuedMessages
     set({ queuedMessages: rest })
-    get().sendMessage(next.text, next.attachments, next.scheduledFireAt != null
-      ? {
-          scheduledFireAt: next.scheduledFireAt,
-          ...(next.scheduledModelId ? { scheduledProviderId: next.scheduledProviderId, scheduledModelId: next.scheduledModelId } : {}),
-        }
-      : undefined)
+    // 定时来源的 /goal 命令文本转 goalManage（入队期间无法拦截，flush 是最后关口）
+    if (!dispatchScheduledGoalText(next.text, next.scheduledFireAt, get)) {
+      get().sendMessage(next.text, next.attachments, next.scheduledFireAt != null
+        ? {
+            scheduledFireAt: next.scheduledFireAt,
+            ...(next.scheduledModelId ? { scheduledProviderId: next.scheduledProviderId, scheduledModelId: next.scheduledModelId } : {}),
+          }
+        : undefined)
+    }
   },
 
   /**
@@ -2184,6 +2198,36 @@ function formatTurnError(err: TurnErrorInfo): string {
     : i18n.t('app.turnFailedNoDetail')
 }
 
+/**
+ * 定时文本的 /goal 拦截分派：命令文本转 goalManage 控制意图（与手动输入同一语义）。
+ * 定时文本若走普通 sendMessage，命令原文会被当 user 消息发给模型——goal 引擎
+ * （session/goal RPC）不触发、目标卡不出现（2026-09-04 用户反馈）。命中时补
+ * scheduledFired 上报：sendMessage 真发点的上报不再经过，缺了则「已发历史」丢记录；
+ * set 落库的 user 消息文本是 objective（服务端剥 /goal 前缀，sqlite 实测），上报
+ * text 用 objective 才能与历史消息对上「定时执行」徽标（MessageBubble 按
+ * sessionId+text 匹配 firedHistory），其余动作不落库 user 消息、用原文本仅作历史展示。
+ * 返回 true = 已按 goal 命令处理，调用方跳过 sendMessage。
+ */
+function dispatchScheduledGoalText(
+  text: string,
+  fireAt: number | undefined,
+  get: () => StoreState,
+): boolean {
+  const cmd = parseGoalCommand(text)
+  if (!cmd) return false
+  const sid = get().currentSessionId
+  get().goalManage(cmd.action, cmd.objective)
+  if (sid && fireAt != null) {
+    sendToJava({
+      op: 'scheduledFired',
+      sessionId: sid,
+      text: cmd.action === 'set' ? (cmd.objective ?? text) : text,
+      fireAt,
+    })
+  }
+  return true
+}
+
 /** 后端消息归约（导出供测试直接驱动分发链路；运行时由 bridge onMessage 挂接）*/
 export function handleResponse(
   msg: JavaResponse,
@@ -2477,7 +2521,7 @@ export function handleResponse(
     case 'scheduledDue': {
       // 定时消息到点：走与手动发送同一段准入（sendMessage 内部分流——回合活跃入队尾，
       // 空闲直接发），发出后消息带「定时执行」徽标。sessionId 不匹配（路由到的标签已
-      // 切走）不受理也不 ack → Java 侧 15s 超时降级直发
+      // 切走）不受理也不 ack → Java 侧 15s 超时降级直发。
       const { id, sessionId: dueSid, text, scheduledFireAt, providerId, modelId } = msg as {
         id: string
         sessionId?: string
@@ -2487,12 +2531,20 @@ export function handleResponse(
         modelId?: string
       }
       if (dueSid && get().currentSessionId !== dueSid) break
-      get().sendMessage(text, undefined, scheduledFireAt != null
-        ? {
-            scheduledFireAt,
-            ...(modelId ? { scheduledProviderId: providerId, scheduledModelId: modelId } : {}),
-          }
-        : undefined)
+      // /goal 命令文本转 goalManage（手动输入同语义；普通 send 命令原文进对话流，
+      // goal 引擎不触发、目标卡不出现）。仅空闲时拦截：回合运行中服务端会拒绝
+      // goal 操作（error 回执+乐观回滚），流式中改走 sendMessage 入队暂存，
+      // 回合结束 flushQueue 再拦截（那里必非流式）
+      if (!get().streaming && dispatchScheduledGoalText(text, scheduledFireAt, get)) {
+        // 已按 goal 命令处理
+      } else {
+        get().sendMessage(text, undefined, scheduledFireAt != null
+          ? {
+              scheduledFireAt,
+              ...(modelId ? { scheduledProviderId: providerId, scheduledModelId: modelId } : {}),
+            }
+          : undefined)
+      }
       // 本地即时移除（权威列表由 Java ack 后广播）；handleResponse 的 set 无 updater 形态
       set({ scheduledMessages: get().scheduledMessages.filter((m) => m.id !== id) })
       sendToJava({ op: 'scheduledDueAck', id })

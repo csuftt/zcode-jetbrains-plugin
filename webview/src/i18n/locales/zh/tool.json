@@ -91,6 +91,13 @@
   "webPrompt": "提问",
   "viewFullResult": "查看完整结果",
   "webFetchTitle": "网页获取 · {{domain}}",
-  "webSearchTitle": "网页搜索 · {{query}}"
+  "webSearchTitle": "网页搜索 · {{query}}",
+  "todo": {
+    "added": "新增",
+    "removed": "已移除 {{count}} 项",
+    "statusPending": "待办",
+    "statusInProgress": "进行中",
+    "statusCompleted": "已完成"
+  }
 }
 

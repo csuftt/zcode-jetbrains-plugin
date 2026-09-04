@@ -82,8 +82,7 @@
     "taskFailed": "서브에이전트 작업이 실패했습니다"
   },
   "viewPlan": "계획 세부 정보 보기",
-  "planTitle": "실행 계획"
-,
+  "planTitle": "실행 계획",
   "viewWebResult": "대화상자에서 결과 보기",
   "viewPage": "브라우저에서 페이지 열기",
   "webUrl": "URL",
@@ -91,6 +90,12 @@
   "webPrompt": "프롬프트",
   "viewFullResult": "전체 결과 보기",
   "webFetchTitle": "웹 가져오기 · {{domain}}",
-  "webSearchTitle": "웹 검색 · {{query}}"
+  "webSearchTitle": "웹 검색 · {{query}}",
+  "todo": {
+    "added": "신규",
+    "removed": "제거됨 {{count}}개",
+    "statusPending": "대기 중",
+    "statusInProgress": "진행 중",
+    "statusCompleted": "완료"
+  }
 }
-

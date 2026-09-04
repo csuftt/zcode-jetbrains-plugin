@@ -1279,7 +1279,25 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
                 cost: 0,
                 tokens: { total: 1234, input: 1100, output: 134, reasoning: 0 },
               },
-              // （mock）TodoWrite —— 状态面板「任务」数据源
+              // （mock）TodoWrite —— 状态面板「任务」数据源；连续两条展示工具卡
+              // 增量标注（新增/状态变更/删除，todoDiff 渲染验收用）
+              {
+                type: 'tool',
+                callID: 'call_mock_todo_prev',
+                tool: 'TodoWrite',
+                state: {
+                  status: 'completed',
+                  input: {
+                    todos: [
+                      { content: '梳理项目三层架构', status: 'pending', priority: 'high' },
+                      { content: '分析流式渲染性能瓶颈', status: 'in_progress', priority: 'high' },
+                      { content: '优化 workspace 过滤逻辑', status: 'in_progress', priority: 'high' },
+                      { content: '调研竞品实现', status: 'pending', priority: 'low' },
+                    ],
+                  },
+                  time: { start: Date.now() - 53200, end: Date.now() - 53100 },
+                },
+              },
               {
                 type: 'tool',
                 callID: 'call_mock_todo',
@@ -1292,6 +1310,7 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
                       { content: '分析流式渲染性能瓶颈', status: 'completed', priority: 'high' },
                       { content: '优化 workspace 过滤逻辑', status: 'in_progress', priority: 'high' },
                       { content: '补充单元测试', status: 'pending', priority: 'medium' },
+                      { content: '写性能报告', status: 'pending', priority: 'medium' },
                     ],
                   },
                   time: { start: Date.now() - 53000, end: Date.now() - 52900 },

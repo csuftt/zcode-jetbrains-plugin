@@ -82,8 +82,7 @@
     "taskFailed": "サブエージェントが失敗しました"
   },
   "viewPlan": "計画の詳細を表示",
-  "planTitle": "実行計画"
-,
+  "planTitle": "実行計画",
   "viewWebResult": "ダイアログで結果を表示",
   "viewPage": "ブラウザでページを開く",
   "webUrl": "URL",
@@ -91,6 +90,12 @@
   "webPrompt": "プロンプト",
   "viewFullResult": "全文を表示",
   "webFetchTitle": "ウェブ取得 · {{domain}}",
-  "webSearchTitle": "ウェブ検索 · {{query}}"
+  "webSearchTitle": "ウェブ検索 · {{query}}",
+  "todo": {
+    "added": "追加",
+    "removed": "削除済み {{count}} 件",
+    "statusPending": "未着手",
+    "statusInProgress": "進行中",
+    "statusCompleted": "完了"
+  }
 }
-

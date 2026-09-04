@@ -82,8 +82,7 @@
     "taskFailed": "子代理執行失敗"
   },
   "viewPlan": "查閱計畫詳細內容",
-  "planTitle": "執行計畫"
-,
+  "planTitle": "執行計畫",
   "viewWebResult": "彈窗查看結果",
   "viewPage": "開啟原始網頁",
   "webUrl": "網址",
@@ -91,6 +90,12 @@
   "webPrompt": "提問",
   "viewFullResult": "查看完整結果",
   "webFetchTitle": "網頁取得 · {{domain}}",
-  "webSearchTitle": "網頁搜尋 · {{query}}"
+  "webSearchTitle": "網頁搜尋 · {{query}}",
+  "todo": {
+    "added": "新增",
+    "removed": "已移除 {{count}} 項",
+    "statusPending": "待辦",
+    "statusInProgress": "進行中",
+    "statusCompleted": "已完成"
+  }
 }
-

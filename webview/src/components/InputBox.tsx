@@ -41,6 +41,7 @@ import { PromptEnhancerDialog } from './PromptEnhancerDialog'
 import { sendToJava, onMessage } from '@/ipc/bridge'
 import type { JavaResponse, SlashCommand, AgentDef, ImageAttachmentInput } from '@/types/messages'
 import { insertChipAtCursor, insertCommandChipAtCursor, convertCompletedPaths, serializeEditor, type CmdChipKind } from '@/utils/inlineFileTags'
+import { parseGoalCommand } from '@/utils/goalCommand'
 import { KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
 import { readEnhanceConfig, ENHANCE_CONFIG_CHANGED_EVENT } from '@/utils/enhanceConfig'
 import { PastedTextRef, PastedTextPreview, type PastedTextItem } from './PastedTextRef'
@@ -470,20 +471,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     // 自然匹配不上 ^\/goal，行为不变；带图片/子智能体发送目标时不拦截（objective
     // 是纯文本，图片无法随 goal 下发）。
     if (images.length === 0 && !selectedAgent) {
-      const m = fullText.match(/^\/goal(?:\s+([\s\S]+))?$/)
-      if (m) {
-        const goalArg = m[1]?.trim() ?? ''
-        if (!goalArg) {
-          goalManage('show')
-        } else if (/^pause$/i.test(goalArg)) {
-          goalManage('pause')
-        } else if (/^resume$/i.test(goalArg)) {
-          goalManage('resume')
-        } else if (/^clear$/i.test(goalArg)) {
-          goalManage('clear')
-        } else {
-          goalManage('set', goalArg)
-        }
+      const goalCmd = parseGoalCommand(fullText)
+      if (goalCmd) {
+        goalManage(goalCmd.action, goalCmd.objective)
         clearEditor()
         setPastedTexts([])
         setSlashQuery(null)

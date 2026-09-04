@@ -24,6 +24,7 @@ import { toolErrorText } from '@/utils/parseStatus'
 import { sendToJava, openExternalUrl } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { useTick } from '@/hooks/useTick'
+import { extractTodoItems, diffTodos, findPrevTodoWriteTodos } from '@/utils/todoDiff'
 import { FileIcon } from './FileIcon'
 import '../styles/tool-call-card.less'
 
@@ -96,6 +97,9 @@ function inputSummary(tool: string, input?: Record<string, unknown>): string {
       return String(input.query || '')
     case 'Skill':
       return String(input.skill || input.args || '')
+    case 'TodoWrite':
+      // 摘要位置让给进度徽标（已完成/总数，渲染层计算）
+      return ''
     case 'ExitPlanMode':
       return String(input.plan || '').slice(0, 60)
     case 'TaskOutput':
@@ -116,6 +120,31 @@ function statusBadge(status: ToolPart['state']['status']): { text: string; cls: 
     case 'running': return { text: '⟳', cls: 'running' }
     case 'error': return { text: '✗', cls: 'err' }
     default: return { text: '…', cls: 'pending' }
+  }
+}
+
+/** TodoWrite 任务状态 → codicon（进行中的转圈动画由 less 补）*/
+function todoStatusIcon(status: string): string {
+  switch (status) {
+    case 'completed': return 'codicon-check'
+    case 'in_progress': return 'codicon-loading'
+    case 'pending': return 'codicon-circle-large-outline'
+    default: return 'codicon-circle-small'
+  }
+}
+
+/** 任务状态 → css 修饰类后缀（未知状态归 other）*/
+function todoStatusKind(status: string): string {
+  return status === 'completed' || status === 'in_progress' || status === 'pending' ? status : 'other'
+}
+
+/** 任务状态显示名（i18n，未收录状态回退原值——服务端可能引入新状态词）*/
+function todoStatusLabel(status: string, t: TFunction): string {
+  switch (status) {
+    case 'completed': return t('tool.todo.statusCompleted')
+    case 'in_progress': return t('tool.todo.statusInProgress')
+    case 'pending': return t('tool.todo.statusPending')
+    default: return status
   }
 }
 
@@ -271,6 +300,18 @@ export function ToolCallCard({ part }: Props) {
     })
   }
 
+  // TodoWrite（任务列表）：与上一次调用对比做增量标注（新增/状态变更/删除）。
+  // 上次快照按 callID 在主消息流里顺序回溯（跨消息，TodoWrite 不聚组、每次调用
+  // 一张卡）；子代理弹窗等 parts 不在主流中的场景回溯不到 → 纯当前列表无标注。
+  // ⚠️ selector 返回原始引用（messages/undefined 二选一），不得返回新对象
+  const isTodoTool = tool === 'TodoWrite'
+  const todoItems = useMemo(() => (isTodoTool ? extractTodoItems(part) : []), [isTodoTool, part])
+  const todoMessages = useStore((s) => (isTodoTool ? s.messages : undefined))
+  const todoDiff = useMemo(
+    () => (isTodoTool ? diffTodos(todoMessages ? findPrevTodoWriteTodos(todoMessages, part.callID) : null, todoItems) : null),
+    [isTodoTool, todoMessages, part.callID, todoItems],
+  )
+
   // Read 工具不需要展开（只有文件名 + 点击打开，不渲染 output）；
   // Skill 输入/输出全在头部 📖 弹窗，展开区仅流式原始输入/出错时有内容；
   // ExitPlanMode 同款：plan 全文走 📖 弹窗，完成后无展开区（流式中仍可看原始片段）
@@ -304,6 +345,21 @@ export function ToolCallCard({ part }: Props) {
             {lineStats.add > 0 && lineStats.del > 0 && <span className="file-group__stats-sep" />}
             {lineStats.del > 0 && <span className="file-group__del">−{lineStats.del}</span>}
           </span>
+        )}
+        {/* 任务列表：进度徽标（已完成/总数）+ 增量摘要（+新增 ~变更 −删除），收起即可感知 */}
+        {isTodoTool && todoItems.length > 0 && (
+          <>
+            <span className="tool-card__todo-progress">
+              {todoDiff?.completedCount ?? 0}/{todoItems.length}
+            </span>
+            {todoDiff && (todoDiff.addedCount > 0 || todoDiff.statusChangedCount > 0 || todoDiff.removed.length > 0) && (
+              <span className="tool-card__todo-delta">
+                {todoDiff.addedCount > 0 && <span className="todo-delta__add">+{todoDiff.addedCount}</span>}
+                {todoDiff.statusChangedCount > 0 && <span className="todo-delta__chg">~{todoDiff.statusChangedCount}</span>}
+                {todoDiff.removed.length > 0 && <span className="todo-delta__del">−{todoDiff.removed.length}</span>}
+              </span>
+            )}
+          </>
         )}
         {/* Edit/Write 的 diff + 刷新按钮（cc-gui EditToolBlock）*/}
         {hasDiff && (
@@ -548,6 +604,44 @@ export function ToolCallCard({ part }: Props) {
               )}
             </>
           )}
+          {/* 任务列表（TodoWrite）：全量列表 + 增量标注（新增/状态变更），已移除单列一节 */}
+          {isTodoTool && input && todoDiff && todoDiff.entries.length > 0 && (
+            <div className="tool-card__section tool-card__section--todo">
+              <ul className="todo-list">
+                {todoDiff.entries.map((e) => (
+                  <li
+                    key={e.content}
+                    className={`todo-item todo-item--${todoStatusKind(e.status)}${e.change === 'added' ? ' todo-item--added' : e.change === 'status' ? ' todo-item--changed' : ''}`}
+                    title={e.content}
+                  >
+                    <span className={`codicon ${todoStatusIcon(e.status)}${e.status === 'in_progress' ? ' todo-item__spin' : ''}`} />
+                    <span className="todo-item__content">{e.content}</span>
+                    {e.change === 'added' && (
+                      <span className="todo-item__tag todo-item__tag--add">{t('tool.todo.added')}</span>
+                    )}
+                    {e.change === 'status' && (
+                      <span className="todo-item__tag todo-item__tag--chg">
+                        {todoStatusLabel(e.prevStatus ?? '', t)} → {todoStatusLabel(e.status, t)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {todoDiff.removed.length > 0 && (
+                <div className="todo-removed">
+                  <div className="todo-removed__label">{t('tool.todo.removed', { count: todoDiff.removed.length })}</div>
+                  <ul className="todo-list todo-list--removed">
+                    {todoDiff.removed.map((r) => (
+                      <li key={r.content} className="todo-item todo-item--removed" title={r.content}>
+                        <span className={`codicon ${todoStatusIcon(r.status)}`} />
+                        <span className="todo-item__content">{r.content}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
           {/* Bash：终端风格（命令 + 输出）*/}
           {tool === 'Bash' && (
             <>
@@ -582,8 +676,9 @@ export function ToolCallCard({ part }: Props) {
           {/* 其他工具：JSON 输入/输出。Skill 无展开区内容（技能名在头部摘要、
               技能文档走 📖 弹窗）；Agent 类输出（最终报告）同样只走头部弹窗按钮；
               ExitPlanMode 的 plan 全文走 📖 弹窗，展开区不渲染 input JSON；
-              web 双工具走上方专用分支（input 友好展示 + 来源列表/短预览）*/}
-          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && tool !== 'ExitPlanMode' && !isWebTool && (
+              web 双工具走上方专用分支（input 友好展示 + 来源列表/短预览）；
+              TodoWrite 走上方任务列表分支（diff 标注），仅流式未解析时落到 rawInput 原文 */}
+          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && tool !== 'ExitPlanMode' && !isWebTool && !isTodoTool && (
             <>
               {state.input && Object.keys(state.input).length > 0 && (
                 <div className="tool-card__section">

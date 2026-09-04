@@ -82,8 +82,7 @@
     "taskFailed": "Subagent task failed"
   },
   "viewPlan": "View plan details",
-  "planTitle": "Execution Plan"
-,
+  "planTitle": "Execution Plan",
   "viewWebResult": "View result in dialog",
   "viewPage": "Open page in browser",
   "webUrl": "URL",
@@ -91,6 +90,12 @@
   "webPrompt": "Prompt",
   "viewFullResult": "View full result",
   "webFetchTitle": "Web Fetch · {{domain}}",
-  "webSearchTitle": "Web Search · {{query}}"
+  "webSearchTitle": "Web Search · {{query}}",
+  "todo": {
+    "added": "New",
+    "removed": "Removed {{count}}",
+    "statusPending": "Pending",
+    "statusInProgress": "In progress",
+    "statusCompleted": "Completed"
+  }
 }
-

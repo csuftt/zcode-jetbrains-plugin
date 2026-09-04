@@ -86,6 +86,24 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
 
         // ============ 纯逻辑（单测直接覆盖，不依赖 Project） ============
 
+        /**
+         * /goal 命令文本解析（与 webview utils/goalCommand.ts 同一语义）。
+         * 定时文本若是 /goal 命令，直发兜底须转 session/goal RPC——普通 send 会把
+         * 命令原文发给模型当 user 消息，goal 引擎不触发、目标卡不出现。
+         * 非命令文本返回 null。
+         */
+        fun parseGoalCommand(text: String): GoalCommand? {
+            val m = Regex("^/goal(?:\\s+([\\s\\S]+))?$").find(text.trimEnd()) ?: return null
+            val arg = m.groupValues[1].trim()
+            return when {
+                arg.isEmpty() -> GoalCommand("show", null)
+                arg.equals("pause", ignoreCase = true) -> GoalCommand("pause", null)
+                arg.equals("resume", ignoreCase = true) -> GoalCommand("resume", null)
+                arg.equals("clear", ignoreCase = true) -> GoalCommand("clear", null)
+                else -> GoalCommand("set", arg)
+            }
+        }
+
         /** 到点且在宽限窗内才自动分派；hold（切会话回退挂起）永不自动 */
         fun shouldAutoFire(item: Item, now: Long, graceMs: Long = GRACE_MS): Boolean =
             !item.hold && item.fireAt <= now && now - item.fireAt <= graceMs
@@ -177,6 +195,9 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
             }
         }
     }
+
+    /** /goal 命令解析结果：action ∈ set/pause/resume/clear/show；仅 set 带 objective */
+    data class GoalCommand(val action: String, val objective: String?)
 
     /** 待发定时消息（FIRED/CANCELLED 即时移除不保留——发出后的消息本身就是记录） */
     data class Item(
@@ -581,6 +602,8 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
      * 成功即移除+记录已发+通知。
      */
     private fun directSend(item: Item) {
+        // /goal 命令文本转 session/goal RPC（与 webview 受理路径同语义），不入对话流
+        parseGoalCommand(item.text)?.let { directGoal(item, it); return }
         val sent = try {
             val client = project.zCodeService().getClient()
             try {
@@ -620,6 +643,54 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
         if (sent) {
             removeById(item.id, "fired-direct")
             recordFired(item.sessionId, item.text, item.fireAt)
+            ZCodeNotifyService.notifyScheduledFired(project, item.sessionId, item.text)
+            openSessionTabOnEdt(item.sessionId)
+        }
+    }
+
+    /**
+     * 直发兜底的 /goal 变体：session/goal RPC（错误语义对齐 [directSend]——冷会话
+     * -32004 resume 重试；-32010 悬挂回合延迟重扫；其余错误保持待发下轮再试，
+     * 服务端拒绝（plan 模式等）最终随宽限过期转手动决定）。
+     * 目标状态不经 goalManaged 回执（那走 webview op 通道）——由 session.updated
+     * 事件载荷与开标签后 messages 首拉（session.target）在前端落地，出卡链路完整。
+     */
+    private fun directGoal(item: Item, cmd: GoalCommand) {
+        val sent = try {
+            val client = project.zCodeService().getClient()
+            try {
+                client.goal(item.sessionId, cmd.action, cmd.objective)
+                true
+            } catch (e: ZCodeProtocolException) {
+                val cold = e.message?.contains("-32004") == true ||
+                    e.message?.contains("Session is not active", ignoreCase = true) == true
+                val running = e.code == -32010 || e.message?.contains("-32010") == true
+                when {
+                    cold -> {
+                        client.resume(item.sessionId, Workspace(item.workspacePath))
+                        client.goal(item.sessionId, cmd.action, cmd.objective)
+                        true
+                    }
+                    running -> {
+                        log.info("[scheduled] session busy (-32010), deferring goal id=${item.id}")
+                        false
+                    }
+                    else -> {
+                        log.warn("[scheduled] direct goal failed (will retry next sweep) id=${item.id}: ${e.message}")
+                        false
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[scheduled] direct goal failed (client not ready? will retry) id=${item.id}: ${e.message}")
+            false
+        }
+        if (sent) {
+            removeById(item.id, "fired-direct")
+            // set 落库 user 消息文本=objective（服务端剥 /goal 前缀），用它记录才能与
+            // 历史消息对上「定时执行」徽标（webview 按 sessionId+text 匹配 fired）；
+            // 其余动作不落库 user 消息，用原文本仅作已发历史展示
+            recordFired(item.sessionId, if (cmd.action == "set") cmd.objective ?: item.text else item.text, item.fireAt)
             ZCodeNotifyService.notifyScheduledFired(project, item.sessionId, item.text)
             openSessionTabOnEdt(item.sessionId)
         }

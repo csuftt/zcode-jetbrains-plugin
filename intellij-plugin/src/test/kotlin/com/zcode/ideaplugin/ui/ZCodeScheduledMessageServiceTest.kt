@@ -119,4 +119,32 @@ class ZCodeScheduledMessageServiceTest {
         assertTrue(ZCodeScheduledMessageService.parseFired("not json {").isEmpty())
         assertTrue(ZCodeScheduledMessageService.parseFired("[{\"text\":\"x\"}]").isEmpty()) // 缺字段条目被跳过
     }
+
+    // ============ /goal 命令解析（directSend 兜底拦截；与 webview goalCommand.ts 同语义）============
+
+    @Test
+    fun `goal 无参与子命令解析`() {
+        assertEquals(ZCodeScheduledMessageService.GoalCommand("show", null), ZCodeScheduledMessageService.parseGoalCommand("/goal"))
+        assertEquals(ZCodeScheduledMessageService.GoalCommand("show", null), ZCodeScheduledMessageService.parseGoalCommand("/goal "))
+        assertEquals(ZCodeScheduledMessageService.GoalCommand("pause", null), ZCodeScheduledMessageService.parseGoalCommand("/goal PAUSE"))
+        assertEquals(ZCodeScheduledMessageService.GoalCommand("resume", null), ZCodeScheduledMessageService.parseGoalCommand("/goal resume"))
+        assertEquals(ZCodeScheduledMessageService.GoalCommand("clear", null), ZCodeScheduledMessageService.parseGoalCommand("/goal clear"))
+    }
+
+    @Test
+    fun `goal 目标文本解析为 set（多行保留）`() {
+        assertEquals(
+            ZCodeScheduledMessageService.GoalCommand("set", "修复登录页\n并补测试"),
+            ZCodeScheduledMessageService.parseGoalCommand("/goal 修复登录页\n并补测试"),
+        )
+    }
+
+    @Test
+    fun `非 goal 命令文本返回 null（不误伤普通定时消息）`() {
+        assertEquals(null, ZCodeScheduledMessageService.parseGoalCommand("早安摘要"))
+        assertEquals(null, ZCodeScheduledMessageService.parseGoalCommand("/goals"))
+        assertEquals(null, ZCodeScheduledMessageService.parseGoalCommand("先跑 /goal"))
+        assertEquals(null, ZCodeScheduledMessageService.parseGoalCommand("/compact"))
+        assertEquals(null, ZCodeScheduledMessageService.parseGoalCommand(""))
+    }
 }
