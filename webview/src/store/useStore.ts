@@ -2744,6 +2744,9 @@ export function handleResponse(
       // 会话时丢弃，避免旧会话的模型翻转污染当前会话显示与级别缓存
       if (msg.sessionId && msg.sessionId !== get().currentSessionId) break
       lastModelSetAckAt = Date.now() // 切换后首回合零输出提示的时间基准
+      // 切换前模型（合成 model_change 分隔卡用，须在下方 set 覆盖 currentModel 前捕获；
+      // 即时路径=setModel 下发时暂存的 prev，延迟路径=modelSetPending 回滚后的现值）
+      const prevModelForMarker = get().modelSwitchPrevModel ?? get().currentModel
       set({
         currentModel: { modelId: msg.modelId, providerId: msg.providerId },
         modelInvalidated: false,
@@ -2751,6 +2754,35 @@ export function handleResponse(
         modelPendingSwitch: null, // 延迟切换落定（缺陷AC），清提示与回滚暂存
         modelSwitchPrevModel: null,
         lastNotice: null,
+        // 模型切换分隔卡（2026-09-02 实测：服务端 marker 在下一次 send 才落库、
+        // 不走流式事件推送）——切换成功瞬间本地合成一条即时反馈；插入点=消息流
+        // 尾部，与服务端将来落库位置一致（切换后第一条新消息之前），任何历史
+        // 重拉整包替换会以服务端真身无缝接管，不产生双条。流式中到达的延迟补发
+        //（罕见：补发恰逢下一回合已开跑）跳过——插入位置会错到流式消息之后，
+        // 服务端真身由回合结束重拉显示
+        ...(get().streaming
+          ? {}
+          : {
+              messages: [
+                ...get().messages,
+                {
+                  info: {
+                    role: 'assistant',
+                    id: `synthetic-model-change-${Date.now()}`,
+                    sessionID: msg.sessionId ?? get().currentSessionId ?? '',
+                    time: { created: Date.now() },
+                  },
+                  parts: [{
+                    type: 'timeline',
+                    timelineType: 'model_change',
+                    ...(prevModelForMarker
+                      ? { fromModel: { modelId: prevModelForMarker.modelId, label: prevModelForMarker.modelId } }
+                      : {}),
+                    toModel: { modelId: msg.modelId, label: msg.modelId },
+                  }],
+                },
+              ],
+            }),
       })
       // 切换模型后立即刷新用量，圆环 size 随新模型窗口更新（不用等下次对话结束）
       setTimeout(() => get().loadUsage(), 500)

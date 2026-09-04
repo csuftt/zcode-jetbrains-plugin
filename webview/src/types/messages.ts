@@ -143,9 +143,9 @@ export interface TimelinePart {
   preCompactTokenCount?: number
   postCompactTokenCount?: number
   truePostCompactTokenCount?: number
-  /** model_change：切换前后模型 */
-  fromModel?: { modelID?: string; label?: string; variant?: string }
-  toModel?: { modelID?: string; label?: string; variant?: string }
+  /** model_change：切换前后模型（服务端实测字段为 modelId 小写 d，modelID 为老类型定义笔误保留兼容）*/
+  fromModel?: { modelID?: string; modelId?: string; label?: string; variant?: string }
+  toModel?: { modelID?: string; modelId?: string; label?: string; variant?: string }
   time?: { start: number; end?: number }
   [key: string]: unknown
 }

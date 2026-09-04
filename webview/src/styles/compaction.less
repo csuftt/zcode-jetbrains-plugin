@@ -77,9 +77,11 @@
   align-items: center;
   gap: 10px;
   margin: 14px 0;
+  min-width: 0; // 窄面板下允许收缩：model_change 的长模型名不得顶出横向滚动条
 
   &__line {
     flex: 1;
+    min-width: 16px; // 极窄时保底线段，不被长文案挤没
     height: 1px;
     background: var(--border-secondary);
   }
@@ -87,21 +89,36 @@
   &__text {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    flex-wrap: wrap; // 窄面板下 label 与 meta 分行，长模型名换行而非截断
+    justify-content: center;
+    row-gap: 2px;
+    column-gap: 5px;
     color: var(--text-secondary);
     font-size: 11px;
-    white-space: nowrap;
     user-select: none;
+    min-width: 0; // 同上：作为 flex 子项须可收缩，否则 min-content 锁死整行宽度
+    text-align: center; // meta 多行时行内居中，对齐分隔卡整体居中气质
 
     .codicon {
       font-size: 12px;
       color: var(--text-tertiary);
+      flex-shrink: 0;
     }
+  }
+
+  &__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap; // icon+文案一体，不拆行
   }
 
   &__meta {
     color: var(--text-tertiary);
     font-size: 10px;
+    min-width: 0;
+    white-space: normal; // 超长模型名（from → to 带渠道前缀）换行显示，全文走 title 悬停
+    overflow-wrap: anywhere; // 模型名是无空格长 token，须允许任意字符断行
   }
 }
 

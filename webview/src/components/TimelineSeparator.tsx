@@ -7,6 +7,9 @@
  *   - context_compaction：上下文已压缩（token 收缩指标）
  *   - model_change：模型切换（from → to）
  * 未知 timelineType 退化为中性「时间线事件」，不吞不炸。
+ *
+ * 长文案（model_change 的 from/to label 带渠道前缀）窄面板下换行而非截断：
+ * label 部分（icon+文案）nowrap 保持一体，meta 允许任意字符断行。
  */
 
 import { useTranslation } from 'react-i18next'
@@ -16,6 +19,16 @@ import '../styles/compaction.less'
 
 interface Props {
   part: TimelinePart
+}
+
+/**
+ * from/to 模型显示名：取短名 modelId（服务端实测小写 d）。
+ * 服务端 marker 的 label 是 "providerId/modelId" 复合（如
+ * builtin:bigmodel-coding-plan/GLM-5-Turbo），直接显示会与本地合成卡
+ * （用 modelId）两套观感，且长名窄面板换行——统一短名，全名走 title 悬停。
+ */
+function modelLabel(m?: { modelID?: string; modelId?: string; label?: string }): string | undefined {
+  return m?.modelId ?? m?.modelID ?? m?.label
 }
 
 export function TimelineSeparator({ part }: Props) {
@@ -28,11 +41,13 @@ export function TimelineSeparator({ part }: Props) {
       <div className="tl-sep">
         <span className="tl-sep__line" />
         <span className="tl-sep__text">
-          <span className="codicon codicon-compress" />
-          {t('chat.compaction.title')}
+          <span className="tl-sep__label">
+            <span className="codicon codicon-compress" />
+            {t('chat.compaction.title')}
+          </span>
           {pre != null && post != null && (
             <span className="tl-sep__meta" title={`${pre.toLocaleString()} → ${post.toLocaleString()}`}>
-              {' '}{compactTokens(pre)} → {compactTokens(post)} tokens
+              {compactTokens(pre)} → {compactTokens(post)} tokens
             </span>
           )}
         </span>
@@ -42,15 +57,24 @@ export function TimelineSeparator({ part }: Props) {
   }
 
   if (part.timelineType === 'model_change') {
-    const from = part.fromModel?.label ?? part.fromModel?.modelID
-    const to = part.toModel?.label ?? part.toModel?.modelID
+    const from = modelLabel(part.fromModel)
+    const to = modelLabel(part.toModel)
     return (
       <div className="tl-sep">
         <span className="tl-sep__line" />
         <span className="tl-sep__text">
-          <span className="codicon codicon-arrow-swap" />
-          {t('chat.timeline.modelChanged')}
-          {from && to && <span className="tl-sep__meta">{`${from} → ${to}`}</span>}
+          <span className="tl-sep__label">
+            <span className="codicon codicon-arrow-swap" />
+            {t('chat.timeline.modelChanged')}
+          </span>
+          {from && to && (
+            <span
+              className="tl-sep__meta"
+              title={`${part.fromModel?.label ?? from} → ${part.toModel?.label ?? to}`}
+            >
+              {`${from} → ${to}`}
+            </span>
+          )}
         </span>
         <span className="tl-sep__line" />
       </div>
