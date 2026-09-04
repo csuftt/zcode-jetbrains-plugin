@@ -142,10 +142,16 @@ export function ModelSelect({ currentModel, onSelect, disabled = false }: Props)
           <ModelIcon
             modelId={currentModel?.modelId ?? displayName ?? undefined}
             providerId={currentModel?.providerId}
-            size={9}
+            size={11}
           />
         )}
-        <span className={`selector-button-text ${!hasModel ? 'selector-button-text--placeholder' : ''}`}>
+        <span
+          className={`selector-button-text ${!hasModel ? 'selector-button-text--placeholder' : ''} ${
+            hasModel && displayName && /[a-z]/.test(displayName) && !/[A-Z]/.test(displayName)
+              ? 'selector-button-text--xheight'
+              : ''
+          }`}
+        >
           {displayName ?? t('input.model.selectModel')}
         </span>
         <span className="codicon codicon-chevron-down selector-button-chevron" />

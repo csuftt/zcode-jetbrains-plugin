@@ -74,7 +74,7 @@ export function ModeSelect() {
         title={activeMode ? t(`input.mode.${activeMode.value}.title`) : t('input.mode.title')}
       >
         <span className={`codicon ${modeIcon(displayValue)} mode-icon`} />
-        <span className="selector-button-text">{displayLabel}</span>
+        <span className="selector-button-text selector-button-text--cjk">{displayLabel}</span>
         <span className="codicon codicon-chevron-down selector-button-chevron" />
       </button>
 

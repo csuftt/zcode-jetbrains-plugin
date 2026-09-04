@@ -87,7 +87,7 @@ export function ThoughtLevelSelect() {
         title={isDefault ? t('input.thought.titleWithDefault', { level: displayText }) : t('input.thought.title')}
       >
         <span className={`codicon ${current ? levelIcon(current) : 'codicon-lightbulb'} thought-level-icon`} />
-        <span className="selector-button-text">{displayText}</span>
+        <span className="selector-button-text selector-button-text--cjk">{displayText}</span>
         <span className="codicon codicon-chevron-down selector-button-chevron" />
       </button>
 

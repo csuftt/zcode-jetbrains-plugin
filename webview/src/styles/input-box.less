@@ -468,6 +468,21 @@
   &--placeholder {
     color: var(--text-muted);
   }
+
+  /* 中文标签档（思考级别/权限模式按钮）：同 10px 下 CJK 墨迹比 ASCII 模型名显小，
+     单独提一档到 11px（line-height 按上注换算 13px）；模型按钮的拉丁 modelId 保持 10px */
+  &--cjk {
+    font-size: 11px;
+    line-height: 13px;
+  }
+
+  /* 小写拉丁档（模型按钮常态文字）：全小写 modelId（deepseek-v4-flash 等）墨迹主体
+     是 x-height 小写体，高度≈大写 cap 的 72%——同 10px 比 11px 中文标签显小一档，
+     与 --cjk 同档 11px 补偿；含大写的（GLM-5.3，cap 高≈汉字）维持 10px 基准档 */
+  &--xheight {
+    font-size: 11px;
+    line-height: 13px;
+  }
 }
 
 /* 提特异性压 codicon.css 的 .codicon[class*='codicon-'] 简写（0,2,0）——单类
