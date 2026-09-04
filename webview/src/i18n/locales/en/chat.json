@@ -30,7 +30,17 @@
     "viewFull": "View full text ({{lines}} lines · {{count}} chars)",
     "fullTextTitle": "Full user message ({{lines}} lines · {{count}} chars)",
     "closeFull": "Close",
-    "fullTextAria": "Full user message dialog"
+    "fullTextAria": "Full user message dialog",
+    "copy": "Copy",
+    "copyCopied": "Copied",
+    "edit": "Edit",
+    "editCancel": "Cancel",
+    "editRegenerate": "Regenerate"
+  },
+  "edit": {
+    "replaying": "Regenerating with the edited message…",
+    "staleTarget": "Conversation changed; edit cancelled",
+    "rewindFailed": "Message rewind did not take effect; edit cancelled, please retry"
   },
   "thinking": {
     "thinking": "Thinking",

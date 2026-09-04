@@ -33,6 +33,7 @@ import { clockTime, compactTokens, formatDuration } from '@/utils/time'
 import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
 import { KV_HYDRATED_EVENT } from '@/utils/persist'
 import { useTick } from '@/hooks/useTick'
+import { copyText, useCopyFeedback } from '@/utils/clipboard'
 import { ScrollJumpButton } from './ScrollJumpButton'
 import { CompactionSummaryCard } from './CompactionSummaryCard'
 import { TimelineSeparator } from './TimelineSeparator'
@@ -55,9 +56,11 @@ interface Props {
   anchorAttr?: string
   /** 会话内搜索面板激活（长用户消息临时展开，保 TreeWalker 高亮/定位）*/
   searchActive?: boolean
+  /** 该 user 消息是最后一轮可编辑消息（编辑按钮的显示条件；官方 Edit History 语义）*/
+  editable?: boolean
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, streaming, anchorAttr, searchActive }: Props) {
+export const MessageBubble = memo(function MessageBubble({ message, streaming, anchorAttr, searchActive, editable }: Props) {
   const { info, parts } = message
   const isUser = info.role === 'user'
   const time = clockTime(info.time?.created)
@@ -102,6 +105,8 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
         anchorAttr={anchorAttr}
         searchActive={searchActive}
         scheduledFireAt={firedAt}
+        messageId={info.id}
+        editable={editable}
       />
     )
   }
@@ -125,6 +130,8 @@ function UserBubble({
   anchorAttr,
   searchActive,
   scheduledFireAt,
+  messageId,
+  editable,
 }: {
   text: string
   imageParts: Array<ImagePart | FilePart>
@@ -133,6 +140,10 @@ function UserBubble({
   searchActive?: boolean
   /** 定时消息标记（fireAt）：发出后气泡上带「定时执行」徽标（历史重拉不带，预期）*/
   scheduledFireAt?: number
+  /** 服务端消息 id（编辑目标锚定 + 编辑态判定）；乐观消息为 local_u_ 前缀 */
+  messageId?: string
+  /** 最后一轮可编辑消息（官方 Edit History：仅最后一轮用户消息可编辑）*/
+  editable?: boolean
 }) {
   const { t } = useTranslation()
   const [showFull, setShowFull] = useState(false)
@@ -152,6 +163,14 @@ function UserBubble({
         .filter((x): x is { src: string; key: string; title: string | undefined } => !!x.src),
     [imageParts],
   )
+  // 编辑态锚定本消息（store 级状态：提交/取消在 EditComposer 内完成）
+  const editing = useStore((s) => !!messageId && s.editingMessageId === messageId)
+  const { state: copyState, showResult } = useCopyFeedback(1200)
+  const onCopy = () => { void showResult(() => copyText(text)) }
+
+  if (editing) {
+    return <EditComposer initialText={text} lines={lines} />
+  }
 
   return (
     <div className="msg msg--user" data-anchor-msg={anchorAttr}>
@@ -180,9 +199,95 @@ function UserBubble({
           </button>
         )}
       </div>
+      <div className="msg__actions">
+        <button
+          type="button"
+          className="msg__action-btn"
+          onClick={onCopy}
+          disabled={!text}
+          title={copyState === 'ok' ? t('chat.message.copyCopied') : t('chat.message.copy')}
+          aria-label={t('chat.message.copy')}
+        >
+          <span className={`codicon ${copyState === 'ok' ? 'codicon-check msg__action-btn--ok' : 'codicon-copy'}`} />
+        </button>
+        {editable && (
+          <button
+            type="button"
+            className="msg__action-btn"
+            onClick={() => useStore.getState().startEdit()}
+            title={t('chat.message.edit')}
+            aria-label={t('chat.message.edit')}
+          >
+            <span className="codicon codicon-edit" />
+          </button>
+        )}
+      </div>
       {showFull && (
         <UserTextPreviewDialog text={text} lines={lines} onClose={() => setShowFull(false)} />
       )}
+    </div>
+  )
+}
+
+/**
+ * 用户消息行内编辑器（官方 Edit History 形态：原消息展开为可编辑输入框）。
+ * 提交走 store.submitEdit（rewind + 重发编排）；Enter 提交、Shift+Enter 换行、
+ * Esc 取消（对齐 InputBox 键位）；IME 组合中的 Enter 不当提交。
+ */
+function EditComposer({ initialText, lines }: { initialText: string; lines: number }) {
+  const { t } = useTranslation()
+  const [value, setValue] = useState(initialText)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const submitEdit = useStore((s) => s.submitEdit)
+  const cancelEdit = useStore((s) => s.cancelEdit)
+
+  // 挂载即聚焦：光标置于末尾（保留全选改写的可能——用户直接输入即整体替换的
+  // 常见编辑动线由「全选」自行触发，不做预设）
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [])
+
+  const submit = () => {
+    if (!value.trim()) return
+    submitEdit(value)
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEdit()
+      return
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      submit()
+    }
+  }
+
+  const rows = Math.min(Math.max(lines + 1, 3), 14)
+  return (
+    <div className="msg msg--user msg--editing" >
+      <textarea
+        ref={ref}
+        className="msg__edit-textarea"
+        value={value}
+        rows={rows}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={onKeyDown}
+        aria-label={t('chat.message.edit')}
+      />
+      <div className="msg__edit-actions">
+        <button type="button" className="msg__edit-btn msg__edit-btn--ghost" onClick={cancelEdit}>
+          {t('chat.message.editCancel')}
+        </button>
+        <button type="button" className="msg__edit-btn msg__edit-btn--primary" onClick={submit} disabled={!value.trim()}>
+          <span className="codicon codicon-send" />
+          {t('chat.message.editRegenerate')}
+        </button>
+      </div>
     </div>
   )
 }

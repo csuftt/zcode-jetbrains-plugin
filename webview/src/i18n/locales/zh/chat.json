@@ -30,7 +30,17 @@
     "viewFull": "查看全文（{{lines}} 行 · {{count}} 字符）",
     "fullTextTitle": "用户消息全文（{{lines}} 行 · {{count}} 字符）",
     "closeFull": "关闭",
-    "fullTextAria": "用户消息全文弹窗"
+    "fullTextAria": "用户消息全文弹窗",
+    "copy": "复制",
+    "copyCopied": "已复制",
+    "edit": "编辑",
+    "editCancel": "取消",
+    "editRegenerate": "重新生成"
+  },
+  "edit": {
+    "replaying": "正在按编辑后的消息重新生成…",
+    "staleTarget": "会话已变化，编辑已取消",
+    "rewindFailed": "消息回退未生效，编辑已取消，请重试"
   },
   "thinking": {
     "thinking": "思考中",

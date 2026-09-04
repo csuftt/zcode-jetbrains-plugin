@@ -35,6 +35,14 @@ import { mergeTurnMessages } from '@/utils/mergeTurnMessages'
 import { getPersisted, setPersisted, removePersisted, entriesWithPrefix } from '@/utils/persist'
 import { readEnhanceConfig } from '@/utils/enhanceConfig'
 import { extractBackgroundTaskIdFromContent } from '@/utils/backgroundTask'
+import {
+  buildEditRewindCommand,
+  findEditableUserMessage,
+  applyRewindCuts,
+  loadRewindCuts,
+  addRewindCut,
+  asConversationRewind,
+} from '@/utils/editHistory'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'mock' | 'error'
 
@@ -175,6 +183,9 @@ function sessionResetBase(): Partial<StoreState> {
     childSessionV4: {},
     childLiveMessages: {},
     childStreamingIds: {},
+    // 编辑态与重放编排绑定当前会话，切会话作废
+    editingMessageId: null,
+    editReplay: null,
   }
 }
 let reconcileProbeInFlight = false
@@ -422,6 +433,13 @@ interface StoreState {
   /** createSession 级别补发被推迟暂存的级别（等 modelSet 落定后按新模型下发，防 -32603 竞态）*/
   pendingThoughtLevel: string | null
 
+  // 编辑历史消息（对齐官方 Edit History：仅最后一轮用户消息可编辑，改写重新生成）
+  /** 行内编辑态锚定的消息 id（null=不在编辑态）；提交/取消/切会话清除 */
+  editingMessageId: string | null
+  /** 编辑重放编排：rewind 命令已发出，等 rewind turn 完成 + 快照落地（case 'messages'）
+   *  后自动重发 text。rewound=服务端 rewind.triggered 已确认（turn 结束时未确认则判失败）。 */
+  editReplay: { targetMsgId: string; text: string; rewound: boolean } | null
+
   // 上下文用量（session/read → runtime.contextUsage）
   /** hitRate = null 表示本 turn 暂无缓存统计（新 turn 开始、首次模型调用完成前），显示"—"*/
   contextUsage: { used: number; size: number; hitRate: number | null } | null
@@ -542,7 +560,16 @@ interface StoreState {
   init: () => void
   loadSessions: () => void
   selectSession: (session: SessionInfo) => void
-  sendMessage: (text: string, attachments?: ImageAttachmentInput[], opts?: { scheduledFireAt?: number; scheduledProviderId?: string; scheduledModelId?: string }) => void
+  sendMessage: (text: string, attachments?: ImageAttachmentInput[], opts?: { scheduledFireAt?: number; scheduledProviderId?: string; scheduledModelId?: string; hiddenCommand?: boolean }) => void
+  /** 进入最后一条用户消息的编辑态（MessageBubble 行内编辑框） */
+  startEdit: () => void
+  /** 退出编辑态（不提交） */
+  cancelEdit: () => void
+  /**
+   * 提交编辑（编辑重新生成）：发 `/rewind conversation <msgId>` 截断该轮，rewind
+   * turn 完成重拉快照落地后自动重发编辑文本（editReplay 编排，见 case 'messages'）
+   */
+  submitEdit: (text: string) => void
   createSession: () => void
   /** 待命态定时任务：先把会话建好再落库（归属唯一化），createSession 响应后自动 scheduledCreate */
   createSessionForSchedule: (text: string, fireAt: number, providerId?: string, modelId?: string, keepCurrent?: boolean) => void
@@ -759,6 +786,8 @@ export const useStore = create<StoreState>((set, get) => ({
   backgroundTasks: {},
   queuedMessages: [],
   goal: null,
+  editingMessageId: null,
+  editReplay: null,
   scheduledMessages: [],
   firedHistory: [],
   lastScheduledListTs: 0,
@@ -1095,42 +1124,84 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     // 本地把用户消息立即加入列表（不等 reload，体验更快）；
-    // 图片附件同时以 image part 乐观展示（dataUrl 直连渲染）
-    const userMsg: ZCodeMessage = {
-      info: {
-        role: 'user',
-        time: { created: Date.now() },
-        id: `local_u_${Date.now()}`,
-        sessionID: sid,
-        // 定时消息徽标（定时 HH:mm 执行）；历史重拉为服务端权威数据，不带此标记（预期）
-        ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
-      },
-      parts: [
-        ...(attachments ?? []).map((a) => ({
-          type: 'image' as const,
-          mediaType: a.mimeType,
-          dataUrl: `data:${a.mimeType};base64,${a.dataBase64}`,
-          dataBase64: a.dataBase64,
-          source: { kind: 'inline' as const, filename: a.filename },
-        })),
-        { type: 'text', text },
-      ],
-    }
-    set((s) => ({ messages: [...s.messages, userMsg] }))
+    // 图片附件同时以 image part 乐观展示（dataUrl 直接渲染）。
+    // hiddenCommand（编辑重放的 /rewind 命令）：不插乐观消息——命令轮不进 UI
+    //（快照侧服务端已剪除，diag-rewind-meta.py 实测），乐观标题同理不占位
+    if (!opts?.hiddenCommand) {
+      const userMsg: ZCodeMessage = {
+        info: {
+          role: 'user',
+          time: { created: Date.now() },
+          id: `local_u_${Date.now()}`,
+          sessionID: sid,
+          // 定时消息徽标（定时 HH:mm 执行）；历史重拉为服务端权威数据，不带此标记（预期）
+          ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
+        },
+        parts: [
+          ...(attachments ?? []).map((a) => ({
+            type: 'image' as const,
+            mediaType: a.mimeType,
+            dataUrl: `data:${a.mimeType};base64,${a.dataBase64}`,
+            dataBase64: a.dataBase64,
+            source: { kind: 'inline' as const, filename: a.filename },
+          })),
+          { type: 'text', text },
+        ],
+      }
+      set((s) => ({ messages: [...s.messages, userMsg] }))
 
-    // 乐观标题：新会话首条消息立即占位（CLI 要等首轮对话结束才生成正式标题，长任务期间
-    // header/标签 tooltip 一直是「新会话」）。仅该会话首个临时标题生效（与 CLI 取首轮
-    // 输入作标题一致）；正式标题由 session.titleUpdated 事件或 listSessions 刷新替换
-    const curTitle = get().sessions.find((s) => s.sessionId === sid)?.title
-    if (!get().provisionalTitles[sid] && isDefaultSessionTitle(curTitle, sid)) {
-      const provisional = deriveProvisionalTitle(text)
-      if (provisional) {
-        set((s) => ({
-          provisionalTitles: { ...s.provisionalTitles, [sid]: provisional },
-          sessions: s.sessions.map((x) => (x.sessionId === sid ? { ...x, title: provisional } : x)),
-        }))
+      // 乐观标题：新会话首条消息立即占位（CLI 要等首轮对话结束才生成正式标题，长任务期间
+      // header/标签 tooltip 一直是「新会话」）。仅该会话首个临时标题生效（与 CLI 取首轮
+      // 输入作标题一致）；正式标题由 session.titleUpdated 事件或 listSessions 刷新替换
+      const curTitle = get().sessions.find((s) => s.sessionId === sid)?.title
+      if (!get().provisionalTitles[sid] && isDefaultSessionTitle(curTitle, sid)) {
+        const provisional = deriveProvisionalTitle(text)
+        if (provisional) {
+          set((s) => ({
+            provisionalTitles: { ...s.provisionalTitles, [sid]: provisional },
+            sessions: s.sessions.map((x) => (x.sessionId === sid ? { ...x, title: provisional } : x)),
+          }))
+        }
       }
     }
+  },
+
+  startEdit: () => {
+    const st = get()
+    if (st.editingMessageId || st.streaming || st.editReplay) return
+    const target = findEditableUserMessage(st.messages)
+    if (!target) return
+    set({ editingMessageId: target.info.id })
+  },
+
+  cancelEdit: () => {
+    if (get().editingMessageId) set({ editingMessageId: null })
+  },
+
+  /**
+   * 提交编辑（编辑重新生成）：
+   * 1. 守卫（回合进行中/排队非空/编辑目标已过期则放弃）
+   * 2. 发 `/rewind conversation <msgId>`（hiddenCommand：不插乐观消息）——
+   *    服务端截断模型上下文，rewind.triggered 事件到达时截断内存消息并落 kv 记忆
+   * 3. rewind turn 完成 → 300ms 常规重拉 → case 'messages' 落地（applyRewindCuts
+   *    应用 kv 记忆）→ 消费 editReplay 自动重发编辑文本
+   */
+  submitEdit: (text) => {
+    const st = get()
+    const trimmed = text.trim()
+    const sid = st.currentSessionId
+    const targetId = st.editingMessageId
+    if (!sid || !targetId || !trimmed || st.streaming || st.editReplay || st.queuedMessages.length > 0) {
+      return
+    }
+    // 编辑目标仍是最后一条可编辑消息（编辑期间会话被外部推进则放弃）
+    const target = findEditableUserMessage(st.messages)
+    if (!target || target.info.id !== targetId) {
+      set({ editingMessageId: null, lastError: i18n.t('chat.edit.staleTarget') })
+      return
+    }
+    set({ editingMessageId: null, editReplay: { targetMsgId: targetId, text: trimmed, rewound: false } })
+    get().sendMessage(buildEditRewindCommand(targetId), undefined, { hiddenCommand: true })
   },
 
   /**
@@ -2497,6 +2568,13 @@ export function handleResponse(
         // 打开会话的首拉标志（selectSession 置位、下方快照落地复位）：P2 补发依据
         const firstFetch = get().loadingMessages
         applyMessagesSnapshot(msg, set, get)
+        // 编辑重放的正路径：rewind turn 结束触发的重拉已落地（applyRewindCuts
+        // 已截断），此刻 streaming=false，重发编辑文本开启新生成轮
+        const replay = get().editReplay
+        if (replay?.rewound) {
+          set({ editReplay: null })
+          get().sendMessage(replay.text)
+        }
         // P2 让路（缺陷AB 编排②）：首拉落地（P0 完成）后补发用量/子代理——不与
         // subscribe/messages 并发挤服务端会话队列；历史会话底部栏数据同样补齐
         if (firstFetch) {
@@ -3753,6 +3831,24 @@ function handleStreamBatchDirect(
       turnHasModelOutput = false
       armSwitchStallHint(sessionId, set, get)
     }
+    // 编辑重放的 rewind 生效确认（同单推路径）：截断本批局部 messages（编辑目标
+    // 轮到尾部，含 turn.started 建的流式空壳）+ kv 落记忆，不走消息归约
+    if (event.type === 'rewind.triggered') {
+      const targetId = asConversationRewind(event.payload)
+      const replay = get().editReplay
+      if (targetId && replay?.targetMsgId === targetId) {
+        const tIdx = messages.findIndex((m) => m.info.id === targetId && m.info.role === 'user')
+        if (tIdx >= 0) {
+          messages = messages.slice(0, tIdx)
+          if (streamingMessageId && !messages.some((m) => m.info.id === streamingMessageId)) {
+            streamingMessageId = null
+          }
+        }
+        set({ editReplay: { ...replay, rewound: true } })
+        if (sessionId) addRewindCut(sessionId, targetId)
+      }
+      continue
+    }
     // 压缩回合不建流式 assistant 消息（同单推路径：零 delta 空气泡，CompactingIndicator 表达）；
     // goal 校验轮同款（verifying 窗口内服务端起 completion verifier 回合，~10s 零
     // delta——建了就是空气泡+工作中 footer，校验完消失 = 间歇闪屏，0.3.2 真机反馈；
@@ -3806,11 +3902,21 @@ function handleStreamBatchDirect(
 
   if (turnEnded) {
     console.log(`[store] turn 结束（批量），重新拉取消息确保一致`)
+    // 编辑重放失败清理（同单推路径）：rewound 未确认或回合失败 → 放弃重发并提示
+    const replay = get().editReplay
+    if (replay && (!replay.rewound || turnError)) {
+      set({
+        editReplay: null,
+        ...(turnError ? {} : { lastError: i18n.t('chat.edit.rewindFailed') }),
+      })
+    }
     // 本批未同时开启新 turn 时自动发送队列下一条（同批 completed+started 说明服务端已自动续轮）
     if (!turnStarted) {
       // 压缩回合结束：摘要卡只经下方重拉快照落地，队列非空时延迟到快照落地后再
       // flush——立即发会让新 turn 抢先置 streaming，快照被丢弃、摘要卡整轮缺失
-      if (wasCompacting && get().queuedMessages.length > 0) {
+      if (get().editReplay) {
+        // 编辑重放等快照落地后由 case 'messages' 消费重发（同压缩延迟 flush 思路）
+      } else if (wasCompacting && get().queuedMessages.length > 0) {
         scheduleDeferredCompactFlush(sessionId)
       } else {
         get().flushQueue()
@@ -3863,6 +3969,31 @@ function handleStreamEvent(
   // 状态变化通知（panel 单推，低频即时）：模式/级别跟随服务端
   if (event.type === 'state.updated') {
     applyStateUpdated(event, set)
+    return
+  }
+
+  // 编辑重放的 rewind 生效确认（diag-edit-rewind.py 实测时序：turn.started →
+  // rewind.triggered → turn.completed）：服务端已截断模型上下文，此处同步截断
+  // 内存消息（删除编辑目标轮到尾部——编辑守卫保证目标轮之后只有本命令轮），
+  // 并把 targetId 落 kv 截断记忆（快照不反映截断，重拉时按轮删除重放）
+  if (event.type === 'rewind.triggered') {
+    const targetId = asConversationRewind(event.payload)
+    const st = get()
+    if (targetId && st.editReplay && st.editReplay.targetMsgId === targetId) {
+      const tIdx = st.messages.findIndex((m) => m.info.id === targetId && m.info.role === 'user')
+      // 流式空壳（turn.started 建立的）随截断一并清除：streamingMessageId 指向
+      // 已删消息时清空（rewind turn 无后续 delta，turnEnded 也会兜底清）
+      const cutMessages = tIdx >= 0 ? st.messages.slice(0, tIdx) : st.messages
+      set({
+        messages: cutMessages,
+        ...(st.streamingMessageId && !cutMessages.some((m) => m.info.id === st.streamingMessageId)
+          ? { streamingMessageId: null }
+          : {}),
+        editReplay: { ...st.editReplay, rewound: true },
+      })
+      const sid = get().currentSessionId
+      if (sid) addRewindCut(sid, targetId)
+    }
     return
   }
 
@@ -3987,6 +4118,16 @@ function handleStreamEvent(
   if (turnEnded) {
     cancelSwitchStallHint()
     const wasCompacting = get().compacting
+    // 编辑重放的 rewind turn 结束：rewound 未确认（rewind.triggered 丢失 / 命令
+    // 被服务端降级拒绝）或回合失败 → 截断未生效，放弃重发并提示（模型上下文
+    // 未变，原消息原样保留，用户可重试编辑）
+    const replay = get().editReplay
+    if (replay && (!replay.rewound || turnError)) {
+      set({
+        editReplay: null,
+        ...(turnError ? {} : { lastError: i18n.t('chat.edit.rewindFailed') }),
+      })
+    }
     set({
       streaming: false,
       streamingMessageId: null,
@@ -4000,7 +4141,10 @@ function handleStreamEvent(
     // 压缩回合结束：摘要卡只经下方重拉快照落地，队列非空时延迟到快照落地后再
     // flush——立即发会让新 turn 抢先置 streaming，快照被丢弃、摘要卡整轮缺失
     //（同批量路径 scheduleDeferredCompactFlush，2026-08-22 /compact 排队实测）
-    if (wasCompacting && get().queuedMessages.length > 0) {
+    if (get().editReplay) {
+      // 编辑重放等快照落地后由 case 'messages' 消费重发（同压缩延迟 flush 思路：
+      // 立即 flush 会让排队消息抢先开新 turn，重拉快照被 streaming 守卫丢弃）
+    } else if (wasCompacting && get().queuedMessages.length > 0) {
       scheduleDeferredCompactFlush(sessionId)
     } else {
       get().flushQueue()
@@ -4250,11 +4394,17 @@ function applyMessagesSnapshot(
   // 过滤 model-only 合成消息（todo_reminder 等，2026-08-15 误渲染成
   // "子代理完成"卡片的根源）——只影响展示，下方派生计算仍用原始全量。
   // 同轮 turn 的多条 assistant step 合并为一条（耗时/token 取整轮），
-  // 否则重拉后"已工作"塌缩成最后一个 step 的耗时
-  const visibleMessages = mergeTurnMessages(
-    stripLeadingModelChangeMarkers(
-      msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
+  // 否则重拉后"已工作"塌缩成最后一个 step 的耗时。
+  // 编辑截断记忆重放（快照不反映 rewind——diag-rewind-meta.py 实测服务端
+  // Rbt 过滤链缺 createdMessageID，目标轮原样返回；按 kv 记录轮删除还原）
+  const sid = get().currentSessionId
+  const visibleMessages = applyRewindCuts(
+    mergeTurnMessages(
+      stripLeadingModelChangeMarkers(
+        msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
+      ),
     ),
+    sid ? loadRewindCuts(sid) : [],
   )
   // 通知扫描：转录里出现 task-notification 而活动还停在 running（子会话流与
   // 生命周期钩子都错过的场合，如重启恢复）→ 自愈收尾并拉权威列表补齐

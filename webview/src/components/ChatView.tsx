@@ -10,7 +10,7 @@
  * - 停止生成按钮已移到输入框（发送/停止互斥）
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage } from '@/types/messages'
 import { MessageBubble } from './MessageBubble'
@@ -21,6 +21,8 @@ import { ConversationSearch } from './ConversationSearch'
 import { GoalCard } from './GoalCard'
 import { NEAR_BOTTOM_PX, HIDE_DELAY_MS, UP_GHOST_MS } from './ScrollJumpButton'
 import { isAgentNotification } from '@/utils/parseNotification'
+import { useStore } from '@/store/useStore'
+import { findEditableUserMessage } from '@/utils/editHistory'
 import '../styles/chat-view.less'
 import '../styles/compaction.less'
 
@@ -56,6 +58,17 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
+  const streaming = useStore((s) => s.streaming)
+  const queuedCount = useStore((s) => s.queuedMessages.length)
+  const editReplay = useStore((s) => s.editReplay)
+  // 编辑按钮仅出现在最后一轮可编辑用户消息上（官方 Edit History 语义），
+  // 且仅在空闲态（无回合/无排队/非编辑重放）开放——rewind 与活动回合互斥
+  const editableMsgId = useMemo(
+    () => (!streaming && queuedCount === 0 && !editReplay
+      ? findEditableUserMessage(messages)?.info.id ?? null
+      : null),
+    [messages, streaming, queuedCount, editReplay],
+  )
   // 最近一次滚轮上滑时刻：其后的短窗口内 scroll 的"到底判定"不恢复自动跟滚——
   // 上滑断跟后流式置底/微小回弹引发的 scroll 会把跟滚立刻拉回（上滑弹跳根因）
   const lastUpWheelAt = useRef(0)
@@ -203,6 +216,7 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
                 streaming={m.info.id === streamingMessageId}
                 anchorAttr={m.info.role === 'user' && !isAgentNotification(m.info) ? m.info.id : undefined}
                 searchActive={!!searchOpen}
+                editable={m.info.id === editableMsgId}
               />
             )
           })}
@@ -211,6 +225,13 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
             <div className="compacting-indicator">
               <span className="compacting-indicator__spin" />
               {t('chat.compaction.compressing')}
+            </div>
+          ) : editReplay ? (
+            // 编辑重放：rewind turn（不渲染命令轮）→ 快照落地 → 重发新文本，
+            // 期间等待指示用编辑专属文案（与普通等待转圈区分）
+            <div className="compacting-indicator">
+              <span className="compacting-indicator__spin" />
+              {t('chat.edit.replaying')}
             </div>
           ) : (
             <>

@@ -30,7 +30,17 @@
     "viewFull": "전체 보기({{lines}}줄 · {{count}}자)",
     "fullTextTitle": "사용자 메시지 전체({{lines}}줄 · {{count}}자)",
     "closeFull": "닫기",
-    "fullTextAria": "사용자 메시지 전체 보기 대화상자"
+    "fullTextAria": "사용자 메시지 전체 보기 대화상자",
+    "copy": "복사",
+    "copyCopied": "복사됨",
+    "edit": "편집",
+    "editCancel": "취소",
+    "editRegenerate": "다시 생성"
+  },
+  "edit": {
+    "replaying": "편집된 메시지로 다시 생성하는 중…",
+    "staleTarget": "대화가 변경되어 편집이 취소되었습니다",
+    "rewindFailed": "메시지 되감기가 적용되지 않아 편집이 취소되었습니다. 다시 시도해 주세요"
   },
   "thinking": {
     "thinking": "생각 중",

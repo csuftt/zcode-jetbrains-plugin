@@ -43,11 +43,17 @@ describe('用户消息长文折叠', () => {
   })
   afterEach(cleanup)
 
+  /** 「查看全文」展开按钮（用户消息 hover 操作区另有复制/编辑按钮，须按类名定位）*/
+  function expandBtn(): HTMLElement | null {
+    return document.querySelector('.msg__expand')
+  }
+
   it('≥10 行的长消息默认折叠：加折叠类 + 展开按钮 + 全文仍在 DOM', () => {
     render(<MessageBubble message={userMsg(LONG_12_LINES)} />)
     expect(bubble().className).toContain('msg__bubble--collapsed')
-    const btn = screen.getByRole('button')
-    expect(btn.textContent).toContain('12')
+    const btn = expandBtn()
+    expect(btn).not.toBeNull()
+    expect(btn!.textContent).toContain('12')
     // 折叠不截断 DOM：尾部行文本节点必须存在（搜索 TreeWalker 依赖）
     expect(bubble().textContent).toContain('第 12 行')
   })
@@ -57,21 +63,21 @@ describe('用户消息长文折叠', () => {
     expect(bubble().className).toContain('msg__bubble--collapsed')
   })
 
-  it('短消息不折叠、无按钮', () => {
+  it('短消息不折叠、无展开按钮', () => {
     render(<MessageBubble message={userMsg(SHORT)} />)
     expect(bubble().className).not.toContain('msg__bubble--collapsed')
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(expandBtn()).toBeNull()
   })
 
   it('searchActive 强制展开（搜索面板打开时）', () => {
     render(<MessageBubble message={userMsg(LONG_12_LINES)} searchActive />)
     expect(bubble().className).not.toContain('msg__bubble--collapsed')
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(expandBtn()).toBeNull()
   })
 
   it('点击查看全文 → body 下出现全文弹窗，Escape 关闭', () => {
     render(<MessageBubble message={userMsg(LONG_12_LINES)} />)
-    fireEvent.click(screen.getByRole('button'))
+    fireEvent.click(expandBtn()!)
     // portal 挂 body：弹窗不在消息树内
     const dialog = document.body.querySelector('.msg-fulltext') as HTMLElement
     expect(dialog).not.toBeNull()
