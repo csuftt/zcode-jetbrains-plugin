@@ -35,7 +35,8 @@
     "copyCopied": "已复制",
     "edit": "编辑",
     "editCancel": "取消",
-    "editRegenerate": "重新生成"
+    "editRegenerate": "重新生成",
+    "fork": "从此回复分叉"
   },
   "edit": {
     "replaying": "正在按编辑后的消息重新生成…",
@@ -109,7 +110,9 @@
     "event": "时间线事件",
     "goalPassed": "目标校验通过",
     "goalNotSatisfied": "目标未达成，继续推进",
-    "goalIteration": "第 {{iteration}} 轮"
+    "goalIteration": "第 {{iteration}} 轮",
+    "forked": "已从父会话分叉",
+    "forkFrom": "分叉自父会话（…{{id}}）"
   },
   "goal": {
     "status": {
@@ -141,5 +144,11 @@
     "goal": "设定长目标：AI 自动多轮推进并自校验，直到达成",
     "init": "初始化 AGENTS.md 项目指令文件",
     "compact": "压缩对话历史，释放上下文空间"
+  },
+  "fork": {
+    "busy": "回合进行中无法分叉，请等当前回合结束后再试",
+    "confirmTitle": "从此回复分叉新会话？",
+    "confirmMessage": "历史保留到这条回复（含），原会话不受影响。",
+    "confirmOk": "分叉"
   }
 }

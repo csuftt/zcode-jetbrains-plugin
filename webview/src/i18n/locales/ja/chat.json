@@ -35,7 +35,8 @@
     "copyCopied": "コピーしました",
     "edit": "編集",
     "editCancel": "キャンセル",
-    "editRegenerate": "再生成"
+    "editRegenerate": "再生成",
+    "fork": "この返答からフォーク"
   },
   "edit": {
     "replaying": "編集後のメッセージで再生成中…",
@@ -109,7 +110,9 @@
     "event": "タイムラインイベント",
     "goalPassed": "ゴール検証に合格",
     "goalNotSatisfied": "ゴール未達成、継続中",
-    "goalIteration": "第 {{iteration}} 周目"
+    "goalIteration": "第 {{iteration}} 周目",
+    "forked": "親セッションからフォーク",
+    "forkFrom": "親セッションからフォーク（…{{id}}）"
   },
   "goal": {
     "status": {
@@ -141,5 +144,11 @@
     "goal": "長期目標を設定：AI が複数ラウンドで自動推進・自己検証します",
     "init": "AGENTS.md プロジェクト指示ファイルを初期化",
     "compact": "会話履歴を圧縮してコンテキスト容量を解放"
+  },
+  "fork": {
+    "busy": "ターン実行中はフォークできません。終了後にお試しください",
+    "confirmTitle": "この返答から新しいセッションをフォークしますか？",
+    "confirmMessage": "履歴はこの返答まで保持され、元のセッションは影響を受けません。",
+    "confirmOk": "フォーク"
   }
 }

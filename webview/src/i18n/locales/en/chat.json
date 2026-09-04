@@ -35,7 +35,8 @@
     "copyCopied": "Copied",
     "edit": "Edit",
     "editCancel": "Cancel",
-    "editRegenerate": "Regenerate"
+    "editRegenerate": "Regenerate",
+    "fork": "Fork after this reply"
   },
   "edit": {
     "replaying": "Regenerating with the edited message…",
@@ -109,7 +110,9 @@
     "event": "Timeline event",
     "goalPassed": "Goal verified",
     "goalNotSatisfied": "Goal not met, continuing",
-    "goalIteration": "Iteration {{iteration}}"
+    "goalIteration": "Iteration {{iteration}}",
+    "forked": "Forked from parent session",
+    "forkFrom": "Forked from parent session (…{{id}})"
   },
   "goal": {
     "status": {
@@ -141,5 +144,11 @@
     "goal": "Set a long-running goal: AI iterates and self-verifies until achieved",
     "init": "Initialize the AGENTS.md project instructions file",
     "compact": "Compact conversation history to free up context space"
+  },
+  "fork": {
+    "busy": "Can't fork while a turn is running — wait for it to finish",
+    "confirmTitle": "Fork a new session from this reply?",
+    "confirmMessage": "History is kept up to this reply (inclusive); the original session stays untouched.",
+    "confirmOk": "Fork"
   }
 }

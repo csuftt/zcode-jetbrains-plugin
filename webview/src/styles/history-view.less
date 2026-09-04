@@ -222,6 +222,9 @@
     color: var(--text-tertiary);
     line-height: 1.6;
     margin-bottom: 16px;
+    // 多行时自动平衡断行：防止中文文案行尾孤字（如「响。」单独成行），
+    // Chromium 114+ 支持，低版本忽略无害
+    text-wrap: balance;
   }
 }
 

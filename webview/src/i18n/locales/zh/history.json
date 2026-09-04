@@ -37,5 +37,7 @@
   "archiveConfirm": "确定要归档所选 {{count}} 个会话吗？可在「已归档」中恢复。",
   "restoreConfirm": "确定要恢复所选 {{count}} 个会话吗？",
   "messageCount": "{{count}} 条消息",
-  "running": "运行中"
+  "running": "运行中",
+  "forkedSession": "分叉会话",
+  "goalSession": "目标模式会话"
 }

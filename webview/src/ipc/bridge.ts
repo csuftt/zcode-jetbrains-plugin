@@ -1873,6 +1873,12 @@ flowchart LR
     case 'unsubscribeChild':
       // mock：子代理终点退订 ack（无真实订阅可清）
       return { op: 'unsubscribedChild', sessionId: req.sessionId }
+    case 'forkSession':
+      // mock：分叉应答（伪 id；验 forkBusy 复位与 sessionForked 分支，新标签编排需真机）
+      return { op: 'sessionForked', forkedSessionId: `sess_fork_${Date.now()}`, parentSessionId: req.sessionId }
+    case 'gotoSession':
+      // mock：跳转会话 ack（dev 无多标签宿主，仅防误报"mock 不支持 op"错误条）
+      return { op: 'gotoSessionOpened' }
     case '__jsLog':
       // 诊断日志：桥未就绪期落 mock 时静默吞掉（mock 分支缺失会弹"mock 不支持 op"）
       return { op: '__jsLogAck' }

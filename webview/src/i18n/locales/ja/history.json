@@ -21,5 +21,7 @@
   "confirmDeleteAgain": "もう一度クリックして削除を確定",
   "deleteSession": "セッションを削除",
   "messageCount": "{{count}} 件のメッセージ",
-  "running": "実行中"
+  "running": "実行中",
+  "forkedSession": "フォークされたセッション",
+  "goalSession": "ゴールセッション"
 }

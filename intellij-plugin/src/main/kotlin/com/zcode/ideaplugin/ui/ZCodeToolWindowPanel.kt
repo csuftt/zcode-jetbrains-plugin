@@ -828,6 +828,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "subagents" -> handleSubagents(msg)
                         "subagentMessages" -> handleSubagentMessages(msg)
                         "createSession" -> handleCreateSession(msg)
+                        "forkSession" -> handleForkSession(msg)
                         "subscribe" -> handleSubscribe(msg)
                         "subscribeChild" -> handleSubscribeChild(msg)
                         "unsubscribeChild" -> handleUnsubscribeChild(msg)
@@ -1752,6 +1753,39 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
+    /**
+     * 会话分叉 — v4/command forkAssistant（官方客户端同款通道，零文件操作）。
+     * 新会话不在此处打开：应答 forkedSessionId 后由 webview 决定 gotoSession 新标签打开
+     * （与历史打开编排一致）。老版本 CLI 无 v4 面时回 forkUnsupported——按用户决策隐藏
+     * 入口而非回退 legacy session/fork（该路径带工作区文件恢复副作用，宁可没有）。
+     */
+    private fun handleForkSession(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val messageId = msg["messageId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 messageId")
+        val client = project.zCodeService().getClient()
+        return try {
+            val result = client.forkAssistantViaV4(sessionId, messageId)
+            buildJsonObject {
+                put("op", "sessionForked")
+                put("forkedSessionId", result["forkedSessionId"]?.jsonPrimitive?.content ?: "")
+                result["parentSessionId"]?.jsonPrimitive?.content?.let { put("parentSessionId", it) }
+            }
+        } catch (e: com.zcode.ideaplugin.protocol.ZCodeProtocolException) {
+            if (e.code == -32601) {
+                log.info("Fork unavailable (no v4 surface), hiding entry")
+                buildJsonObject { put("op", "forkUnsupported") }
+            } else {
+                log.warn("Fork session failed: ${e.message}")
+                errorResponse("分叉失败：${e.message ?: "未知错误"}")
+            }
+        } catch (e: Exception) {
+            log.warn("Fork session failed: ${e.message}")
+            errorResponse("分叉失败：${e.message ?: "未知错误"}")
+        }
+    }
+
     /** session/close — 删除会话 */
     private fun handleDeleteSession(msg: JsonObject): JsonObject {
         val sessionId = msg["sessionId"]?.jsonPrimitive?.content
@@ -1980,6 +2014,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
         put("title", s.title)
         put("status", s.status)
         put("mode", s.mode)
+        // fork/goal 会话标识（历史列表徽标用）：仅真值下发，普通会话不带该字段省流量
+        if (s.sessionKind == "fork") put("sessionKind", "fork")
+        if (s.goalTarget) put("goalTarget", true)
         put("workspacePath", s.workspace?.workspacePath ?: "")
         put("workspaceKey", s.workspace?.workspaceKey ?: "")
         put("createdAt", s.createdAt)

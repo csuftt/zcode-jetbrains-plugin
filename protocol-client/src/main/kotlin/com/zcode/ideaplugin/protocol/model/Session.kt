@@ -30,7 +30,10 @@ data class SessionInfo(
     val traceId: String? = null,
     val titleSource: String? = null,
     /** 归档标记时间戳（毫秒，ZCode 客户端任务索引 tasks.updated_at）；null = 未归档 */
-    val archivedAt: Long? = null
+    val archivedAt: Long? = null,
+    /** 目标模式会话标识（sqlite session_target 有行即算，active/complete 都标；
+     *  历史列表 goal 徽标用，与 sessionKind 正交——可同时为 fork） */
+    val goalTarget: Boolean = false
 )
 
 /** session/create 的响应 */

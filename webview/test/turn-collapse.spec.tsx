@@ -172,7 +172,8 @@ describe('完成轮折叠', () => {
     render(<MessageBubble message={assistantMsg([toolPart('t1')])} />)
     expect(toolCardCount()).toBeGreaterThan(0)
     expect(processBar()).toBeNull()
-    expect(screen.queryByRole('button')).toBeNull()
+    // footer 分叉按钮（B2 一期）不属折叠语义，可存在；这里只锁折叠栏缺席
+    expect(screen.queryByRole('button', { name: /执行过程/ })).toBeNull()
   })
 
   it('结论后挂收尾动作（总结后再调工具）：折前面的过程，尾部工具保留在结论后', () => {

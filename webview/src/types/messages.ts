@@ -152,6 +152,9 @@ export interface TimelinePart {
   verificationId?: string
   goalIteration?: number
   verification?: { passed: boolean; reason?: string; nextAction?: string | null }
+  /** session_fork：分叉来源（2026-09-05 diag-fork2.py 实测；另含 targetMessageId/restoredFileCount）*/
+  parentSessionId?: string
+  targetMessageId?: string
   anchorMessageId?: string
   anchorTurnId?: string
   time?: { start: number; end?: number }
@@ -271,6 +274,10 @@ export interface SessionInfo {
   sizeBytes?: number
   /** 归档标记时间戳（毫秒，取 ZCode 客户端任务索引 updated_at）；缺省 = 未归档（仅已归档列表的项带此字段）*/
   archivedAt?: number
+  /** 会话种类（仅 fork 值下发；历史列表 fork 徽标判据，Java 层已按 sqlite fork id 集归一打标）*/
+  sessionKind?: string
+  /** 目标模式会话标识（sqlite session_target 有行即算，active/complete 都标）；与 sessionKind 正交 */
+  goalTarget?: boolean
 }
 
 // ============ IPC 请求 / 响应（JS ↔ Java）============
@@ -436,6 +443,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'scheduledFired'; sessionId: string; text: string; fireAt: number }
   /** 任务列表跳转会话：Java 统一 openSessionTab——激活已有宿主标签，无则新建标签按 sessionId 恢复 */
   | { op: 'gotoSession'; sessionId: string }
+  /** 从历史消息分叉新会话（B2 一期）：保留到该消息（含），新会话由 sessionForked 应答承载 */
+  | { op: 'forkSession'; sessionId: string; messageId: string }
   /** 历史列表打开前定位：查所有标签是否已绑定该会话（有则 Java 直接激活宿主标签跳转，无副作用）*/
   | { op: 'locateSession'; sessionId: string }
   /** mermaid 复制图片：PNG 纯 base64 → Java 系统剪贴板（JCEF 的 clipboard.write 图片不可靠的降级通道）*/
@@ -774,6 +783,10 @@ export interface EnvStatus {
 export type JavaResponse =
   | { op: 'listSessions'; sessions: SessionInfo[] }  | { op: 'createSession'; sessionId: string }
   | { op: 'tabSessionCleared' }
+  /** forkSession 应答：新会话由前端 openSessionNewTab 承载（与历史打开编排一致）*/
+  | { op: 'sessionForked'; forkedSessionId: string; parentSessionId?: string }
+  /** 老 CLI 无 v4 面（-32601）：隐藏分叉入口（不做 legacy 回退——该路径带文件恢复副作用）*/
+  | { op: 'forkUnsupported' }
   | { op: 'sessionDeleted'; sessionId: string }
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }

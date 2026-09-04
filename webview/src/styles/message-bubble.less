@@ -334,6 +334,20 @@
   &__footer-cost {
     color: var(--status-success);
   }
+
+  /* 分叉按钮（footer「已工作」行右侧）：对齐操作区礼仪 hover 显示 */
+  &__footer-fork {
+    margin-left: auto;
+    opacity: 0;
+    transition: opacity 0.15s;
+    pointer-events: none; /* 隐藏期间不可点 */
+
+    .msg--assistant:hover &,
+    .msg--assistant:focus-within & {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
 }
 
 @keyframes msg-fade-in {

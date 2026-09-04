@@ -21,5 +21,7 @@
   "confirmDeleteAgain": "다시 클릭하여 삭제 확정",
   "deleteSession": "세션 삭제",
   "messageCount": "메시지 {{count}}건",
-  "running": "실행 중"
+  "running": "실행 중",
+  "forkedSession": "포크된 세션",
+  "goalSession": "골 세션"
 }

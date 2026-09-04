@@ -444,6 +444,12 @@ interface StoreState {
    *  后自动重发 text。rewound=服务端 rewind.triggered 已确认（turn 结束时未确认则判失败）。 */
   editReplay: { targetMsgId: string; text: string; rewound: boolean } | null
 
+  // 会话分叉（B2 一期：从任意历史消息派生平行会话，v4 forkAssistant 官方同款通道）
+  /** fork 请求在途（按钮 loading + 防重复点击）；应答/失败复位 */
+  forkBusy: boolean
+  /** 分叉能力可用（老 CLI 无 v4 面时 Java 回 forkUnsupported 置 false，入口隐藏）*/
+  forkSupported: boolean
+
   // 上下文用量（session/read → runtime.contextUsage）
   /** hitRate = null 表示本 turn 暂无缓存统计（新 turn 开始、首次模型调用完成前），显示"—"*/
   contextUsage: { used: number; size: number; hitRate: number | null } | null
@@ -574,6 +580,8 @@ interface StoreState {
    * turn 完成重拉快照落地后自动重发编辑文本（editReplay 编排，见 case 'messages'）
    */
   submitEdit: (text: string) => void
+  /** 从历史消息分叉新会话（B2 一期）：session/fork 保留到该消息（含），应答后新标签打开 */
+  forkFromMessage: (sessionId: string, messageId: string) => void
   createSession: () => void
   /** 待命态定时任务：先把会话建好再落库（归属唯一化），createSession 响应后自动 scheduledCreate */
   createSessionForSchedule: (text: string, fireAt: number, providerId?: string, modelId?: string, keepCurrent?: boolean) => void
@@ -795,6 +803,8 @@ export const useStore = create<StoreState>((set, get) => ({
   goal: null,
   editingMessageId: null,
   editReplay: null,
+  forkBusy: false,
+  forkSupported: true,
   scheduledMessages: [],
   firedHistory: [],
   lastScheduledListTs: 0,
@@ -1183,6 +1193,24 @@ export const useStore = create<StoreState>((set, get) => ({
 
   cancelEdit: () => {
     if (get().editingMessageId) set({ editingMessageId: null })
+  },
+
+  /**
+   * 从历史消息分叉新会话（B2 一期）：session/fork 保留到目标消息（含）。
+   * 入口在 assistant 回复的 footer「已工作」行，target=该回复（保留到它为止，从这条
+   * 回复之后岔出去试另一方案）。命名/打开编排见 case 'sessionForked'。
+   * 运行中分叉服务端并不拒绝（diag-fork2.py ⑤ 实测与文档不符），但分叉到的是中间态，
+   * 且与编辑/停止交互未定义——此处兜底拒绝（按钮已按 streaming 隐藏，双保险）。
+   */
+  forkFromMessage: (sessionId, messageId) => {
+    const st = get()
+    if (st.forkBusy) return
+    if (st.streaming || st.editReplay) {
+      set({ lastError: i18n.t('chat.fork.busy') })
+      return
+    }
+    set({ forkBusy: true })
+    sendToJava({ op: 'forkSession', sessionId, messageId })
   },
 
   /**
@@ -2567,6 +2595,32 @@ export function handleResponse(
       break
     }
 
+    case 'sessionForked': {
+      // 分叉成功：①自动命名——与 ZCode 官方客户端同款「Fork of 原标题」前缀（fork25
+      // sqlite 取证：服务端 fork 落库也自动命名同款），走 renameSession 的 persist 通道
+      //（zcode.sessionTitle.<id>，listSessions 响应时合并、优先于服务端标题，跨重启
+      // 保留；父标题缺失时只用 "Fork"）；
+      // ②新标签打开分叉会话（gotoSession → Java openSessionTab 恢复编排，含 resume/
+      // 订阅）；③loadSessions 把分叉条目刷进历史列表
+      set({ forkBusy: false })
+      if (msg.forkedSessionId) {
+        const parentTitle = get()
+          .sessions.find((s) => s.sessionId === (msg.parentSessionId ?? get().currentSessionId))
+          ?.title?.trim()
+        get().renameSession(msg.forkedSessionId, parentTitle ? `Fork of ${parentTitle}` : 'Fork')
+        get().openSessionNewTab(msg.forkedSessionId)
+        get().loadSessions()
+      }
+      break
+    }
+
+    case 'forkUnsupported': {
+      // 老 CLI 无 v4 面（-32601）：隐藏分叉入口（用户决策：不做 legacy 回退——
+      // legacy session/fork 带工作区文件恢复副作用，宁可没有）
+      set({ forkBusy: false, forkSupported: false })
+      break
+    }
+
     case 'archivedSessions': {
       // 标题合并（persist 手动重命名优先，同 listSessions 逻辑简化版）
       const merged = msg.sessions.map((s) => {
@@ -2830,6 +2884,7 @@ export function handleResponse(
         mcpLogsLoading: false,
         modelManageLoading: false,
         modelTogglingId: null,
+        forkBusy: false,
         // 浏览器设置请求失败（如插件未安装）：页面内联提示（browserBusy 在途时才归属该页）
         ...(get().browserBusy ? { browserBusy: null, browserError: msg.message } : {}),
         ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null, pendingGoalCreation: null } : {}),

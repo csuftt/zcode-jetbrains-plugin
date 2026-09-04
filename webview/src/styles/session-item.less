@@ -77,6 +77,21 @@
     flex-shrink: 0;
   }
 
+  // 会话徽标（fork 分支 / goal 靶心）：标题文字后、时间前，muted 弱化不抢标题焦点；
+  // 字号走组件内联 style（codicon 特异性坑，单类 font-size 不稳）
+  &__fork-badge {
+    flex-shrink: 0;
+    margin-left: 2px; // 与标题文字留出呼吸空隙（父容器 gap 4px 基础上补 2px）
+    color: var(--text-tertiary);
+    opacity: 0.8;
+    cursor: default;
+    transition: opacity 0.15s;
+  }
+
+  &:hover &__fork-badge {
+    opacity: 1;
+  }
+
   &__title-text {
     overflow: hidden;
     text-overflow: ellipsis;

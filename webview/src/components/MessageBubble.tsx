@@ -37,6 +37,7 @@ import { copyText, useCopyFeedback } from '@/utils/clipboard'
 import { ScrollJumpButton } from './ScrollJumpButton'
 import { CompactionSummaryCard } from './CompactionSummaryCard'
 import { TimelineSeparator } from './TimelineSeparator'
+import { ConfirmDialog } from './ConfirmDialog'
 import {
   collectImageParts,
   imagePartSrc,
@@ -403,6 +404,22 @@ function AssistantBubble({
 }) {
   const { info, parts } = message
 
+  // 分叉（B2 一期）：入口在 footer「已工作」行——fork 锚点是已完成的回复（保留到该回复含，
+  // 从这条回复之后岔出去试另一方案），未获回答的用户消息没有分叉价值；
+  // 流式中/本地乐观消息不显示（运行中分叉到中间态无意义且与编辑/停止交互未定义）；
+  // 老 CLI 无 v4 面（forkSupported=false）隐藏。通道=v4 forkAssistant（官方同款，零文件操作）
+  const [confirmFork, setConfirmFork] = useState(false)
+  const forkBusy = useStore((s) => s.forkBusy)
+  const forkSupported = useStore((s) => s.forkSupported)
+  const forkable =
+    forkSupported &&
+    !streaming &&
+    !!info.sessionID &&
+    !!info.id &&
+    !info.id.startsWith('stream_local_') &&
+    !info.id.startsWith('local_')
+  const { t } = useTranslation()
+
   // 连续 Bash 命令聚组（cc-gui groupBlocks 规则）：压缩批量命令的消息区长度。
   // 分组保留原始 part 下标，reasoning 自动展开/流式判定的 index 语义不变
   const units = useMemo(() => groupParts(parts), [parts])
@@ -464,7 +481,24 @@ function AssistantBubble({
           renderedUnits
         )}
       </div>
-      <MessageFooter info={info} time={time} streaming={streaming} />
+      <MessageFooter
+        info={info}
+        time={time}
+        streaming={streaming}
+        fork={forkable ? { busy: forkBusy, onClick: () => setConfirmFork(true) } : undefined}
+      />
+      {confirmFork && (
+        <ConfirmDialog
+          title={t('chat.fork.confirmTitle')}
+          message={t('chat.fork.confirmMessage')}
+          confirmText={t('chat.fork.confirmOk')}
+          onConfirm={() => {
+            setConfirmFork(false)
+            useStore.getState().forkFromMessage(info.sessionID, info.id)
+          }}
+          onCancel={() => setConfirmFork(false)}
+        />
+      )}
     </div>
   )
 }
@@ -517,7 +551,18 @@ function collectUserText(parts: MessagePart[]): string {
  *   - 已完成：⏱ 已工作 X 分 Y 秒（completed - created，服务端权威值）
  *   - turn 结束 → 重拉消息之间有短暂窗口缺 completed，用最后一次跳动值冻结过渡
  */
-function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; time: string; streaming?: boolean }) {
+function MessageFooter({
+  info,
+  time,
+  streaming,
+  fork,
+}: {
+  info: ZCodeMessage['info']
+  time: string
+  streaming?: boolean
+  /** 分叉按钮（footer 行右侧，hover 显示；undefined=不渲染——流式中/乐观消息）*/
+  fork?: { busy: boolean; onClick: () => void }
+}) {
   const { t } = useTranslation()
   const tokens = info.tokens
   const model = info.modelID
@@ -558,6 +603,18 @@ function MessageFooter({ info, time, streaming }: { info: ZCodeMessage['info']; 
         </span>
       )}
       {info.cost ? <span className="msg__footer-cost">${info.cost.toFixed(4)}</span> : null}
+      {fork && (
+        <button
+          type="button"
+          className="msg__action-btn msg__footer-fork"
+          onClick={fork.onClick}
+          disabled={fork.busy}
+          title={t('chat.message.fork')}
+          aria-label={t('chat.message.fork')}
+        >
+          <span className="codicon codicon-git-branch" />
+        </button>
+      )}
     </div>
   )
 }

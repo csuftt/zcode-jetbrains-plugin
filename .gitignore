@@ -31,6 +31,7 @@ webview/src/version/version.ts
 # 发布相关脚本（gen-signing-key.sh）需要入库，故按文件模式忽略诊断脚本而非整个目录
 /scripts/diag-*.py
 /scripts/capture-*
+/scripts/asar-*
 
 # ===== 开发过程文档（设计调研/缺陷回归/里程碑记录，仅本地留档，不入库）=====
 /docs/internal/

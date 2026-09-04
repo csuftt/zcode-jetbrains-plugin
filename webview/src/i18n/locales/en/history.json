@@ -37,5 +37,7 @@
   "archiveConfirm": "Archive {{count}} selected sessions? They can be restored from Archived.",
   "restoreConfirm": "Restore {{count}} selected sessions?",
   "messageCount": "{{count}} messages",
-  "running": "Running"
+  "running": "Running",
+  "forkedSession": "Forked session",
+  "goalSession": "Goal session"
 }

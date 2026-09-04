@@ -110,6 +110,20 @@ function SessionItemInner({
           <span className="session-item__title-text">
             {renderTitle ? renderTitle(title) : title}
           </span>
+          {session.sessionKind === 'fork' && (
+            <span
+              className="codicon codicon-git-branch session-item__fork-badge"
+              style={{ fontSize: '12px' }}
+              title={t('history.forkedSession')}
+            />
+          )}
+          {session.goalTarget && (
+            <span
+              className="codicon codicon-target session-item__fork-badge"
+              style={{ fontSize: '12px' }}
+              title={t('history.goalSession')}
+            />
+          )}
         </div>
         <span className="session-item__time">
           {relativeTime(variant === 'archived' ? (session.archivedAt ?? session.updatedAt) : session.updatedAt)}

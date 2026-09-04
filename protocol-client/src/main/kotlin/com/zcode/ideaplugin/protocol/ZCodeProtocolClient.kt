@@ -83,6 +83,10 @@ class ZCodeProtocolClient private constructor(
     /** 已 v4 订阅的会话（幂等去重；帧到达时也以此为门禁，未订阅会话的帧不映射） */
     private val v4SubscribedSessions = ConcurrentHashMap.newKeySet<String>()
 
+    /** v4 订阅 id（sessionId → subscribe 应答 ack.subscriptionId）：退订 RPC 的
+     * 必填参数之一（三件套 topic+connectionId+subscriptionId，缺任一 -32603） */
+    private val v4SubscriptionIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     /** v4 帧累计映射产出事件数（[V4FrameProbe] 的 mapped 字段，见 handleNotification） */
     private val v4MappedProbe = ConcurrentHashMap<String, Long>()
 
@@ -643,8 +647,92 @@ class ZCodeProtocolClient private constructor(
         // 并集必须按 updatedAt 重排：两查各自按时间倒序返回，直接拼接会把补查命中的
         // 会话整段垫到列表尾部（历史列表表现为"不按时间倒序"）。sortedWith 稳定排序，
         // 同时间戳保持服务端原序
-        return (primary + alt.filter { it.sessionId !in primaryIds })
+        val merged = (primary + alt.filter { it.sessionId !in primaryIds })
             .sortedWith(compareByDescending { it.updatedAt })
+
+        // fork/目标模式补查（diag-fork21 定案）：session/list 的 DB 查询固定 roots=true
+        // （只查 parent_id IS NULL 的根会话），fork 会话天然被排除——fork 刚发生时
+        // 靠 app-server 内存补列可见，重启后（新进程纯查 DB）就从列表消失、恢复标签
+        // 也因列表查不到退化为空白。目标模式会话同理（session_target 关联列表不暴露）。
+        // 官方客户端走 sessions-index v4 索引（含 fork），legacy 协议参数（schema strict）
+        // 无口子放开，故直读 db.sqlite 补齐（与删除会话/归档同一数据源）。fail-soft：
+        // 查询失败保持原列表，宁少显示不拖垮主流程
+        val nativeDir = workspacePath.replace('/', File.separatorChar)
+        val forkDir = workspacePath.replace('\\', '/')
+        val extras = querySessionExtrasFromDb(nativeDir, forkDir)
+        // fork+goal 可同属一会话：两路标识都打上
+        val forks = extras.forks.map {
+            if (it.sessionId in extras.goalIds) it.copy(goalTarget = true) else it
+        }
+        if (forks.isEmpty() && extras.goalIds.isEmpty()) return merged
+        val forkIds = forks.mapTo(HashSet()) { it.sessionId }
+        val knownIds = merged.mapTo(HashSet()) { it.sessionId }
+        // 内存驻留行（fork 刚发生时的补列）sessionKind=interactive 且 title 为空，按
+        // sqlite 的 fork id 集合统一打标——前端 fork 徽标判据收敛为单一来源
+        // sessionKind==='fork'（diag-fork23：内存行与补查行形态不一致的弥合）
+        val marked = merged.map {
+            val isFork = it.sessionId in forkIds
+            val isGoal = it.sessionId in extras.goalIds
+            when {
+                isFork && isGoal -> it.copy(sessionKind = "fork", goalTarget = true)
+                isFork -> it.copy(sessionKind = "fork")
+                isGoal -> it.copy(goalTarget = true)
+                else -> it
+            }
+        }
+        return (marked + forks.filter { it.sessionId !in knownIds })
+            .sortedWith(compareByDescending { it.updatedAt })
+    }
+
+    /** [listSessions] 补查结果：fork 会话行 + 目标模式会话 id 集（可同属一个会话） */
+    private data class SessionExtras(val forks: List<SessionInfo>, val goalIds: Set<String>)
+
+    /**
+     * 直读 ~/.zcode/cli/db/db.sqlite 补查当前工作区的 fork 会话与目标模式会话
+     * （session/list 缺口的补集，见 [listSessions]）。fork 限定 task_type='fork'
+     * （parent_id 非空还可能是 subagent_child，混入即子会话泄漏）；goal 取
+     * session_target 有行即算（status active/complete 都标识——历史列表表达
+     * "这是目标模式会话"，运行态由会话内 GoalCard 呈现）；directory 双形态 IN
+     * （斜杠撕裂同因）；title 库里有服务端自动命名的 "Fork of <父标题>"（插件
+     * persist 的 "Fork · " 前缀名由前端合并时优先）。失败/超时/库缺失降级空集。
+     */
+    private fun querySessionExtrasFromDb(nativeDir: String, forkDir: String): SessionExtras {
+        if (!java.nio.file.Files.exists(cliDbPath)) return SessionExtras(emptyList(), emptySet())
+        return try {
+            val pb = ProcessBuilder(nodePath, "-e", SESSION_LIST_EXTRAS_JS)
+            pb.environment()["ZCODE_FORK_DB"] = cliDbPath.toString()
+            pb.environment()["ZCODE_FORK_DIR_NATIVE"] = nativeDir
+            pb.environment()["ZCODE_FORK_DIR_ALT"] = forkDir
+            pb.redirectError(ProcessBuilder.Redirect.DISCARD)
+            val p = pb.start()
+            val out = p.inputStream.bufferedReader().readText()
+            if (!p.waitFor(10, TimeUnit.SECONDS) || p.exitValue() != 0) {
+                return SessionExtras(emptyList(), emptySet())
+            }
+            val o = Json.parseToJsonElement(out.trim()).jsonObject
+            val forks = o["forks"]?.jsonArray?.mapNotNull { el ->
+                try {
+                    val r = el.jsonObject
+                    SessionInfo(
+                        sessionId = r["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                        title = r["title"]?.jsonPrimitive?.contentOrNull ?: "",
+                        sessionKind = "fork",
+                        workspace = Workspace(nativeDir),
+                        createdAt = r["time_created"]?.jsonPrimitive?.longOrNull ?: 0L,
+                        updatedAt = r["time_updated"]?.jsonPrimitive?.longOrNull ?: 0L,
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            } ?: emptyList()
+            val goals = o["goalIds"]?.jsonArray
+                ?.mapNotNullTo(HashSet()) { it.jsonPrimitive.contentOrNull }
+                ?: emptySet()
+            SessionExtras(forks, goals)
+        } catch (e: Exception) {
+            println("[ZCodeProtocolClient] session extras query failed (degrading to empty): ${e.message}")
+            SessionExtras(emptyList(), emptySet())
+        }
     }
 
     private fun listSessionsOnce(
@@ -751,22 +839,31 @@ class ZCodeProtocolClient private constructor(
         val r = request("v4/conversation/subscribe", params, timeoutMs)
         requireOk(r)
         v4SubscribedSessions.add(sessionId)
+        r["result"]?.jsonObject?.get("ack")?.jsonObject
+            ?.get("subscriptionId")?.jsonPrimitive?.contentOrNull
+            ?.let { v4SubscriptionIds[sessionId] = it }
         return r["result"]?.jsonObject ?: JsonObject(emptyMap())
     }
 
     /**
      * v4/conversation/unsubscribe — 退订（best-effort：失败只清本地状态不抛）。
-     * 连接级开销可忽略，不退订也无害；供会话关闭路径收敛使用。
+     * 参数三件套全必填：topic+connectionId+subscriptionId（diag-fork20 二分实测：
+     * 缺任一均 -32603 ZodError；旧实现缺 subscriptionId 故退订从未成功——服务端侧
+     * 自清兜底故无症状）。连接级开销可忽略，不退订也无害；供会话关闭路径收敛使用。
      */
     fun unsubscribeConversationV4(sessionId: String, timeoutMs: Long = 5000) {
+        val subId = v4SubscriptionIds.remove(sessionId)
         v4SubscribedSessions.remove(sessionId)
         v4FrameProbe.remove(sessionId)
         v4MappedProbe.remove(sessionId)
         v4FrameMapper.cleanup(sessionId)
         try {
+            // 服务端 schema 三件套全必填（diag-fork20 二分实测：缺 subscriptionId 或
+            // 缺 topic/connectionId 均 -32603 ZodError）
             request("v4/conversation/unsubscribe", buildJsonObject {
                 put("topic", "conversation/$sessionId")
                 put("connectionId", v4ConnectionId)
+                if (subId != null) put("subscriptionId", subId)
             }, timeoutMs)
         } catch (e: Exception) {
             // 退订失败可忽略（连接回收/进程退出时服务端自清）
@@ -1095,6 +1192,170 @@ class ZCodeProtocolClient private constructor(
         val r = requestWithRetry("session/subagents", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
         requireOk(r)
         return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * v4/command forkAssistant — 会话分叉（官方桌面客户端同款通道，行为对齐定案）。
+     *
+     * 链路（diag-fork10~16/26 探针全链路实测）：v4/conversation/subscribe（ack.logEpoch）→
+     * v4/conversation/rowsRange 定位目标行所在轮（从最新往回 beforeRowId 翻页至覆盖全会话）→
+     * 改选该轮内带 canFork 的 assistantText 行
+     * （官方分叉语义是轮级别：canFork 只打在轮内最后一段，长轮次的中间段天然无；legacy 视图
+     * 整轮合并显示、messageId 取第一段，须换算到轮末段）→ v4/command forkAssistant
+     * （target={rowId,entityId}，CAS：baseRevision 首发必 stale，取应答 revisionAtDecision
+     * 重试一次即 accepted）→ result.sessionId。
+     *
+     * 与 legacy session/fork 的本质差异：官方通道**零文件操作**（restoredFiles:[]，handler
+     * 只复制消息），无 legacy 路径的 checkpoint 工作区恢复副作用——这正是切换通道的动因。
+     *
+     * v4 订阅为 fork 期间临时行为：完成即退订，避免与 legacy 流双投递（分叉入口仅
+     * 非流式可见，窗口期无帧）；若会话已在 v4SubscribedSessions（子代理场景）则
+     * 复用既有订阅不退订。
+     *
+     * @return result {forkedSessionId, parentSessionId}
+     * @throws ZCodeProtocolException code=-32601 老版本 CLI 无 v4 面（调用方据此让前端
+     * 隐藏分叉入口）；rejected 带 reasonCode 原文案
+     */
+    fun forkAssistantViaV4(sessionId: String, messageId: String, timeoutMs: Long = 20000): JsonObject {
+        val wasSubscribed = sessionId in v4SubscribedSessions
+        val subParams = buildJsonObject {
+            put("topic", "conversation/$sessionId")
+            put("connectionId", v4ConnectionId)
+            put("clientMode", "desktop-continuous")
+        }
+        val subResp = request("v4/conversation/subscribe", subParams, timeoutMs)
+        requireOk(subResp)
+        // 不把会话加入 v4SubscribedSessions（diag-fork19 定案）：该集合是 v4 帧→legacy
+        // 事件的映射白名单（子会话实时流通道），而订阅建立即推 initial snapshot 帧——
+        // 进白名单会被 V4FrameMapper 回放出 turn.started+全量消息事件推给父会话标签，
+        // 前端误入流式态、完成轮折叠全展开（fork 后「当前会话莫名实时流」缺陷）。
+        // fork 的订阅只为取 ack.logEpoch/subscriptionId（rowsRange 信封 + 退订要用），
+        // 帧到达时因不在白名单被 handleNotification 直接丢弃，父会话零扰动。
+        subResp["result"]?.jsonObject?.get("ack")?.jsonObject
+            ?.get("subscriptionId")?.jsonPrimitive?.contentOrNull
+            ?.let { v4SubscriptionIds[sessionId] = it }
+        val logEpoch = subResp["result"]?.jsonObject?.get("ack")?.jsonObject
+            ?.get("logEpoch")?.jsonPrimitive?.content
+            ?: throw ZCodeProtocolException("v4 订阅应答缺 ack.logEpoch")
+        try {
+            // rowsRange 定位分叉行。注意四点（fork14~16/26 真会话取证定案）：
+            // ① 分页参数是 beforeRowId（没有 fromRowId），从最新往回翻页，hasMore 标记还有更早的行；
+            // ② 投影活窗口有限（snapshotTailWindowRows=60 起，limit 上限 200），目标行须翻页找；
+            // ③ 分叉语义是【轮】级别（fork16 定案）：canFork 只打在轮内最后一段 assistantText 上，
+            //    而长轮次是「过渡语→工具→最终回复」多段结构，legacy 视图把整轮合并成一条消息、
+            //    messageId 取轮内第一段——按 messageId 直选必然选中无 canFork 的中间段被守卫拒。
+            //    官方客户端的 fork 按钮挂在轮尾、目标行=轮内带 canFork 的行。对齐做法：按 entityId
+            //    找到目标行取其 turnId，改选该轮内带 canFork 的行（轮末段 rowId 更大、翻页先遇到，
+            //    一遍扫描即可同时收齐）；target.entityId 必须用该行自己的 entityId（守卫校验
+            //    entityIdByRowId 匹配）。actions:null 是 JSON 显式 null，须 as? JsonObject 防 JsonNull 崩溃。
+            // ④ 翻页上限须覆盖全会话（fork26 定案）：本会话 1300+ 行/首轮 39 行，目标（第一条
+            //    回复）在最老端——页数上限小了 targetSeen=false 会误报「原对话已不包含」。
+            //    limit=200×50 页=万行封顶；找到目标轮即停，长会话通常 1~2 页就命中。
+            var beforeRowId: Long? = null
+            var hasMore = true
+            var pages = 0
+            var targetSeen = false
+            var targetTurnId: String? = null
+            val forkableByTurn = LinkedHashMap<String, JsonObject>()
+            while (hasMore && pages < 50) {
+                val rowsParams = buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("topic", "conversation/$sessionId")
+                    put("limit", 200)
+                    beforeRowId?.let { put("beforeRowId", it) }
+                }
+                val rowsResp = request("v4/conversation/rowsRange", rowsParams, timeoutMs)
+                requireOk(rowsResp)
+                val result = rowsResp["result"]?.jsonObject
+                    ?: throw ZCodeProtocolException("rowsRange 应答缺 result")
+                val rows = result["rows"]?.jsonArray ?: JsonArray(emptyList())
+                if (rows.isEmpty()) break
+                for (element in rows) {
+                    val o = element.jsonObject
+                    val turnId = o["turnId"]?.jsonPrimitive?.contentOrNull
+                    val canFork = o["kind"]?.jsonPrimitive?.contentOrNull == "assistantText" &&
+                        (o["actions"] as? JsonObject)?.get("canFork")?.jsonPrimitive?.booleanOrNull == true
+                    if (canFork && turnId != null) forkableByTurn.putIfAbsent(turnId, o)
+                    if (o["entityId"]?.jsonPrimitive?.contentOrNull == messageId) {
+                        targetSeen = true
+                        if (turnId != null) targetTurnId = turnId
+                    }
+                }
+                if (targetTurnId != null && targetTurnId in forkableByTurn) break
+                hasMore = result["hasMore"]?.jsonPrimitive?.booleanOrNull == true
+                beforeRowId = rows.firstOrNull()?.jsonObject?.get("rowId")?.jsonPrimitive?.longOrNull
+                pages += 1
+            }
+            val row = targetTurnId?.let { forkableByTurn[it] } ?: throw ZCodeProtocolException(
+                if (targetSeen) "分叉点不可用：该轮次未完成或已被中断，完成一轮对话后才能分叉"
+                else "原对话已不包含分叉那条消息"
+            )
+            val targetRowId = row["rowId"]?.jsonPrimitive?.intOrNull
+                ?: throw ZCodeProtocolException("rowsRange 行缺 rowId")
+            val targetEntityId = row["entityId"]?.jsonPrimitive?.contentOrNull
+                ?: throw ZCodeProtocolException("rowsRange 分叉行缺 entityId")
+
+            // CAS：baseRevision 首发必 stale，revisionAtDecision 重试一次（fork12 模式）
+            var baseRevision = 0
+            var res: JsonObject = JsonObject(emptyMap())
+            var forkedId: String? = null
+            for (attempt in 0 until 2) {
+                val params = buildJsonObject {
+                    put("commandId", "fork-${java.util.UUID.randomUUID()}")
+                    put("clientId", "zcode-idea-plugin")
+                    put("sessionId", sessionId)
+                    put("type", "forkAssistant")
+                    put("payload", buildJsonObject {
+                        put("target", buildJsonObject {
+                            put("rowId", targetRowId)
+                            put("entityId", targetEntityId)
+                        })
+                    })
+                    put("issuedAt", System.currentTimeMillis())
+                    put("baseRevision", baseRevision)
+                    put("baseLogEpoch", logEpoch)
+                }
+                val r = request("v4/command", params, timeoutMs)
+                requireOk(r)
+                res = r["result"]?.jsonObject ?: JsonObject(emptyMap())
+                val status = res["status"]?.jsonPrimitive?.content
+                if (status == "accepted" || status == "duplicate") {
+                    forkedId = res["result"]?.jsonObject?.get("sessionId")
+                        ?.jsonPrimitive?.content
+                    break
+                }
+                if (status == "stale" && attempt == 0) {
+                    baseRevision = res["revisionAtDecision"]?.jsonPrimitive?.intOrNull ?: break
+                } else {
+                    break
+                }
+            }
+            if (forkedId == null) {
+                val reason = res["reasonCode"]?.jsonPrimitive?.content ?: ""
+                val detail = res["message"]?.jsonPrimitive?.content ?: ""
+                throw ZCodeProtocolException(
+                    "fork 被拒绝: ${res["status"]?.jsonPrimitive?.content ?: "unknown"} $reason $detail".trim()
+                )
+            }
+            // fork 会把父会话的 goal target 整行复制（含 active 状态，diag-fork28 取证），
+            // 但引擎不会在新会话续跑（active_run_* 全空）——前端目标卡会一直显示
+            // "运行中"且本地计时累加（假跑）。fork 后把新会话的目标暂停：objective
+            // 保留、状态转 paused（用户可经目标卡恢复按钮 resume），pause 也会落
+            // 一张"已暂停"timeline 卡让来源可见。无目标/已完成的会话 pause 报错，
+            // 失败一律静默不阻塞分叉主流程。
+            try {
+                goal(forkedId, "pause", timeoutMs = 5000)
+            } catch (_: Exception) {
+            }
+            return buildJsonObject {
+                put("forkedSessionId", forkedId)
+                put("parentSessionId", sessionId)
+            }
+        } finally {
+            if (!wasSubscribed) {
+                unsubscribeConversationV4(sessionId, timeoutMs)
+            }
+        }
     }
 
     /** session/resume — 续会话（命门） */
@@ -1694,6 +1955,29 @@ private val SESSION_STATS_JS = """
     for (const r of msgs) map[r.sid] = { cnt: r.cnt, bytes: 0 };
     for (const r of parts) { (map[r.sid] || (map[r.sid] = { cnt: 0, bytes: 0 })).bytes = r.bytes; }
     console.log(JSON.stringify(map));
+""".trimIndent()
+
+/** 历史列表补查（fork 会话 + 目标模式会话，session/list roots=true/session_target 两缺口）：
+ *  目录用环境变量传参与 [SESSION_STATS_JS] 同模式。internal：供 [ForkSessionsQueryTest]
+ *  做临时库回归（防双引号转义坑回归）。
+ *  ⚠️ JS 字符串一律单引号/反引号，禁双引号——Windows 上 Java ProcessBuilder 传 -e 脚本参数
+ *  的转义链（Java→CreateProcess→node argv 解析）会把 JS 双引号弄坏，node 收到残缺脚本
+ *  SyntaxError exit 1（fork24 实测复现：双引号 exit=1 零输出、反引号 exit=0 出 23 行） */
+internal val SESSION_LIST_EXTRAS_JS = """
+    const {DatabaseSync} = require('node:sqlite');
+    const db = new DatabaseSync(process.env.ZCODE_FORK_DB);
+    db.exec('PRAGMA busy_timeout = 15000');
+    const forks = db.prepare(
+        `SELECT id, title, time_created, time_updated FROM session ` +
+        `WHERE parent_id IS NOT NULL AND task_type='fork' AND directory IN (?, ?) ` +
+        `ORDER BY time_updated DESC LIMIT 200`
+    ).all(process.env.ZCODE_FORK_DIR_NATIVE, process.env.ZCODE_FORK_DIR_ALT);
+    const goals = db.prepare(
+        `SELECT DISTINCT st.session_id AS sid FROM session_target st ` +
+        `JOIN session s ON s.id = st.session_id ` +
+        `WHERE s.directory IN (?, ?)`
+    ).all(process.env.ZCODE_FORK_DIR_NATIVE, process.env.ZCODE_FORK_DIR_ALT).map(r => r.sid);
+    console.log(JSON.stringify({ forks: forks, goalIds: goals }));
 """.trimIndent()
 
 /** 会话统计（历史列表展示）：消息数 + message/part 内容字节和 */

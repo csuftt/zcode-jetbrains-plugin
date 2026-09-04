@@ -87,6 +87,28 @@ export function TimelineSeparator({ part }: Props) {
     )
   }
 
+  if (part.timelineType === 'session_fork') {
+    // 分叉标记（B2 一期，2026-09-05 diag-fork2.py 实测）：fork 新会话首条 assistant
+    // 空消息携带本 part（parentSessionId/targetMessageId）。此前走中性「时间线事件」
+    // 兜底无信息量，专卡说明来龙去脉（父会话 id 尾段走 title 悬停）
+    const parentTail = part.parentSessionId?.slice(-8)
+    return (
+      <div className="tl-sep">
+        <span className="tl-sep__line" />
+        <span className="tl-sep__text">
+          <span
+            className="tl-sep__label"
+            title={parentTail ? t('chat.timeline.forkFrom', { id: parentTail }) : undefined}
+          >
+            <span className="codicon codicon-git-branch" />
+            {t('chat.timeline.forked')}
+          </span>
+        </span>
+        <span className="tl-sep__line" />
+      </div>
+    )
+  }
+
   if (part.timelineType === 'goal_verification') {
     // 目标校验结果（每轮结束服务端独立校验一次）：通过=收尾分隔；未通过=续跑
     // 前的"下一轮行动"锚点。reason 全文走 title 悬停（卡片只放结论一行）

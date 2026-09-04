@@ -35,7 +35,8 @@
     "copyCopied": "복사됨",
     "edit": "편집",
     "editCancel": "취소",
-    "editRegenerate": "다시 생성"
+    "editRegenerate": "다시 생성",
+    "fork": "이 답변에서 분기"
   },
   "edit": {
     "replaying": "편집된 메시지로 다시 생성하는 중…",
@@ -109,7 +110,9 @@
     "event": "타임라인 이벤트",
     "goalPassed": "목표 검증 통과",
     "goalNotSatisfied": "목표 미달성, 계속 진행",
-    "goalIteration": "{{iteration}}회차"
+    "goalIteration": "{{iteration}}회차",
+    "forked": "부모 세션에서 분기됨",
+    "forkFrom": "부모 세션에서 분기됨(…{{id}})"
   },
   "goal": {
     "status": {
@@ -141,5 +144,11 @@
     "goal": "장기 목표 설정: AI가 여러 라운드에 걸쳐 자동 추진·자체 검증합니다",
     "init": "AGENTS.md 프로젝트 지침 파일 초기화",
     "compact": "대화 기록을 압축하여 컨텍스트 공간 확보"
+  },
+  "fork": {
+    "busy": "턴이 실행 중일 때는 분기할 수 없습니다. 종료 후 다시 시도하세요",
+    "confirmTitle": "이 답변에서 새 세션을 분기할까요?",
+    "confirmMessage": "기록은 이 답변까지 유지되며 원본 세션은 영향을 받지 않습니다.",
+    "confirmOk": "분기"
   }
 }
