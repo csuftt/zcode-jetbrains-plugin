@@ -413,6 +413,14 @@ interface StoreState {
    */
   steeredMessageIds: string[]
   /**
+   * 审批意见回显豁免（transient，不入 kv）：意见式拒绝后服务端把意见经 guide
+   * 通道回显进当前回合，事件面与 steer 插队同形（turn.steerDrained）。不豁免会
+   * 与缺陷Q拆分处本地插入叠加成双条、messageId 误进徽标账本标成「⚡引导」
+   * （0.3.3 真机实测）。置位：insertFeedbackMessage；消费：steerDrained 命中
+   * （窗口内 + 文本一致）跳过注入与徽标；懒过期。
+   */
+  planFeedbackEcho: { text: string; at: number } | null
+  /**
    * 目标模式状态（session/goal，2026-09 协议实测定案）：null=无目标。
    * 数据三路：messages 首拉（session.target）恢复 + goalManaged 响应 +
    * session.updated 目标 payload（action/target/previousTarget）实时推进。
@@ -794,6 +802,9 @@ interface StoreState {
   insertFeedbackMessage: (text: string) => void
 }
 
+/** 审批意见回显豁免窗口：意见应答到服务端 guide 回显（steerDrained）到达的合理时距上限 */
+const PLAN_FEEDBACK_ECHO_MS = 15000
+
 let bridgeInitialized = false
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -849,6 +860,7 @@ export const useStore = create<StoreState>((set, get) => ({
   queuedMessages: [],
   steerPending: null,
   steeredMessageIds: readSteerMarkers(),
+  planFeedbackEcho: null,
   goal: null,
   editingMessageId: null,
   editReplay: null,
@@ -1306,6 +1318,9 @@ export const useStore = create<StoreState>((set, get) => ({
     const trimmed = text.trim()
     const sid = get().currentSessionId
     if (!sid || !trimmed) return
+    // 置回显豁免：服务端会把意见经 guide 通道回显（steerDrained 同形事件），
+    // 命中窗口的注入跳过，防与本地插入叠加双条 + 误标「⚡引导」（0.3.3 真机缺陷）
+    const echo = { text: trimmed, at: Date.now() }
     const { messages, streamingMessageId } = get()
     const userMsg: ZCodeMessage = {
       info: {
@@ -1321,7 +1336,7 @@ export const useStore = create<StoreState>((set, get) => ({
       ? messages.findIndex((m) => m.info.id === streamingMessageId)
       : -1
     if (idx < 0 || messages[idx].info.role !== 'assistant') {
-      set((s) => ({ messages: [...s.messages, userMsg] }))
+      set((s) => ({ messages: [...s.messages, userMsg], planFeedbackEcho: echo }))
       return
     }
     // 新流式消息用独立命名空间 id：不与协议 messageId 撞车（撞上会被 turn.started
@@ -1336,7 +1351,7 @@ export const useStore = create<StoreState>((set, get) => ({
       },
       ...messages.slice(idx + 1),
     ]
-    set({ messages: next, streamingMessageId: newStreamingId })
+    set({ messages: next, streamingMessageId: newStreamingId, planFeedbackEcho: echo })
   },
 
   createSession: () => {
@@ -4026,6 +4041,8 @@ function handleStreamBatchDirect(
   let bgDirty = false // 本批内后台任务有增删（有变更才 patch，保持引用稳定防多余重渲染）
   // steer 引导插队 chip 的批内过渡值（有变更才进 patch，保持引用稳定）
   let steerPending = get().steerPending
+  // 审批意见回显豁免标志的批内过渡值（steerDrained 命中时清，批末进 patch）
+  let planFeedbackEcho = get().planFeedbackEcho
   // 本批落位的注入消息 id（徽标标记，批末统一持久化 + 进 patch）
   const steerNewIds: string[] = []
   const childKeyPatch: Record<string, string> = {}
@@ -4144,6 +4161,18 @@ function handleStreamBatchDirect(
         : steerPending
           ? [{ messageId: `steer_${steerPending.at}`, text: steerPending.text }]
           : []
+      // 审批意见回显豁免：意见式拒绝的服务端注入走 guide 通道，事件面与 steer
+      // 插队同形。窗口内且文本一致 = 审批回显而非用户插队：跳过注入与徽标
+      // （意见气泡由 insertFeedbackMessage 本地条在拆分处呈现，无徽标），流式壳
+      // 不动（后续 delta 继续进本地壳，轮末重拉权威对账）。文本不一致 = 真
+      // steer 并发，按正常落位处理
+      const echo = planFeedbackEcho
+      if (entries.length > 0 && echo && Date.now() - echo.at < PLAN_FEEDBACK_ECHO_MS
+        && entries.every((e) => e.text.trim() === echo.text)) {
+        planFeedbackEcho = null
+        steerPending = null
+        continue
+      }
       const known = new Set(messages.map((m) => m.info.id))
       for (const e of entries) if (!known.has(e.messageId)) steerNewIds.push(e.messageId)
       messages = appendSteerUserMessages(messages, entries, sessionId, event.timestamp)
@@ -4214,6 +4243,8 @@ function handleStreamBatchDirect(
   }
   // steer chip 批内有变更才进 patch（引用稳定防多余重渲染）
   if (steerPending !== get().steerPending) patch.steerPending = steerPending
+  // 审批意见回显豁免标志批内被消费 → 清空进 patch
+  if (planFeedbackEcho !== get().planFeedbackEcho) patch.planFeedbackEcho = planFeedbackEcho
   // 本批落位的注入消息：kv 持久化 + 进 patch（气泡「⚡引导」徽标，MessageBubble 读）
   if (steerNewIds.length > 0) {
     addSteerMarkers(steerNewIds)
@@ -4338,6 +4369,14 @@ function handleStreamEvent(
       : pending
         ? [{ messageId: `steer_${pending.at}`, text: pending.text }]
         : []
+    // 审批意见回显豁免（同批量路径）：窗口内且文本一致 = 审批回显而非用户插队，
+    // 跳过注入与徽标；流式壳不动，后续 delta 继续进缺陷Q本地壳
+    const echo = get().planFeedbackEcho
+    if (entries.length > 0 && echo && Date.now() - echo.at < PLAN_FEEDBACK_ECHO_MS
+      && entries.every((e) => e.text.trim() === echo.text)) {
+      set({ planFeedbackEcho: null, steerPending: null })
+      return
+    }
     const known = new Set(get().messages.map((m) => m.info.id))
     const newIds = entries.filter((e) => !known.has(e.messageId)).map((e) => e.messageId)
     if (newIds.length > 0) {
