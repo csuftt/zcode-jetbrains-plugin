@@ -850,3 +850,116 @@
   background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
+
+/* ===== steer 引导插队（引导中 chip）===== */
+.input-box__steer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  // 上边距让 chip 与容器顶边留呼吸位（chat-input-box 无 padding，6px+手柄下缘
+  // 2px≈8px，对齐输入区节奏）；左右 2px 对齐排队卡片
+  margin: 6px 2px;
+  min-width: 0;
+}
+
+.input-box__steer-pending {
+  // 收缩约束：容器窄时整体可缩（预览文本先行收缩出省略号），不被内容顶宽
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px dashed var(--status-warning);
+  // 6px 圆角与排队卡片同制（10px 在小高度胶囊上显臃肿、与邻卡不协调）
+  border-radius: 6px;
+  color: var(--status-warning);
+  font-size: 11px;
+  line-height: 16px;
+  // 呼吸：底色+外圈光晕缓慢起伏（琥珀身份色，与排队卡片「引导」按钮同源）
+  animation: steer-pending-breathe 1.8s ease-in-out infinite;
+
+  .codicon {
+    font-size: 12px;
+    flex-shrink: 0;
+    // 闪电脉冲：闪烁+微缩放，"注入进行中"
+    animation: steer-zap-pulse 1.2s ease-in-out infinite;
+  }
+}
+
+.input-box__steer-pending__preview {
+  // 消息预览在前：可收缩（长文本省略号），是 chip 宽度的主导项
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.input-box__steer-pending__label {
+  flex-shrink: 0;
+}
+
+// 三点常驻固定占位 + 交错闪烁：宽度恒定，不因动画改布局（content 动画逐字
+// 增减宽度，曾把卡片撑大放小——2026-09-07 用户反馈换设计）
+.input-box__steer-pending__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+
+  i {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: steer-dot-blink 1.2s ease-in-out infinite;
+
+    &:nth-child(2) { animation-delay: 0.2s; }
+    &:nth-child(3) { animation-delay: 0.4s; }
+  }
+}
+
+@keyframes steer-dot-blink {
+  0%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+@keyframes steer-pending-breathe {
+  0%, 100% {
+    background: color-mix(in srgb, var(--status-warning) 6%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-warning) 0%, transparent);
+  }
+  50% {
+    background: color-mix(in srgb, var(--status-warning) 14%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-warning) 12%, transparent);
+  }
+}
+
+@keyframes steer-zap-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .input-box__steer-pending,
+  .input-box__steer-pending .codicon,
+  .input-box__steer-pending__dots i {
+    animation: none;
+  }
+
+  // 静态降级：三点常驻半透明（固定占位不变）
+  .input-box__steer-pending__dots i {
+    opacity: 0.55;
+  }
+}
+

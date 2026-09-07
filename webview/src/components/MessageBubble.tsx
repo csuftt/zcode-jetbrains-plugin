@@ -67,6 +67,8 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
   const time = clockTime(info.time?.created)
   // 已发定时记录：服务端读回的消息不带定时标记，按下匹配补「定时执行」徽标
   const firedHistory = useStore((s) => s.firedHistory)
+  // 引导（steer）注入的用户消息：气泡带「⚡引导」徽标（kv 持久化，跨重拉/重启）
+  const isSteered = useStore((s) => s.steeredMessageIds.includes(info.id))
 
   // 子 agent / 任务回调的合成通知（role 是 user 但 synthetic）：独立卡片渲染，不当用户消息
   if (isAgentNotification(info)) {
@@ -107,6 +109,7 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
         anchorAttr={anchorAttr}
         searchActive={searchActive}
         scheduledFireAt={firedAt}
+        steered={isSteered}
         messageId={info.id}
         editable={editable}
       />
@@ -132,6 +135,7 @@ function UserBubble({
   anchorAttr,
   searchActive,
   scheduledFireAt,
+  steered,
   messageId,
   editable,
 }: {
@@ -142,6 +146,8 @@ function UserBubble({
   searchActive?: boolean
   /** 定时消息标记（fireAt）：发出后气泡上带「定时执行」徽标（历史重拉不带，预期）*/
   scheduledFireAt?: number
+  /** 引导（steer）注入标记：气泡带「⚡引导」徽标（kv 持久化，历史重拉仍在）*/
+  steered?: boolean
   /** 服务端消息 id（编辑目标锚定 + 编辑态判定）；乐观消息为 local_u_ 前缀 */
   messageId?: string
   /** 最后一轮可编辑消息（官方 Edit History：仅最后一轮用户消息可编辑）*/
@@ -182,6 +188,12 @@ function UserBubble({
           <span className="msg__schedule-badge" title={t('input.schedule.firedBadge')}>
             <span className="codicon codicon-clockface" />
             {t('input.schedule.firedBadge')}
+          </span>
+        )}
+        {steered && (
+          <span className="msg__steer-badge" title={t('input.steer.badgeTitle')}>
+            <span className="codicon codicon-zap" />
+            {t('input.steer.badge')}
           </span>
         )}
       </div>

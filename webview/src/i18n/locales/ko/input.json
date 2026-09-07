@@ -50,7 +50,10 @@
     "edit": "편집(입력창으로)",
     "remove": "대기열에서 제거",
     "scheduledBadge": "예약 메시지 · {{time}}",
-    "scheduledShort": "예약"
+    "scheduledShort": "예약",
+    "steerNow": "끼어들기(실행 중 턴에 주입, 중단 없음)",
+    "steerNowShort": "끼어들기",
+    "steerDisabled": "이미 끼어들기 중인 메시지가 있습니다. 안착 후 다시 시도하세요"
   },
   "pasted": {
     "clickToPreview": "클릭하여 전체 내용 미리보기",
@@ -113,5 +116,13 @@
     "preset_in5m": "5분 후",
     "preset_in30m": "30분 후",
     "preset_in1h": "1시간 후"
+  },
+  "steer": {
+    "pending": "주입 중…",
+    "notDelivered": "끼어들기 미적용: 방금 끝난 턴에 메시지를 주입하지 못했습니다. 다시 보내주세요",
+    "notAccepted": "끼어들기 불가: 현재 상태에서는 주입할 수 없습니다",
+    "failedPrefix": "끼어들기 실패: ",
+    "badge": "끼어들기",
+    "badgeTitle": "이 메시지는 실행 중인 턴에 주입되었습니다"
   }
 }

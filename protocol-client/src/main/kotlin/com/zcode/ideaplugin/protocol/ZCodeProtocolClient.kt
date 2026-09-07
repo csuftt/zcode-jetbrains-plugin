@@ -1407,6 +1407,43 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * v4/command {type:"sendText", requestedDelivery:"guide"} — 引导式插队（steer）：
+     * 把消息注入运行中的回合让模型当场转向，不打断、不排队（官方客户端同款输入路由，
+     * requestedDelivery 三态 startNow|queue|guide）。
+     *
+     * 协议定案（diag-steer/diag-steer2 真机探针，2026-09-07）：
+     * - 裸命令即可（无需 v4/conversation/subscribe，对齐 stopForegroundViaV4）；
+     * - 注入过程经 legacy session/event 透传：turn.steerQueued（delivery=guide、
+     *   targetTurnId、inputPreview）→ turn.steerDrained（injectedMessageIds，
+     *   注入消息的服务端正式 id）——前端渲染全走事件，本方法只负责受理；
+     * - guide 未降级实锤过；若服务端降级为 queue，条目不会自动排空（sendQueuedNow
+     *   是客户端职责），表现为回合结束仍无 steerDrained（前端按未生效提示重发）；
+     * - legacy session/send 在回合中并发行为不可靠（实测 accepted 但消息无声消失），
+     *   steer 是唯一的运行中输入通道。
+     *
+     * @return 应答 result（type=inputAccepted、delivery=初始准入 coarse 值——实测
+     *          guide 也报 "queue"，真实路由以 steerQueued 事件为准，勿据此判断降级）
+     */
+    fun steerViaV4(sessionId: String, text: String, timeoutMs: Long = 8000): JsonObject {
+        val params = buildJsonObject {
+            put("commandId", "steer-${java.util.UUID.randomUUID()}")
+            put("clientId", "zcode-idea-plugin")
+            put("sessionId", sessionId)
+            put("type", "sendText")
+            put("payload", buildJsonObject {
+                put("text", text)
+                put("requestedDelivery", "guide")
+            })
+            put("issuedAt", System.currentTimeMillis())
+            put("connectionId", "zcode-idea-plugin")
+            put("clientMode", "desktop-continuous")
+        }
+        val r = request("v4/command", params, timeoutMs)
+        requireOk(r)
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * session/cancelBackgroundTask — 取消子代理/后台任务（taskId = agentId）。
      * 作用于主会话（须 active）；runtime 按 taskType 分发——local_agent 走
      * subagentPort.stopTask（前台子代理也能停），bash 后台任务走 abort。

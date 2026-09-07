@@ -51,7 +51,10 @@
     "edit": "编辑（回到输入框）",
     "remove": "移出队列",
     "scheduledBadge": "定时消息 · {{time}}",
-    "scheduledShort": "定时"
+    "scheduledShort": "定时",
+    "steerNow": "引导（注入当前回合，不打断）",
+    "steerNowShort": "引导",
+    "steerDisabled": "已有消息在引导中，请等落位后再引导"
   },
   "pasted": {
     "clickToPreview": "点击预览完整内容",
@@ -118,5 +121,13 @@
     "preset_in5m": "5 分钟后",
     "preset_in30m": "30 分钟后",
     "preset_in1h": "1 小时后"
+  },
+  "steer": {
+    "pending": "引导中",
+    "notDelivered": "插队未生效：消息未能注入刚结束的回合，请重新发送",
+    "notAccepted": "插队未受理：当前状态不能插队",
+    "failedPrefix": "插队失败：",
+    "badge": "引导",
+    "badgeTitle": "该消息经引导注入运行中的回合"
   }
 }

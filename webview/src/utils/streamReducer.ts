@@ -731,3 +731,55 @@ function finalizePendingTools(messages: ZCodeMessage[], timestamp: number): ZCod
   })
   return changed ? newMessages : messages
 }
+
+// ============ steer 引导式插队（2026-09-07 diag-steer 探针定案）============
+// turn.steerQueued 载荷（pendingInputId/input/inputPreview/inputSize/commandKind?/
+// delivery/targetTurnId/queueLength/intent?）不解析——queueLength 无 UI 消费，
+// 事件走 store 默认忽略；降级检测若将来需要，载荷形状以探针文档为准。
+
+/**
+ * turn.steerDrained payload.drainedInputs → 注入消息列表。
+ * payload = {pendingInputIds, targetTurnId, injectedMessageIds, drainedInputs?:
+ *            [{pendingInputId, messageId, text, delivery?, ...}]}；drainedInputs
+ * 是可选字段，缺失时回退 pending 文本由 store 层兜底。
+ */
+export interface SteerDrainedInput {
+  messageId: string
+  text: string
+}
+
+export function asSteerDrainedInputs(payload: StreamEventPayload): SteerDrainedInput[] {
+  const p = payload as Partial<{ drainedInputs: unknown }> | null
+  if (!p || !Array.isArray(p.drainedInputs)) return []
+  const out: SteerDrainedInput[] = []
+  for (const d of p.drainedInputs as Array<Record<string, unknown>>) {
+    if (d && typeof d.messageId === 'string' && typeof d.text === 'string') {
+      out.push({ messageId: d.messageId, text: d.text })
+    }
+  }
+  return out
+}
+
+/**
+ * 注入 user 气泡（纯函数，不可变更新）。幂等：id 命中即跳过——steerDrained 与
+ * 回合结束的全量重拉可能先后到达，重拉是权威替换，这里只保证流式期间不重复。
+ *
+ * 位置语义：追加尾部。服务端权威序（diag-steer3 取证）为 [.., u1, assistant(前段),
+ * u2注入, assistant(后段)]——调用时机在流式壳封口之后，尾部即 u2 的正确槽位。
+ */
+export function appendSteerUserMessages(
+  messages: ZCodeMessage[],
+  entries: SteerDrainedInput[],
+  sessionId?: string,
+  timestamp?: number,
+): ZCodeMessage[] {
+  if (entries.length === 0) return messages
+  const known = new Set(messages.map((m) => m.info.id))
+  const add = entries
+    .filter((e) => !known.has(e.messageId))
+    .map((e): ZCodeMessage => ({
+      info: { role: 'user', time: { created: timestamp ?? Date.now() }, id: e.messageId, sessionID: sessionId ?? '' },
+      parts: e.text ? [{ type: 'text', text: e.text }] : [],
+    }))
+  return add.length > 0 ? [...messages, ...add] : messages
+}

@@ -171,6 +171,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const sessionId = useStore((s) => s.currentSessionId)
   // 待执行定时任务总数（全项目，Java 权威列表镜像）——日历按钮角标
   const scheduledCount = useStore((s) => s.scheduledMessages.length)
+  // 引导中的插队消息（排队卡片「引导」按钮发起，事件驱动清除）——chip 展示
+  const steerPending = useStore((s) => s.steerPending)
   useEffect(() => {
     resetNav()
     setGhostSuffix('')
@@ -1245,6 +1247,20 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         <ScheduledMessages onReschedule={openReschedulePicker} />
 
         {/* 目标模式状态卡已移至 ChatView 右上角悬浮（ZCode 客户端同款位置）*/}
+
+        {/* steer 引导中 chip：排队卡片「引导」按钮发起后，等待服务端注入落位
+            （steerDrained 落气泡 / 回合结束未落位清 chip + 横幅提示）*/}
+        {steerPending && (
+          <div className="input-box__steer-row">
+            <div className="input-box__steer-pending" role="status">
+              <span className="codicon codicon-zap" />
+              <span className="input-box__steer-pending__preview">{steerPending.text}</span>
+              <span className="input-box__steer-pending__label">{t('input.steer.pending')}</span>
+              {/* 三点常驻固定占位（交错闪烁），不用 content 动画——那会逐字改变宽度把卡片撑大放小 */}
+              <span className="input-box__steer-pending__dots"><i /><i /><i /></span>
+            </div>
+          </div>
+        )}
 
         {/* 排队消息（streaming 中 Enter 入队的，回合结束自动发送）*/}
         <MessageQueue onEdit={editQueuedToInput} />

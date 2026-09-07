@@ -356,6 +356,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 子代理 stopped 终点退订：收敛 v4 订阅/行表/探针计数（best-effort，失败无害）*/
   | { op: 'unsubscribeChild'; sessionId: string }
   | { op: 'stop'; sessionId: string; /** 连带中止的后台任务 id（exec_ bash 任务，账本仍在跑的）；子代理由 Java 侧权威枚举 */ taskIds?: string[] }
+  /** 引导式插队（steer）：v4 sendText requestedDelivery=guide，注入运行中回合（2026-09-07 探针定案）*/
+  | { op: 'steerMessage'; sessionId: string; text: string }
   | { op: 'getIdeTheme' }
   | { op: 'listFiles'; query: string }
   | { op: 'listCommands'; query?: string }
@@ -787,6 +789,8 @@ export type JavaResponse =
   | { op: 'sessionForked'; forkedSessionId: string; parentSessionId?: string }
   /** 老 CLI 无 v4 面（-32601）：隐藏分叉入口（不做 legacy 回退——该路径带文件恢复副作用）*/
   | { op: 'forkUnsupported' }
+  /** steerMessage 应答：accepted=true 时 UI 由 turn.steerQueued/steerDrained 事件驱动；error=受理失败（清 chip + 横幅）*/
+  | { op: 'steerMessage'; sessionId: string; accepted?: boolean; delivery?: string; error?: string }
   | { op: 'sessionDeleted'; sessionId: string }
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }

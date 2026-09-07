@@ -50,7 +50,10 @@
     "edit": "編輯（回到輸入框）",
     "remove": "移出佇列",
     "scheduledBadge": "定時訊息 · {{time}}",
-    "scheduledShort": "定時"
+    "scheduledShort": "定時",
+    "steerNow": "引導（注入當前回合，不打斷）",
+    "steerNowShort": "引導",
+    "steerDisabled": "已有訊息在引導中，請等落位後再引導"
   },
   "pasted": {
     "clickToPreview": "點選預覽完整內容",
@@ -113,5 +116,13 @@
     "preset_in5m": "5 分鐘後",
     "preset_in30m": "30 分鐘後",
     "preset_in1h": "1 小時後"
+  },
+  "steer": {
+    "pending": "引導中",
+    "notDelivered": "插隊未生效：訊息未能注入剛結束的回合，請重新傳送",
+    "notAccepted": "插隊未受理：目前狀態不能插隊",
+    "failedPrefix": "插隊失敗：",
+    "badge": "引導",
+    "badgeTitle": "該訊息經引導注入執行中的回合"
   }
 }

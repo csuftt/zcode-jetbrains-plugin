@@ -33,7 +33,8 @@ function diagWarn(text: string): void {
 import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/utils/parseStatus'
 import { isHiddenSyntheticMessage } from '@/utils/parseNotification'
 import { mergeTurnMessages } from '@/utils/mergeTurnMessages'
-import { getPersisted, setPersisted, removePersisted, entriesWithPrefix } from '@/utils/persist'
+import { getPersisted, setPersisted, removePersisted, entriesWithPrefix, KV_HYDRATED_EVENT } from '@/utils/persist'
+import { addSteerMarkers, readSteerMarkers } from '@/utils/steerMarkers'
 import { readEnhanceConfig } from '@/utils/enhanceConfig'
 import { extractBackgroundTaskIdFromContent } from '@/utils/backgroundTask'
 import {
@@ -391,6 +392,21 @@ interface StoreState {
   /** 排队消息（streaming 中 Enter 入队，回合结束自动发队头）*/
   queuedMessages: QueuedMessage[]
   /**
+   * 引导中（steer）的插队消息：v4 sendText requestedDelivery=guide 已受理、
+   * 等待服务端注入运行中回合。置位：steerMessage 乐观置位；清除：steerDrained
+   * （注入落位）/ turn.started（startNow 降级，气泡由 input 兜底）/ 回合结束
+   * （未生效降级提示）。restore 记录乐观移除的队列条目及原下标——受理 ack
+   * 失败时由应答处理插回原位（失败回滚，防文本丢失）。事件形状见
+   * docs/internal/design-research/steer插队协议探针-2026-09-07.md
+   */
+  steerPending: { text: string; at: number; restore?: { item: QueuedMessage; index: number } } | null
+  /**
+   * 被引导注入的 user 消息 id（服务端真身 id，kv 持久化跨重拉/重启）——
+   * 气泡渲染「⚡引导」徽标（对齐定时消息「定时执行」徽标语义）。
+   * 写入：steerDrained 落位 / startNow 降级认领；读取：MessageBubble。
+   */
+  steeredMessageIds: string[]
+  /**
    * 目标模式状态（session/goal，2026-09 协议实测定案）：null=无目标。
    * 数据三路：messages 首拉（session.target）恢复 + goalManaged 响应 +
    * session.updated 目标 payload（action/target/previousTarget）实时推进。
@@ -730,6 +746,24 @@ interface StoreState {
   removeQueuedMessage: (id: string) => void
   /** 立即发送排队消息：移到队头 + 中断当前回合（turn 结束事件到达后自动发出）*/
   sendQueuedNow: (id: string) => void
+  /**
+   * 引导式插队（steer）：把纯文本消息注入运行中的回合（v4 sendText
+   * requestedDelivery=guide，2026-09-07 探针定案），不打断不排队。
+   * 乐观置 steerPending（chip 反馈），气泡等 steerDrained/turn.started 落位
+   * （注入消息 id 是服务端正式 id，与回合结束重拉天然对齐）。ack 的
+   * result.delivery 是初始准入 coarse 值（实测 guide 也报 "queue"），不能据它
+   * 判断降级；失败/降级由事件与回合结束兜底。返回 false=未受理（守卫拦截）。
+   * restore：来自队列的条目及其原下标，受理 ack 失败时插回原位。
+   */
+  steerMessage: (text: string, restore?: { item: QueuedMessage; index: number }) => boolean
+  /**
+   * 引导队列中的消息（排队卡片「引导」按钮，2026-09-07 交互定案）：Enter 恒入队，
+   * 用户看到卡片后显式选「引导」（注入当前回合）或「立即」（中断+发）。成功即
+   * 从队列移除该条；失败（非流式/已有在途引导）保留队列条目并横幅提示；受理
+   * 后 ack 失败（服务端拒收/Java 异常）由应答处理按 restore 插回原位。
+   * 定时来源与带附件的条目由 UI 隐藏入口（定时 ack 语义与 v4 附件形状未验证）。
+   */
+  sendQueuedAsSteer: (id: string) => void
   /** 回合结束（streaming→false）后自动发送队头 */
   flushQueue: () => void
   /** 立即执行定时消息：乐观移除卡片；本面板正看该会话则直接走受理路径发送，否则交 Java 分派（可能开标签/直发）*/
@@ -800,6 +834,8 @@ export const useStore = create<StoreState>((set, get) => ({
   compacting: false,
   backgroundTasks: {},
   queuedMessages: [],
+  steerPending: null,
+  steeredMessageIds: readSteerMarkers(),
   goal: null,
   editingMessageId: null,
   editReplay: null,
@@ -894,6 +930,12 @@ export const useStore = create<StoreState>((set, get) => ({
     // IDE 广播：envSave 保存成功后多标签同步最新环境状态（Panel broadcastEnvStatus）
     // node 测试环境（vitest）无 window，跳过注册
     if (typeof window !== 'undefined') {
+      // steer 标识的 kv 迟水合兜底：注入写回完成后重读（store 创建时可能读到空值，
+      // 同 enhanceConfig 在 InputBox 的 KV_HYDRATED 重读模式）；
+      // node 测试环境的 window mock 无 addEventListener，一并防护
+      if (typeof window.addEventListener === 'function') {
+        window.addEventListener(KV_HYDRATED_EVENT, () => set({ steeredMessageIds: readSteerMarkers() }))
+      }
       window.onEnvStatusChanged = (status: EnvStatus) => set({ envStatus: status })
       // IDE 广播：其他标签切换 provider 启用/禁用后多标签同步（Panel broadcastModelChanges）。
       // 与 modelToggled 应答同款合并，但不碰 modelTogglingId（由本标签自己的应答清除）；
@@ -1408,6 +1450,32 @@ export const useStore = create<StoreState>((set, get) => ({
           : undefined)
       }
     }
+  },
+
+  /**
+   * 引导式插队（steer）：见接口注释。这里只做受理与乐观置位；chip 的清除与
+   * 气泡落位全部由事件驱动（turn.steerQueued/steerDrained，批量与单推两路都拦截）。
+   */
+  steerMessage: (text, restore?) => {
+    const trimmed = text.trim()
+    const sid = get().currentSessionId
+    if (!sid || !get().streaming || get().steerPending || !trimmed) return false
+    set({ steerPending: { text: trimmed, at: Date.now(), ...(restore ? { restore } : {}) } })
+    sendToJava({ op: 'steerMessage', sessionId: sid, text: trimmed })
+    return true
+  },
+
+  sendQueuedAsSteer: (id) => {
+    const q = get().queuedMessages
+    const index = q.findIndex((m) => m.id === id)
+    if (index < 0) return
+    const target = q[index]
+    if (!get().steerMessage(target.text, { item: target, index })) {
+      // 守卫拦截（极少见：回合恰好结束/已有在途引导）——保留队列条目 + 提示
+      set({ lastError: i18n.t('input.steer.notAccepted') })
+      return
+    }
+    set({ queuedMessages: q.filter((m) => m.id !== id) })
   },
 
   sendScheduledNow: (id) => {
@@ -2618,6 +2686,34 @@ export function handleResponse(
       // 老 CLI 无 v4 面（-32601）：隐藏分叉入口（用户决策：不做 legacy 回退——
       // legacy session/fork 带工作区文件恢复副作用，宁可没有）
       set({ forkBusy: false, forkSupported: false })
+      break
+    }
+
+    case 'steerMessage': {
+      // 仅失败需要处理（成功由 turn.steerDrained 事件驱动）：清乐观 chip + 横幅
+      // 提示 + 队列条目回滚（乐观移除发生在受理之前，失败必须物归原主——按
+      // steerPending.restore 插回原位，越界钳到队尾）。仅 chip 仍在途时回滚：
+      // 已被 steerDrained/claim 清除说明注入已发生，迟到失败 ack 再回滚会与
+      // 注入气泡重复。两种失败形态：error=Java 侧异常（v4 面缺失/会话失效）；
+      // accepted:false=服务端拒收（status≠accepted，无 error 字段）
+      let failure: string | null = null
+      if (msg.accepted === false) {
+        diagWarn('steer rejected: status≠accepted')
+        failure = i18n.t('input.steer.notAccepted')
+      } else if (msg.error) {
+        diagWarn(`steer rejected: ${msg.error}`)
+        failure = `${i18n.t('input.steer.failedPrefix')}${msg.error}`
+      }
+      if (failure) {
+        const pending = get().steerPending
+        const patch: { steerPending: null; lastError: string; queuedMessages?: QueuedMessage[] } = { steerPending: null, lastError: failure }
+        if (pending?.restore) {
+          const q = [...get().queuedMessages]
+          q.splice(Math.min(pending.restore.index, q.length), 0, pending.restore.item)
+          patch.queuedMessages = q
+        }
+        set(patch)
+      }
       break
     }
 
@@ -3874,6 +3970,10 @@ function handleStreamBatchDirect(
   let turnError: TurnErrorInfo | undefined
   let bgTasks: BackgroundTaskMap | null = null
   let bgDirty = false // 本批内后台任务有增删（有变更才 patch，保持引用稳定防多余重渲染）
+  // steer 引导插队 chip 的批内过渡值（有变更才进 patch，保持引用稳定）
+  let steerPending = get().steerPending
+  // 本批落位的注入消息 id（徽标标记，批末统一持久化 + 进 patch）
+  const steerNewIds: string[] = []
   const childKeyPatch: Record<string, string> = {}
 
   for (const event of events) {
@@ -3974,6 +4074,42 @@ function handleStreamBatchDirect(
       }
       continue
     }
+    // steer 引导式插队（2026-09-07 探针定案）：注入气泡落位，不进消息归约
+    // （归约器只认消息型事件）；批内改局部变量，下方 patch 一次性合并。
+    // turn.steerQueued 仅携带 queueLength（UI 不消费）走默认忽略
+    if (event.type === 'turn.steerDrained') {
+      // 服务端结构（diag-steer3 权威取证）：注入 u2 落在前后两段 assistant 之间，
+      // 同一回合被拆成两条 assistant 消息（post-steer 输出进全新 assistant 消息，
+      // 有独立 messageId），落位瞬间到回合结束此序不变。实时态镜像该结构：
+      // ① u2 追加尾部（当前流式壳 = pre-steer 内容之后）；② streamingMessageId
+      // 置空——旧壳就地封口成普通 assistant 消息，下一条产出型 delta 走归约器
+      // 补壳分支按协议 assistantMessageId 自建新壳（真身 id，轮末重拉天然对账）
+      const drained = asSteerDrainedInputs(event.payload)
+      const entries = drained.length > 0
+        ? drained
+        : steerPending
+          ? [{ messageId: `steer_${steerPending.at}`, text: steerPending.text }]
+          : []
+      const known = new Set(messages.map((m) => m.info.id))
+      for (const e of entries) if (!known.has(e.messageId)) steerNewIds.push(e.messageId)
+      messages = appendSteerUserMessages(messages, entries, sessionId, event.timestamp)
+      streamingMessageId = null
+      steerPending = null
+      continue
+    }
+    if (event.type === 'turn.started' && steerPending) {
+      // guide 降级 startNow（无 steerDrained 直接开新轮）：input 与插队文本一致
+      // 才认领（防把 goal 自动续轮等无关 turn 误认领）；气泡 id 优先 payload.
+      // messageId（服务端正式 user 消息 id），handleTurnStarted 对已存在同 id
+      // user 气泡有独立命名空间处理，不会把 delta 串进气泡
+      const p = event.payload as { input?: unknown; messageId?: unknown }
+      if (typeof p.input === 'string' && p.input.trim() === steerPending.text) {
+        const id = typeof p.messageId === 'string' && p.messageId ? p.messageId : `steer_${steerPending.at}`
+        messages = appendSteerUserMessages(messages, [{ messageId: id, text: p.input }], sessionId, event.timestamp)
+        steerNewIds.push(id)
+        steerPending = null
+      }
+    }
     // 压缩回合不建流式 assistant 消息（同单推路径：零 delta 空气泡，CompactingIndicator 表达）；
     // goal 校验轮同款（verifying 窗口内服务端起 completion verifier 回合，~10s 零
     // delta——建了就是空气泡+工作中 footer，校验完消失 = 间歇闪屏，0.3.2 真机反馈；
@@ -4014,6 +4150,20 @@ function handleStreamBatchDirect(
     // 任务仍在后台跑——由任务完成通知清除，见 bgCompleted 分支）
     // 失败回合展示错误详情（同批 failed+started 的自动续轮不打扰）
     if (turnError) patch.lastError = formatTurnError(turnError)
+    // steer 插队 chip 活到回合结束 = 未落位（guide 降级队列被弃/命令失败等，
+    // 罕见路径——实测 guide 命中时 steerDrained 早于 completed 到达）：清 chip
+    // 并横幅提示可重发
+    if (steerPending) {
+      steerPending = null
+      if (!turnError) patch.lastError = i18n.t('input.steer.notDelivered')
+    }
+  }
+  // steer chip 批内有变更才进 patch（引用稳定防多余重渲染）
+  if (steerPending !== get().steerPending) patch.steerPending = steerPending
+  // 本批落位的注入消息：kv 持久化 + 进 patch（气泡「⚡引导」徽标，MessageBubble 读）
+  if (steerNewIds.length > 0) {
+    addSteerMarkers(steerNewIds)
+    patch.steeredMessageIds = [...get().steeredMessageIds, ...steerNewIds]
   }
   // 后台任务指示器（多任务并发，key = toolCallId）：本批有增删才 patch
   if (bgDirty && bgTasks) patch.backgroundTasks = bgTasks
@@ -4120,6 +4270,52 @@ function handleStreamEvent(
       if (sid) addRewindCut(sid, targetId)
     }
     return
+  }
+
+  // steer 引导式插队（同批量路径）：注入气泡落位，不进消息归约；
+  // turn.steerQueued 仅携带 queueLength（UI 不消费）走默认忽略
+  if (event.type === 'turn.steerDrained') {
+    // 服务端结构镜像（同批量路径，diag-steer3 定案）：u2 追加尾部 + 流式壳封口，
+    // 后续 delta 按协议 assistantMessageId 自建新壳；落位 id 进徽标账本
+    const drained = asSteerDrainedInputs(event.payload)
+    const pending = get().steerPending
+    const entries = drained.length > 0
+      ? drained
+      : pending
+        ? [{ messageId: `steer_${pending.at}`, text: pending.text }]
+        : []
+    const known = new Set(get().messages.map((m) => m.info.id))
+    const newIds = entries.filter((e) => !known.has(e.messageId)).map((e) => e.messageId)
+    if (newIds.length > 0) {
+      addSteerMarkers(newIds)
+      set({
+        steerPending: null,
+        streamingMessageId: null,
+        steeredMessageIds: [...get().steeredMessageIds, ...newIds],
+        messages: appendSteerUserMessages(get().messages, entries, event.sessionId, event.timestamp),
+      })
+    } else {
+      set({
+        steerPending: null,
+        streamingMessageId: null,
+        messages: appendSteerUserMessages(get().messages, entries, event.sessionId, event.timestamp),
+      })
+    }
+    return
+  }
+  if (event.type === 'turn.started' && get().steerPending) {
+    // guide 降级 startNow：input 与插队文本一致才认领（同批量路径）
+    const pending = get().steerPending
+    const p = event.payload as { input?: unknown; messageId?: unknown }
+    if (pending && typeof p.input === 'string' && p.input.trim() === pending.text) {
+      const id = typeof p.messageId === 'string' && p.messageId ? p.messageId : `steer_${pending.at}`
+      addSteerMarkers([id])
+      set({
+        steerPending: null,
+        steeredMessageIds: [...get().steeredMessageIds, id],
+        messages: appendSteerUserMessages(get().messages, [{ messageId: id, text: p.input }], event.sessionId, event.timestamp),
+      })
+    }
   }
 
   // 子代理生命周期通知（spawned/stopped）：注册子会话，stop 时收尾活动 + 拉权威
@@ -4253,6 +4449,8 @@ function handleStreamEvent(
         ...(turnError ? {} : { lastError: i18n.t('chat.edit.rewindFailed') }),
       })
     }
+    // steer 插队 chip 活到回合结束 = 未落位（同批量路径）：清 chip + 提示可重发
+    const steerDropped = get().steerPending
     set({
       streaming: false,
       streamingMessageId: null,
@@ -4260,7 +4458,11 @@ function handleStreamEvent(
       compacting: false,
       // 后台任务指示器不在回合结束清除（同批量路径：由任务完成通知清除）
       // 失败回合展示错误详情（此前 payload.error 被丢弃，失败只表现为"转圈停了"）
-      ...(turnError ? { lastError: formatTurnError(turnError) } : {}),
+      ...(turnError
+        ? { lastError: formatTurnError(turnError), steerPending: null }
+        : steerDropped
+          ? { steerPending: null, lastError: i18n.t('input.steer.notDelivered') }
+          : {}),
     })
     console.log(`[store] turn ${event.type}，重新拉取消息确保一致`)
     // 压缩回合结束：摘要卡只经下方重拉快照落地，队列非空时延迟到快照落地后再

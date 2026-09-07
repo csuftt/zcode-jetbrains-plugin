@@ -833,6 +833,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "subscribeChild" -> handleSubscribeChild(msg)
                         "unsubscribeChild" -> handleUnsubscribeChild(msg)
                         "stop" -> handleStop(msg)
+                        "steerMessage" -> handleSteerMessage(msg)
                         "listFiles" -> handleListFiles(msg)
                         "listCommands" -> handleListCommands(msg)
                         "listMemoryFiles" -> handleListMemoryFiles(msg)
@@ -3760,6 +3761,39 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject {
             put("op", "stopped")
             put("sessionId", sessionId)
+        }
+    }
+
+    /**
+     * steerMessage — 引导式插队（前端 InputBox 流式中触发，2026-09-07 探针定案）：
+     * v4/command sendText requestedDelivery=guide 把纯文本注入运行中的回合。
+     * 受理即返回（注入过程由 legacy 流 turn.steerQueued/steerDrained 事件驱动前端
+     * 渲染，本 handler 不等落位）；失败内联 error 字段——前端据此清乐观 chip 并
+     * 横幅提示（走通用 errorResponse 会丢 steer 上下文，chip 只能等回合结束兜底清）。
+     */
+    private fun handleSteerMessage(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val text = msg["text"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 text")
+        return try {
+            val result = project.zCodeService().getClient().steerViaV4(sessionId, text)
+            val accepted = result["status"]?.jsonPrimitive?.content == "accepted"
+            val delivery = result["result"]?.jsonObject?.get("delivery")?.jsonPrimitive?.contentOrNull ?: ""
+            log.info("steer accepted=$accepted delivery=$delivery sessionId=$sessionId textLength=${text.length}")
+            buildJsonObject {
+                put("op", "steerMessage")
+                put("sessionId", sessionId)
+                put("accepted", accepted)
+                put("delivery", delivery)
+            }
+        } catch (e: Exception) {
+            log.warn("steer failed: ${e.message}")
+            buildJsonObject {
+                put("op", "steerMessage")
+                put("sessionId", sessionId)
+                put("error", "${e.message}")
+            }
         }
     }
 

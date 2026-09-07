@@ -50,7 +50,10 @@
     "edit": "編集（入力欄へ戻す）",
     "remove": "キューから削除",
     "scheduledBadge": "予約メッセージ · {{time}}",
-    "scheduledShort": "予約"
+    "scheduledShort": "予約",
+    "steerNow": "割り込み（実行中のターンへ注入、中断なし）",
+    "steerNowShort": "割り込み",
+    "steerDisabled": "既に割り込み中のメッセージがあります。落ち着くまでお待ちください"
   },
   "pasted": {
     "clickToPreview": "クリックで全文をプレビュー",
@@ -113,5 +116,13 @@
     "preset_in5m": "5分後",
     "preset_in30m": "30分後",
     "preset_in1h": "1時間後"
+  },
+  "steer": {
+    "pending": "注入中…",
+    "notDelivered": "割り込み未遂：直前に終了したターンへ注入できませんでした。もう一度送信してください",
+    "notAccepted": "割り込み不可：現在の状態では注入できません",
+    "failedPrefix": "割り込み失敗：",
+    "badge": "割り込み",
+    "badgeTitle": "このメッセージは実行中のターンへ注入されました"
   }
 }

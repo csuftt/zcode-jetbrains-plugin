@@ -116,6 +116,33 @@
       }
     }
 
+    // 引导（steer）：图标+文本一体的边框按钮，常驻琥珀色醒目区分中性的「立即」；
+    // 布局同 --send（width:auto 覆盖基础 __btn 的 18px 方块，否则文字竖排换行）
+    &--steer {
+      width: auto;
+      height: 20px;
+      gap: 3px;
+      padding: 0 6px;
+      border: 1px solid var(--status-warning);
+      border-radius: 4px;
+      color: var(--status-warning);
+      background: color-mix(in srgb, var(--status-warning) 10%, transparent);
+      white-space: nowrap;
+
+      .codicon {
+        font-size: 11px;
+      }
+
+      &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--status-warning) 22%, transparent);
+      }
+
+      &:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+    }
+
     // 删除：hover 变红
     &--remove:hover {
       background: var(--color-button-danger-hover-bg);

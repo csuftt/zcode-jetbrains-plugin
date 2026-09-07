@@ -51,7 +51,10 @@
     "edit": "Edit (back to input box)",
     "remove": "Remove from queue",
     "scheduledBadge": "Scheduled · {{time}}",
-    "scheduledShort": "Scheduled"
+    "scheduledShort": "Scheduled",
+    "steerNow": "Steer (inject into the running turn, no interruption)",
+    "steerNowShort": "Steer",
+    "steerDisabled": "A message is already steering — wait for it to land"
   },
   "pasted": {
     "clickToPreview": "Click to preview full content",
@@ -118,5 +121,13 @@
     "preset_in5m": "In 5 min",
     "preset_in30m": "In 30 min",
     "preset_in1h": "In 1 hour"
+  },
+  "steer": {
+    "pending": "Steering…",
+    "notDelivered": "Steer not delivered: the message could not be injected into the turn that just ended — please send it again",
+    "notAccepted": "Steer not accepted: steering is unavailable right now",
+    "failedPrefix": "Steer failed: ",
+    "badge": "Steered",
+    "badgeTitle": "This message was steered into the running turn"
   }
 }
