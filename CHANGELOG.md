@@ -6,6 +6,40 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.3.3] - 2026-09-07
+
+中文:
+
+### 新增
+
+- **会话分叉**：在任意 AI 回复上选择分叉，即可从该轮派生一个平行会话——新会话携带从开头到该轮（含）的完整上下文，之后的内容不带入，可独立继续对话；历史列表以分支徽标标识，重启后仍在。
+- **引导式插队（steer）**：AI 生成中可把排队消息「引导」进当前回合——不打断生成，AI 在回合中途收到指令并调整方向；被引导的消息带 ⚡ 徽标，会话重开后保留。
+- **AI 重新生成会话标题**：顶部标题旁新增刷新入口，确认后 AI 根据最近对话内容重新起标题（聊偏了可随时纠正）；标题服务端落库，重启后保持。
+- **任务列表友好渲染**：任务清单多次更新时，工具卡增量标注变化——进度徽标、新增项与状态迁移标签、已移除区，多轮任务推进一目了然。
+- **锚点导航压缩标识**：压缩过的会话在锚点轨道以橙色徽章标出压缩点（悬停预览、点击跳转），锚点历史弹窗按消息顺序混排压缩条目；滚动贴底时最后一个锚点点亮，点击跳转后高亮不被滚动抢走。
+- **定时任务支持 /goal**：定时任务内容为 /goal 命令时到点正常触发目标模式（此前命令会被当普通消息发出而无效）。
+
+### 修复
+
+- **@ 文件补全搜不到深层文件**：文件补全此前会漏掉嵌套较深（如五层以上）或非常见扩展名的文件，现改为遍历全项目（上限 200 条）。
+- **启动后切模型误报「槽位已满」**：IDE 启动后会话尚未激活时切换模型，可能误报「驻留槽位已满，请重启 IDE」；现已自动恢复会话并重试，仍失败时提示重开会话再切，不再误导。
+
+English:
+
+### Added
+
+- **Session forking**: Pick "Fork" on any AI reply to derive a parallel session from that turn — the new session carries the full context from the beginning up to and including that turn, drops everything after it, and can continue on its own. Forked sessions show a branch badge in the history list and survive restarts.
+- **Steer (guide a queued message in)**: While the AI is generating, a queued message can be "steered" into the current turn — generation is not interrupted; the AI receives the instruction mid-turn and adjusts course. Steered messages carry a ⚡ badge that survives reopening the session.
+- **AI-regenerated session titles**: A refresh entry next to the title regenerates it from recent conversation after confirmation — handy when the topic has drifted. Titles are stored server-side and persist across restarts.
+- **Friendly task-list rendering**: When the task list is updated multiple times, the tool card annotates each change — a progress badge, added items and status-change tags, and a removed section — so multi-round progress is clear at a glance.
+- **Compaction markers in anchor navigation**: Compacted sessions show an orange badge at each compaction point on the anchor track (hover to preview, click to jump), and the anchor history popover lists compaction entries in message order. Scrolling to the bottom now lights up the last anchor, and the highlight is not stolen by scrolling right after a jump.
+- **Scheduled tasks support /goal**: A scheduled task whose prompt is a /goal command now triggers goal mode on time (previously the command was sent as a plain message and did nothing).
+
+### Fixed
+
+- **@ file completion missed deeply nested files**: File completion used to miss deeply nested (5+ levels) or uncommon-extension files; it now walks the whole project (capped at 200 entries).
+- **False "slots full" when switching models right after startup**: Switching models before the session is fully activated at IDE startup could falsely report "resident slots full, please restart the IDE". The plugin now resumes the session and retries automatically; if it still fails, the message guides you to reopen the session instead of misleading you.
+
 ## [0.3.2] - 2026-09-04
 
 中文:
