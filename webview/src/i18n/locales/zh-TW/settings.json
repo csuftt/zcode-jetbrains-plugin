@@ -152,7 +152,8 @@
     "enhanceModel": {
       "title": "潤色模型",
       "followSession": "跟隨會話模型",
-      "invalidHint": "所選模型已失效，潤色時將回退預設模型"    },
+      "invalidHint": "所選模型已失效，潤色時將回退預設模型"
+    },
     "turnCollapseTitle": "對話摺疊",
     "turnCollapseEnabled": {
       "title": "自動摺疊執行過程",

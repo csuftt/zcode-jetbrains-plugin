@@ -152,7 +152,8 @@
     "enhanceModel": {
       "title": "개선 모델",
       "followSession": "세션 모델 따르기",
-      "invalidHint": "선택한 모델이 더 이상 없어 개선 시 기본 모델로 대체됩니다"    },
+      "invalidHint": "선택한 모델이 더 이상 없어 개선 시 기본 모델로 대체됩니다"
+    },
     "turnCollapseTitle": "대화 접기",
     "turnCollapseEnabled": {
       "title": "실행 과정 자동 접기",

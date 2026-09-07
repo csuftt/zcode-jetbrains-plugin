@@ -152,7 +152,8 @@
     "enhanceModel": {
       "title": "Enhance model",
       "followSession": "Follow session model",
-      "invalidHint": "Selected model is unavailable; enhancement falls back to the default model"    },
+      "invalidHint": "Selected model is unavailable; enhancement falls back to the default model"
+    },
     "turnCollapseTitle": "Conversation collapse",
     "turnCollapseEnabled": {
       "title": "Auto-collapse execution process",

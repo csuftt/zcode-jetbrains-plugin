@@ -152,7 +152,8 @@
     "enhanceModel": {
       "title": "改善モデル",
       "followSession": "セッションのモデルに従う",
-      "invalidHint": "選択したモデルは無効です。改善時はデフォルトモデルにフォールバックします"    },
+      "invalidHint": "選択したモデルは無効です。改善時はデフォルトモデルにフォールバックします"
+    },
     "turnCollapseTitle": "会話の折りたたみ",
     "turnCollapseEnabled": {
       "title": "実行プロセスを自動折りたたみ",
