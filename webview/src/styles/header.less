@@ -162,6 +162,21 @@
     opacity: 1;
 }
 
+/* AI 标题重生成按钮（复用 edit-btn 基础样式，激活时保持可见 + 图标转圈）*/
+.session-title-regen-btn--active {
+    opacity: 1;
+
+    .codicon {
+        animation: session-title-regen-spin 0.9s linear infinite;
+    }
+}
+
+@keyframes session-title-regen-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* Edit mode */
 .session-title-edit-mode {
     display: flex;

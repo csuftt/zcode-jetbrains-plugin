@@ -17,6 +17,12 @@
     "saveTitleAria": "タイトルを保存",
     "cancelEditAria": "編集をキャンセル",
     "editTitleAria": "セッションタイトルを編集",
+    "regenTitle": "AI でタイトルを再生成",
+    "regenTitleAria": "AI でセッションタイトルを再生成",
+    "regenNoContent": "会話内容がないためタイトルを生成できません",
+    "regenConfirmTitle": "セッションタイトルを再生成",
+    "regenConfirmMessage": "会話内容から AI が新しいタイトルを生成し、現在のタイトルを上書きします。続行しますか？",
+    "regenConfirmOk": "再生成",
     "untitled": "新しいセッション"
   },
   "message": {

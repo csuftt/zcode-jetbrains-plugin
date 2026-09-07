@@ -15,8 +15,9 @@
 import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
+import { extractTitleExcerpt } from '@/utils/titleExcerpt'
 import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, GoalState } from '@/types/messages'
-import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError } from '@/utils/streamReducer'
+import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import i18n from '@/i18n/config'
 
@@ -297,6 +298,11 @@ interface StoreState {
 
   /** 驻留水位提醒（缺陷BA）：Java 账本预计打开会话后越过服务端驻留阈值时由 subscribed 应答置位 */
   residentPoolNotice: string | null
+
+  /** AI 标题重新生成进行中（会话 id；null=空闲。全局单飞，与 Java 侧 AtomicBoolean 对应）*/
+  titleRegeneratingSessionId: string | null
+  /** AI 标题重新生成的失败提示（App 通栏展示，自动消失）*/
+  sessionTitleRegenError: string | null
 
   // 运行环境（node / zcode.cjs / 凭证三件套）
   /** null = 尚未检测完成（init 异步拉取）；allOk=false 时主界面显示环境提醒条 */
@@ -620,6 +626,11 @@ interface StoreState {
   stopStreaming: () => void
   /** 重命名会话（CLI 协议无 rename op，仅前端 persist 持久化）*/
   renameSession: (sessionId: string, title: string) => void
+  /** AI 重新生成当前会话标题（构建全会话摘录·偏向最新轮次 → Java generateText + v4 renameSession；
+   *  结果经 sessionTitleRegenerated 应答应用，失败置 sessionTitleRegenError）*/
+  regenerateSessionTitle: (sessionId: string) => void
+  /** 清除标题重生成失败提示（App 通栏自动消失/手动关闭）*/
+  clearSessionTitleRegenError: () => void
   /** 拉取可切换的模型列表（config.json）*/
   loadModels: () => void
   /** 手动刷新模型清单（下拉刷新按钮）：置 modelsRefreshing，响应后复位 */
@@ -789,6 +800,8 @@ export const useStore = create<StoreState>((set, get) => ({
   connectionStatus: 'connecting',
   lastError: null,
   residentPoolNotice: null,
+  titleRegeneratingSessionId: null,
+  sessionTitleRegenError: null,
   projectPath: '',
   envStatus: null,
   envSaving: false,
@@ -1561,6 +1574,29 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       sessions: s.sessions.map((x) => (x.sessionId === sessionId ? { ...x, title } : x)),
     }))
+  },
+
+  clearSessionTitleRegenError: () => set({ sessionTitleRegenError: null }),
+
+  regenerateSessionTitle: (sessionId) => {
+    // 全局单飞（Java 侧 AtomicBoolean 同款）：进行中忽略重复点击
+    if (get().titleRegeneratingSessionId) return
+    const excerpt = extractTitleExcerpt(get().messages)
+    if (!excerpt) {
+      set({ sessionTitleRegenError: i18n.t('chat.header.regenNoContent') })
+      return
+    }
+    set({ titleRegeneratingSessionId: sessionId, sessionTitleRegenError: null })
+    // 附带 currentModel：generateText 跟随会话模型（会话能跑对话则模型必然已在
+    // workspace 目录注册，直调即成功）；缺陷实锤——落 config 默认会选中会话没用过的
+    // 渠道（如 builtin:bigmodel），app-server 重启后未注册即 -32603
+    const cm = get().currentModel
+    sendToJava({
+      op: 'regenerateSessionTitle',
+      sessionId,
+      excerpt,
+      ...(cm ? { providerId: cm.providerId, modelId: cm.modelId } : {}),
+    })
   },
 
   loadModels: () => {
@@ -3509,6 +3545,17 @@ export function handleResponse(
             : { text: msg.text }),
         },
       })
+      break
+
+    case 'sessionTitleRegenerated':
+      // AI 标题回包：成功经 renameSession 应用（本地状态 + persist 持久化，与手动改名
+      // 同通道；服务端 v4 renameSession 已由 Java 落库）；失败置通栏提示
+      if (msg.error) {
+        set({ titleRegeneratingSessionId: null, sessionTitleRegenError: msg.error })
+      } else {
+        if (msg.title) get().renameSession(msg.sessionId, msg.title)
+        set({ titleRegeneratingSessionId: null })
+      }
       break
 
     case 'agents':

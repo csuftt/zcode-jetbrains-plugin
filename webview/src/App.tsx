@@ -9,7 +9,7 @@
  * Header 按钮：新会话/历史/设置已实现；新Tab→createTab op；搜索→会话内搜索面板
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { useTheme } from '@/hooks/useTheme'
@@ -30,6 +30,7 @@ import { ChangelogDialog, CHANGELOG_LAST_SEEN_KEY } from '@/components/Changelog
 import { EnvBanner } from '@/components/EnvBanner'
 import { sendToJava, isInJcef } from '@/ipc/bridge'
 import { getPersisted, setPersisted, isKvHydrated, KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
+import { extractTitleExcerpt } from '@/utils/titleExcerpt'
 import { APP_VERSION } from '@/version/version'
 import './styles/global.less'
 import './styles/buttons.less'
@@ -67,6 +68,10 @@ export default function App() {
   const clearError = useStore((s) => s.clearError)
   const clearNotice = useStore((s) => s.clearNotice)
   const renameSession = useStore((s) => s.renameSession)
+  const titleRegeneratingSessionId = useStore((s) => s.titleRegeneratingSessionId)
+  const sessionTitleRegenError = useStore((s) => s.sessionTitleRegenError)
+  const regenerateSessionTitle = useStore((s) => s.regenerateSessionTitle)
+  const clearSessionTitleRegenError = useStore((s) => s.clearSessionTitleRegenError)
   const setModel = useStore((s) => s.setModel)
   const loadArchivedSessions = useStore((s) => s.loadArchivedSessions)
   const archiveSession = useStore((s) => s.archiveSession)
@@ -216,6 +221,14 @@ export default function App() {
   const sessionTitle =
     currentSession?.title ?? (currentSessionId ? currentSessionId.slice(0, 12) : '')
 
+  // AI 重新生成标题：有真实用户消息才可生成；失败提示 6s 自动消失
+  const canRegenerateTitle = useMemo(() => extractTitleExcerpt(messages) !== null, [messages])
+  useEffect(() => {
+    if (!sessionTitleRegenError) return
+    const timer = setTimeout(clearSessionTitleRegenError, 6000)
+    return () => clearTimeout(timer)
+  }, [sessionTitleRegenError, clearSessionTitleRegenError])
+
   // 会话标题推给 Java 作标签 tooltip（悬停显示会话名；标签本身保持「会话N」编号）。
   // 变化时防抖 500ms；只在本 webview 连接 Java 时发送（mock 模式静默丢弃）
   const lastPushedTitleRef = useRef('')
@@ -250,6 +263,11 @@ export default function App() {
         onTitleChange={(t) => {
           if (currentSessionId) renameSession(currentSessionId, t)
         }}
+        onRegenerateTitle={() => {
+          if (currentSessionId) regenerateSessionTitle(currentSessionId)
+        }}
+        canRegenerateTitle={canRegenerateTitle}
+        regeneratingTitle={!!currentSessionId && titleRegeneratingSessionId === currentSessionId}
       />
       {/* 环境提醒条：node/zcode.cjs/凭证任一异常时显示（仅异常渲染，正常保持安静）*/}
       <EnvBanner
@@ -341,6 +359,16 @@ export default function App() {
         <div className="app__notice-bar">
           <span>⚠️ {residentPoolNotice}</span>
           <button className="app__error-close" onClick={clearResidentPoolNotice} aria-label={t('app.errorCloseAria')}>
+            <span className="codicon codicon-close" />
+          </button>
+        </div>
+      )}
+
+      {/* AI 标题重生成失败提示：6s 自动消失（上方 useEffect），可手动关闭 */}
+      {sessionTitleRegenError && (
+        <div className="app__notice-bar">
+          <span>⚠️ {sessionTitleRegenError}</span>
+          <button className="app__error-close" onClick={clearSessionTitleRegenError} aria-label={t('app.errorCloseAria')}>
             <span className="codicon codicon-close" />
           </button>
         </div>

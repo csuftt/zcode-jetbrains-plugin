@@ -17,6 +17,12 @@
     "saveTitleAria": "保存标题",
     "cancelEditAria": "取消编辑",
     "editTitleAria": "编辑会话标题",
+    "regenTitle": "AI 重新生成标题",
+    "regenTitleAria": "AI 重新生成会话标题",
+    "regenNoContent": "会话还没有对话内容，无法生成标题",
+    "regenConfirmTitle": "重新生成会话标题",
+    "regenConfirmMessage": "将根据对话内容用 AI 重新生成标题并覆盖当前标题，是否继续？",
+    "regenConfirmOk": "重新生成",
     "untitled": "新会话"
   },
   "message": {

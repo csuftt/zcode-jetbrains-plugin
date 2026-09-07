@@ -17,6 +17,12 @@
     "saveTitleAria": "제목 저장",
     "cancelEditAria": "편집 취소",
     "editTitleAria": "세션 제목 편집",
+    "regenTitle": "AI로 제목 다시 생성",
+    "regenTitleAria": "AI로 세션 제목 다시 생성",
+    "regenNoContent": "대화 내용이 없어 제목을 생성할 수 없습니다",
+    "regenConfirmTitle": "세션 제목 다시 생성",
+    "regenConfirmMessage": "대화 내용을 바탕으로 AI가 새 제목을 생성하여 현재 제목을 덮어씁니다. 계속할까요?",
+    "regenConfirmOk": "다시 생성",
     "untitled": "새 세션"
   },
   "message": {

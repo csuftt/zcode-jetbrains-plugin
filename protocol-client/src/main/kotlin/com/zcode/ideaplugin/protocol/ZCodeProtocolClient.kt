@@ -1444,6 +1444,31 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * v4/command {type:"renameSession"} — 设置会话标题（服务端落库，zcode.cjs 内部
+     * 走 runtime.setCustomSessionTitle，titleSource=custom）。
+     * 用途：AI 重新生成会话标题（op=regenerateSessionTitle 生成后经此持久化）。
+     * 仅对 app-server 已驻留的会话有效（宿主会话表解析失败时报错，调用方兜底
+     * 前端 persist 持久化）；无 baseRevision 要求（元数据命令，非历史行变更）。
+     *
+     * @return 应答 result（含 status: accepted 等，仅日志用）
+     */
+    fun renameSessionViaV4(sessionId: String, title: String, timeoutMs: Long = 8000): JsonObject {
+        val params = buildJsonObject {
+            put("commandId", "rename-${java.util.UUID.randomUUID()}")
+            put("clientId", "zcode-idea-plugin")
+            put("sessionId", sessionId)
+            put("type", "renameSession")
+            put("payload", buildJsonObject { put("title", title) })
+            put("issuedAt", System.currentTimeMillis())
+            put("connectionId", "zcode-idea-plugin")
+            put("clientMode", "desktop-continuous")
+        }
+        val r = request("v4/command", params, timeoutMs)
+        requireOk(r)
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * session/cancelBackgroundTask — 取消子代理/后台任务（taskId = agentId）。
      * 作用于主会话（须 active）；runtime 按 taskType 分发——local_agent 走
      * subagentPort.stopTask（前台子代理也能停），bash 后台任务走 abort。

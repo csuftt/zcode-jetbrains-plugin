@@ -397,6 +397,9 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'toggleSkill'; path: string; enabled: boolean }
   /** 提示词润色（一次性 CLI headless 调用，零会话污染；模型跟随当前选择）*/
   | { op: 'enhancePrompt'; text: string; workspacePath?: string; providerId?: string; modelId?: string }
+  /** AI 重新生成会话标题（excerpt=全会话对话摘录；providerId/modelId=当前会话模型透传，
+   *  generateText 跟随会话模型避免选中未注册渠道，Kotlin 走 generateText + v4 renameSession）*/
+  | { op: 'regenerateSessionTitle'; sessionId: string; excerpt: string; providerId?: string; modelId?: string }
   /** 子智能体清单（user + project 作用域磁盘扫描，disabled 已过滤）*/
   | { op: 'listAgents' }
   /** 新建/更新/改名子智能体（originalName 非空且 ≠ name = 改名）*/
@@ -904,6 +907,8 @@ export type JavaResponse =
   | { op: 'skillToggled'; path: string; enabled: boolean }
   /** op=enhancePrompt 的响应（error 非 nil = 失败，弹窗错误态）*/
   | { op: 'enhancePromptResult'; original?: string; text?: string; error?: string; model?: string }
+  /** op=regenerateSessionTitle 的响应（title 非空 = 成功并已应用；error = 失败提示）*/
+  | { op: 'sessionTitleRegenerated'; sessionId: string; title?: string; error?: string }
   | { op: 'agents'; agents: AgentDef[] }
   | { op: 'agentSaved'; name: string; scope: string }
   | { op: 'agentDeleted'; name: string; scope: string }

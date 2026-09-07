@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import '../styles/header.less'
+import { ConfirmDialog } from './ConfirmDialog'
 
 /** 返回箭头（cc-gui Icons.tsx BackIcon 简化版）*/
 function BackIcon() {
@@ -42,6 +43,12 @@ interface Props {
   onHistory: () => void
   onSettings: () => void
   onTitleChange: (newTitle: string) => void
+  /** AI 重新生成会话标题（有对话内容才可点；确认弹窗在组件内）*/
+  onRegenerateTitle: () => void
+  /** 当前会话是否具备生成条件（存在真实用户消息）*/
+  canRegenerateTitle: boolean
+  /** 标题生成进行中（按钮转圈，全局单飞）*/
+  regeneratingTitle: boolean
 }
 
 export function ChatHeader({
@@ -56,6 +63,9 @@ export function ChatHeader({
   onHistory,
   onSettings,
   onTitleChange,
+  onRegenerateTitle,
+  canRegenerateTitle,
+  regeneratingTitle,
 }: Props) {
   const { t } = useTranslation()
   // settings 视图不渲染（SettingsView 自带关闭入口）
@@ -69,7 +79,13 @@ export function ChatHeader({
             <BackIcon /> {t('chat.header.back')}
           </button>
         ) : (
-          <SessionTitle title={sessionTitle} onTitleChange={onTitleChange} />
+          <SessionTitle
+            title={sessionTitle}
+            onTitleChange={onTitleChange}
+            onRegenerate={onRegenerateTitle}
+            canRegenerate={canRegenerateTitle}
+            regenerating={regeneratingTitle}
+          />
         )}
       </div>
       <div className="header-right">
@@ -105,17 +121,24 @@ export function ChatHeader({
   )
 }
 
-/** 会话标题：hover 铅笔 → 编辑态 input + check/close（照抄 cc-gui 编辑逻辑）*/
+/** 会话标题：hover 铅笔（编辑）/ 刷新（AI 重新生成，带二次确认）*/
 function SessionTitle({
   title,
   onTitleChange,
+  onRegenerate,
+  canRegenerate,
+  regenerating,
 }: {
   title: string
   onTitleChange: (t: string) => void
+  onRegenerate: () => void
+  canRegenerate: boolean
+  regenerating: boolean
 }) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
+  const [confirmRegen, setConfirmRegen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // 进入编辑态：填入当前标题并自动聚焦全选
@@ -184,9 +207,31 @@ function SessionTitle({
       <div className="session-title" title={title}>
         {title || t('chat.header.untitled')}
       </div>
+      <button
+        className={`session-title-edit-btn session-title-regen-btn${regenerating ? ' session-title-regen-btn--active' : ''}`}
+        onClick={() => setConfirmRegen(true)}
+        disabled={!canRegenerate || regenerating}
+        aria-label={t('chat.header.regenTitleAria')}
+        data-tooltip={canRegenerate ? t('chat.header.regenTitle') : t('chat.header.regenNoContent')}
+      >
+        <span className="codicon codicon-refresh" />
+      </button>
       <button className="session-title-edit-btn" onClick={startEditing} aria-label={t('chat.header.editTitleAria')}>
         <span className="codicon codicon-edit" />
       </button>
+      {/* AI 重新生成标题二次确认（覆盖当前标题属破坏性替换，且消耗一次模型调用）*/}
+      {confirmRegen && (
+        <ConfirmDialog
+          title={t('chat.header.regenConfirmTitle')}
+          message={t('chat.header.regenConfirmMessage')}
+          confirmText={t('chat.header.regenConfirmOk')}
+          onConfirm={() => {
+            setConfirmRegen(false)
+            onRegenerate()
+          }}
+          onCancel={() => setConfirmRegen(false)}
+        />
+      )}
     </div>
   )
 }
