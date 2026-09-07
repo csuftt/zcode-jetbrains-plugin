@@ -26,7 +26,7 @@ export type CmdChipKind = 'goal' | 'compact' | 'command' | 'skill'
  *  command=终端绿 / skill=笔紫，与下拉条目图标配色一致；init 用户拍板用通用绿）*/
 const CMD_META: Record<string, { icon: string; variant: string }> = {
   goal: { icon: 'codicon-target', variant: 'goal' },
-  compact: { icon: 'codicon-archive', variant: 'compact' },
+  compact: { icon: 'codicon-fold', variant: 'compact' },
   command: { icon: 'codicon-terminal', variant: 'command' },
   skill: { icon: 'codicon-wand', variant: 'skill' },
 }

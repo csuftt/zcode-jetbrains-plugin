@@ -42,7 +42,7 @@ export function TimelineSeparator({ part }: Props) {
         <span className="tl-sep__line" />
         <span className="tl-sep__text">
           <span className="tl-sep__label">
-            <span className="codicon codicon-compress" />
+            <span className="codicon codicon-fold" />
             {t('chat.compaction.title')}
           </span>
           {pre != null && post != null && (

@@ -74,8 +74,9 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, a
   }
   // 压缩摘要消息（role=user + info.summary）：折叠卡片，不当用户气泡
   // （消息级无 synthetic 标记，isHiddenSyntheticMessage 拦不住，必须在此分流）
+  // anchorAttr 透传挂 data-anchor-msg：锚点轨道压缩徽章/历史弹窗点击跳转落点
   if (isCompactSummaryMessage(info)) {
-    return <CompactionSummaryCard message={message} time={time} />
+    return <CompactionSummaryCard message={message} time={time} anchorAttr={anchorAttr} />
   }
   // 时间线分隔符消息（assistant + timeline part）：无气泡结构的横线分隔卡，
   // 此前 timeline part 不被识别渲染成"只有耗时行的空壳气泡"

@@ -21,9 +21,11 @@ import '../styles/compaction.less'
 interface Props {
   message: ZCodeMessage
   time: string
+  /** 锚点属性（消息 id）：锚点轨道压缩徽章/历史弹窗点击跳转的落点 */
+  anchorAttr?: string
 }
 
-export function CompactionSummaryCard({ message, time }: Props) {
+export function CompactionSummaryCard({ message, time, anchorAttr }: Props) {
   const { t } = useTranslation()
   const { info, parts } = message
   const body = info.summary?.body ?? ''
@@ -35,7 +37,7 @@ export function CompactionSummaryCard({ message, time }: Props) {
   const count = boundary?.summarizedMessageCount
 
   return (
-    <div className="compact-card">
+    <div className="compact-card" data-anchor-msg={anchorAttr}>
       <div
         className="compact-card__header"
         onClick={() => setOpen(true)}

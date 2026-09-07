@@ -4,7 +4,7 @@
  * - 按钮渲染在 rail 顶部；点击弹出列表
  * - 弹窗列出全部用户消息（不受锚点 30 条抽样限制）
  * - 点击列表项：关闭弹窗并滚动消息容器到目标
- * - Esc / 点击 rail 外部关闭；压缩摘要不进列表
+ * - Esc / 点击 rail 外部关闭；压缩点以专属条目进列表（不占用户编号）
  */
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -98,12 +98,20 @@ describe('锚点历史按钮与弹窗', () => {
     expect(container.querySelectorAll('.scroll-control-button').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('压缩摘要消息不进弹窗列表', () => {
+  it('压缩点以专属条目进列表：不占用户编号、不泄漏摘要正文、计数只数用户消息', () => {
     const { container } = renderRail([userMsg('u1', '第一个问题'), compactSummaryMsg('c1'), userMsg('u2', '第二个问题')])
     fireEvent.click(container.querySelector('.anchor-history-node')!)
     const items = container.querySelectorAll('.anchor-history-item')
-    expect(items.length).toBe(2)
-    expect(container.textContent).not.toContain('压缩摘要')
+    expect(items.length).toBe(3)
+    expect(container.querySelectorAll('.anchor-history-item--compact').length).toBe(1)
+    expect(container.querySelector('.anchor-history-item--compact')!.textContent).toContain('上下文已压缩')
+    // 摘要正文不进任何条目
+    expect(container.textContent).not.toContain('压缩摘要正文')
+    // 用户条目编号连续（压缩条目无 # 序号）
+    expect(items[0].textContent).toContain('#1')
+    expect(items[2].textContent).toContain('#2')
+    // 头部计数只数用户消息
+    expect(container.querySelector('.anchor-history-count')!.textContent).toContain('2')
   })
 
   it('点击列表项：弹窗关闭并滚动消息容器到目标', () => {

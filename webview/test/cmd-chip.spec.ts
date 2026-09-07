@@ -12,7 +12,7 @@ describe('内联命令 chip', () => {
     expect(goal).toContain('cmd-ref--goal')
 
     const compact = buildCommandChipHTML('compact', 'compact')
-    expect(compact).toContain('codicon-archive')
+    expect(compact).toContain('codicon-fold')
     expect(compact).toContain('cmd-ref--compact')
   })
 

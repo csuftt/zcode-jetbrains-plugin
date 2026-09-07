@@ -114,6 +114,47 @@
   }
 }
 
+/* ===== 压缩点徽章（轨道结构性事件节点）=====
+   橙色 fold 图标直接充当节点（无圆底，对齐历史入口形态）：颜色（警示橙）
+   与 user 圆点的灰/蓝彻底区分——0.3.2 实测反馈蓝色实心圆与 active 圆点
+   撞形；图标用 fold 而非 compress：内置 codicon 字体是旧版 730 字形集，
+   无 compress 字形（真机隐形教训，2026-09-07），换图标前先核对
+   src/codicon.css 字形表 */
+.messages-anchor-compact {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--anchor-compact);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 2;
+  transition: all 0.15s;
+
+  /* span.codicon（0,2,1）压 codicon.css 的 .codicon[class*='codicon-'] 简写（0,2,0）*/
+  & span.codicon {
+    font-size: 14px;
+  }
+
+  &:hover {
+    transform: translate(-50%, -50%) scale(1.25);
+    filter: brightness(1.2);
+  }
+
+  &.is-active {
+    transform: translate(-50%, -50%) scale(1.15);
+    /* 图标节点无实心底，光晕沿字形发光（box-shadow 会是方形盒阴影）*/
+    text-shadow: 0 0 6px var(--anchor-compact);
+  }
+}
+
 /* 锚点预览 tooltip（cc-gui .anchor-tooltip 同款）*/
 .anchor-tooltip {
   position: absolute;
@@ -310,6 +351,23 @@
   font-size: 10px;
   color: var(--text-tertiary);
   margin-bottom: 2px;
+}
+
+/* 压缩条目变体：单行结构（图标 + 固定文案 + 时间），无预览文本；
+   图标着强调色与用户消息条目区分，不占 # 序号 */
+.anchor-history-item--compact {
+  .anchor-history-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 0;
+    color: var(--text-secondary);
+  }
+}
+
+.anchor-history-compact-icon {
+  font-size: 11px;
+  color: var(--anchor-compact);
 }
 
 .anchor-history-text {

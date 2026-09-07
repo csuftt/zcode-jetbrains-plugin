@@ -72,7 +72,7 @@ type SlashItem =
 const BUILTIN_COMMANDS: { name: string; icon?: string }[] = [
   { name: 'goal', icon: 'codicon-target' },
   { name: 'init' },
-  { name: 'compact', icon: 'codicon-archive' },
+  { name: 'compact', icon: 'codicon-fold' },
 ]
 
 /**
