@@ -4,9 +4,12 @@ import com.zcode.ideaplugin.protocol.LogRedactor
 
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
@@ -4007,8 +4010,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /**
      * 文件列表（@文件补全用）
      *
-     * 扫描项目目录下的代码文件，按 query 过滤，限 50 个。
-     * 用 VFS（虚拟文件系统）递归扫，跳过 node_modules/.git/build 等。
+     * ProjectFileIndex 遍历项目内容根（issue #6：原自制 BFS 深度 >5 剪枝，Maven/Gradle
+     * 深包结构项目大量源码搜不到）。不限深度；不设扩展名白名单，凡非二进制文本皆可引用；
+     * 模块 excluded 目录由 FileIndex 自动跳过，忽略目录/隐藏目录手工剪枝兜底
+     * （open directory 项目可能没有 excluded 配置）。
      */
     private fun handleListFiles(msg: JsonObject): JsonObject {
         val query = msg["query"]?.jsonPrimitive?.content?.lowercase() ?: ""
@@ -4016,51 +4021,47 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return buildJsonObject { put("op", "files"); put("files", JsonArray(emptyList())) }
 
         val files = mutableListOf<String>()
-        val ignoredDirs = setOf("node_modules", ".git", "build", "dist", "out", ".gradle", ".idea", "target", "__pycache__")
-        // 常见代码文件扩展名
-        val codeExts = setOf(
-            "kt", "java", "py", "ts", "tsx", "js", "jsx", "json", "yaml", "yml",
-            "xml", "html", "css", "less", "scss", "md", "sql", "go", "rs", "c", "cpp", "h",
-            "sh", "bat", "gradle", "properties", "toml"
+        val ignoredDirs = setOf(
+            "node_modules", ".git", "build", "dist", "out", ".gradle", ".idea", "target", "__pycache__",
+            ".svn", ".hg", ".venv", "venv", "vendor", "Pods", ".terraform"
         )
+        val maxFiles = 200
 
         try {
-            val baseVfs = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(basePath)
+            val baseVfs = LocalFileSystem.getInstance().findFileByPath(basePath)
             if (baseVfs != null && baseVfs.isDirectory) {
-                // 递归扫描（BFS，限深度 5 层）
-                val queue = ArrayDeque<Pair<com.intellij.openapi.vfs.VirtualFile, Int>>()
-                queue.add(baseVfs to 0)
-                while (queue.isNotEmpty() && files.size < 50) {
-                    val (dir, depth) = queue.removeFirst()
-                    if (depth > 5) continue
-                    for (child in dir.children) {
-                        if (files.size >= 50) break
-                        val name = child.name
-                        if (child.isDirectory) {
-                            if (name !in ignoredDirs && !name.startsWith(".")) {
-                                queue.add(child to depth + 1)
+                ReadAction.compute<Boolean, RuntimeException> {
+                    ProjectFileIndex.getInstance(project).iterateContentUnderDirectory(
+                        baseVfs,
+                        { vf ->
+                            if (vf.isDirectory) return@iterateContentUnderDirectory true
+                            if (FileTypeManager.getInstance().getFileTypeByFile(vf).isBinary) {
+                                return@iterateContentUnderDirectory true
                             }
-                        } else {
-                            val ext = name.substringAfterLast('.', "").lowercase()
-                            if (ext in codeExts) {
-                                // 相对路径（更短，补全更友好）
-                                val relPath = child.path.removePrefix(basePath).replace('\\', '/').trimStart('/')
-                                if (query.isEmpty() || relPath.lowercase().contains(query) || name.lowercase().contains(query)) {
-                                    files.add(relPath)
-                                }
+                            // 超大文本（lock/生成物类）不进补全，防个别文件淹没配额
+                            if (vf.length > 1L shl 20) return@iterateContentUnderDirectory true
+                            val relPath = vf.path.removePrefix(basePath).replace('\\', '/').trimStart('/')
+                            if (query.isEmpty() || relPath.lowercase().contains(query) || vf.name.lowercase().contains(query)) {
+                                files.add(relPath)
                             }
-                        }
-                    }
+                            files.size < maxFiles // 到量即停，中断遍历
+                        },
+                        { vf -> !vf.isDirectory || (vf.name.lowercase() !in ignoredDirs && !vf.name.startsWith(".")) }
+                    )
                 }
             }
         } catch (e: Exception) {
             log.warn("File scan failed: ${e.message}")
         }
 
+        // @ 展开频率低（query 为空）打 info 供远程场景诊断；逐键过滤的请求走 debug
+        if (query.isEmpty()) log.info("[listFiles] base=$basePath matched=${files.size}")
+        else log.debug("[listFiles] base=$basePath matched=${files.size} query='$query'")
+
         files.sortBy { it.length } // 短路径优先（通常更相关）
         return buildJsonObject {
             put("op", "files")
-            put("files", JsonArray(files.take(50).map { JsonPrimitive(it) }))
+            put("files", JsonArray(files.take(maxFiles).map { JsonPrimitive(it) }))
         }
     }
 
