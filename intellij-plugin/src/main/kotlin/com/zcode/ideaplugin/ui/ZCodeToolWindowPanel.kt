@@ -2591,13 +2591,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 前端收到 modelSetPending 后回滚选中态并提示"本轮结束后生效"，补发成功再落定
         if (sessionId in streamingTurns) return deferModelSwitch(sessionId, modelId, providerId)
         val client = project.zCodeService().getClient()
+        // 带 runtimeModel：服务端先把 provider 注册进 workspace（绕过"可选模型"校验）
+        // 普通 setModel 只能切 main/lite/available 里的模型（当前只有 anthropic/GLM-5.2）
+        // 提到 try 外：冷会话自愈重试（下方 catch）复用同一 runtimeModel
+        val runtimeModel = buildRuntimeModel(providerId, modelId)
+        if (runtimeModel == null) {
+            log.warn("Provider $providerId not found in config.json, falling back to plain setModel (may fail)")
+        }
         try {
-            // 带 runtimeModel：服务端先把 provider 注册进 workspace（绕过"可选模型"校验）
-            // 普通 setModel 只能切 main/lite/available 里的模型（当前只有 anthropic/GLM-5.2）
-            val runtimeModel = buildRuntimeModel(providerId, modelId)
-            if (runtimeModel == null) {
-                log.warn("Provider $providerId not found in config.json, falling back to plain setModel (may fail)")
-            }
             client.setModel(sessionId, modelId, providerId, runtimeModel)
             log.info("Model switched: $sessionId → $providerId/$modelId")
         } catch (e: Exception) {
@@ -2605,6 +2606,20 @@ if (!window.__ZCODE_LOG_HOOK__) {
             // 转延迟切换——回合结束后补发重试会给出真实结果（真不支持则报 modelSetFailed）
             if (isUnsupportedModelEx(e) && sessionId in streamingTurns) {
                 return deferModelSwitch(sessionId, modelId, providerId)
+            }
+            // 冷会话（-32004 Session is not active）：启动恢复上次会话时 applyModelIfReady
+            // 的 setModel 与 subscribe 的 resume 并发赛跑（各 op 线程池并发执行），抢跑即撞。
+            // 槽位此刻是空的，此前误报"槽位已满重启 IDE"（假警报）。与 getSettings 同款
+            // 自愈：resume 激活（去重器会等在途 resume 落地）后重试一次
+            if (isSessionNotActiveError(e)) {
+                try {
+                    resumeSessionDeduped(client, sessionId, effectiveWorkspacePath(msg))
+                    client.setModel(sessionId, modelId, providerId, runtimeModel)
+                    log.info("Model switched after cold-session resume: $sessionId → $providerId/$modelId")
+                    return modelSetResponse(sessionId, modelId, providerId)
+                } catch (e2: Exception) {
+                    log.warn("Model switch still failing after cold-session resume: ${e2.message}")
+                }
             }
             log.warn("Model switch failed: ${e.message}")
             // 忙窗口超时（缺陷AB）：后台延迟重试，成功后补推 modelSet（前端据此落定切换/清在途标记）

@@ -2976,7 +2976,12 @@ export function handleResponse(
       // -32004 家族（缺陷BA）："Session is not active"（既有会话被 LRU 踢出驻留）与
       // "Session not found"（新建会话撞槽位满被整体挤出、尚不可 resume）同因不同文，
       // 按错误码/两种文案匹配，统一追加槽位指引
-      const sessionInactive = /-32004|Session is not active|Session not found/i.test(msg.message)
+      // 模型切换来源的 -32004 不套槽位文案：Java 侧 handleSetModel 已带 resume 自愈，
+      // 走到这里说明自愈后仍失败，多半是启动恢复竞态残留而非槽位满——引导重开会话后重切
+      const modelSwitchInactive =
+        /^Model switch failed:/.test(msg.message) && /-32004|Session is not active|Session not found/i.test(msg.message)
+      const sessionInactive =
+        !modelSwitchInactive && /-32004|Session is not active|Session not found/i.test(msg.message)
       // -32010（A prompt is already running）：服务端回合悬挂，Java 已自动 stop+重发，
       // 走到前端说明自愈失败——提示可操作文案；且跳过 flushQueue（服务端 prompt 状态
       // 未清前队列下一条大概率再撞，会连环报错，2026-08-20 实测）
@@ -2991,13 +2996,15 @@ export function handleResponse(
       set({
         // 人话指引放句首、协议原文挪进括号（缺陷BA）：错误条空间有限，指引垫在
         // 句尾会被截断——用户先看到"怎么办"，原文只作存证
-        lastError: sessionInactive
-          ? `${i18n.t('app.sessionInactiveHint')}（${msg.message}）`
-          : promptRunning
-            ? `${i18n.t('app.promptRunningHint')}（${msg.message}）`
-            : resumeBusy
-              ? `${i18n.t('app.resumeBusyHint')}（${msg.message}）`
-              : msg.message,
+        lastError: modelSwitchInactive
+          ? `${i18n.t('app.modelSwitchInactiveHint')}（${msg.message}）`
+          : sessionInactive
+            ? `${i18n.t('app.sessionInactiveHint')}（${msg.message}）`
+            : promptRunning
+              ? `${i18n.t('app.promptRunningHint')}（${msg.message}）`
+              : resumeBusy
+                ? `${i18n.t('app.resumeBusyHint')}（${msg.message}）`
+                : msg.message,
         // 环境前置检查失败（EnvCheckException/envSave 验证失败）：附带 envStatus 刷新提醒条
         ...(msg.envStatus ? { envStatus: msg.envStatus } : {}),
         envSaving: false,

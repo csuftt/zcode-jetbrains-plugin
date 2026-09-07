@@ -6,6 +6,7 @@
   "turnFailed": "本轮执行失败：{{message}}",
   "turnFailedNoDetail": "本轮执行失败（服务端未返回错误详情）",
   "sessionInactiveHint": "会话槽位已满（服务端上限 16，已打开的会话不会自动释放）：重启 IDE 释放槽位后，重新发送消息或从历史列表重新打开会话即可",
+  "modelSwitchInactiveHint": "模型切换失败（会话尚未激活）：从历史列表重新打开会话或发送一条消息后再切换即可",
   "modelSwitchDeferred": "模型切换将在本轮结束后生效：{{model}}",
   "modelCaptchaGated": "体验套餐模型的接口需完成人机验证（滑块），插件无法代为完成，请选择个人套餐或 API Key 渠道的模型",
   "modelSwitchStallHint": "切换模型后的首个回合已等待 1 分钟仍无任何输出，可能被服务端挂起（多为模型服务端瞬时故障）：可停止后重发，或切回原模型再试",
