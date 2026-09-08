@@ -16,7 +16,8 @@ import kotlin.test.assertTrue
  * TaskIndexStore 单元测试：临时目录造 tasks-index + cli db 双库，真实 node:sqlite 进程执行
  *
  * 覆盖：归档补 UPSERT / 已有行仅动 archived（title/pinned 保留）/ 恢复（含清旧机制
- * time_archived）/ listTasks / schema 不兼容 fail-soft
+ * time_archived）/ 软删（deleted=1 且 archived 位保留，对齐客户端实库语义；无行补删 +
+ * 清旧机制位）/ listTasks / schema 不兼容 fail-soft
  */
 class TaskIndexStoreTest {
 
@@ -149,6 +150,91 @@ class TaskIndexStoreTest {
     fun `archive unknown session fails`() {
         createDbs()
         assertFailsWith<IllegalStateException> { store.setArchived("sess_missing", sessDb, archive = true) }
+    }
+
+    @Test
+    fun `delete soft-deletes existing row keeping archived and title`() {
+        createDbs()
+        // 对齐客户端实库语义（2026-09-08）：删除归档会话只置 deleted=1，archived/title 不动
+        store.setArchived("sess_test-1", sessDb, archive = true)
+        store.setDeleted("sess_test-1", sessDb)
+        val row = taskRow("sess_test-1")!!
+        assertTrue("\"deleted\":1" in row, "删除应置 deleted=1: $row")
+        assertTrue("\"archived\":1" in row, "客户端删除不清 archived 位: $row")
+        assertTrue("\"title\":\"测试会话\"" in row, "删除不动 title: $row")
+        assertTrue(!store.listTasks()[0].let { it.archived && !it.deleted }, "listArchived 口径（archived&&!deleted）应滤除已删行")
+    }
+
+    @Test
+    fun `delete upserts missing row and clears legacy time_archived`() {
+        createDbs()
+        // 老版本插件归档的会话：tasks 无行 + time_archived 有值——删除必须双清，
+        // 否则 listArchivedSessions 双源合并的旧机制分支仍会命中（删除不生效）
+        node("-e", """
+            const {DatabaseSync} = require('node:sqlite');
+            const s = new DatabaseSync(process.env.S);
+            s.prepare('UPDATE session SET time_archived = 999 WHERE id = ?').run('sess_test-1');
+        """.trimIndent(), env = mapOf("S" to sessDb.toString()))
+
+        store.setDeleted("sess_test-1", sessDb)
+
+        val row = taskRow("sess_test-1")!!
+        assertTrue("\"deleted\":1" in row, "无行应补删除行: $row")
+        assertTrue("\"archived\":0" in row, "补删行 archived=0（旧机制位已清，归档态由 deleted 承载）: $row")
+        assertEquals("null", timeArchived("sess_test-1"), "删除应顺带清旧机制归档位 time_archived")
+    }
+
+    @Test
+    fun `autoArchive archives stale rows and backfills unindexed sessions`() {
+        createDbs()
+        // tasks 预置三行：过期 completed（应归档）/ pinned（豁免）/ 未过期（豁免）
+        node("-e", """
+            const {DatabaseSync} = require('node:sqlite');
+            const t = new DatabaseSync(process.env.T);
+            const ins = t.prepare(`INSERT INTO tasks (workspace_key, workspace_path, task_id, title, task_status, created_at, updated_at, pinned, meta_json)
+              VALUES ('G:/proj/demo', 'G:/proj/demo', ?, ?, 'completed', 0, ?, ?, '{}')`);
+            ins.run('sess_stale', '过期会话', 1000, 0);          // 过期 → 归档
+            ins.run('sess_pinned', '置顶会话', 1000, 1);          // pinned → 豁免
+            ins.run('sess_fresh', '新会话', Date.now() + 999999, 0); // 未过期 → 豁免
+            const s = new DatabaseSync(process.env.S);
+            // 基线行推到未来，避免混入补归档结果；再插入客户端未索引的插件会话（补行归档对象）
+            s.prepare('UPDATE session SET time_updated = ? WHERE id = ?').run(Date.now() + 999999, 'sess_test-1');
+            s.prepare('INSERT INTO session (id, path, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?)')
+              .run('sess_backfill', 'G:/proj/demo', '补行会话', 1000, 1000);
+        """.trimIndent(), env = mapOf("T" to tasksDb.toString(), "S" to sessDb.toString()))
+
+        val archived = store.autoArchiveStale(sessDb, "G:\\proj\\demo", 7)
+
+        // 双形态工作区匹配 + 两段合并：tasks 行 1 条 + 补行 1 条
+        assertEquals(listOf("sess_stale", "sess_backfill"), archived.map { it.id }, "应归档过期行与补行，豁免 pinned/未过期: $archived")
+        assertEquals(listOf("过期会话", "补行会话"), archived.map { it.title }, "条目应带标题")
+        assertTrue("\"archived\":1" in taskRow("sess_stale")!!, "过期 completed 行应置 archived=1")
+        assertTrue("\"archived\":0" in taskRow("sess_pinned")!!, "pinned 行豁免")
+        assertTrue("\"archived\":0" in taskRow("sess_fresh")!!, "未过期行豁免")
+        val backfill = taskRow("sess_backfill")!!
+        assertTrue("\"archived\":1" in backfill, "无行会话应补行归档: $backfill")
+        assertTrue("\"deleted\":0" in backfill, "补归档行非软删")
+    }
+
+    @Test
+    fun `autoArchive does not archive non-completed or recently active sessions`() {
+        createDbs()
+        node("-e", """
+            const {DatabaseSync} = require('node:sqlite');
+            const t = new DatabaseSync(process.env.T);
+            const ins = t.prepare(`INSERT INTO tasks (workspace_key, workspace_path, task_id, title, task_status, created_at, updated_at, pinned, meta_json)
+              VALUES ('G:/proj/demo', 'G:/proj/demo', ?, ?, ?, 0, ?, 0, '{}')`);
+            ins.run('sess_running', '进行中', 'running', 1000);      // 非 completed → 豁免
+            ins.run('sess_deleted', '已删', 'completed', 1000);       // 需单独置 deleted=1
+            t.prepare('UPDATE tasks SET deleted = 1 WHERE task_id = ?').run('sess_deleted');
+            // 基线行推到未来，避免混入补归档结果
+            const s = new DatabaseSync(process.env.S);
+            s.prepare('UPDATE session SET time_updated = ? WHERE id = ?').run(Date.now() + 999999, 'sess_test-1');
+        """.trimIndent(), env = mapOf("T" to tasksDb.toString(), "S" to sessDb.toString()))
+
+        val archived = store.autoArchiveStale(sessDb, "G:/proj/demo", 7)
+
+        assertTrue(archived.isEmpty(), "running/deleted 行都不应归档: $archived")
     }
 
     @Test

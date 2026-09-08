@@ -48,6 +48,7 @@ function setup(currentSessionId: string | null, onLocate: (sid: string) => Promi
     onBack: vi.fn(),
     onArchive: vi.fn(),
     onRestore: vi.fn(),
+    onDeleteArchived: vi.fn(),
     onRefresh: vi.fn(),
     onLoadArchived: vi.fn(),
   }

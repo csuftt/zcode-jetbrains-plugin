@@ -47,6 +47,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
@@ -863,6 +864,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "deleteSession" -> handleDeleteSession(msg)
                         "archiveSession" -> handleArchiveSession(msg)
                         "restoreSession" -> handleRestoreSession(msg)
+                        "deleteArchivedSession" -> handleDeleteArchivedSession(msg)
+                        "getAutoArchiveConfig" -> handleGetAutoArchiveConfig()
+                        "setAutoArchiveConfig" -> handleSetAutoArchiveConfig(msg)
+                        "getAutoArchiveRecords" -> handleGetAutoArchiveRecords()
+                        "runAutoArchiveNow" -> handleRunAutoArchiveNow()
                         "scheduledCreate" -> handleScheduledCreate(msg)
                         "scheduledCancel" -> handleScheduledOpSimple(msg, "cancel")
                         "scheduledReschedule" -> handleScheduledReschedule(msg)
@@ -1985,6 +1991,76 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject {
             put("op", "sessionRestored")
             put("sessionId", sessionId)
+        }
+    }
+
+    /** 删除归档会话（软删对齐 ZCode 客户端：tasks.deleted=1，数据保留，两端列表同步隐藏）*/
+    private fun handleDeleteArchivedSession(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val client = project.zCodeService().getClient()
+        try {
+            client.deleteArchivedSession(sessionId)
+            log.info("Archived session deleted: $sessionId")
+        } catch (e: Exception) {
+            log.warn("Archived session delete failed: ${e.message}")
+            return errorResponse("删除失败: ${e.message}")
+        }
+        // 软删后会话从两端列表消失：待发定时消息连带丢弃（对齐归档/删除惯例）；
+        // 订阅簿记移除（会话不可再达，残留条目无意义）
+        ZCodeScheduledMessageService.getInstance(project).dropForSession(sessionId)
+        subscribedSessions.remove(sessionId)
+        return buildJsonObject {
+            put("op", "sessionArchiveDeleted")
+            put("sessionId", sessionId)
+        }
+    }
+
+    // ============ 自动归档（配置与 ZCode 客户端共享，历史视图「自动归档」tab） ============
+
+    private fun autoArchiveService() = ZCodeAutoArchiveService.getInstance(project)
+
+    private fun handleGetAutoArchiveConfig(): JsonObject {
+        val cfg = ZCodeClientSettingStore.readAutoArchiveConfig()
+        return buildJsonObject {
+            put("op", "autoArchiveConfig")
+            put("enabled", cfg.enabled)
+            put("olderThanDays", cfg.olderThanDays)
+        }
+    }
+
+    private fun handleSetAutoArchiveConfig(msg: JsonObject): JsonObject {
+        val enabled = msg["enabled"]?.jsonPrimitive?.booleanOrNull
+            ?: return errorResponse("缺少 enabled")
+        val days = msg["olderThanDays"]?.jsonPrimitive?.intOrNull ?: 7
+        if (!ZCodeClientSettingStore.writeAutoArchiveConfig(enabled, days)) {
+            return errorResponse("写入共享配置失败（setting.json 被占用或只读）")
+        }
+        log.info("Auto archive config set: enabled=$enabled days=$days")
+        return buildJsonObject {
+            put("op", "autoArchiveConfigChanged")
+            put("enabled", enabled)
+            put("olderThanDays", days.coerceIn(1, 365))
+        }
+    }
+
+    private fun handleGetAutoArchiveRecords(): JsonObject = buildJsonObject {
+        put("op", "autoArchiveRecords")
+        put("records", ZCodeAutoArchiveService.recordsToJson(autoArchiveService().loadRecords()))
+    }
+
+    /**
+     * 手动触发一轮扫描（与定时轮共用开关：未启用直接 skipped，不动库——用户定案）。
+     * 同步执行（pooled thread），应答带全量记录省一往返。
+     */
+    private fun handleRunAutoArchiveNow(): JsonObject {
+        val enabled = ZCodeClientSettingStore.readAutoArchiveConfig().enabled
+        val record = if (enabled) autoArchiveService().runSweep("manual") else null
+        return buildJsonObject {
+            put("op", "autoArchiveRan")
+            put("count", record?.count ?: 0)
+            if (!enabled) put("skipped", "disabled")
+            put("records", handleGetAutoArchiveRecords()["records"] ?: JsonArray(emptyList()))
         }
     }
 

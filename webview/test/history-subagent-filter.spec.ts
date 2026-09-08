@@ -25,15 +25,15 @@ const SUB_SID = 'sess_subagent_agent_78d4b027-7ad8-4e52-bc6f-f9cc81559dab'
 const NORMAL_SID = 'sess_normal_1'
 const LOCAL_SID = 'sess_local_only'
 
-function makeSession(sessionId: string, title: string) {
+function makeSession(sessionId: string, title: string, updatedAt = 1700000000000) {
   return {
     sessionId,
     title,
     status: 'idle',
     mode: 'build',
     workspacePath: 'G:\\mock',
-    createdAt: 1700000000000,
-    updatedAt: 1700000000000,
+    createdAt: updatedAt,
+    updatedAt,
   }
 }
 
@@ -61,9 +61,11 @@ describe('历史列表子代理会话过滤', () => {
   })
 
   it('已混入本地列表的子代理会话不会经 staleLocal 补插复活', () => {
-    // 模拟被污染的本地列表：内存里残留子代理会话（补列响应曾把它带进来）
+    // 模拟被污染的本地列表：内存里残留子代理会话（补列响应曾把它带进来）。
+    // 本地条目用近时间戳——staleLocal 保留窗口收窄到"当前会话/5 分钟内活动"后，
+    // 乐观新建仍属该窗口（归档复活防的是超窗口旧条目，见 auto-archive-store.spec）
     useStore.setState({
-      sessions: [makeSession(SUB_SID, '子代理'), makeSession(LOCAL_SID, '本地乐观新建')],
+      sessions: [makeSession(SUB_SID, '子代理'), makeSession(LOCAL_SID, '本地乐观新建', Date.now())],
     })
     // 后续刷新的服务端快照只含正常会话：本地乐观新建应保留（staleLocal 机制），
     // 子代理条目不得借同一机制复活

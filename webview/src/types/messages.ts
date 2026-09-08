@@ -340,6 +340,16 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'archiveSession'; sessionId: string }
   /** 恢复归档会话（置 time_archived = NULL）*/
   | { op: 'restoreSession'; sessionId: string }
+  /** 删除归档会话（软删对齐 ZCode 客户端：tasks.deleted=1，数据保留可复活）*/
+  | { op: 'deleteArchivedSession'; sessionId: string }
+  /** 自动归档：读共享配置（~/.zcode/v2/setting.json，与 ZCode 客户端同源）*/
+  | { op: 'getAutoArchiveConfig' }
+  /** 自动归档：写共享配置（客户端下次读取同样生效）*/
+  | { op: 'setAutoArchiveConfig'; enabled: boolean; olderThanDays: number }
+  /** 自动归档：拉取归档记录（仅 >0 轮次，Kotlin PropertiesComponent 存储）*/
+  | { op: 'getAutoArchiveRecords' }
+  /** 自动归档：手动立即扫描一轮（不受开关限制）*/
+  | { op: 'runAutoArchiveNow' }
   /** 拉取已归档会话列表 */
   | { op: 'listArchivedSessions'; workspacePath?: string }
   /** reconcile=true：流式静默对账探测（看门狗只读快照，响应带 reconcile 标记） */
@@ -793,6 +803,18 @@ export interface EnvStatus {
   rdHost?: boolean
 }
 
+/** 自动归档单条会话引用（记录详情用）*/
+export interface AutoArchivedSessionRef { sessionId: string; title: string }
+
+/** 自动归档轮次记录（仅归档数>0；mode: auto=定时轮 / manual=手动触发）*/
+export interface AutoArchiveRecord {
+  ts: number
+  mode: 'auto' | 'manual'
+  days: number
+  count: number
+  sessions: AutoArchivedSessionRef[]
+}
+
 export type JavaResponse =
   | { op: 'listSessions'; sessions: SessionInfo[] }  | { op: 'createSession'; sessionId: string }
   | { op: 'tabSessionCleared' }
@@ -809,6 +831,11 @@ export type JavaResponse =
   | { op: 'sessionDeleted'; sessionId: string }
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }
+  | { op: 'sessionArchiveDeleted'; sessionId: string }
+  | { op: 'autoArchiveConfig'; enabled: boolean; olderThanDays: number }
+  | { op: 'autoArchiveConfigChanged'; enabled: boolean; olderThanDays: number }
+  | { op: 'autoArchiveRecords'; records: AutoArchiveRecord[] }
+  | { op: 'autoArchiveRan'; count: number; skipped?: 'disabled'; records: AutoArchiveRecord[] }
   | { op: 'archivedSessions'; sessions: SessionInfo[] }
   /** copyImage 回执：Java 系统剪贴板写入结果 */
   | { op: 'imageCopied'; ok: boolean; error?: string }

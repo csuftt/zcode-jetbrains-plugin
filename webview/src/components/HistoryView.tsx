@@ -1,17 +1,21 @@
 /**
- * 历史视图（cc-gui HistoryView 移植 + 归档/回收站）
+ * 历史视图（cc-gui HistoryView 移植 + 归档/回收站 + 自动归档）
  *
  * 结构：
- *   .history-tabs：会话 / 已归档 tab 切换（归档是可逆的"收起"，已归档 tab 仅支持还原）
+ *   .history-tabs：会话 / 已归档 / 自动归档 tab 切换（归档是可逆的"收起"，已归档 tab
+ *                 支持还原+软删；自动归档 tab 承载配置/手动扫描/归档记录面板）
  *   .history-header
  *     ├─ .history-header-main：左侧信息条「共 N 个会话」/「已选择 N 个会话」
- *     │                       右侧工具栏（多选 + 刷新；多选模式按 tab 提供 归档/恢复所选 + 退出）
+ *     │                       右侧工具栏（多选 + 刷新；多选模式按 tab 提供 归档/恢复/删除所选 + 退出）
  *     └─ .history-search-container：搜索框（非多选模式显示，300ms 防抖 + mark 高亮）
- *   .history-list：会话列表（多选模式显示 checkbox）
+ *   .history-list：会话列表（多选模式显示 checkbox）；自动归档 tab 渲染 AutoArchivePanel
  *
  * 操作语义：
  * - 会话 tab：日常操作=归档（可逆，SessionItem 内联二次确认）；多选=批量归档（modal 轻确认）
- * - 已归档 tab：仅还原（可逆，无确认）；点击已归档项不进入会话，恢复走专属还原按钮
+ * - 已归档 tab：还原（可逆，无确认）+ 删除（软删对齐 ZCode 客户端：tasks.deleted=1 数据保留，
+ *   两端列表同步隐藏；语义重于还原，走 modal danger 确认，条目级与批量共用）
+ * - 自动归档 tab：开关+保留天数与 ZCode 客户端共享配置；手动立即扫描；归档记录展开看详情
+ * - 点击已归档项不进入会话，操作走专属还原/删除按钮
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -19,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import type { SessionInfo } from '@/types/messages'
 import { SessionItem } from './SessionItem'
 import { ConfirmDialog } from './ConfirmDialog'
+import { AutoArchivePanel } from './AutoArchivePanel'
 import '../styles/history-view.less'
 
 interface Props {
@@ -40,13 +45,15 @@ interface Props {
   onArchive: (sessionId: string) => void
   /** 恢复（已归档 tab，置 time_archived=NULL）*/
   onRestore: (sessionId: string) => void
+  /** 删除（已归档 tab，软删对齐 ZCode 客户端：数据保留，两端列表同步隐藏）*/
+  onDeleteArchived: (sessionId: string) => void
   onRefresh: () => void
   /** 进入已归档 tab 时拉取列表 */
   onLoadArchived: () => void
 }
 
-/** 待确认的批量操作（归档/恢复共用 modal 确认）*/
-type ConfirmAction = { type: 'archive' | 'restore'; ids: string[] }
+/** 待确认的批量操作（归档/恢复/删除共用 modal 确认；删除为 danger 样式）*/
+type ConfirmAction = { type: 'archive' | 'restore' | 'delete'; ids: string[] }
 
 /** 标题高亮（cc-gui highlightText：<mark> 标黄匹配词）*/
 function Highlight({ text, query }: { text: string; query: string }) {
@@ -75,11 +82,12 @@ export function HistoryView({
   onBack,
   onArchive,
   onRestore,
+  onDeleteArchived,
   onRefresh,
   onLoadArchived,
 }: Props) {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<'active' | 'archived'>('active')
+  const [tab, setTab] = useState<'active' | 'archived' | 'auto'>('active')
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -125,8 +133,8 @@ export function HistoryView({
   const allVisibleSelected =
     filtered.length > 0 && filtered.every((s) => selectedIds.has(s.sessionId))
 
-  // 切 tab：清空多选 + 搜索（两套列表各自干净）
-  const switchTab = (next: 'active' | 'archived') => {
+  // 切 tab：清空多选 + 搜索（各 tab 各自干净）
+  const switchTab = (next: 'active' | 'archived' | 'auto') => {
     if (next === tab) return
     setTab(next)
     setSelectionMode(false)
@@ -204,12 +212,19 @@ export function HistoryView({
     setConfirmAction({ type: 'archive', ids: [...selectedIds] })
   const requestRestoreSelected = () =>
     setConfirmAction({ type: 'restore', ids: [...selectedIds] })
+  const requestDeleteSelected = () =>
+    setConfirmAction({ type: 'delete', ids: [...selectedIds] })
+  // 条目级删除：与批量共用 modal 确认（删除语义重，不用还原那套 3s 内联轻确认）
+  const requestDeleteArchived = (sessionId: string) =>
+    setConfirmAction({ type: 'delete', ids: [sessionId] })
 
   const execConfirmAction = () => {
     if (!confirmAction) return
     const { type, ids } = confirmAction
-    if (type === 'archive') ids.forEach(onArchive)
-    else ids.forEach(onRestore)
+    // forEach 回调收 (item, index, array) 三参，箭头收窄避免透传给下游（mock/转发场景会暴露）
+    if (type === 'archive') ids.forEach((id) => onArchive(id))
+    else if (type === 'restore') ids.forEach((id) => onRestore(id))
+    else ids.forEach((id) => onDeleteArchived(id))
     setConfirmAction(null)
     exitSelectionMode()
   }
@@ -226,6 +241,14 @@ export function HistoryView({
         message: t('history.archiveConfirm', { count: ids.length }),
         confirmText: t('history.archive'),
         danger: false,
+      }
+    }
+    if (type === 'delete') {
+      return {
+        title: t('history.confirmDeleteTitle'),
+        message: t('history.deleteConfirm', { count: ids.length }),
+        confirmText: t('history.delete'),
+        danger: true,
       }
     }
     return {
@@ -253,8 +276,17 @@ export function HistoryView({
           >
             {t('history.tabArchived')}
           </button>
+          <button
+            className={`history-tab ${tab === 'auto' ? 'history-tab--active' : ''}`}
+            onClick={() => switchTab('auto')}
+          >
+            {t('history.tabAutoArchive')}
+          </button>
         </div>
 
+        {/* 自动归档 tab：不显示列表工具栏/搜索（面板自成一体，挂在 header 外的主体区） */}
+        {tab !== 'auto' && (
+          <>
         <div className="history-header-main">
           {selectionMode ? (
             <div className="history-selection-summary">{t('history.selectedSessions', { count: selectedIds.size })}</div>
@@ -290,15 +322,26 @@ export function HistoryView({
                     <span>{t('history.archiveSelected')}</span>
                   </button>
                 ) : (
-                  <button
-                    className="history-toolbar-btn"
-                    onClick={requestRestoreSelected}
-                    disabled={selectedIds.size === 0}
-                    title={t('history.restoreSelected')}
-                  >
-                    <span className="codicon codicon-unarchive" />
-                    <span>{t('history.restoreSelected')}</span>
-                  </button>
+                  <>
+                    <button
+                      className="history-toolbar-btn"
+                      onClick={requestRestoreSelected}
+                      disabled={selectedIds.size === 0}
+                      title={t('history.restoreSelected')}
+                    >
+                      <span className="codicon codicon-unarchive" />
+                      <span>{t('history.restoreSelected')}</span>
+                    </button>
+                    <button
+                      className="history-toolbar-btn"
+                      onClick={requestDeleteSelected}
+                      disabled={selectedIds.size === 0}
+                      title={t('history.deleteSelected')}
+                    >
+                      <span className="codicon codicon-trash" />
+                      <span>{t('history.deleteSelected')}</span>
+                    </button>
+                  </>
                 )}
                 <button
                   className="history-toolbar-btn"
@@ -343,8 +386,11 @@ export function HistoryView({
             <span className="codicon codicon-search history-search-icon" />
           </div>
         )}
+          </>
+        )}
       </div>
 
+      {tab === 'auto' ? <AutoArchivePanel /> : (
       <div className="history-list">
         {tab === 'archived' && archivedLoading && archivedSessions.length === 0 ? (
           <div className="history-empty">{t('history.loading')}</div>
@@ -367,6 +413,7 @@ export function HistoryView({
                 variant={tab === 'archived' ? 'archived' : 'active'}
                 onArchive={onArchive}
                 onRestore={onRestore}
+                onDelete={tab === 'archived' ? requestDeleteArchived : undefined}
                 renderTitle={(title) => <Highlight text={title} query={debouncedQuery} />}
                 selectionMode={selectionMode}
                 selected={selectedIds.has(s.sessionId)}
@@ -376,8 +423,9 @@ export function HistoryView({
           </ul>
         )}
       </div>
+      )}
 
-      {/* 批量操作确认 modal（归档/恢复共用）*/}
+      {/* 批量操作确认 modal（归档/恢复/删除共用）*/}
       {confirmModalProps && (
         <ConfirmDialog
           title={confirmModalProps.title}

@@ -37,6 +37,18 @@ object ZCodeClientSettingStore {
         val askUserQuestionAutoResolutionEnabled: Boolean = true,
     )
 
+    /**
+     * 自动归档旧任务配置（与客户端「设置→任务」同源共享）
+     *
+     * 客户端 zod schema：taskAutoArchiveEnabled boolean optional（缺失=关）、
+     * taskAutoArchiveOlderThanDays int positive max(365) optional（缺失取 7，
+     * 见 asar readTaskAutoArchiveConfig 的 ??7 兜底）。
+     */
+    data class AutoArchiveConfig(
+        val enabled: Boolean = false,
+        val olderThanDays: Int = 7,
+    )
+
     fun settingPath(home: String = System.getProperty("user.home")): File =
         File(File(home, ".zcode/v2"), "setting.json")
 
@@ -50,21 +62,31 @@ object ZCodeClientSettingStore {
         )
     }
 
+    /** 读自动归档配置（客户端同默认：关 + 7 天） */
+    fun readAutoArchiveConfig(home: String = System.getProperty("user.home")): AutoArchiveConfig = synchronized(LOCK) {
+        val root = readRoot(home) ?: return AutoArchiveConfig()
+        AutoArchiveConfig(
+            enabled = root.booleanField("taskAutoArchiveEnabled") ?: false,
+            olderThanDays = root.intField("taskAutoArchiveOlderThanDays")?.coerceIn(1, 365) ?: 7,
+        )
+    }
+
+    /** 写自动归档两键（其余键原样保留）；days 钳到客户端 schema 界 1..365 */
+    fun writeAutoArchiveConfig(enabled: Boolean, olderThanDays: Int, home: String = System.getProperty("user.home")): Boolean =
+        writeFields(home, "taskAutoArchiveEnabled" to JsonPrimitive(enabled),
+            "taskAutoArchiveOlderThanDays" to JsonPrimitive(olderThanDays.coerceIn(1, 365)))
+
     /** 只改 memoryEnabled 一个字段，其余键原样保留；tmp + 原子 move 防写坏 */
     fun writeMemoryEnabled(enabled: Boolean, home: String = System.getProperty("user.home")): Boolean =
-        writeBooleanField("memoryEnabled", enabled, home)
+        writeFields(home, "memoryEnabled" to JsonPrimitive(enabled))
 
-    /** 单布尔字段写入（保留其余键；文件缺失写最小片段——客户端按 zod schema 读缺失键走默认值）*/
-    private fun writeBooleanField(key: String, value: Boolean, home: String): Boolean = synchronized(LOCK) {
+    /** 多字段写入（保留其余键；文件缺失写最小片段——客户端按 zod schema 读缺失键走默认值）*/
+    private fun writeFields(home: String, vararg fields: Pair<String, JsonPrimitive>): Boolean = synchronized(LOCK) {
         val file = settingPath(home)
         val root = readRoot(home)
-        val newRoot = if (root == null) {
-            buildJsonObject { put(key, value) }
-        } else {
-            buildJsonObject {
-                root.forEach { (k, v) -> if (k != key) put(k, v) }
-                put(key, value)
-            }
+        val newRoot = buildJsonObject {
+            if (root != null) root.forEach { (k, v) -> if (k !in fields.map { it.first }) put(k, v) }
+            fields.forEach { (k, v) -> put(k, v) }
         }
         try {
             file.parentFile?.mkdirs()
@@ -86,4 +108,7 @@ object ZCodeClientSettingStore {
 
     private fun JsonObject.booleanField(key: String): Boolean? =
         (this[key] as? JsonPrimitive)?.booleanOrNull
+
+    private fun JsonObject.intField(key: String): Int? =
+        (this[key] as? JsonPrimitive)?.content?.toIntOrNull()
 }

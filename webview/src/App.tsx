@@ -77,6 +77,7 @@ export default function App() {
   const loadArchivedSessions = useStore((s) => s.loadArchivedSessions)
   const archiveSession = useStore((s) => s.archiveSession)
   const restoreSession = useStore((s) => s.restoreSession)
+  const deleteArchivedSession = useStore((s) => s.deleteArchivedSession)
   const locateSessionTab = useStore((s) => s.locateSessionTab)
   const openSessionNewTab = useStore((s) => s.openSessionNewTab)
   const setPendingSettingsSection = useStore((s) => s.setPendingSettingsSection)
@@ -324,6 +325,7 @@ export default function App() {
             onBack={() => setCurrentView('chat')}
             onArchive={archiveSession}
             onRestore={restoreSession}
+            onDeleteArchived={deleteArchivedSession}
             onRefresh={loadSessions}
             onLoadArchived={loadArchivedSessions}
           />

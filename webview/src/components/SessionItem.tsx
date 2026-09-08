@@ -12,7 +12,9 @@
  *   3s 未确认自动恢复），再点触发归档；归档可逆，可在「已归档」中还原
  * - 还原（archived 变体）：hover 显示 codicon-unarchive，点击进入"确认还原"（强调色，
  *   3s 未确认自动恢复），再点触发恢复；恢复可逆
- * - 点击 archived 变体项不进入会话（HistoryView 拦截），恢复走专属还原按钮
+ * - 删除（archived 变体）：hover 显示 codicon-trash，点击直接回调 onDelete（确认由
+ *   HistoryView 的 danger modal 承担——删除语义重于还原，不走 3s 内联轻确认）
+ * - 点击 archived 变体项不进入会话（HistoryView 拦截），操作走专属还原/删除按钮
  */
 
 import { memo, useEffect, useRef, useState, Fragment, type ReactNode } from 'react'
@@ -29,6 +31,8 @@ interface Props {
   onArchive?: (sessionId: string) => void
   /** 恢复（archived 模式；可逆，无确认）*/
   onRestore?: (sessionId: string) => void
+  /** 删除（archived 模式；软删，确认由父级 danger modal 承担）*/
+  onDelete?: (sessionId: string) => void
   /** active=历史会话（默认）/ archived=已归档（回收站）*/
   variant?: 'active' | 'archived'
   /** 自定义标题渲染（搜索高亮用）*/
@@ -40,7 +44,7 @@ interface Props {
 }
 
 function SessionItemInner({
-  session, active, onSelect, onArchive, onRestore, renderTitle,
+  session, active, onSelect, onArchive, onRestore, onDelete, renderTitle,
   variant = 'active',
   selectionMode = false, selected = false, onToggle,
 }: Props) {
@@ -131,18 +135,33 @@ function SessionItemInner({
         {!selectionMode && (
           <div className="session-item__actions">
             {variant === 'archived' ? (
-              <button
-                type="button"
-                className={`session-item__action session-item__restore ${confirming ? 'session-item__restore--confirming' : ''}`}
-                onClick={handleRestore}
-                title={confirming ? t('history.confirmRestoreAgain') : t('history.restore')}
-              >
-                {confirming ? (
-                  <span className="codicon codicon-check" style={{ color: 'var(--accent-primary)' }} />
-                ) : (
-                  <span className="codicon codicon-unarchive" />
+              <>
+                <button
+                  type="button"
+                  className={`session-item__action session-item__restore ${confirming ? 'session-item__restore--confirming' : ''}`}
+                  onClick={handleRestore}
+                  title={confirming ? t('history.confirmRestoreAgain') : t('history.restore')}
+                >
+                  {confirming ? (
+                    <span className="codicon codicon-check" style={{ color: 'var(--accent-primary)' }} />
+                  ) : (
+                    <span className="codicon codicon-unarchive" />
+                  )}
+                </button>
+                {onDelete && (
+                  <button
+                    type="button"
+                    className="session-item__action session-item__delete"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDelete(session.sessionId)
+                    }}
+                    title={t('history.delete')}
+                  >
+                    <span className="codicon codicon-trash" />
+                  </button>
                 )}
-              </button>
+              </>
             ) : (
               <button
                 type="button"

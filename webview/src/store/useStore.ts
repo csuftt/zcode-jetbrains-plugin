@@ -16,7 +16,7 @@ import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, GoalState } from '@/types/messages'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, GoalState, AutoArchiveRecord } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import i18n from '@/i18n/config'
@@ -645,6 +645,28 @@ interface StoreState {
   archiveSession: (sessionId: string) => void
   /** 恢复归档会话（从回收站移回历史列表）*/
   restoreSession: (sessionId: string) => void
+  /** 删除归档会话（软删对齐 ZCode 客户端：数据保留，两端列表同步隐藏）*/
+  deleteArchivedSession: (sessionId: string) => void
+  /** ============ 自动归档（历史视图「自动归档」tab） ============ */
+  /** 共享配置是否已水合（进 tab 时拉取）*/
+  autoArchiveConfigLoaded: boolean
+  /** 开关与保留天数（与 ZCode 客户端共享 ~/.zcode/v2/setting.json）*/
+  autoArchiveEnabled: boolean
+  autoArchiveDays: number
+  /** 归档记录（仅 >0 轮次，新→旧）*/
+  autoArchiveRecords: AutoArchiveRecord[]
+  /** 手动立即扫描在途 */
+  autoArchiveRunning: boolean
+  /** 最近一轮手动扫描结果（null=未跑过；0=无符合条件）*/
+  autoArchiveLastRunCount: number | null
+  /** 最近一轮手动扫描被跳过（开关未启用——扫描不生效）*/
+  autoArchiveLastRunSkipped: boolean
+  /** 进自动归档 tab 拉取配置+记录 */
+  loadAutoArchiveData: () => void
+  /** 写共享配置（乐观更新，ack 校正）*/
+  setAutoArchiveConfig: (enabled: boolean, olderThanDays: number) => void
+  /** 手动立即扫描一轮 */
+  runAutoArchiveNow: () => void
   /**
    * 历史列表打开会话前的定位查询：resolve true = Java 已激活该会话的宿主标签（跨标签跳转完成）；
    * false = 没有任何标签打开过它（调用方决定覆盖当前标签页还是新开）
@@ -874,6 +896,13 @@ export const useStore = create<StoreState>((set, get) => ({
   pendingGoalCreation: null,
   archivedSessions: [],
   archivedLoading: false,
+  autoArchiveConfigLoaded: false,
+  autoArchiveEnabled: false,
+  autoArchiveDays: 7,
+  autoArchiveRecords: [],
+  autoArchiveRunning: false,
+  autoArchiveLastRunCount: null,
+  autoArchiveLastRunSkipped: false,
 
   messages: [],
   loadingMessages: false,
@@ -1473,6 +1502,28 @@ export const useStore = create<StoreState>((set, get) => ({
 
   restoreSession: (sessionId) => {
     sendToJava({ op: 'restoreSession', sessionId })
+  },
+
+  deleteArchivedSession: (sessionId) => {
+    sendToJava({ op: 'deleteArchivedSession', sessionId })
+  },
+
+  loadAutoArchiveData: () => {
+    sendToJava({ op: 'getAutoArchiveConfig' })
+    sendToJava({ op: 'getAutoArchiveRecords' })
+  },
+
+  setAutoArchiveConfig: (enabled, olderThanDays) => {
+    // 乐观更新（写共享 setting.json 由 Kotlin 落盘，ack 校正）
+    set({ autoArchiveEnabled: enabled, autoArchiveDays: olderThanDays })
+    sendToJava({ op: 'setAutoArchiveConfig', enabled, olderThanDays })
+  },
+
+  runAutoArchiveNow: () => {
+    // 开关未启用不发起扫描（面板按钮同步禁用；Kotlin 侧还有终门禁言）
+    if (get().autoArchiveRunning || !get().autoArchiveEnabled) return
+    set({ autoArchiveRunning: true, autoArchiveLastRunSkipped: false, autoArchiveLastRunCount: null })
+    sendToJava({ op: 'runAutoArchiveNow' })
   },
 
   locateSessionTab: (sessionId) =>
@@ -2502,11 +2553,22 @@ export function handleResponse(
       })
       // 并发时序防御：listSessions 响应是"请求发出时刻"的服务端快照，可能早于本标签的
       // 乐观创建（init/早前发出的慢响应晚于 createSession 响应到达）——若直接全量替换，
-      // 刚插入的新会话会被旧快照抹掉，header/历史列表退回会话 id 前缀。本地已有但快照
-      // 缺失的会话保留（服务端权威数据由后续刷新校正；已删会话已被 sessionDeleted 过滤，
-      // 不会在这里复活）
+      // 刚插入的新会话会被旧快照抹掉，header/历史列表退回会话 id 前缀。
+      // 但保留必须限定在"乐观新建的几秒窗口"内：本地任意旧条目无限补插会把服务端刻意
+      // 隐藏的会话复活（2026-09-08 实踩：自动归档 157 条后刷新，归档会话经 staleLocal
+      // 全量复活，会话列表数字不减）。保留判据二选一：
+      // - 本标签当前打开的会话（服务端快照缺它必是时序问题，不能从 header 抹掉）
+      // - 最近 5 分钟内有活动（乐观新建/刚跑过回合的时序窗口足够覆盖；更久的缺失条目
+      //   按服务端权威处理——归档/客户端删除/子会话泄漏过滤都靠这个口径生效）
       const serverIds = new Set(merged.map((s) => s.sessionId))
-      const staleLocal = get().sessions.filter((s) => !serverIds.has(s.sessionId) && !s.sessionId.startsWith('sess_subagent'))
+      const currentId = get().currentSessionId
+      const RECENT_WINDOW_MS = 5 * 60_000
+      const staleLocal = get().sessions.filter(
+        (s) =>
+          !serverIds.has(s.sessionId) &&
+          !s.sessionId.startsWith('sess_subagent') &&
+          (s.sessionId === currentId || Date.now() - (s.updatedAt ?? 0) < RECENT_WINDOW_MS),
+      )
       if (staleLocal.length) merged.push(...staleLocal)
       // 时间倒序统一收口：服务端快照整体有序，但本地的补插项（staleLocal 追加在尾、
       // 乐观新建插在头）会破坏全局顺序 → 按更新时间倒序重排（稳定排序，同时间戳保持原序）
@@ -2784,6 +2846,43 @@ export function handleResponse(
       // 恢复：从已归档列表移除，刷新历史列表让会话重新出现
       set({ archivedSessions: get().archivedSessions.filter((x) => x.sessionId !== msg.sessionId) })
       get().loadSessions()
+      break
+    }
+
+    case 'sessionArchiveDeleted': {
+      // 删除归档会话（软删）：从已归档列表移除即可，会话不回正常列表
+      set({ archivedSessions: get().archivedSessions.filter((x) => x.sessionId !== msg.sessionId) })
+      break
+    }
+
+    case 'autoArchiveConfig': {
+      // 共享配置水合（进自动归档 tab 拉取；Kotlin 读 ~/.zcode/v2/setting.json）
+      set({ autoArchiveConfigLoaded: true, autoArchiveEnabled: msg.enabled, autoArchiveDays: msg.olderThanDays })
+      break
+    }
+
+    case 'autoArchiveConfigChanged': {
+      // 写入 ack 校正（乐观更新的落地确认）
+      set({ autoArchiveEnabled: msg.enabled, autoArchiveDays: msg.olderThanDays })
+      break
+    }
+
+    case 'autoArchiveRecords': {
+      set({ autoArchiveRecords: msg.records })
+      break
+    }
+
+    case 'autoArchiveRan': {
+      // 手动扫描完成：应答带全量记录；归档会话从正常列表消失 → 静默刷新列表。
+      // skipped=disabled（Kotlin 终门禁言：开关未启用扫描没跑）只回传记录，不刷列表
+      const skipped = msg.skipped === 'disabled'
+      set({
+        autoArchiveRecords: msg.records,
+        autoArchiveRunning: false,
+        autoArchiveLastRunCount: skipped ? null : msg.count,
+        autoArchiveLastRunSkipped: skipped,
+      })
+      if (!skipped) get().loadSessions()
       break
     }
 

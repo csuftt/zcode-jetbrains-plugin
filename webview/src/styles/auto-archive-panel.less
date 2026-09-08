@@ -1,0 +1,261 @@
+/* 自动归档面板（历史视图「自动归档」tab）——配置卡/手动触发/归档记录 */
+
+.auto-archive-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  // 作为 .history-view（flex 列）里 header 的兄弟节点：占满剩余空间并内部滚动，
+  // 不能用 height:100%（会被 header 顶出溢出）
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+  background: var(--bg-chat);
+
+  &__section {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--bg-secondary, transparent);
+  }
+
+  &__section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+
+    .codicon {
+      font-size: 14px;
+      color: var(--accent-primary);
+    }
+  }
+
+  /* 记录条数徽标（section-header 尾部） */
+  &__section-badge {
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 16px;
+    min-width: 16px;
+    padding: 0 5px;
+    text-align: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+    color: var(--accent-primary);
+  }
+
+  &__hint {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+
+    .codicon {
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    &--ok {
+      color: var(--success-color, #67c23a);
+    }
+
+    &--warn {
+      color: #e6a23c;
+    }
+  }
+
+  /* 保留天数行：常显（独立于开关），与开关卡片左缘对齐缩进 */
+  &__days {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 26px;
+  }
+
+  &__days-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  /* 天数选择器提字号（agent-select 默认 11px 在本页显小），触发钮与下拉项同步 */
+  &__days {
+    .selector-button {
+      font-size: 13px;
+      padding: 4px 10px;
+    }
+  }
+
+  &__days-dropdown {
+    left: 0;
+    right: auto;
+    min-width: 150px;
+
+    .selector-dropdown-item {
+      font-size: 13px;
+      padding: 6px 10px;
+    }
+  }
+
+  &__run-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border: 1px solid var(--accent-primary);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+    color: var(--accent-primary);
+    font-size: 12px;
+    cursor: pointer;
+    align-self: flex-start;
+    transition: all 0.15s;
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--accent-primary) 22%, transparent);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      border-color: var(--border-color);
+      background: transparent;
+      color: var(--text-tertiary);
+    }
+
+    .codicon {
+      font-size: 13px;
+    }
+
+    .spin {
+      animation: auto-archive-spin 1s linear infinite;
+    }
+  }
+
+  &__empty {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: 12px 0;
+  }
+
+  &__records {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__record-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    text-align: left;
+
+    &:hover {
+      background: var(--bg-hover);
+    }
+
+    .codicon {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+    }
+  }
+
+  &__record-ts {
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  &__record-mode {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+    color: var(--accent-primary);
+    flex-shrink: 0;
+
+    &--manual {
+      background: color-mix(in srgb, #e6a23c 16%, transparent);
+      color: #e6a23c;
+    }
+  }
+
+  /* 本轮使用的保留时长（比 mode 更弱一档的信息） */
+  &__record-days {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+
+  &__record-count {
+    margin-left: auto;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  /* 展开详情：限高滚动（单轮可归档上百条，不封顶会把面板撑爆） */
+  &__record-sessions {
+    list-style: none;
+    margin: 2px 0 6px 22px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary, transparent);
+    max-height: 240px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  &__record-session {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    min-width: 0;
+
+    .codicon {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+    }
+
+    &--more {
+      color: var(--text-tertiary);
+      font-size: 11px;
+      justify-content: center;
+    }
+  }
+
+  &__record-session-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@keyframes auto-archive-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

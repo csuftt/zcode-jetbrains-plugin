@@ -14,7 +14,7 @@
  *   走 mock 响应，方便纯前端调试。
  */
 
-import type { JavaRequest, JavaResponse, StreamEvent, EnvStatus, ZCodeMessage } from '@/types/messages'
+import type { JavaRequest, JavaResponse, StreamEvent, EnvStatus, ZCodeMessage, AutoArchiveRecord } from '@/types/messages'
 
 /** 仓库地址（「打开仓库」展示/复制/mock 打开共用；生产 openExternal 由 Java 侧
  *  硬编码常量权威决定，不由前端传参——零注入面，改地址须两侧同步）*/
@@ -304,9 +304,29 @@ const mockSessions = [
   },
 ]
 
-// 已归档会话 mock（回收站视图验收用）
-const mockArchivedSessions = [
+// 自动归档记录 mock（自动归档 tab 验收用；真实数据源为 Kotlin PropertiesComponent）
+const mockArchiveRecords: AutoArchiveRecord[] = [
   {
+    ts: Date.now() - 2 * 3600_000,
+    mode: 'manual',
+    days: 7,
+    count: 2,
+    sessions: [
+      { sessionId: 'sess_mock_aa_1', title: '（mock·自动归档）登录态持久化调研' },
+      { sessionId: 'sess_mock_aa_2', title: '（mock·自动归档）构建脚本提速' },
+    ],
+  },
+  {
+    ts: Date.now() - 26 * 3600_000,
+    mode: 'auto',
+    days: 7,
+    count: 1,
+    sessions: [{ sessionId: 'sess_mock_aa_3', title: '（mock·自动归档）旧版 CLI 兼容垫片清理' }],
+  },
+]
+
+// 已归档会话 mock（回收站视图验收用）
+const mockArchivedSessions = [  {
     sessionId: 'sess_mock_archived_1',
     title: '（mock·已归档）旧版本登录模块重构',
     status: 'idle',
@@ -879,6 +899,16 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       return { op: 'sessionArchived', sessionId: req.sessionId }
     case 'restoreSession':
       return { op: 'sessionRestored', sessionId: req.sessionId }
+    case 'deleteArchivedSession':
+      return { op: 'sessionArchiveDeleted', sessionId: req.sessionId }
+    case 'getAutoArchiveConfig':
+      return { op: 'autoArchiveConfig', enabled: true, olderThanDays: 7 }
+    case 'setAutoArchiveConfig':
+      return { op: 'autoArchiveConfigChanged', enabled: req.enabled, olderThanDays: req.olderThanDays }
+    case 'getAutoArchiveRecords':
+      return { op: 'autoArchiveRecords', records: mockArchiveRecords }
+    case 'runAutoArchiveNow':
+      return { op: 'autoArchiveRan', count: 2, records: mockArchiveRecords }
     case 'locateSession':
       // mock：固定无宿主标签，让「覆盖当前标签页 / 新标签页打开」弹窗在 dev 可验收
       return { op: 'sessionTabLocated', sessionId: req.sessionId, found: false }

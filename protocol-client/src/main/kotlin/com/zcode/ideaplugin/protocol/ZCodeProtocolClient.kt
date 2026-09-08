@@ -1827,6 +1827,20 @@ class ZCodeProtocolClient private constructor(
     fun restoreSession(sessionId: String) = taskIndex.setArchived(sessionId, cliDbPath, archive = false)
 
     /**
+     * 删除会话（软删，对齐 ZCode 客户端删除语义）：tasks.deleted=1，db.sqlite 数据全保留，
+     * 两端列表同步隐藏（客户端 queryTaskList 与本插件列表均过滤 deleted）。与硬删
+     * [closeSession]（递归删 db 行，正常列表在用）语义不同，归档页删除走本方法。
+     */
+    fun deleteArchivedSession(sessionId: String) = taskIndex.setDeleted(sessionId, cliDbPath)
+
+    /**
+     * 自动归档陈旧任务（对齐 ZCode 客户端「自动归档旧任务」）：对本工作区执行一轮
+     * 客户端同款判据扫描（详见 [TaskIndexStore.autoArchiveStale]），返回归档条目。
+     */
+    fun autoArchiveStaleSessions(workspacePath: String, olderThanDays: Int): List<TaskIndexStore.ArchiveRef> =
+        taskIndex.autoArchiveStale(cliDbPath, workspacePath, olderThanDays)
+
+    /**
      * 列出已归档会话：双源合并（兼容既有用户的老机制归档）
      *
      * - 新机制：tasks-index archived=1（ZCode 客户端归档/自动归档 + 新版插件归档），
@@ -1842,8 +1856,15 @@ class ZCodeProtocolClient private constructor(
         // 冷启动 workspacePath 空串直落全库）。空路径直接返回空，宁可空显示不跨项目污染
         if (workspacePath.isNullOrBlank()) return emptyList()
         val all = listSessions(workspacePath, includeArchived = true, limit = limit, timeoutMs = timeoutMs)
-        val archivedById = taskIndex.listTasks().filter { it.archived }.associateBy { it.taskId }
+        // deleted 必须排除：客户端删除归档会话只置 tasks.deleted=1（archived 位保持 1，
+        // 2026-09-08 实库实证），不过滤则客户端删掉的会话在本列表阴魂不散。
+        // deletedIds 兜底覆盖"软删但 time_archived 意外残留"的行（tasks-index 是客户端
+        // 私有库无兼容承诺，删除语义必须严格执行，不适用"宁多显示"原则）
+        val taskRows = taskIndex.listTasks()
+        val archivedById = taskRows.filter { it.archived && !it.deleted }.associateBy { it.taskId }
+        val deletedIds = taskRows.asSequence().filter { it.deleted }.map { it.taskId }.toSet()
         return all.mapNotNull { s ->
+            if (s.sessionId in deletedIds) return@mapNotNull null
             val t = archivedById[s.sessionId]
             when {
                 t != null -> s.copy(archivedAt = t.updatedAt)   // 新机制（tasks-index）
