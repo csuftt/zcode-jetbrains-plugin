@@ -132,6 +132,14 @@ cd webview && npm install && npm run build && npm run build:single && cd ..
 
 生产模式下插件会用内置 HttpServer（127.0.0.1 随机端口）serve 多文件产物——webview 拥有真实 origin 与 sourcemap，DevTools 中可直接看 TS/TSX 源码断点；server 启动失败时自动降级 singlefile 单文件加载。
 
+## 远程开发（JetBrains Gateway / WSL）
+
+支持 JetBrains Gateway 远程开发（SSH 远程主机 / WSL2），插件只装在**后端** IDE：
+
+- 在 JetBrains Client 的 Settings → Plugins 中对 ZC GUI 选「在后端安装」，或从磁盘安装时选择后端；**前端（Client 侧）不要装副本**——双端同时安装会使面板落到前端实例，文件补全与发送功能失效（须卸载前端副本、仅保留后端安装才能恢复），参见 [issue #6](https://github.com/csuftt/zcode-jetbrains-plugin/issues/6)。
+- 远程机需要具备运行条件：Node.js ≥ 18、ZCode CLI（按标准路径安装会被自动发现，如 `/opt/ZCode/app/resources/glm/zcode.cjs`；也可在插件设置 → 基础设置 → 环境中手动指定路径）与登录凭证（`~/.zcode/v2/`）。
+- 已知限制：AI 浏览器工具（browser-use）依赖的 CEF 调试通道跑在前端本机，远程开发下不可用；插件已做静默降级，不再显示误报横幅。
+
 ## 工作原理
 
 插件以子进程方式启动 ZCode 的 app-server（`node zcode.cjs app-server`），通过 stdin/stdout 上的 JSON-RPC 驱动会话；事件流按会话分发、节流批量推入 JCEF，前端 reducer 增量归约为消息树与任务 / 子代理 / 文件改动等派生状态。插件同时充当宿主，实现 app-server 下行的 browser-use 宿主协议（`interaction/browserList` / `browserExecute` 反向请求），把 AI 的浏览器工具落到内嵌 JCEF 浏览器上执行。

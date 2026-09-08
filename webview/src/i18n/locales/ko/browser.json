@@ -5,6 +5,7 @@
     "switchDesc": "공식 Browser Use 플러그인을 활성화하여 새 세션이 내장 브라우저로 웹 페이지에 접근·조작할 수 있게 합니다",
     "stateOn": "켜짐",
     "stateOff": "꺼짐",
+    "rdUnavailable": "원격 개발 모드에서는 사용할 수 없습니다: 브라우저 도구가 의존하는 CEF 디버그 채널은 프런트엔드 로컬 머신에서 실행됩니다",
     "notInstalledShort": "미설치",
     "readonlyHint": "ZCode 클라이언트와 설정을 공유합니다. 변경은 ZCode 클라이언트 설정에서 하세요(새 세션에 적용)"
   },

@@ -783,6 +783,8 @@ export interface EnvStatus {
   /** browser-use 宿主健康（非阻断建议项；null = 未探测/未初始化，旧包兼容）*/
   browserHost?: EnvBrowserHostStatus
   allOk: boolean
+  /** RD 后端 host（远程开发模式）：浏览器控制设置卡据此提示 browser-use 不可用（旧包兼容，缺省视为 false）*/
+  rdHost?: boolean
 }
 
 export type JavaResponse =

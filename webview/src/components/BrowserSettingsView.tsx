@@ -41,7 +41,7 @@ function siteTags(t: TFunction, s: BrowserOverviewSite): string[] {
 }
 
 /** 浏览器控制只读状态卡（状态与 ZCode 客户端共用，修改在客户端进行）*/
-function ControlStatusCard({ enabled, installed }: { enabled: boolean; installed: boolean }) {
+function ControlStatusCard({ enabled, installed, rdHost }: { enabled: boolean; installed: boolean; rdHost: boolean }) {
   const { t } = useTranslation()
   return (
     <div className={cx('browser-settings__readonly', enabled && 'on')}>
@@ -56,6 +56,12 @@ function ControlStatusCard({ enabled, installed }: { enabled: boolean; installed
           </span>
         </div>
         <div className="browser-settings__action-desc">{t('browser.control.switchDesc')}</div>
+        {rdHost && (
+          <div className="browser-settings__action-desc browser-settings__rd-note">
+            <span className="codicon codicon-remote" />
+            <span>{t('browser.control.rdUnavailable')}</span>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -139,6 +145,7 @@ export function BrowserSettingsView() {
   const error = useStore((s) => s.browserError)
   const cleared = useStore((s) => s.browserCleared)
   const overview = useStore((s) => s.browserOverview)
+  const rdHost = useStore((s) => s.envStatus?.rdHost === true)
   const loadBrowserConfig = useStore((s) => s.loadBrowserConfig)
   const clearBrowserData = useStore((s) => s.clearBrowserData)
   const loadBrowserOverview = useStore((s) => s.loadBrowserOverview)
@@ -176,6 +183,7 @@ export function BrowserSettingsView() {
           <ControlStatusCard
             enabled={config.browserControlEnabled}
             installed={config.pluginInstalled}
+            rdHost={rdHost}
           />
         ) : (
           <div className="browser-settings__readonly">{t('browser.loading')}</div>

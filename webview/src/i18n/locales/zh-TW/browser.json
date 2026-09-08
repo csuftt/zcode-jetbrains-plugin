@@ -5,6 +5,7 @@
     "switchDesc": "啟用 Browser Use 官方外掛，讓新會話可以透過內建瀏覽器存取和操作網頁",
     "stateOn": "已啟用",
     "stateOff": "已停用",
+    "rdUnavailable": "遠端開發模式下不可用：瀏覽器工具依賴的 CEF 除錯通道執行在前端本機",
     "notInstalledShort": "未安裝",
     "readonlyHint": "與 ZCode 客戶端共用設定，如需修改請在 ZCode 客戶端的設定中操作（新會話生效）"
   },

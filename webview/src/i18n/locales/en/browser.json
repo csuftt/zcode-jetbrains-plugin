@@ -5,6 +5,7 @@
     "switchDesc": "Enable the official Browser Use plugin so new sessions can visit and operate web pages via the embedded browser",
     "stateOn": "Enabled",
     "stateOff": "Disabled",
+    "rdUnavailable": "Unavailable in remote development: the CEF debug channel used by browser tools runs on the local frontend machine",
     "notInstalledShort": "Not installed",
     "readonlyHint": "Shared with the ZCode client. To change it, use the settings in the ZCode client (applies to new sessions)"
   },

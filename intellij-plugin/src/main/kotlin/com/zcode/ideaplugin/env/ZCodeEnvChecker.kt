@@ -214,7 +214,9 @@ object ZCodeEnvChecker {
         // 探针异常同样按未探测处理（check 不能因宿主探测炸掉）
         val resolved = if (status.allOk) {
             status.copy(browserHost = try {
-                browserHostProbe?.invoke()
+                // RD 下不探测：CEF 跑在前端本机（JetBrains Client），后端探测 CDP
+                // 端口架构性不可达，横幅只会永远误报（issue #6 附带发现③）
+                if (RdEnvironment.isRemoteDevHost()) null else browserHostProbe?.invoke()
             } catch (e: Exception) {
                 null
             })
@@ -600,5 +602,7 @@ object ZCodeEnvChecker {
             })
         }
         put("allOk", s.allOk)
+        // RD 后端 host 标志：前端据此在浏览器控制设置卡提示 browser-use 远程不可用
+        put("rdHost", RdEnvironment.isRemoteDevHost())
     }
 }

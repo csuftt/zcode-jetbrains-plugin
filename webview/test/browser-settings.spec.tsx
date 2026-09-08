@@ -140,4 +140,19 @@ describe('浏览器设置页', () => {
     })
     fireEvent.click(document.querySelector('.browser-overview__close')!)
   })
+
+  it('RD 后端 host 下浏览器控制卡显示远程不可用提示，本地环境不显示', () => {
+    setConfig({ browserControlEnabled: true, pluginInstalled: true })
+    // 本地环境（envStatus 无 rdHost）：不出现提示行
+    render(<BrowserSettingsView />)
+    expect(document.querySelector('.browser-settings__rd-note')).toBeFalsy()
+    cleanup()
+
+    // RD 后端（rdHost=true）：提示行出现
+    useStore.setState({ envStatus: { rdHost: true } as never })
+    render(<BrowserSettingsView />)
+    const note = document.querySelector('.browser-settings__rd-note')
+    expect(note).toBeTruthy()
+    expect(note!.textContent).toContain('远程开发模式下不可用')
+  })
 })

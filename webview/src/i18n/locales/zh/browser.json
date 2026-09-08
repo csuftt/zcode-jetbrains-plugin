@@ -5,6 +5,7 @@
     "switchDesc": "启用 Browser Use 官方插件，让新会话可以通过内置浏览器访问和操作网页",
     "stateOn": "已启用",
     "stateOff": "已禁用",
+    "rdUnavailable": "远程开发模式下不可用：浏览器工具依赖的 CEF 调试通道运行在前端本机",
     "notInstalledShort": "未安装",
     "readonlyHint": "与 ZCode 客户端共用配置，如需修改请在 ZCode 客户端的设置中操作（新会话生效）"
   },

@@ -107,6 +107,21 @@
     line-height: 1.5;
   }
 
+  /* RD 后端 host 提示行（browser-use 远程开发下不可用）*/
+  &__rd-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: var(--fs-hint);
+    color: var(--status-warning);
+
+    .codicon {
+      font-size: var(--fs-hint);
+      flex-shrink: 0;
+    }
+  }
+
   /* 按钮组（查看 + 清除并排）*/
   &__action-btns {
     display: inline-flex;
