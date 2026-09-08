@@ -971,3 +971,40 @@
     color: var(--text-muted);
   }
 }
+
+/* ============ AskUserQuestion 回看（已选答案摘要行，点击开回看弹窗） ============ */
+
+.tool-card__askuser-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 30px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.tool-card__askuser-check {
+  color: var(--vscode-testing-iconPassed, #73c991);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tool-card__askuser-label {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.tool-card__askuser-answer {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

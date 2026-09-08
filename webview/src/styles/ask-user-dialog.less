@@ -176,3 +176,96 @@
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
 }
+
+/* ============ 回看弹窗（AskUserReviewDialog，只读） ============ */
+
+/* 头部关闭按钮：实时弹窗无此元素（提交/取消即关），回看需显式出口 */
+.ask-user-dialog__close {
+  margin-left: auto;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+}
+
+/* 回看：选中选项 ✓ 与答案并排（✓ 居左，label/描述纵向堆叠其右；未选中无图标） */
+.ask-user-dialog--review .ask-user-dialog__option.active {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ask-user-dialog__opt-check {
+  font-size: 13px;
+  color: var(--accent-primary);
+  flex-shrink: 0;
+  margin-top: 2px; /* 与 label 首行视觉对齐 */
+}
+
+/* label/描述纵向容器（✓ 并排时保持两行结构） */
+.ask-user-dialog__opt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 只读选项：无 hover 交互语义（cursor 继承 dialog 默认，不伪装可点） */
+.ask-user-dialog--review .ask-user-dialog__option {
+  cursor: default;
+
+  &:hover {
+    border-color: var(--border-primary);
+    background: var(--bg-primary);
+  }
+
+  &.active:hover {
+    border-color: var(--accent-primary);
+    background: rgba(0, 127, 212, 0.1);
+  }
+}
+
+/* 未回答标注 */
+.ask-user-dialog__notanswered {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* 拒绝/异常回执兜底块 */
+.ask-user-dialog__receipt {
+  margin-top: 4px;
+
+  &-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+
+  &-text {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+}

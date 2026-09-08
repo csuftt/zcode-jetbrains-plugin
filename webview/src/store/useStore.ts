@@ -577,6 +577,15 @@ interface StoreState {
   // AskUserQuestion 弹窗（deadlineMs = Java 侧应答超时时刻，弹窗倒计时用；旧链路可缺省）
   askUser: { requestId: string; toolName: string; questions: import('@/types/messages').AskUserQuestion[]; deadlineMs?: number } | null
 
+  // AskUserQuestion 回看弹窗（消息流工具卡点击打开，只读回看问题/选项/已选答案；
+  // 数据为打开瞬间从工具 part 提取的快照，recognized=false 时 raw 为原文回执兜底）
+  askUserReview: {
+    questions: import('@/types/messages').AskUserQuestion[]
+    answers: Record<string, string>
+    recognized: boolean
+    raw: string
+  } | null
+
   // ExitPlanMode 计划审批弹窗（服务端 interaction/requestUserInput，params = {input:{plan}}）
   exitPlanApproval: { requestId: string; plan: string; deadlineMs?: number } | null
 
@@ -751,6 +760,10 @@ interface StoreState {
   openMarkdownPreview: (p: { title: string; meta?: string; markdown: string }) => void
   /** 关闭通用 Markdown 预览弹窗 */
   closeMarkdownPreview: () => void
+  /** 打开 AskUserQuestion 回看弹窗（工具卡点击，只读快照）*/
+  openAskUserReview: (r: { questions: import('@/types/messages').AskUserQuestion[]; answers: Record<string, string>; recognized: boolean; raw: string }) => void
+  /** 关闭 AskUserQuestion 回看弹窗 */
+  closeAskUserReview: () => void
   /** 打开版本更新弹窗（What's New；已读标记写回由 App 关闭回调负责）*/
   openChangelog: () => void
   /** 关闭版本更新弹窗 */
@@ -843,6 +856,7 @@ export const useStore = create<StoreState>((set, get) => ({
   subagentDetail: null,
   subagentReport: null,
   markdownPreview: null,
+  askUserReview: null,
   changelogOpen: false,
   childMessages: {},
   childMessagesLoading: false,
@@ -1084,6 +1098,7 @@ export const useStore = create<StoreState>((set, get) => ({
       thoughtLevel: null, // 清空旧会话设置，等 getSettings 回来更新（currentMode 由 messages 推断兜底）
       subagentReport: null,
       markdownPreview: null,
+      askUserReview: null,
       // 模型切换在途标记与推迟的级别补发绑定旧会话流程，切会话作废
       modelSwitchInFlightAt: null,
       pendingThoughtLevel: null,
@@ -1401,6 +1416,7 @@ export const useStore = create<StoreState>((set, get) => ({
       currentMode: null,
       subagentReport: null,
       markdownPreview: null,
+      askUserReview: null,
       askUser: null, // 旧会话遗留的提问/审批弹窗随会话切换关闭
       exitPlanApproval: null,
       permissionRequest: null,
@@ -2050,6 +2066,8 @@ export const useStore = create<StoreState>((set, get) => ({
   closeSubagentReport: () => set({ subagentReport: null }),
   openMarkdownPreview: (p) => set({ markdownPreview: p, subagentReport: null }),
   closeMarkdownPreview: () => set({ markdownPreview: null }),
+  openAskUserReview: (r) => set({ askUserReview: r }),
+  closeAskUserReview: () => set({ askUserReview: null }),
 
   openChangelog: () => set({ changelogOpen: true }),
   closeChangelog: () => set({ changelogOpen: false }),
@@ -2510,6 +2528,7 @@ export function handleResponse(
           pendingThoughtLevel: null,
           subagentReport: null,
           markdownPreview: null,
+          askUserReview: null,
           // 新会话乐观插入列表（空标题占位）：listSessions 异步返回前 header/历史列表
           // 就能找到该会话——否则乐观标题（sendMessage 的 map）匹配不到，标题要等
           // 列表刷新才显示（期间 header 是会话 id 前缀）。服务端权威数据由下方
@@ -2972,6 +2991,7 @@ export function handleResponse(
         currentMode: null,
         subagentReport: null,
         markdownPreview: null,
+        askUserReview: null,
       })
       // 刷新会话列表（新会话会出现在列表里）
       get().loadSessions()

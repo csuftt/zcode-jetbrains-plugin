@@ -97,5 +97,14 @@
     "statusPending": "未着手",
     "statusInProgress": "進行中",
     "statusCompleted": "完了"
+  },
+  "askUserReview": {
+    "title": "質問とあなたの回答",
+    "viewDetail": "クリックで質問と回答を確認",
+    "yourAnswer": "あなたの回答",
+    "notAnswered": "未回答",
+    "customAnswer": "カスタム回答",
+    "close": "閉じる",
+    "receipt": "システム応答"
   }
 }

@@ -97,5 +97,14 @@
     "statusPending": "待辦",
     "statusInProgress": "進行中",
     "statusCompleted": "已完成"
+  },
+  "askUserReview": {
+    "title": "問題與你的回答",
+    "viewDetail": "點擊查看問題與你的回答",
+    "yourAnswer": "你的回答",
+    "notAnswered": "未回答",
+    "customAnswer": "自訂答案",
+    "close": "關閉",
+    "receipt": "系統回執"
   }
 }

@@ -82,8 +82,7 @@
     "taskFailed": "子代理执行失败"
   },
   "viewPlan": "查阅计划详情",
-  "planTitle": "执行计划"
-,
+  "planTitle": "执行计划",
   "viewWebResult": "弹窗查看结果",
   "viewPage": "打开原网页",
   "webUrl": "网址",
@@ -98,6 +97,14 @@
     "statusPending": "待办",
     "statusInProgress": "进行中",
     "statusCompleted": "已完成"
+  },
+  "askUserReview": {
+    "title": "问题与你的回答",
+    "viewDetail": "点击查看问题与你的回答",
+    "yourAnswer": "你的回答",
+    "notAnswered": "未回答",
+    "customAnswer": "自定义答案",
+    "close": "关闭",
+    "receipt": "系统回执"
   }
 }
-

@@ -97,5 +97,14 @@
     "statusPending": "Pending",
     "statusInProgress": "In progress",
     "statusCompleted": "Completed"
+  },
+  "askUserReview": {
+    "title": "Questions & Your Answers",
+    "viewDetail": "Click to review questions and your answers",
+    "yourAnswer": "Your answer",
+    "notAnswered": "Not answered",
+    "customAnswer": "Custom answer",
+    "close": "Close",
+    "receipt": "System receipt"
   }
 }

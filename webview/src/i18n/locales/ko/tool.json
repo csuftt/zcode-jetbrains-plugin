@@ -97,5 +97,14 @@
     "statusPending": "대기 중",
     "statusInProgress": "진행 중",
     "statusCompleted": "완료"
+  },
+  "askUserReview": {
+    "title": "질문과 답변",
+    "viewDetail": "클릭하여 질문과 답변 보기",
+    "yourAnswer": "내 답변",
+    "notAnswered": "미응답",
+    "customAnswer": "직접 입력한 답변",
+    "close": "닫기",
+    "receipt": "시스템 응답"
   }
 }

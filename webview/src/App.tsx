@@ -25,6 +25,7 @@ import { PermissionApprovalDialog } from '@/components/PermissionApprovalDialog'
 import { SubagentDetailDialog } from '@/components/SubagentDetailDialog'
 import { SubagentReportDialog } from '@/components/SubagentReportDialog'
 import { MarkdownPreviewDialog } from '@/components/MarkdownPreviewDialog'
+import { AskUserReviewDialog } from '@/components/AskUserReviewDialog'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ChangelogDialog, CHANGELOG_LAST_SEEN_KEY } from '@/components/ChangelogDialog'
 import { EnvBanner } from '@/components/EnvBanner'
@@ -430,6 +431,8 @@ export default function App() {
       {/* 通用 Markdown 预览弹窗（工具卡输出全文阅读，如 Skill 文档/网页工具结果；
           叠在详情弹窗之上的阅读层，关闭后详情仍在）*/}
       <MarkdownPreviewDialog />
+      {/* AskUserQuestion 回看弹窗（消息流「询问用户」工具卡点击，只读回看问题与已选答案）*/}
+      <AskUserReviewDialog />
       {/* 版本更新弹窗（条件渲染：每次打开从最新版页开始；关闭即记已读当前版本）*/}
       {changelogOpen && (
         <ChangelogDialog

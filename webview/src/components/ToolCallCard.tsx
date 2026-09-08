@@ -15,12 +15,13 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import type { ToolPart } from '@/types/messages'
+import type { ToolPart, AskUserQuestion } from '@/types/messages'
 import { relativeTime, formatToolDuration } from '@/utils/time'
 import { parsePartialToolInput, lineCount, tailLines } from '@/utils/partialToolInput'
 import { extractWebSources, extractDomain } from '@/utils/webSources'
 import { isBackgroundTaskOutput } from '@/utils/backgroundTask'
 import { toolErrorText } from '@/utils/parseStatus'
+import { extractAskQuestions, parseAskUserAnswers } from '@/utils/askUserAnswer'
 import { sendToJava, openExternalUrl } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { useTick } from '@/hooks/useTick'
@@ -102,6 +103,9 @@ function inputSummary(tool: string, input?: Record<string, unknown>): string {
       return ''
     case 'ExitPlanMode':
       return String(input.plan || '').slice(0, 60)
+    case 'AskUserQuestion':
+      // 摘要让位给第一个问题文本（弹窗回看入口的识别锚点）
+      return String((input.questions as AskUserQuestion[] | undefined)?.[0]?.question || '').slice(0, 80)
     case 'TaskOutput':
     case 'TaskStop':
       return String(input.task_id || '')
@@ -312,16 +316,51 @@ export function ToolCallCard({ part }: Props) {
     [isTodoTool, todoMessages, part.callID, todoItems],
   )
 
+  // AskUserQuestion（询问用户）：问题/选项/已选答案回看——点击卡片开只读弹窗
+  // （复用实时提问弹窗样式）。答案从完成态 output 解析（服务端回执，轮末整包重拉
+  // 后落库；实时 batch 收尾不带 output，期间弹窗降级为仅回看问题）。
+  // 提问中（流式 input 未解析）回退普通展开看原始输入。
+  const isAskUserTool = tool === 'AskUserQuestion'
+  const askQuestions = useMemo(() => extractAskQuestions(input), [input])
+  const askParse = useMemo(
+    () => (isAskUserTool && askQuestions.length ? parseAskUserAnswers(state.output, askQuestions) : null),
+    [isAskUserTool, askQuestions, state.output],
+  )
+  const askReviewable = isAskUserTool && askQuestions.length > 0
+  const askAnswerLine = askParse
+    ? askQuestions.map((q) => askParse.answers[q.question]).filter(Boolean).join(' · ')
+    : ''
+  const openAskUserReview = useStore((s) => s.openAskUserReview)
+
+  const handleHeaderClick = () => {
+    if (askReviewable) {
+      openAskUserReview({
+        questions: askQuestions,
+        answers: askParse?.answers ?? {},
+        recognized: askParse?.recognized ?? false,
+        raw: state.output ?? '',
+      })
+      return
+    }
+    if (expandable) setExpanded(!expanded)
+  }
+
   // Read 工具不需要展开（只有文件名 + 点击打开，不渲染 output）；
   // Skill 输入/输出全在头部 📖 弹窗，展开区仅流式原始输入/出错时有内容；
-  // ExitPlanMode 同款：plan 全文走 📖 弹窗，完成后无展开区（流式中仍可看原始片段）
+  // ExitPlanMode 同款：plan 全文走 📖 弹窗，完成后无展开区（流式中仍可看原始片段）；
+  // AskUserQuestion 已解析出问题时点击=开回看弹窗，不再展开 JSON（流式未解析仍可展开）
   const expandable = tool !== 'Read' &&
     !(tool === 'Skill' && !rawInput && !state.error) &&
-    !(tool === 'ExitPlanMode' && !rawInput && !state.error)
+    !(tool === 'ExitPlanMode' && !rawInput && !state.error) &&
+    !askReviewable
 
   return (
     <div className={`tool-card tool-card--${badge.cls}`}>
-      <div className="tool-card__header" onClick={() => expandable && setExpanded(!expanded)}>
+      <div
+        className="tool-card__header"
+        onClick={handleHeaderClick}
+        title={askReviewable ? t('tool.askUserReview.viewDetail') : undefined}
+      >
         <span className="tool-card__icon"><span className={`codicon ${toolIcon(tool)}`} /></span>
         <span className="tool-card__name">{toolDisplayName(tool, t)}</span>
         {summary && (
@@ -480,6 +519,18 @@ export function ToolCallCard({ part }: Props) {
         )}
         {expandable && <span className="tool-card__toggle">{expanded ? '▼' : '▶'}</span>}
       </div>
+      {/* 已选答案摘要行（询问用户）：完成态且答案可解析时收起即可见，点击同开回看弹窗 */}
+      {askReviewable && askAnswerLine && (
+        <div
+          className="tool-card__askuser-line"
+          title={t('tool.askUserReview.viewDetail')}
+          onClick={handleHeaderClick}
+        >
+          <span className="codicon codicon-check tool-card__askuser-check" />
+          <span className="tool-card__askuser-label">{t('tool.askUserReview.yourAnswer')}</span>
+          <span className="tool-card__askuser-answer">{askAnswerLine}</span>
+        </div>
+      )}
       {/* 子代理摘要行（Agent/Task）：实时工具数 + 状态，点击查看原始过程 */}
       {isAgentTool && subStatus && (
         <div
