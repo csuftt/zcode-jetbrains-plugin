@@ -4,6 +4,7 @@ import com.zcode.ideaplugin.protocol.LogRedactor
 
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
@@ -4030,7 +4031,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
         try {
             val baseVfs = LocalFileSystem.getInstance().findFileByPath(basePath)
             if (baseVfs != null && baseVfs.isDirectory) {
-                ReadAction.compute<Boolean, RuntimeException> {
+                // ReadAction.compute(ThrowableComputable) 在 2026.1 被 @Deprecated（241 无新重载可静态引用），
+                // 改 nonBlocking：官方推荐方向，241~263 全版本存在，且长扫描不阻塞写锁
+                ReadAction.nonBlocking<Boolean>(java.util.concurrent.Callable {
                     ProjectFileIndex.getInstance(project).iterateContentUnderDirectory(
                         baseVfs,
                         { vf ->
@@ -4048,8 +4051,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         },
                         { vf -> !vf.isDirectory || (vf.name.lowercase() !in ignoredDirs && !vf.name.startsWith(".")) }
                     )
-                }
+                }).executeSynchronously()
             }
+        } catch (e: ProcessCanceledException) {
+            throw e
         } catch (e: Exception) {
             log.warn("File scan failed: ${e.message}")
         }
