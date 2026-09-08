@@ -53,7 +53,10 @@
     "scheduledShort": "予約",
     "steerNow": "割り込み（実行中のターンへ注入、中断なし）",
     "steerNowShort": "割り込み",
-    "steerDisabled": "既に割り込み中のメッセージがあります。落ち着くまでお待ちください"
+    "steerDisabled": "既に割り込み中のメッセージがあります。落ち着くまでお待ちください",
+    "imageOnly": "（画像）",
+    "imageBadge": "画像 {{count}} 枚",
+    "steerImageNow": "ステア（画像付き：このターン終了後に自動送信）"
   },
   "pasted": {
     "clickToPreview": "クリックで全文をプレビュー",
@@ -123,6 +126,10 @@
     "notAccepted": "割り込み不可：現在の状態では注入できません",
     "failedPrefix": "割り込み失敗：",
     "badge": "割り込み",
-    "badgeTitle": "このメッセージは実行中のターンへ注入されました"
+    "badgeTitle": "このメッセージは実行中のターンへ注入されました",
+    "pendingImage": "画像付きステア · このターン終了後に自動送信",
+    "cancel": "ステアを取り消す",
+    "cancelling": "取り消し中…",
+    "cancelTooLate": "ステアは既に実行中のターンに注入されたため、取り消せません"
   }
 }

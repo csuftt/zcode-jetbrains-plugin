@@ -903,6 +903,33 @@
   flex-shrink: 0;
 }
 
+// 撤回引导按钮（✕）：chip 内联小幽灵钮，hover 提示撤回语义
+.input-box__steer-pending__cancel {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: -2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+
+  .codicon {
+    font-size: 11px;
+    // 撤回动作不受 chip 呼吸/脉冲动画传染
+    animation: none;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+  }
+}
+
 // 三点常驻固定占位 + 交错闪烁：宽度恒定，不因动画改布局（content 动画逐字
 // 增减宽度，曾把卡片撑大放小——2026-09-07 用户反馈换设计）
 .input-box__steer-pending__dots {

@@ -173,6 +173,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const scheduledCount = useStore((s) => s.scheduledMessages.length)
   // 引导中的插队消息（排队卡片「引导」按钮发起，事件驱动清除）——chip 展示
   const steerPending = useStore((s) => s.steerPending)
+  // 撤回引导（chip ✕）：v4 deleteQueueItem 撤销在途注入/服务端队列条目
+  const cancelSteer = useStore((s) => s.cancelSteer)
   useEffect(() => {
     resetNav()
     setGhostSuffix('')
@@ -527,13 +529,31 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     setGhostSuffix('')
   }
 
-  /** 队列消息回填输入框（编辑）：非空时换行追加，光标移到末尾并聚焦 */
-  function editQueuedToInput(text: string) {
+  /**
+   * 队列消息回填输入框（编辑）：非空时换行追加，光标移到末尾并聚焦；
+   * 图片附件一并回填附件栏（2026-09-08 修复：此前只回文本，带图排队消息编辑即丢图）。
+   * width/height 压缩元数据不回填（0 占位），仅影响再压缩判定，不影响发送载荷。
+   */
+  function editQueuedToInput(text: string, attachments?: ImageAttachmentInput[]) {
     const el = editorRef.current
     if (!el) return
     const existing = serializeEditor(el).replace(/\s+$/, '')
     el.textContent = existing ? `${existing}\n${text}` : text
-    setHasText(true)
+    setHasText(!!el.textContent?.trim())
+    if (attachments?.length) {
+      setImages((prev) => [
+        ...prev,
+        ...attachments.map((a, i) => ({
+          id: `img_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+          filename: a.filename,
+          mediaType: a.mimeType,
+          base64: a.dataBase64,
+          sizeBytes: a.sizeBytes,
+          width: 0,
+          height: 0,
+        })),
+      ])
+    }
     // 回填文本里的 @绝对路径 回显为内联 chip
     convertCompletedPaths(el, true)
     el.focus()
@@ -1249,15 +1269,34 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         {/* 目标模式状态卡已移至 ChatView 右上角悬浮（ZCode 客户端同款位置）*/}
 
         {/* steer 引导中 chip：排队卡片「引导」按钮发起后，等待服务端注入落位
-            （steerDrained 落气泡 / 回合结束未落位清 chip + 横幅提示）*/}
+            （steerDrained 落气泡 / 回合结束未落位清 chip + 横幅提示）。
+            ✕ 撤回（2026-09-08）：v4 deleteQueueItem 撤销在途条目，成功回插队列；
+            带附件引导文案不同（服务端降级为本回合结束后立即发出）*/}
         {steerPending && (
           <div className="input-box__steer-row">
             <div className="input-box__steer-pending" role="status">
               <span className="codicon codicon-zap" />
               <span className="input-box__steer-pending__preview">{steerPending.text}</span>
-              <span className="input-box__steer-pending__label">{t('input.steer.pending')}</span>
+              <span className="input-box__steer-pending__label">
+                {steerPending.cancelling
+                  ? t('input.steer.cancelling')
+                  : steerPending.attachments?.length
+                    ? t('input.steer.pendingImage')
+                    : t('input.steer.pending')}
+              </span>
               {/* 三点常驻固定占位（交错闪烁），不用 content 动画——那会逐字改变宽度把卡片撑大放小 */}
-              <span className="input-box__steer-pending__dots"><i /><i /><i /></span>
+              {!steerPending.cancelling && (
+                <span className="input-box__steer-pending__dots"><i /><i /><i /></span>
+              )}
+              {steerPending.queueItemId && !steerPending.cancelling && (
+                <button
+                  className="input-box__steer-pending__cancel"
+                  onClick={cancelSteer}
+                  title={t('input.steer.cancel')}
+                >
+                  <span className="codicon codicon-close" />
+                </button>
+              )}
             </div>
           </div>
         )}

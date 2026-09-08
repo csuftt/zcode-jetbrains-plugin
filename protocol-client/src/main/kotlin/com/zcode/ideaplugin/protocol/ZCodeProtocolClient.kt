@@ -1421,19 +1421,89 @@ class ZCodeProtocolClient private constructor(
      * - legacy session/send 在回合中并发行为不可靠（实测 accepted 但消息无声消失），
      *   steer 是唯一的运行中输入通道。
      *
+     * 带附件（2026-09-08 zcode.cjs 源码核验）：payload.attachments 走 ref 引用形态
+     * {ref,fileName,mime,bytes}（strict schema，ref 必填）。ref 为非 URI 字符串时
+     * 服务端按磁盘路径读附件（mapAttachmentRef → {path: ref, type: image|...}），
+     * 故图片以临时文件绝对路径作 ref。注意 guide+attachments 服务端必降级为 queue
+     * （fallbackReasonCode=guide.attachmentsUnsupported，runtime.steerTurn 只收纯文本）：
+     * 消息在本回合结束后由客户端促发（sendQueuedNowViaV4），不会中途注入。
+     * commandId 由调用方传入以派生 queueItemId（queue_<commandId>），供撤销/促发。
+     *
      * @return 应答 result（type=inputAccepted、delivery=初始准入 coarse 值——实测
      *          guide 也报 "queue"，真实路由以 steerQueued 事件为准，勿据此判断降级）
      */
-    fun steerViaV4(sessionId: String, text: String, timeoutMs: Long = 8000): JsonObject {
+    fun steerViaV4(
+        sessionId: String,
+        text: String,
+        commandId: String = "steer-${java.util.UUID.randomUUID()}",
+        attachments: List<V4AttachmentRef>? = null,
+        timeoutMs: Long = 8000,
+    ): JsonObject {
         val params = buildJsonObject {
-            put("commandId", "steer-${java.util.UUID.randomUUID()}")
+            put("commandId", commandId)
             put("clientId", "zcode-idea-plugin")
             put("sessionId", sessionId)
             put("type", "sendText")
             put("payload", buildJsonObject {
                 put("text", text)
                 put("requestedDelivery", "guide")
+                if (!attachments.isNullOrEmpty()) {
+                    put("attachments", buildJsonArray {
+                        attachments.forEach { a ->
+                            add(buildJsonObject {
+                                put("ref", a.ref)
+                                put("fileName", a.fileName)
+                                put("mime", a.mime)
+                                put("bytes", a.bytes)
+                            })
+                        }
+                    })
+                }
             })
+            put("issuedAt", System.currentTimeMillis())
+            put("connectionId", "zcode-idea-plugin")
+            put("clientMode", "desktop-continuous")
+        }
+        val r = request("v4/command", params, timeoutMs)
+        requireOk(r)
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * v4/command {type:"deleteQueueItem"} — 撤销队列/引导条目（2026-09-08 zcode.cjs
+     * 核验）：app.removeQueueItem → runtime.removePendingInputById（reason=user_removed），
+     * 运行中回合的 pending steer 输入与会话级队列项都走这条撤销通道；已注入落位/
+     * 已促发的条目返回 queue.itemMissing 错误（调用方按"太迟了"处理，幂等无害）。
+     */
+    fun deleteQueueItemViaV4(sessionId: String, queueItemId: String, timeoutMs: Long = 8000): JsonObject {
+        val params = buildJsonObject {
+            put("commandId", "delq-${java.util.UUID.randomUUID()}")
+            put("clientId", "zcode-idea-plugin")
+            put("sessionId", sessionId)
+            put("type", "deleteQueueItem")
+            put("payload", buildJsonObject { put("queueItemId", queueItemId) })
+            put("issuedAt", System.currentTimeMillis())
+            put("connectionId", "zcode-idea-plugin")
+            put("clientMode", "desktop-continuous")
+        }
+        val r = request("v4/command", params, timeoutMs)
+        requireOk(r)
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * v4/command {type:"sendQueuedNow"} — 促发服务端队列条目立即执行（官方客户端
+     * 回合结束自动排空的同款原语，autoDrainPromotion 语义）：中断当前回合（若仍在跑）
+     * 并以该条目开启新回合。带附件的 steer 条目被服务端降级为 queue 后由本方法促发
+     * （附件 ref 随条目透传）。条目不存在（已排空/已撤销）报 queue.itemMissing。
+     */
+    fun sendQueuedNowViaV4(sessionId: String, queueItemId: String, timeoutMs: Long = 8000): JsonObject {
+        val params = buildJsonObject {
+            put("commandId", "promq-${java.util.UUID.randomUUID()}")
+            put("clientId", "zcode-idea-plugin")
+            put("sessionId", sessionId)
+            put("type", "sendQueuedNow")
+            put("payload", buildJsonObject { put("queueItemId", queueItemId) })
             put("issuedAt", System.currentTimeMillis())
             put("connectionId", "zcode-idea-plugin")
             put("clientMode", "desktop-continuous")

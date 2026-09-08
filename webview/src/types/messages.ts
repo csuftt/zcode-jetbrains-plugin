@@ -356,8 +356,14 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 子代理 stopped 终点退订：收敛 v4 订阅/行表/探针计数（best-effort，失败无害）*/
   | { op: 'unsubscribeChild'; sessionId: string }
   | { op: 'stop'; sessionId: string; /** 连带中止的后台任务 id（exec_ bash 任务，账本仍在跑的）；子代理由 Java 侧权威枚举 */ taskIds?: string[] }
-  /** 引导式插队（steer）：v4 sendText requestedDelivery=guide，注入运行中回合（2026-09-07 探针定案）*/
-  | { op: 'steerMessage'; sessionId: string; text: string }
+  /** 引导式插队（steer）：v4 sendText requestedDelivery=guide，注入运行中回合（2026-09-07 探针定案）。
+   *  commandId 前端生成（queueItemId=queue_<commandId> 服务端确定性派生，撤销/促发句柄）；
+   *  attachments 走 v4 ref 形态由 Java 落临时文件（guide+附件服务端降级为回合后执行）*/
+  | { op: 'steerMessage'; sessionId: string; text: string; commandId: string; attachments?: ImageAttachmentInput[] }
+  /** 撤回引导中/服务端队列中的条目（v4 deleteQueueItem）：引导 chip ✕ 触发 */
+  | { op: 'cancelSteer'; sessionId: string; queueItemId: string }
+  /** 促发服务端队列条目立即执行（v4 sendQueuedNow）：带附件 steer 降级 queue 后回合结束促发 */
+  | { op: 'promoteQueuedInput'; sessionId: string; queueItemId: string }
   | { op: 'getIdeTheme' }
   | { op: 'listFiles'; query: string }
   | { op: 'listCommands'; query?: string }
@@ -794,8 +800,12 @@ export type JavaResponse =
   | { op: 'sessionForked'; forkedSessionId: string; parentSessionId?: string }
   /** 老 CLI 无 v4 面（-32601）：隐藏分叉入口（不做 legacy 回退——该路径带文件恢复副作用）*/
   | { op: 'forkUnsupported' }
-  /** steerMessage 应答：accepted=true 时 UI 由 turn.steerQueued/steerDrained 事件驱动；error=受理失败（清 chip + 横幅）*/
-  | { op: 'steerMessage'; sessionId: string; accepted?: boolean; delivery?: string; error?: string }
+  /** steerMessage 应答：accepted=true 时 UI 由 turn.steerQueued/steerDrained 事件驱动；error=受理失败（清 chip + 横幅）。queueItemId=queue_<commandId>（前端已预置，ack 仅核对）*/
+  | { op: 'steerMessage'; sessionId: string; accepted?: boolean; delivery?: string; queueItemId?: string; error?: string }
+  /** cancelSteer 应答：removed=true 已撤销（清 chip + 队列条目回插）；false=已注入落位/已促发（queue.itemMissing），提示不可撤 */
+  | { op: 'cancelSteer'; sessionId: string; queueItemId: string; removed: boolean; error?: string }
+  /** promoteQueuedInput 应答：ok=true 服务端已受理促发（新回合 turn.started 落气泡）；false=条目已不在（清 chip 兜底）*/
+  | { op: 'promoteQueuedInput'; sessionId: string; queueItemId: string; ok: boolean; error?: string }
   | { op: 'sessionDeleted'; sessionId: string }
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }

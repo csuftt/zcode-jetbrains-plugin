@@ -53,7 +53,10 @@
     "scheduledShort": "定時",
     "steerNow": "引導（注入當前回合，不打斷）",
     "steerNowShort": "引導",
-    "steerDisabled": "已有訊息在引導中，請等落位後再引導"
+    "steerDisabled": "已有訊息在引導中，請等落位後再引導",
+    "imageOnly": "（圖片）",
+    "imageBadge": "{{count}} 張圖片",
+    "steerImageNow": "引導（帶圖：本回合結束後自動發出）"
   },
   "pasted": {
     "clickToPreview": "點選預覽完整內容",
@@ -123,6 +126,10 @@
     "notAccepted": "插隊未受理：目前狀態不能插隊",
     "failedPrefix": "插隊失敗：",
     "badge": "引導",
-    "badgeTitle": "該訊息經引導注入執行中的回合"
+    "badgeTitle": "該訊息經引導注入執行中的回合",
+    "pendingImage": "帶圖引導 · 本回合結束後自動發出",
+    "cancel": "撤回引導",
+    "cancelling": "正在撤回…",
+    "cancelTooLate": "引導已注入當前回合，無法撤回"
   }
 }

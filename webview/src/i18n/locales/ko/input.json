@@ -53,7 +53,10 @@
     "scheduledShort": "예약",
     "steerNow": "끼어들기(실행 중 턴에 주입, 중단 없음)",
     "steerNowShort": "끼어들기",
-    "steerDisabled": "이미 끼어들기 중인 메시지가 있습니다. 안착 후 다시 시도하세요"
+    "steerDisabled": "이미 끼어들기 중인 메시지가 있습니다. 안착 후 다시 시도하세요",
+    "imageOnly": "(이미지)",
+    "imageBadge": "이미지 {{count}}개",
+    "steerImageNow": "스티어(이미지 포함: 이번 턴 종료 후 자동 전송)"
   },
   "pasted": {
     "clickToPreview": "클릭하여 전체 내용 미리보기",
@@ -123,6 +126,10 @@
     "notAccepted": "끼어들기 불가: 현재 상태에서는 주입할 수 없습니다",
     "failedPrefix": "끼어들기 실패: ",
     "badge": "끼어들기",
-    "badgeTitle": "이 메시지는 실행 중인 턴에 주입되었습니다"
+    "badgeTitle": "이 메시지는 실행 중인 턴에 주입되었습니다",
+    "pendingImage": "이미지 스티어 · 이번 턴 종료 후 자동 전송",
+    "cancel": "스티어 취소",
+    "cancelling": "취소 중…",
+    "cancelTooLate": "스티어가 이미 실행 중인 턴에 주입되어 취소할 수 없습니다"
   }
 }

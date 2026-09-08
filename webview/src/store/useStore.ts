@@ -401,11 +401,23 @@ interface StoreState {
    * 引导中（steer）的插队消息：v4 sendText requestedDelivery=guide 已受理、
    * 等待服务端注入运行中回合。置位：steerMessage 乐观置位；清除：steerDrained
    * （注入落位）/ turn.started（startNow 降级，气泡由 input 兜底）/ 回合结束
-   * （未生效降级提示）。restore 记录乐观移除的队列条目及原下标——受理 ack
-   * 失败时由应答处理插回原位（失败回滚，防文本丢失）。事件形状见
-   * docs/internal/design-research/steer插队协议探针-2026-09-07.md
+   * （未生效降级提示；带附件条目改为促发后保留 chip 等认领）。restore 记录乐观
+   * 移除的队列条目及原下标——受理 ack 失败时由应答处理插回原位（失败回滚，防
+   * 文本丢失），cancelSteer 成功时同源插回。
+   * queueItemId = queue_<commandId>（commandId 前端生成，服务端确定性派生
+   * f1()/Cse() 实锤），是撤销（deleteQueueItem）与促发（sendQueuedNow）的句柄。
+   * attachments 非空 = 服务端必降级为 queue 的带图引导（chip 文案区分 + 回合末促发）。
+   * 事件形状见 docs/internal/design-research/steer插队协议探针-2026-09-07.md
    */
-  steerPending: { text: string; at: number; restore?: { item: QueuedMessage; index: number } } | null
+  steerPending: {
+    text: string
+    at: number
+    queueItemId?: string
+    attachments?: ImageAttachmentInput[]
+    /** 撤回请求在途（chip 置取消中，防重复点击与落位竞态）*/
+    cancelling?: boolean
+    restore?: { item: QueuedMessage; index: number }
+  } | null
   /**
    * 被引导注入的 user 消息 id（服务端真身 id，kv 持久化跨重拉/重启）——
    * 气泡渲染「⚡引导」徽标（对齐定时消息「定时执行」徽标语义）。
@@ -779,23 +791,42 @@ interface StoreState {
   /** 立即发送排队消息：移到队头 + 中断当前回合（turn 结束事件到达后自动发出）*/
   sendQueuedNow: (id: string) => void
   /**
-   * 引导式插队（steer）：把纯文本消息注入运行中的回合（v4 sendText
+   * 引导式插队（steer）：把消息注入运行中的回合（v4 sendText
    * requestedDelivery=guide，2026-09-07 探针定案），不打断不排队。
+   * 带附件（2026-09-08 扩展）：v4 sendText 原生支持 attachments（ref 形态），但
+   * guide+附件服务端必降级为 queue（runtime.steerTurn 只收纯文本）——消息在本回合
+   * 结束后由 promoteQueuedSteer 促发执行，chip 文案据此区分。
    * 乐观置 steerPending（chip 反馈），气泡等 steerDrained/turn.started 落位
    * （注入消息 id 是服务端正式 id，与回合结束重拉天然对齐）。ack 的
    * result.delivery 是初始准入 coarse 值（实测 guide 也报 "queue"），不能据它
    * 判断降级；失败/降级由事件与回合结束兜底。返回 false=未受理（守卫拦截）。
    * restore：来自队列的条目及其原下标，受理 ack 失败时插回原位。
    */
-  steerMessage: (text: string, restore?: { item: QueuedMessage; index: number }) => boolean
+  steerMessage: (text: string, attachments?: ImageAttachmentInput[], restore?: { item: QueuedMessage; index: number }) => boolean
   /**
    * 引导队列中的消息（排队卡片「引导」按钮，2026-09-07 交互定案）：Enter 恒入队，
    * 用户看到卡片后显式选「引导」（注入当前回合）或「立即」（中断+发）。成功即
    * 从队列移除该条；失败（非流式/已有在途引导）保留队列条目并横幅提示；受理
    * 后 ack 失败（服务端拒收/Java 异常）由应答处理按 restore 插回原位。
-   * 定时来源与带附件的条目由 UI 隐藏入口（定时 ack 语义与 v4 附件形状未验证）。
+   * 定时来源的条目由 UI 隐藏入口（定时 ack 语义未验证）；带附件条目可引导
+   * （服务端降级为回合结束后立即发出，见 steerMessage）。
    */
   sendQueuedAsSteer: (id: string) => void
+  /**
+   * 撤回引导中的消息（引导 chip ✕，2026-09-08）：v4 deleteQueueItem 按 queueItemId
+   * 撤销（pending steer 输入与服务端队列项同通道）。chip 置 cancelling 防重复点击；
+   * 应答 removed=true 才清 chip 并按 restore 插回队列（不做乐观回插：撤回失败的
+   * 真实原因是已注入落位，此时插回会造成气泡+队列条目并存）。removed=false 横幅
+   * 提示已太迟，chip 交给 steerDrained 正常落位。
+   */
+  cancelSteer: () => void
+  /**
+   * 促发服务端队列条目立即执行（v4 sendQueuedNow，官方 autoDrainPromotion 同款）：
+   * 带附件的 steer 被服务端降级为 queue 后不会自动排空（探针定案，排空是客户端
+   * 职责），回合结束仍 pending 时调用——服务端以该条目开启新回合，气泡由
+   * turn.started 的 input 认领路径落位。条目已不存在按 ok=false 清 chip 兜底。
+   */
+  promoteQueuedSteer: () => void
   /** 回合结束（streaming→false）后自动发送队头 */
   flushQueue: () => void
   /** 立即执行定时消息：乐观移除卡片；本面板正看该会话则直接走受理路径发送，否则交 Java 分派（可能开标签/直发）*/
@@ -1499,13 +1530,30 @@ export const useStore = create<StoreState>((set, get) => ({
   /**
    * 引导式插队（steer）：见接口注释。这里只做受理与乐观置位；chip 的清除与
    * 气泡落位全部由事件驱动（turn.steerQueued/steerDrained，批量与单推两路都拦截）。
+   * commandId 前端生成——queueItemId=queue_<commandId> 是服务端确定性派生
+   * （zcode.cjs f1()/Cse() 实锤），撤销/促发都要用它，不等 ack 回填。
    */
-  steerMessage: (text, restore?) => {
+  steerMessage: (text, attachments?, restore?) => {
     const trimmed = text.trim()
     const sid = get().currentSessionId
     if (!sid || !get().streaming || get().steerPending || !trimmed) return false
-    set({ steerPending: { text: trimmed, at: Date.now(), ...(restore ? { restore } : {}) } })
-    sendToJava({ op: 'steerMessage', sessionId: sid, text: trimmed })
+    const commandId = `steer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    set({
+      steerPending: {
+        text: trimmed,
+        at: Date.now(),
+        queueItemId: `queue_${commandId}`,
+        ...(attachments?.length ? { attachments } : {}),
+        ...(restore ? { restore } : {}),
+      },
+    })
+    sendToJava({
+      op: 'steerMessage',
+      sessionId: sid,
+      text: trimmed,
+      commandId,
+      ...(attachments?.length ? { attachments } : {}),
+    })
     return true
   },
 
@@ -1514,12 +1562,27 @@ export const useStore = create<StoreState>((set, get) => ({
     const index = q.findIndex((m) => m.id === id)
     if (index < 0) return
     const target = q[index]
-    if (!get().steerMessage(target.text, { item: target, index })) {
+    if (!get().steerMessage(target.text, target.attachments, { item: target, index })) {
       // 守卫拦截（极少见：回合恰好结束/已有在途引导）——保留队列条目 + 提示
       set({ lastError: i18n.t('input.steer.notAccepted') })
       return
     }
     set({ queuedMessages: q.filter((m) => m.id !== id) })
+  },
+
+  cancelSteer: () => {
+    const pending = get().steerPending
+    const sid = get().currentSessionId
+    if (!pending?.queueItemId || pending.cancelling || !sid) return
+    set({ steerPending: { ...pending, cancelling: true } })
+    sendToJava({ op: 'cancelSteer', sessionId: sid, queueItemId: pending.queueItemId })
+  },
+
+  promoteQueuedSteer: () => {
+    const pending = get().steerPending
+    const sid = get().currentSessionId
+    if (!pending?.queueItemId || pending.cancelling || !sid) return
+    sendToJava({ op: 'promoteQueuedInput', sessionId: sid, queueItemId: pending.queueItemId })
   },
 
   sendScheduledNow: (id) => {
@@ -2765,7 +2828,8 @@ export function handleResponse(
       // steerPending.restore 插回原位，越界钳到队尾）。仅 chip 仍在途时回滚：
       // 已被 steerDrained/claim 清除说明注入已发生，迟到失败 ack 再回滚会与
       // 注入气泡重复。两种失败形态：error=Java 侧异常（v4 面缺失/会话失效）；
-      // accepted:false=服务端拒收（status≠accepted，无 error 字段）
+      // accepted:false=服务端拒收（status≠accepted，无 error 字段）。
+      // queueItemId 前端已乐观预置（queue_<commandId> 确定性派生），ack 不再回填
       let failure: string | null = null
       if (msg.accepted === false) {
         diagWarn('steer rejected: status≠accepted')
@@ -2783,6 +2847,39 @@ export function handleResponse(
           patch.queuedMessages = q
         }
         set(patch)
+      }
+      break
+    }
+
+    case 'cancelSteer': {
+      // 撤回应答：removed=true → 清 chip + 按 restore 插回队列（非乐观——撤回
+      // 失败的真实原因是已注入落位，那时隔着注入气泡插回队列条目是错的）。
+      // removed=false = 已落位/已促发（queue.itemMissing）：chip 退出 cancelling
+      // 态并横幅提示，落位交给在途的 steerDrained 正常收尾
+      const pending = get().steerPending
+      if (!pending) break
+      if (msg.removed) {
+        const patch: Partial<StoreState> = { steerPending: null }
+        if (pending.restore) {
+          const q = [...get().queuedMessages]
+          q.splice(Math.min(pending.restore.index, q.length), 0, pending.restore.item)
+          patch.queuedMessages = q
+        }
+        set(patch)
+      } else {
+        diagWarn(`steer cancel missed: ${msg.error ?? 'item missing'}`)
+        set({ steerPending: { ...pending, cancelling: false }, lastError: i18n.t('input.steer.cancelTooLate') })
+      }
+      break
+    }
+
+    case 'promoteQueuedInput': {
+      // 促发应答：ok=true → 无事可做（新回合 turn.started 的 input 认领路径清 chip
+      // 并落气泡）；ok=false = 条目已不在（异常双促发/会话已失效）——清 chip 兜底，
+      // 防止带图引导 chip 永挂。正常排空路径不应到这里报错
+      if (!msg.ok) {
+        diagWarn(`steer promote missed: ${msg.error ?? 'item missing'}`)
+        if (get().steerPending) set({ steerPending: null, lastError: i18n.t('input.steer.notDelivered') })
       }
       break
     }
@@ -4253,12 +4350,25 @@ function handleStreamBatchDirect(
     // 任务仍在后台跑——由任务完成通知清除，见 bgCompleted 分支）
     // 失败回合展示错误详情（同批 failed+started 的自动续轮不打扰）
     if (turnError) patch.lastError = formatTurnError(turnError)
-    // steer 插队 chip 活到回合结束 = 未落位（guide 降级队列被弃/命令失败等，
-    // 罕见路径——实测 guide 命中时 steerDrained 早于 completed 到达）：清 chip
-    // 并横幅提示可重发
+    // steer 插队 chip 活到回合结束：纯文本引导 = 未落位（guide 降级队列被弃/命令
+    // 失败等，罕见路径——实测 guide 命中时 steerDrained 早于 completed 到达），清
+    // chip 并横幅提示可重发。带附件引导（queueItemId+attachments）不同：服务端对
+    // guide+附件必降级为 queue（runtime.steerTurn 只收纯文本，zcode.cjs 实锤）且
+    // 降级条目不自动排空（排空是客户端职责）——回合结束正是促发时机：v4
+    // sendQueuedNow 让服务端以该条目（含附件 ref）开新回合，chip 保留到新回合
+    // turn.started 的 input 认领路径落气泡；促发失败（条目已不在）由应答兜底清。
+    // cancelling 在途（撤回应答未回）三不碰：不促发、不清 chip、不横幅——撤回
+    // 应答 removed=true 要按 restore 回插队列，这里清了 pending 回插就落空（条目
+    // 两头消失），去留完全交给撤回应答
     if (steerPending) {
-      steerPending = null
-      if (!turnError) patch.lastError = i18n.t('input.steer.notDelivered')
+      if (steerPending.cancelling) {
+        // 留给 cancelSteer 应答收尾
+      } else if (steerPending.queueItemId && steerPending.attachments?.length) {
+        sendToJava({ op: 'promoteQueuedInput', sessionId, queueItemId: steerPending.queueItemId })
+      } else {
+        steerPending = null
+        if (!turnError) patch.lastError = i18n.t('input.steer.notDelivered')
+      }
     }
   }
   // steer chip 批内有变更才进 patch（引用稳定防多余重渲染）
@@ -4562,8 +4672,24 @@ function handleStreamEvent(
         ...(turnError ? {} : { lastError: i18n.t('chat.edit.rewindFailed') }),
       })
     }
-    // steer 插队 chip 活到回合结束 = 未落位（同批量路径）：清 chip + 提示可重发
+    // steer 插队 chip 活到回合结束：纯文本引导 = 未落位（同批量路径），清 chip +
+    // 提示可重发。带附件引导 = 服务端必降级 queue 且不自动排空，回合结束促发
+    // （v4 sendQueuedNow）并保留 chip 等新回合 turn.started 认领（同批量路径）。
+    // cancelling 在途三不碰（同批量路径：撤回应答要按 restore 回插，先清 pending
+    // 会让回插落空）
     const steerDropped = get().steerPending
+    const keepImageSteer = !!steerDropped?.queueItemId && !!steerDropped.attachments?.length
+      && !steerDropped.cancelling && !turnError
+    if (keepImageSteer) get().promoteQueuedSteer()
+    const steerEndPatch: Partial<StoreState> = turnError
+      ? { lastError: formatTurnError(turnError), steerPending: steerDropped?.cancelling ? steerDropped : null }
+      : steerDropped
+        ? keepImageSteer
+          ? { steerPending: steerDropped }
+          : steerDropped.cancelling
+            ? { steerPending: steerDropped }
+            : { steerPending: null, lastError: i18n.t('input.steer.notDelivered') }
+        : {}
     set({
       streaming: false,
       streamingMessageId: null,
@@ -4571,11 +4697,7 @@ function handleStreamEvent(
       compacting: false,
       // 后台任务指示器不在回合结束清除（同批量路径：由任务完成通知清除）
       // 失败回合展示错误详情（此前 payload.error 被丢弃，失败只表现为"转圈停了"）
-      ...(turnError
-        ? { lastError: formatTurnError(turnError), steerPending: null }
-        : steerDropped
-          ? { steerPending: null, lastError: i18n.t('input.steer.notDelivered') }
-          : {}),
+      ...steerEndPatch,
     })
     console.log(`[store] turn ${event.type}，重新拉取消息确保一致`)
     // 压缩回合结束：摘要卡只经下方重拉快照落地，队列非空时延迟到快照落地后再

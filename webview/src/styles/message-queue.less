@@ -58,6 +58,25 @@
     }
   }
 
+  // 图片附件角标（图标 + 张数）：带图条目一眼可辨（编辑回填/引导降级语义都跟图走）
+  &__img-badge {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+
+    .codicon {
+      font-size: 11px;
+    }
+  }
+
+  &__img-count {
+    user-select: none;
+  }
+
   // 按钮组（立即发送 | 编辑 | 删除），间距比与文本间隔更大
   &__actions {
     flex-shrink: 0;

@@ -79,6 +79,18 @@ data class AttachmentInput(
 )
 
 /**
+ * v4/command sendText 的附件引用（2026-09-08 zcode.cjs 核验，strict schema ref 必填）：
+ * ref 为非 URI 字符串时服务端按磁盘路径读取（mapAttachmentRef → path 分支），
+ * URI 形态（含 scheme://）走 content 通道。插件图片 steer 场景用临时文件绝对路径。
+ */
+data class V4AttachmentRef(
+    val ref: String,
+    val fileName: String,
+    val mime: String,
+    val bytes: Long,
+)
+
+/**
  * 事件类型（规格书 §4：type 在 params 顶层）
  *
  * payload 结构按 type 不同：
