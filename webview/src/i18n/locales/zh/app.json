@@ -14,6 +14,8 @@
   "resumeBusyHint": "会话可能正在恢复中（恢复中断回合后服务端约需 1~2 分钟排队消化），插件会自动重试订阅与设置，请勿重启 IDE；思考深度等设置将在恢复后自动回来",
   "streamLost": "已超过 1 分钟未收到任何流式事件且服务端无新进展，本轮按流中断收尾；如任务未完成请重发（CLI 升级/重启后恢复的会话可能不回发事件）",
   "dialogCountdown": "剩余 {{time}}",
+  "dialogElapsed": "已等待 {{time}}",
+  "dialogElapsedTitle": "提问自动继续已关闭：将一直等待你的回答",
   "dialogCountdownTitle": "长时间未应答将超时，自动视为拒绝并关闭弹窗",
   "changelog": {
     "title": "版本更新",
@@ -37,7 +39,9 @@
     "other": "其他（自定义答案）",
     "otherPlaceholder": "输入自定义答案…",
     "back": "上一题",
-    "next": "下一题"
+    "next": "下一题",
+    "collapse": "收起",
+    "expand": "展开"
   },
   "planApproval": {
     "title": "计划审批",

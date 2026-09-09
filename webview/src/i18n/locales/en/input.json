@@ -136,5 +136,9 @@
     "cancel": "Cancel steer",
     "cancelling": "Cancelling…",
     "cancelTooLate": "Steer already injected into the running turn, cannot cancel"
+  },
+  "statusPanel": {
+    "hide": "Collapse status bar",
+    "show": "Expand status bar"
   }
 }

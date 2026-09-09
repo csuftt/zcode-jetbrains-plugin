@@ -14,6 +14,11 @@
  * 完成轮自动折叠（默认开启，utils/turnCollapseConfig.ts）：完成的对话轮默认
  * 只显示最终结论，点「执行过程」折叠栏展开；关闭则完整展开、可手动收起。
  * 消息渲染时读取，切回聊天视图（ChatView 重挂）即应用新值。
+ *
+ * 提问自动继续（默认关闭=一直等待，utils/askUserConfig.ts）：与 ZCode 客户端
+ * 不同源的插件自有配置——开启后 Agent 提问 5 分钟未回答自动继续；关闭（默认）
+ * 则当前和后续提问一直等待回答（弹窗无倒计时不自动关闭）。persist kv 通道存储，
+ * Kotlin 侧（ZCodeAskUserConfig）即时读取，无消息往返。
  */
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -21,6 +26,7 @@ import { SettingToggle } from './SettingToggle'
 import { readNotifyConfig, writeNotifyConfig } from '@/utils/notifyConfig'
 import { readEnhanceConfig, writeEnhanceConfig, type EnhanceModel } from '@/utils/enhanceConfig'
 import { readTurnCollapseConfig, writeTurnCollapseConfig, type TurnCollapseConfig } from '@/utils/turnCollapseConfig'
+import { readAskUserAutoConfig, writeAskUserAutoConfig } from '@/utils/askUserConfig'
 import { useStore } from '@/store/useStore'
 import '../styles/basic-settings.less'
 import '../styles/agent-select.less'
@@ -32,6 +38,14 @@ export function BehaviorSettings() {
   const [collapse, setCollapse] = useState(readTurnCollapseConfig)
   const models = useStore((s) => s.models)
   const [modelOpen, setModelOpen] = useState(false)
+  // 提问自动继续（插件自有 persist kv 配置，默认关=一直等待回答）
+  const [askUserAuto, setAskUserAuto] = useState(readAskUserAutoConfig)
+
+  const updateAskUserAuto = (patch: Partial<typeof askUserAuto>) => {
+    const next = { ...askUserAuto, ...patch }
+    setAskUserAuto(next)
+    writeAskUserAutoConfig(next)
+  }
 
   const update = (patch: Partial<typeof config>) => {
     const next = { ...config, ...patch }
@@ -183,6 +197,25 @@ export function BehaviorSettings() {
         <small className="basic-settings__hint">
           <span className="codicon codicon-info" />
           <span>{t('settings.behavior.turnCollapseEnabled.hint')}</span>
+        </small>
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-comment-discussion" />
+          <span className="basic-settings__field-label">{t('settings.behavior.askUserAutoTitle')}</span>
+        </div>
+        <SettingToggle
+          icon="codicon-comment-discussion"
+          title={t('settings.behavior.askUserAuto.title')}
+          desc={t('settings.behavior.askUserAuto.desc')}
+          on={askUserAuto.autoContinueEnabled}
+          onToggle={() => updateAskUserAuto({ autoContinueEnabled: !askUserAuto.autoContinueEnabled })}
+          onHint={t('settings.behavior.askUserAuto.onHint')}
+          offHint={t('settings.behavior.askUserAuto.offHint')}
+        />
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.askUserAuto.hint')}</span>
         </small>
       </section>
     </>

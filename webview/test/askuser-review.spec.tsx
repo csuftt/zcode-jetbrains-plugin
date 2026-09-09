@@ -226,6 +226,35 @@ describe('工具卡回看交互', () => {
     expect(useStore.getState().askUserReview).toBeNull()
   })
 
+  it('多问题回看按实时弹窗翻页：进度标注 + 上一题/下一题 + 末页关闭', () => {
+    useStore.setState({
+      askUserReview: {
+        questions: [
+          ...QUESTIONS,
+          { question: '第二个问题？', multiSelect: false, options: [{ label: '选项A' }, { label: '选项B' }] },
+        ],
+        answers: { 'B 区测试需要你实时配合，接下来怎么安排？': '只测新增', '第二个问题？': '选项A' },
+        recognized: true,
+        raw: '',
+      },
+    })
+    render(<AskUserReviewDialog />)
+    // 第 1 页：有进度标注与下一题，无上一题
+    expect(screen.getByText('第 1/2 题')).toBeTruthy()
+    expect(screen.getByText('下一题')).toBeTruthy()
+    expect(screen.queryByText('上一题')).toBeNull()
+    fireEvent.click(screen.getByText('下一题'))
+    // 第 2 页：出现上一题，按钮变关闭
+    expect(screen.getByText('第 2/2 题')).toBeTruthy()
+    expect(screen.getByText('上一题')).toBeTruthy()
+    expect(screen.getByText('第二个问题？')).toBeTruthy()
+    fireEvent.click(screen.getByText('上一题'))
+    expect(screen.getByText('B 区测试需要你实时配合，接下来怎么安排？')).toBeTruthy()
+    fireEvent.click(screen.getByText('下一题'))
+    fireEvent.click(screen.getByText('关闭'))
+    expect(useStore.getState().askUserReview).toBeNull()
+  })
+
   it('流式中（input 未解析）：不显示答案行，头部点击不弹窗（退化为展开）', () => {
     renderCard(askPart({ input: undefined, output: undefined, status: 'running' }))
     expect(screen.queryByText('你的回答')).toBeNull()

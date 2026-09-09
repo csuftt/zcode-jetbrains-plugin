@@ -161,6 +161,14 @@
       "hint": "On by default; collapsed turns expand temporarily during in-session search",
       "onHint": "Enable auto-collapse",
       "offHint": "Disable auto-collapse (fully expand)"
+    },
+    "askUserAutoTitle": "Question wait",
+    "askUserAuto": {
+      "title": "Auto-continue questions",
+      "desc": "When enabled, an unanswered agent question auto-continues after 5 minutes; when disabled (default), the current and future questions wait for your reply indefinitely",
+      "hint": "Waits indefinitely by default (no countdown, never auto-closes); plan approvals keep the 5-minute timeout. Plugin-local only, independent of the ZCode client setting",
+      "onHint": "Click to disable auto-continue",
+      "offHint": "Click to enable auto-continue"
     }
   }
 }

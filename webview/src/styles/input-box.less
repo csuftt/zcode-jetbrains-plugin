@@ -83,6 +83,16 @@
   border-radius: 7px 7px 0 0;
 }
 
+/* 状态栏收起/展开按钮（cc-gui status-panel-toggle）：推到工具条最右；
+   弱化风格对齐询问弹窗折叠按钮（小一号 + tertiary 灰，hover 恢复由 context-tool-btn 管）。
+   必须双类选择器：单类与 .context-tool-btn 同特异性且源码顺序在前，font-size/color
+   会被后者原样压掉（实踩：11px/灰色从未生效，用户两轮反馈"还是太大不够灰"） */
+.context-tool-btn.input-box-topbar__status-toggle {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
 /* 图标按钮（cc-gui .context-tool-btn：22×22 圆角，hover 变色）*/
 .context-tool-btn {
   display: inline-flex;

@@ -17,10 +17,10 @@ import kotlinx.serialization.json.put
  * 「工作区记忆（自动记忆）」开关与客户端共用这一份——桌面端 设置→常规 的开关、
  * 插件设置页的开关、app-server 的 session/requestRuntimePreferences 应答三处同源：
  * 插件切换时写回此文件，客户端下次读配置同样生效，反之亦然。
+ * （「提问自动继续」不在此列：插件自有配置走 ZCodeAskUserConfig，见该类注释。）
  *
  * 字段默认值对齐 zcode.cjs 的 zod schema：
- *   memoryEnabled=false / nativeSearchEnhancementsEnabled=true /
- *   askUserQuestionAutoResolutionEnabled=true
+ *   memoryEnabled=false / nativeSearchEnhancementsEnabled=true
  * 该文件还存了客户端的窗口尺寸、最近项目等大量无关状态——写入时只改目标字段，
  * 其余键原样保留。
  */
@@ -30,11 +30,10 @@ object ZCodeClientSettingStore {
 
     private val prettyJson = Json { prettyPrint = true; prettyPrintIndent = "  " }
 
-    /** requestRuntimePreferences 应答所需三项 */
+    /** requestRuntimePreferences 应答所需两项（askUser 自动继续由 ZCodeAskUserConfig 提供） */
     data class RuntimePrefs(
         val memoryEnabled: Boolean = false,
         val nativeSearchEnhancementsEnabled: Boolean = true,
-        val askUserQuestionAutoResolutionEnabled: Boolean = true,
     )
 
     /**
@@ -52,13 +51,12 @@ object ZCodeClientSettingStore {
     fun settingPath(home: String = System.getProperty("user.home")): File =
         File(File(home, ".zcode/v2"), "setting.json")
 
-    /** 读三项运行时偏好（文件缺失/损坏/字段缺失时用 CLI 侧同款默认值） */
+    /** 读两项运行时偏好（文件缺失/损坏/字段缺失时用 CLI 侧同款默认值） */
     fun readRuntimePrefs(home: String = System.getProperty("user.home")): RuntimePrefs = synchronized(LOCK) {
         val root = readRoot(home) ?: return RuntimePrefs()
         RuntimePrefs(
             memoryEnabled = root.booleanField("memoryEnabled") ?: false,
             nativeSearchEnhancementsEnabled = root.booleanField("nativeSearchEnhancementsEnabled") ?: true,
-            askUserQuestionAutoResolutionEnabled = root.booleanField("askUserQuestionAutoResolutionEnabled") ?: true,
         )
     }
 

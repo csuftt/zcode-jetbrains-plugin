@@ -16,7 +16,7 @@ import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
-import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, GoalState, AutoArchiveRecord } from '@/types/messages'
+import type { JavaResponse, SessionInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, GoalState, AutoArchiveRecord, ToolPart } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import i18n from '@/i18n/config'
@@ -35,6 +35,7 @@ import { parseTodos, parseAgents, parseFileChanges, mergeAgentItems } from '@/ut
 import { isHiddenSyntheticMessage } from '@/utils/parseNotification'
 import { mergeTurnMessages } from '@/utils/mergeTurnMessages'
 import { getPersisted, setPersisted, removePersisted, entriesWithPrefix, KV_HYDRATED_EVENT } from '@/utils/persist'
+import { readStatusPanelConfig, writeStatusPanelConfig } from '@/utils/statusPanelConfig'
 import { addSteerMarkers, readSteerMarkers } from '@/utils/steerMarkers'
 import { readEnhanceConfig } from '@/utils/enhanceConfig'
 import { extractBackgroundTaskIdFromContent } from '@/utils/backgroundTask'
@@ -517,6 +518,20 @@ interface StoreState {
   /** 开关切换请求在途（防重复点击）*/
   memoryToggling: boolean
 
+  // 底部状态栏（任务/子代理/文件）折叠态：即时 UI 偏好不持久化（与 cc-gui 一致，重载回展开）
+  statusPanelCollapsed: boolean
+
+  // AskUserQuestion 应答时刻（callID → 用户在弹窗点确认/取消的本地时钟）：
+  // 服务端落库该工具 end-start≈4ms（等待用户在 interaction 层），快照落地时
+  // 用它补真实 end（preserveAskUserDurations）——batch 收尾被"重拉先落地+
+  // 终态守卫跳过"时这是唯一可靠的时长来源
+  askAnsweredAt: Record<string, number>
+
+  // AskUserQuestion 提问时刻（callID → 弹窗打开的本地时钟，取自 askUser.askedAt）：
+  // 时长修复的真实起点。本地流式 part 的 time.start 不可用——完成事件 kind=result
+  // 的服务端权威 startedAt 会把它覆盖成应答后瞬时值（db 实测 start≈end 差 3ms）
+  askAskedAt: Record<string, number>
+
   // 浏览器设置（设置视图「浏览器」条目；浏览器控制状态与 ZCode 客户端公用配置，只读）
   browserConfig: {
     browserControlEnabled: boolean
@@ -586,8 +601,9 @@ interface StoreState {
   /** 应用用量查询局部错误（app-server 不可达/协议错误）*/
   appUsageError: string | null
 
-  // AskUserQuestion 弹窗（deadlineMs = Java 侧应答超时时刻，弹窗倒计时用；旧链路可缺省）
-  askUser: { requestId: string; toolName: string; questions: import('@/types/messages').AskUserQuestion[]; deadlineMs?: number } | null
+  // AskUserQuestion 弹窗（deadlineMs = Java 侧应答超时时刻，弹窗倒计时用；旧链路可缺省。
+  // askedAt = 事件到达时刻：永远等待模式（无 deadlineMs）下 header 的「已等待」正计时起点）
+  askUser: { requestId: string; toolName: string; questions: import('@/types/messages').AskUserQuestion[]; deadlineMs?: number; askedAt?: number } | null
 
   // AskUserQuestion 回看弹窗（消息流工具卡点击打开，只读回看问题/选项/已选答案；
   // 数据为打开瞬间从工具 part 提取的快照，recognized=false 时 raw 为原文回执兜底）
@@ -720,6 +736,10 @@ interface StoreState {
   createMemoryFile: (path: string) => void
   /** 切换「工作区记忆」开关（新会话生效）*/
   setMemoryEnabled: (enabled: boolean) => void
+  /** 切换底部状态栏折叠态（输入框工具条按钮与状态栏本体共享）*/
+  toggleStatusPanel: () => void
+  /** 记录 AskUserQuestion 应答时刻（弹窗确认/取消时调用，补工具卡真实耗时）*/
+  recordAskUserAnswered: () => void
   /** 拉取浏览器设置快照（设置视图「浏览器」条目）*/
   loadBrowserConfig: () => void
   /** 清除内置浏览器数据（cache=保留 Cookie 与本地站点数据；all=全清）*/
@@ -978,6 +998,9 @@ export const useStore = create<StoreState>((set, get) => ({
   memoryError: null,
   memoryEnabled: null,
   memoryToggling: false,
+  statusPanelCollapsed: readStatusPanelConfig().collapsed,
+  askAnsweredAt: {},
+  askAskedAt: {},
 
   browserConfig: null,
   browserBusy: null,
@@ -1037,6 +1060,9 @@ export const useStore = create<StoreState>((set, get) => ({
       // node 测试环境的 window mock 无 addEventListener，一并防护
       if (typeof window.addEventListener === 'function') {
         window.addEventListener(KV_HYDRATED_EVENT, () => set({ steeredMessageIds: readSteerMarkers() }))
+        // 状态栏折叠态迟水合兜底：生产 origin 每次重启变化，store 初值读到的
+        // localStorage 为空（默认展开）——注入写回完成后用权威值校正
+        window.addEventListener(KV_HYDRATED_EVENT, () => set({ statusPanelCollapsed: readStatusPanelConfig().collapsed }))
       }
       window.onEnvStatusChanged = (status: EnvStatus) => set({ envStatus: status })
       // IDE 广播：其他标签切换 provider 启用/禁用后多标签同步（Panel broadcastModelChanges）。
@@ -1972,6 +1998,42 @@ export const useStore = create<StoreState>((set, get) => ({
     if (get().memoryToggling) return
     set({ memoryToggling: true, memoryError: null })
     sendToJava({ op: 'setMemoryEnabled', enabled })
+  },
+
+  toggleStatusPanel: () => {
+    const collapsed = !get().statusPanelCollapsed
+    set({ statusPanelCollapsed: collapsed })
+    // 持久化（写 kv 通道：localStorage 即时 + 去抖回存 PropertiesComponent，
+    // 新标签水合读最新值）
+    writeStatusPanelConfig({ collapsed })
+  },
+
+  recordAskUserAnswered: () => {
+    // 扫当前消息里仍在等待应答的 AskUserQuestion part（同会话同时至多一个挂起
+    // 提问，防御性全记），callID → 应答时刻 + 提问时刻（弹窗 askedAt）。须在应答
+    // sendToJava 之前调用——应答回执可能瞬间触发重拉，晚于重拉就找不到 pending
+    // 态的 part 了。提问时刻取弹窗 askedAt：本地流式 part 的 time.start 会被完成
+    // 事件（kind=result 服务端权威 startedAt）覆盖成应答后瞬时值，不可作起点
+    const now = Date.now()
+    const askedAt = get().askUser?.askedAt
+    const hits: Record<string, number> = {}
+    const starts: Record<string, number> = {}
+    for (const m of get().messages) {
+      for (const p of m.parts ?? []) {
+        if (p.type !== 'tool') continue
+        const tp = p as ToolPart
+        if (tp.tool === 'AskUserQuestion' && (tp.state?.status === 'pending' || tp.state?.status === 'running')) {
+          hits[tp.callID] = now
+          if (askedAt) starts[tp.callID] = askedAt
+        }
+      }
+    }
+    if (Object.keys(hits).length > 0) {
+      set({
+        askAnsweredAt: { ...get().askAnsweredAt, ...hits },
+        askAskedAt: { ...get().askAskedAt, ...starts },
+      })
+    }
   },
 
   loadBrowserConfig: () => {
@@ -3300,7 +3362,7 @@ export function handleResponse(
     case 'askUser':
       // AskUserQuestion 弹窗（服务器反向请求 interaction/requestUserInput）
       console.log('[store] 收到 askUser:', msg.toolName, msg.questions)
-      set({ askUser: { requestId: msg.requestId, toolName: msg.toolName, questions: msg.questions, deadlineMs: msg.deadlineMs }, askUserPendingActive: true })
+      set({ askUser: { requestId: msg.requestId, toolName: msg.toolName, questions: msg.questions, deadlineMs: msg.deadlineMs, askedAt: Date.now() }, askUserPendingActive: true })
       break
 
     case 'exitPlanApproval':
@@ -5029,7 +5091,7 @@ function mergeGoalRefreshSnapshot(
   const backfillById = new Map<string, ZCodeMessage>()
   const incoming = mergeTurnMessages(
     stripLeadingModelChangeMarkers(
-      msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
+      preserveAskUserDurations(msg.messages, st.messages, st.askAnsweredAt, st.askAskedAt).filter((m) => !isHiddenSyntheticMessage(m.info)),
     ),
   ).filter((m) => {
     const hit = st.messages.find((x) => x.info.id === m.info.id)
@@ -5084,6 +5146,71 @@ function mergeGoalRefreshSnapshot(
   if (Object.keys(patch).length > 0) set(patch)
 }
 
+/**
+ * AskUserQuestion 时长保护（工具卡恒 0.0 秒的修复）：服务端快照/落库里该工具的
+ * state.time 是"应答后瞬时口径"——db.sqlite 实测（diag session/messages 直连核对）
+ * end-start≈3ms 且 **start≈end**（服务端在用户应答后才写 time，start 并非提问时刻），
+ * 真实等待窗口只在 part 行 time_created→time_updated，但协议不透出。可用来源：
+ * 弹窗打开时刻（askAskedAt，recordAskUserAnswered 随应答时刻一并记录）与应答时刻
+ * （askAnsweredAt），两者同为客户端时钟才可相减。本地流式 part 的 time.start 已被
+ * 完成事件覆盖（kind=result 的服务端权威 startedAt=应答后瞬时值），只能兜底。
+ * 快照落地（权威整包重拉与 messages 增量合并共用）按 callID 修复；历史会话首拉
+ * 无本地记录，维持服务端口径（真实时长协议不可得，属预期）。
+ */
+export function preserveAskUserDurations(
+  incoming: ZCodeMessage[],
+  local: ZCodeMessage[],
+  answeredAt: Record<string, number> = {},
+  askedAtMap: Record<string, number> = {},
+): ZCodeMessage[] {
+  if (incoming.length === 0) return incoming
+  // 来源1：本地实时 batch 收尾写入的真实时长（start=提问、end=应答后收尾到达）；
+  // 来源2 的起点优先取 askAskedAt（弹窗时刻），本地流式起点仅兜底
+  const localTimes = new Map<string, { start: number; end: number }>()
+  const localStarts = new Map<string, number>()
+  for (const m of local) {
+    for (const p of m.parts ?? []) {
+      if (p.type !== 'tool') continue
+      const tp = p as ToolPart
+      if (tp.tool !== 'AskUserQuestion') continue
+      const t = tp.state?.time
+      if (!t?.start) continue
+      localStarts.set(tp.callID, t.start)
+      if (t.end && t.end - t.start > 1000) localTimes.set(tp.callID, { start: t.start, end: t.end })
+    }
+  }
+  // 来源2：弹窗应答时刻 + 弹窗打开时刻。batch 可能被"重拉先落地 + 已有终态不覆盖
+  // 守卫"跳过，本地 end 不可用；快照与本地流式 part 的 start 都可能是应答后口径
+  // （result 分支 startedAt 权威覆盖），真实提问起点以 askAskedAt 为准
+  const hasAnswer = Object.keys(answeredAt).length > 0
+  const hasAsked = Object.keys(askedAtMap).length > 0
+  if (localTimes.size === 0 && localStarts.size === 0 && !hasAnswer && !hasAsked) return incoming
+  return incoming.map((m) => {
+    if (!(m.parts ?? []).some((p) => p.type === 'tool' && (p as ToolPart).tool === 'AskUserQuestion')) return m
+    return {
+      ...m,
+      parts: m.parts!.map((p) => {
+        if (p.type !== 'tool') return p
+        const tp = p as ToolPart
+        if (tp.tool !== 'AskUserQuestion') return p
+        const t = tp.state?.time
+        if (!t?.start) return p
+        const lt = localTimes.get(tp.callID)
+        if (lt) {
+          if (t.end && t.end - t.start >= lt.end - lt.start) return p
+          return { ...tp, state: { ...tp.state, time: { start: lt.start, end: lt.end } } } as ToolPart
+        }
+        const ans = answeredAt[tp.callID]
+        const realStart = askedAtMap[tp.callID] ?? localStarts.get(tp.callID)
+        if (ans && realStart && ans > realStart && (!t.end || t.end - t.start < 1000)) {
+          return { ...tp, state: { ...tp.state, time: { start: realStart, end: ans } } } as ToolPart
+        }
+        return p
+      }),
+    }
+  })
+}
+
 /** messages 响应的权威落地（常规重拉与对账收尾共用） */
 function applyMessagesSnapshot(
   msg: { messages: ZCodeMessage[]; goalTarget?: unknown; goalStats?: unknown },
@@ -5101,7 +5228,7 @@ function applyMessagesSnapshot(
   const visibleMessages = applyRewindCuts(
     mergeTurnMessages(
       stripLeadingModelChangeMarkers(
-        msg.messages.filter((m) => !isHiddenSyntheticMessage(m.info)),
+        preserveAskUserDurations(msg.messages, st.messages, st.askAnsweredAt, st.askAskedAt).filter((m) => !isHiddenSyntheticMessage(m.info)),
       ),
     ),
     sid ? loadRewindCuts(sid) : [],

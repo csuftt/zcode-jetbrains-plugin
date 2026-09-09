@@ -136,5 +136,9 @@
     "cancel": "撤回引导",
     "cancelling": "正在撤回…",
     "cancelTooLate": "引导已注入当前回合，无法撤回"
+  },
+  "statusPanel": {
+    "hide": "收起状态栏",
+    "show": "展开状态栏"
   }
 }

@@ -398,6 +398,7 @@ export default function App() {
           toolName={askUser.toolName}
           questions={askUser.questions}
           deadlineMs={askUser.deadlineMs}
+          askedAt={askUser.askedAt}
           onClose={() => useStore.setState({ askUser: null })}
         />
       )}

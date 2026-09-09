@@ -175,6 +175,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const steerPending = useStore((s) => s.steerPending)
   // 撤回引导（chip ✕）：v4 deleteQueueItem 撤销在途注入/服务端队列条目
   const cancelSteer = useStore((s) => s.cancelSteer)
+  // 底部状态栏折叠开关（工具条右侧按钮，收起/展开 StatusPanel 本体）
+  const statusPanelCollapsed = useStore((s) => s.statusPanelCollapsed)
+  const toggleStatusPanel = useStore((s) => s.toggleStatusPanel)
   useEffect(() => {
     resetNav()
     setGhostSuffix('')
@@ -1392,10 +1395,10 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         {/* 上方条（cc-gui ContextBar）：附件按钮 + 定时任务 + 上下文圆环 + 子智能体下拉（左侧依次排列）*/}
         <div className="input-box-topbar">
           <button
-            className="context-tool-btn"
+            className="context-tool-btn tip-align-left"
             onClick={() => sendToJava({ op: 'pickFiles' })}
             disabled={disabled}
-            title={t('input.attach')}
+            data-tip={t('input.attach')}
           >
             <span className="codicon codicon-attach" />
           </button>
@@ -1405,7 +1408,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
               className="context-tool-btn"
               onClick={() => (scheduleOpen ? closeSchedulePicker() : openSchedulePicker())}
               disabled={disabled}
-              title={t('input.schedule.button')}
+              data-tip={t('input.schedule.button')}
               type="button"
             >
               <span className="codicon codicon-clockface" />
@@ -1414,6 +1417,16 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
           </div>
           <ContextRing />
           <AgentSelect onManage={onOpenAgentSettings} disabled={disabled} />
+          {/* 状态栏收起/展开：显示中显 chevron-down、隐藏中显 chevron-up（用户定稿）；
+              推到工具条最右，气泡右对齐防溢出裁剪 */}
+          <button
+            type="button"
+            className="context-tool-btn tip-align-right input-box-topbar__status-toggle"
+            onClick={toggleStatusPanel}
+            data-tip={statusPanelCollapsed ? t('input.statusPanel.show') : t('input.statusPanel.hide')}
+          >
+            <span className={`codicon codicon-chevron-${statusPanelCollapsed ? 'up' : 'down'}`} />
+          </button>
           {/* 定时任务弹窗挂在附件栏（topbar）内：底部锚在附件栏顶部之上，不遮输入框编辑区；
               原生日历向下展开不会被 webview 顶部裁切 */}
           {scheduleOpen && (

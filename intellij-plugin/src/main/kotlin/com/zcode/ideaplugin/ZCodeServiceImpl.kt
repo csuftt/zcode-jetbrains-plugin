@@ -244,16 +244,19 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                 credentials = env.credentials,
                 nodePath = env.nodePath,
             )
-            // requestRuntimePreferences 应答：三项与 ZCode 客户端共用 ~/.zcode/v2/setting.json
-            // （设置页「工作区记忆」开关写的也是这份）。每次应答即时读文件——
-            // 切换开关后新建会话立即生效，无需重启 app-server；memoryEnabled=false 时
-            // CLI 强制 memory:{enabled:false}，MEMORY.md 自动记忆不注入上下文
+            // requestRuntimePreferences 应答：memoryEnabled / nativeSearchEnhancementsEnabled
+            // 与 ZCode 客户端共用 ~/.zcode/v2/setting.json（设置页「工作区记忆」开关写的也是
+            // 这份）。每次应答即时读文件——切换开关后新建会话立即生效，无需重启 app-server；
+            // memoryEnabled=false 时 CLI 强制 memory:{enabled:false}，MEMORY.md 自动记忆不注入
+            // 上下文。「提问自动继续」是插件自有配置（ZCodeAskUserConfig，默认关=一直等待），
+            // 透传给服务端让自动继续行为与插件本地超时同一开关、同一语义
             newClient.runtimePreferencesResponder = { _, _ ->
                 val p = com.zcode.ideaplugin.ui.ZCodeClientSettingStore.readRuntimePrefs()
                 com.zcode.ideaplugin.protocol.model.RuntimePreferences(
                     nativeSearchEnhancementsEnabled = p.nativeSearchEnhancementsEnabled,
                     memoryEnabled = p.memoryEnabled,
-                    askUserQuestionAutoResolutionEnabled = p.askUserQuestionAutoResolutionEnabled,
+                    askUserQuestionAutoResolutionEnabled =
+                        com.zcode.ideaplugin.ui.ZCodeAskUserConfig.readConfig().autoContinueEnabled,
                 )
             }
             client = newClient
@@ -453,6 +456,13 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         // ExitPlanMode 识别：toolName 为主，interaction:"plan_approval" 兜底
         val isPlanApproval = toolName == "ExitPlanMode" ||
             params["interaction"]?.jsonPrimitive?.contentOrNull == "plan_approval"
+        // 「提问自动继续」（插件自有配置 zcode.askUser.config，行为栏可切，默认关）：
+        // 关=普通提问不设超时一直等待（弹窗无倒计时）；开=5 分钟未答自动继续（本地
+        // decline + requestRuntimePreferences 透传 true，服务端同语义）。ExitPlanMode
+        // 审批与权限审批不受此开关影响：审批无人应答时无限挂起回合的代价更高，
+        // 维持 5 分钟超时安全侧收尾。每次请求即时读配置——切换开关连「当前提问」也生效
+        val askUserNoTimeout = !isPlanApproval &&
+            !com.zcode.ideaplugin.ui.ZCodeAskUserConfig.readConfig().autoContinueEnabled
         // 内容指纹：toolName + 问题/计划文本，用于识别服务端重试（同内容、新 id）
         val contentKey = "$toolName|${params["input"]?.toString() ?: params["questions"]?.toString() ?: ""}"
 
@@ -501,13 +511,14 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                 log.info("[askUser] ExitPlanMode plan approval pushed to frontend, waiting for user decision...")
             } else {
                 // 普通 AskUserQuestion：{op:"askUser", requestId, questions, toolName}
+                // （提问自动继续关闭时不推 deadlineMs——前端 DialogCountdown 对缺省不渲染倒计时）
                 val questions = params["questions"] ?: kotlinx.serialization.json.JsonArray(emptyList())
                 val askMsg = buildJsonObject {
                     put("op", "askUser")
                     put("requestId", serverRequestId)
                     put("toolName", toolName)
                     put("questions", questions)
-                    put("deadlineMs", System.currentTimeMillis() + USER_INPUT_TIMEOUT_MS)
+                    if (!askUserNoTimeout) put("deadlineMs", System.currentTimeMillis() + USER_INPUT_TIMEOUT_MS)
                 }
                 targetPanel.pushToWebview(askMsg)
                 log.info("[askUser] Pushed to frontend, waiting for user selection...")
@@ -520,8 +531,11 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         // 阻塞等用户选择（在协议客户端的独立线程，不阻塞 reader/EDT）。
         // 超时必须立即 decline 并关闭弹窗：悬空的等待线程 5 分钟后向服务端补发
         // 迟到的 decline，会被当作"用户拒绝了计划"（引发重复 ExitPlanMode）。
+        // 提问自动继续关闭时普通提问无超时（future.get() 无限等）：回合终止/stop/
+        // 面板关闭走 abortPendingUserInputs 的哨兵 complete 唤醒，线程不会永久滞留
         return try {
-            future.get(USER_INPUT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (askUserNoTimeout) future.get()
+            else future.get(USER_INPUT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         } catch (e: java.util.concurrent.TimeoutException) {
             log.warn("[askUser] Answer wait timed out (5 min), auto-declining: $serverRequestId")
             // 关窗 ack 覆盖共享此 future 的全部 id（清理前收集），防弹窗 id 已换新时

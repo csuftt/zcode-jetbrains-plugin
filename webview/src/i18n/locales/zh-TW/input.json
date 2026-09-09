@@ -131,5 +131,9 @@
     "cancel": "撤回引導",
     "cancelling": "正在撤回…",
     "cancelTooLate": "引導已注入當前回合，無法撤回"
+  },
+  "statusPanel": {
+    "hide": "收起狀態列",
+    "show": "展開狀態列"
   }
 }

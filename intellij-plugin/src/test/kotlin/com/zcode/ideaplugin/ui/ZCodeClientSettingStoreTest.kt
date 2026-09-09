@@ -28,15 +28,14 @@ class ZCodeClientSettingStoreTest {
     }
 
     @Test
-    fun `文件缺失时读默认值（对齐 CLI schema：memory 关、native 和 askUser 开）`() {
+    fun `文件缺失时读默认值（对齐 CLI schema：memory 关、native 开）`() {
         val prefs = ZCodeClientSettingStore.readRuntimePrefs(home.absolutePath)
         assertFalse(prefs.memoryEnabled)
         assertTrue(prefs.nativeSearchEnhancementsEnabled)
-        assertTrue(prefs.askUserQuestionAutoResolutionEnabled)
     }
 
     @Test
-    fun `读取客户端写出的三项开关`() {
+    fun `读取客户端写出的两项开关（askUser 自动继续等无关键忽略）`() {
         writeSetting(
             """
             {
@@ -50,7 +49,6 @@ class ZCodeClientSettingStoreTest {
         val prefs = ZCodeClientSettingStore.readRuntimePrefs(home.absolutePath)
         assertTrue(prefs.memoryEnabled)
         assertFalse(prefs.nativeSearchEnhancementsEnabled)
-        assertFalse(prefs.askUserQuestionAutoResolutionEnabled)
     }
 
     @Test

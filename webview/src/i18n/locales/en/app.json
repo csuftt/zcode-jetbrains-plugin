@@ -14,6 +14,8 @@
   "promptRunningHint": "The previous turn is still running and auto-stop failed. Try again later, or click Stop to end the current generation before sending",
   "resumeBusyHint": "The session may still be resuming (the server needs ~1-2 minutes to digest a recovered interrupted turn); the plugin retries subscribing and settings automatically — do not restart the IDE. Thought-level and other settings return once recovered",
   "dialogCountdown": "{{time}} remaining",
+  "dialogElapsed": "Waited {{time}}",
+  "dialogElapsedTitle": "Ask-question auto-continue is off: the request waits indefinitely for your answer",
   "dialogCountdownTitle": "If unanswered until timeout, the request is auto-declined and the dialog closes",
   "changelog": {
     "title": "What's New",
@@ -37,7 +39,9 @@
     "other": "Other (custom answer)",
     "otherPlaceholder": "Type your answer…",
     "back": "Back",
-    "next": "Next"
+    "next": "Next",
+    "collapse": "Collapse",
+    "expand": "Expand"
   },
   "planApproval": {
     "title": "Plan Approval",

@@ -15,10 +15,37 @@
   z-index: 10000;
 }
 
+/* 实时提问弹窗（dock 变体，对齐 cc-gui 底部形态）：底部停靠非模态——透明遮罩 +
+   pointer-events 放行消息区交互，用户可先回看 AI 刚才做了什么再回答（issue #7）。
+   回看弹窗（AskUserReviewDialog，无 dock 类）保持全屏遮罩居中模态 */
+.ask-user-overlay--dock {
+  align-items: flex-end;
+  padding-bottom: 12px;
+  background: transparent;
+  pointer-events: none;
+
+  .ask-user-dialog {
+    pointer-events: auto;
+    animation: ask-user-slide-up 0.18s ease-out;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+  }
+}
+
+@keyframes ask-user-slide-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .ask-user-dialog {
-  width: 480px;
+  width: 440px;
   max-width: 90vw;
-  max-height: 80vh;
+  max-height: 70vh;
   overflow-y: auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border-primary);
@@ -31,21 +58,27 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 16px;
+    padding: 7px 12px;
     border-bottom: 1px solid var(--border-primary);
   }
 
-  &__icon { font-size: 16px; }
-  &__title { font-weight: 600; font-size: 14px; color: var(--text-primary); }
+  &__icon {
+    font-size: 14px;
+    color: var(--accent-primary);
+    flex-shrink: 0;
+  }
+  /* flex:1 吸收剩余空间：进度/倒计时/折叠钮恒靠右——无倒计时的单问题弹窗
+     折叠钮原先紧跟标题（实踩），因为 auto margin 全在 progress/countdown 上 */
+  &__title { font-weight: 600; font-size: 13px; color: var(--text-primary); flex: 1; }
 
   &__body {
-    padding: 16px;
+    padding: 10px 12px;
     flex: 1;
     overflow-y: auto;
   }
 
   &__question {
-    margin-bottom: 16px;
+    margin-bottom: 10px;
     &:last-child { margin-bottom: 0; }
   }
 
@@ -53,27 +86,27 @@
     font-size: 11px;
     color: var(--text-muted);
     text-transform: uppercase;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
   }
 
   &__q-text {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--text-primary);
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     font-weight: 500;
   }
 
   &__options {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
 
   &__option {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 10px 14px;
+    gap: 1px;
+    padding: 6px 10px;
     text-align: left;
     background: var(--bg-primary);
     border: 1px solid var(--border-primary);
@@ -93,7 +126,7 @@
   }
 
   &__opt-label {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--text-primary);
   }
@@ -101,23 +134,23 @@
   &__opt-desc {
     font-size: 11px;
     color: var(--text-tertiary);
-    line-height: 1.4;
+    line-height: 1.35;
   }
 
   &__footer {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding: 12px 16px;
+    padding: 7px 12px;
     border-top: 1px solid var(--border-primary);
   }
 
   &__btn {
-    padding: 6px 16px;
+    padding: 4px 12px;
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
 
     &--cancel {
       background: transparent;
@@ -136,6 +169,31 @@
 
 /* ============ 逐问题模式新增（进度/导航/其他选项/自定义输入） ============ */
 
+/* 收起态（最小化）：条件渲染已去掉 body/footer，这里只补 header 一行的交互态；
+   整行可点展开（组件侧 onClick），按钮自身 stopPropagation 防双触发 */
+.ask-user-dialog--collapsed .ask-user-dialog__header {
+  border-bottom: none;
+  cursor: pointer;
+}
+
+/* 头部收起/展开按钮（dock 弹窗最小化，样式对齐回看的 __close） */
+.ask-user-dialog__collapse {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+}
+
 .ask-user-dialog__progress {
   margin-left: auto;
   font-size: 12px;
@@ -146,8 +204,11 @@
 .ask-user-dialog__multiselect-hint {
   font-size: 11px;
   color: var(--text-tertiary);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
+
+/* 实时弹窗多选无勾选图标（选中态由选项卡高亮表达，__opt-row 已随勾选框移除）；
+   __opt-check 仅回看弹窗使用（✓ 与答案并排） */
 
 .ask-user-dialog__option--other {
   border-style: dashed;
@@ -155,13 +216,13 @@
 
 .ask-user-dialog__custom-input {
   width: 100%;
-  margin-top: 8px;
-  padding: 6px 10px;
+  margin-top: 6px;
+  padding: 5px 8px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   box-sizing: border-box;
 
   &:focus {
@@ -197,29 +258,8 @@
   }
 }
 
-/* 回看：选中选项 ✓ 与答案并排（✓ 居左，label/描述纵向堆叠其右；未选中无图标） */
-.ask-user-dialog--review .ask-user-dialog__option.active {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.ask-user-dialog__opt-check {
-  font-size: 13px;
-  color: var(--accent-primary);
-  flex-shrink: 0;
-  margin-top: 2px; /* 与 label 首行视觉对齐 */
-}
-
-/* label/描述纵向容器（✓ 并排时保持两行结构） */
-.ask-user-dialog__opt-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-/* 只读选项：无 hover 交互语义（cursor 继承 dialog 默认，不伪装可点） */
+/* 回看选项与实时弹窗同构（label/描述纵向堆叠，选中态仅高亮无 ✓）；
+   只读语义：无 hover 交互（cursor 继承 dialog 默认，不伪装可点） */
 .ask-user-dialog--review .ask-user-dialog__option {
   cursor: default;
 

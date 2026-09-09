@@ -14,6 +14,8 @@
   "promptRunningHint": "이전 턴이 여전히 실행 중이고 자동 중지에 실패했습니다. 잠시 후 다시 시도하거나, 중지 버튼으로 현재 생성을 끝낸 뒤 전송하세요",
   "resumeBusyHint": "세션이 아직 복구 중일 수 있습니다(중단된 턴 복구 처리에 약 1~2분 소요). 플러그인이 구독과 설정을 자동으로 재시도하므로 IDE를 재시작하지 마세요. 사고 깊이 등 설정은 복구 후 자동으로 돌아옵니다",
   "dialogCountdown": "남은 시간 {{time}}",
+  "dialogElapsed": "대기 {{time}}",
+  "dialogElapsedTitle": "질문 자동 계속이 꺼져 있어 사용자의 답변을 무기한 기다립니다",
   "dialogCountdownTitle": "시간 초과 시 자동으로 거절 처리되고 대화 상자가 닫힙니다",
   "changelog": {
     "title": "업데이트 소식",
@@ -37,7 +39,9 @@
     "other": "기타 (직접 입력)",
     "otherPlaceholder": "직접 답변 입력…",
     "back": "이전",
-    "next": "다음"
+    "next": "다음",
+    "collapse": "접기",
+    "expand": "펼치기"
   },
   "planApproval": {
     "title": "계획 승인",

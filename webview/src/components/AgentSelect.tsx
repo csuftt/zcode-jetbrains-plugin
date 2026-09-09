@@ -90,7 +90,8 @@ export function AgentSelect({ onManage, disabled = false }: Props) {
         className="selector-button agent-select-button"
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
-        title={selectedAgent?.description ?? t('input.agent.select')}
+        // tooltip 气泡 nowrap 不换行，长描述截断防溢出屏幕
+        data-tip={selectedAgent?.description?.slice(0, 30) ?? t('input.agent.select')}
       >
         {selectedAgent ? (
           <AgentColorDot color={selectedAgent.color} className="agent-select-button__dot" />

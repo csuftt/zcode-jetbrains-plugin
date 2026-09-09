@@ -45,6 +45,7 @@ export function StatusPanel() {
   const openSubagentDetail = useStore((s) => s.openSubagentDetail)
   const openSubagentReport = useStore((s) => s.openSubagentReport)
   const messages = useStore((s) => s.messages)
+  const statusPanelCollapsed = useStore((s) => s.statusPanelCollapsed)
   const [openTab, setOpenTab] = useState<TabType | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   // popover 用 fixed 定位（脱离父级 overflow:hidden 裁剪），位置由 tab 行的 rect 计算
@@ -104,6 +105,9 @@ export function StatusPanel() {
     if (rect) setPopoverPos({ left: rect.left, bottom: window.innerHeight - rect.top + 4 })
     setOpenTab(tab)
   }
+
+  // 折叠开关（输入框工具条右侧按钮控制，cc-gui 同款交互）：收起时整块不渲染
+  if (statusPanelCollapsed) return null
 
   return (
     <div className="status-panel" ref={panelRef}>
