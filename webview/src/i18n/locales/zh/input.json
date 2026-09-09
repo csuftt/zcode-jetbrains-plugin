@@ -56,8 +56,7 @@
     "steerNowShort": "引导",
     "steerDisabled": "已有消息在引导中，请等落位后再引导",
     "imageOnly": "（图片）",
-    "imageBadge": "{{count}} 张图片",
-    "steerImageNow": "引导（带图：本回合结束后自动发出）"
+    "imageBadge": "{{count}} 张图片"
   },
   "pasted": {
     "clickToPreview": "点击预览完整内容",
@@ -132,7 +131,6 @@
     "failedPrefix": "插队失败：",
     "badge": "引导",
     "badgeTitle": "该消息经引导注入运行中的回合",
-    "pendingImage": "带图引导 · 本回合结束后自动发出",
     "cancel": "撤回引导",
     "cancelling": "正在撤回…",
     "cancelTooLate": "引导已注入当前回合，无法撤回"

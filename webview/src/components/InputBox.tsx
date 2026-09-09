@@ -1280,19 +1280,14 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
 
         {/* steer 引导中 chip：排队卡片「引导」按钮发起后，等待服务端注入落位
             （steerDrained 落气泡 / 回合结束未落位清 chip + 横幅提示）。
-            ✕ 撤回（2026-09-08）：v4 deleteQueueItem 撤销在途条目，成功回插队列；
-            带附件引导文案不同（服务端降级为本回合结束后立即发出）*/}
+            ✕ 撤回（2026-09-08）：v4 deleteQueueItem 撤销在途条目，成功回插队列*/}
         {steerPending && (
           <div className="input-box__steer-row">
             <div className="input-box__steer-pending" role="status">
               <span className="codicon codicon-zap" />
               <span className="input-box__steer-pending__preview">{steerPending.text}</span>
               <span className="input-box__steer-pending__label">
-                {steerPending.cancelling
-                  ? t('input.steer.cancelling')
-                  : steerPending.attachments?.length
-                    ? t('input.steer.pendingImage')
-                    : t('input.steer.pending')}
+                {steerPending.cancelling ? t('input.steer.cancelling') : t('input.steer.pending')}
               </span>
               {/* 三点常驻固定占位（交错闪烁），不用 content 动画——那会逐字改变宽度把卡片撑大放小 */}
               {!steerPending.cancelling && (

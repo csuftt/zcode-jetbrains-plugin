@@ -5,9 +5,8 @@
  *   - 单行省略预览（title 悬浮全文；纯图消息显示占位文案与图片数徽标）
  *   - 立即发送：中断当前回合并把该消息提前到队头（turn 结束事件到达后自动发出）
  *   - 引导（steer）：把该消息注入当前运行中的回合（不打断不排队，v4 guide 通道）；
- *     定时来源条目无此入口（定时 ack 语义未验证）。带附件条目可引导（2026-09-08
- *     扩展）：v4 附件走 ref 形态，但 guide+附件服务端必降级为 queue——表现为本回合
- *     结束后立即发出（附件完整保留），chip 文案区分
+ *     定时来源与带附件条目无此入口（0.3.4 定案：guide+附件服务端必降级 queue 且
+ *     降级条目不自动排空，促发链路复杂易错——带图只保留立即发送与排队自动发出）
  *   - 编辑：移出队列并回填到输入框（onEdit 由 InputBox 提供操作编辑器；图片附件
  *     一并回填附件栏）
  *   - 删除：从队列移除
@@ -74,21 +73,15 @@ export function MessageQueue({ onEdit }: Props) {
                 <span className="codicon codicon-export message-queue__send-icon" />
                 <span className="message-queue__send-label">{t('input.queue.sendNowShort')}</span>
               </button>
-              {/* 引导（steer）：定时来源条目不显示；带附件条目可引导（服务端降级为
-                  本回合结束后立即发出，见组件头注释）；已有在途引导时禁用
-                  （同一时刻只收一条在途注入，steerMessage 守卫兜底）*/}
-              {m.scheduledFireAt == null && (
+              {/* 引导（steer）：定时来源与带附件条目不显示（0.3.4 定案砍带图引导，
+                  降级促发链路不可靠）；已有在途引导时禁用（同一时刻只收一条在途
+                  注入，steerMessage 守卫兜底）*/}
+              {m.scheduledFireAt == null && imageCount === 0 && (
                 <button
                   className="message-queue__btn message-queue__btn--steer"
                   onClick={() => sendQueuedAsSteer(m.id)}
                   disabled={!!steerPending}
-                  title={
-                    steerPending
-                      ? t('input.queue.steerDisabled')
-                      : imageCount > 0
-                        ? t('input.queue.steerImageNow')
-                        : t('input.queue.steerNow')
-                  }
+                  title={steerPending ? t('input.queue.steerDisabled') : t('input.queue.steerNow')}
                 >
                   <span className="codicon codicon-zap" />
                   <span className="message-queue__send-label">{t('input.queue.steerNowShort')}</span>

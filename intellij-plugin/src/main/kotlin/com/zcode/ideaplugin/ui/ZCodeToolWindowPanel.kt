@@ -841,7 +841,6 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "stop" -> handleStop(msg)
                         "steerMessage" -> handleSteerMessage(msg)
                         "cancelSteer" -> handleCancelSteer(msg)
-                        "promoteQueuedInput" -> handlePromoteQueuedInput(msg)
                         "listFiles" -> handleListFiles(msg)
                         "listCommands" -> handleListCommands(msg)
                         "listMemoryFiles" -> handleListMemoryFiles(msg)
@@ -3984,11 +3983,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /**
      * steerMessage — 引导式插队（前端 InputBox 流式中触发，2026-09-07 探针定案）：
      * v4/command sendText requestedDelivery=guide 把文本注入运行中的回合。
-     * 带附件（2026-09-08 扩展）：v4 sendText 附件走 ref 引用形态（strict schema），
-     * 非 URI ref 服务端按磁盘路径读——把 webview 的 dataBase64 图片落临时文件后以
-     * 绝对路径作 ref。guide+附件服务端必降级为 queue（runtime.steerTurn 只收纯文本），
-     * 本回合结束后由前端促发（promoteQueuedInput），此处只管受理。
-     * commandId 由前端传入（queueItemId = queue_<commandId> 前端可预知，供撤销/促发）。
+     * 仅纯文本（0.3.4 定案砍带附件引导：guide+附件服务端必降级 queue 且降级条目
+     * 不自动排空，促发链路复杂且实测不可靠——带图只保留立即发送与排队自动发出）。
+     * commandId 由前端传入（queueItemId = queue_<commandId> 前端可预知，供撤销）。
      * 受理即返回（注入过程由 legacy 流 turn.steerQueued/steerDrained 事件驱动前端
      * 渲染，本 handler 不等落位）；失败内联 error 字段——前端据此清乐观 chip 并
      * 横幅提示（走通用 errorResponse 会丢 steer 上下文，chip 只能等回合结束兜底清）。
@@ -3999,13 +3996,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val text = msg["text"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 text")
         val commandId = msg["commandId"]?.jsonPrimitive?.content ?: "steer-${java.util.UUID.randomUUID()}"
-        val refs = writeSteerAttachmentFiles(msg["attachments"])
         return try {
             val result = project.zCodeService().getClient()
-                .steerViaV4(sessionId, text, commandId, refs)
+                .steerViaV4(sessionId, text, commandId)
             val accepted = result["status"]?.jsonPrimitive?.content == "accepted"
             val delivery = result["result"]?.jsonObject?.get("delivery")?.jsonPrimitive?.contentOrNull ?: ""
-            log.info("steer accepted=$accepted delivery=$delivery sessionId=$sessionId textLength=${text.length} attachments=${refs?.size ?: 0}")
+            log.info("steer accepted=$accepted delivery=$delivery sessionId=$sessionId textLength=${text.length}")
             buildJsonObject {
                 put("op", "steerMessage")
                 put("sessionId", sessionId)
@@ -4020,53 +4016,6 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("sessionId", sessionId)
                 put("error", "${e.message}")
             }
-        }
-    }
-
-    /**
-     * steer 附件落盘：webview 的 {filename,mimeType,sizeBytes,dataBase64} 图片数组 →
-     * 临时文件 V4AttachmentRef（ref=绝对路径）。任一附件解析失败整体放弃（返回 null
-     * 按纯文本 steer——与附件一起丢的文本不该被整条拦下）；目录下 >24h 的旧文件顺手清理。
-     */
-    private fun writeSteerAttachmentFiles(el: JsonElement?): List<com.zcode.ideaplugin.protocol.model.V4AttachmentRef>? {
-        val arr = el as? JsonArray ?: return null
-        if (arr.isEmpty()) return null
-        val dir = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "zcode-gui-steer")
-        try {
-            java.nio.file.Files.createDirectories(dir)
-            // 过期清理（24h 前的遗留临时图）：steer 受理后附件文件生命周期不可知，只能惰性清
-            val cutoff = System.currentTimeMillis() - 24 * 3600 * 1000L
-            java.nio.file.Files.list(dir).use { stream ->
-                stream.filter { it.fileName.toString().endsWith(".img") }
-                    .forEach { p ->
-                        try {
-                            if (java.nio.file.Files.getLastModifiedTime(p).toMillis() < cutoff) {
-                                java.nio.file.Files.deleteIfExists(p)
-                            }
-                        } catch (_: Exception) {
-                        }
-                    }
-            }
-            val refs = arr.mapNotNull { item ->
-                val o = item as? JsonObject ?: return@mapNotNull null
-                val dataBase64 = o["dataBase64"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                val mime = o["mimeType"]?.jsonPrimitive?.content ?: "image/png"
-                val filename = (o["filename"]?.jsonPrimitive?.content ?: "image.png")
-                    .replace(Regex("[^a-zA-Z0-9._-]"), "_")
-                val bytes = java.util.Base64.getDecoder().decode(dataBase64)
-                val path = dir.resolve("${java.util.UUID.randomUUID()}-$filename.img")
-                java.nio.file.Files.write(path, bytes)
-                com.zcode.ideaplugin.protocol.model.V4AttachmentRef(
-                    ref = path.toAbsolutePath().toString(),
-                    fileName = filename,
-                    mime = mime,
-                    bytes = bytes.size.toLong(),
-                )
-            }
-            return refs.ifEmpty { null }
-        } catch (e: Exception) {
-            log.warn("steer attachment materialize failed (fallback to text-only): ${e.message}")
-            return null
         }
     }
 
@@ -4096,38 +4045,6 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("sessionId", sessionId)
                 put("queueItemId", queueItemId)
                 put("removed", false)
-                put("error", "${e.message}")
-            }
-        }
-    }
-
-    /**
-     * promoteQueuedInput — 促发服务端队列条目立即执行：带附件的 steer 被服务端降级为
-     * queue 后不会自动排空（探针定案，sendQueuedNow 是客户端职责），回合结束时前端
-     * 调本 op（v4 sendQueuedNow，官方客户端 autoDrainPromotion 同款原语）开新回合。
-     * 条目已不存在（异常双促发）按 ok=false 静默，前端不重试。
-     */
-    private fun handlePromoteQueuedInput(msg: JsonObject): JsonObject {
-        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
-            ?: return errorResponse("缺少 sessionId")
-        val queueItemId = msg["queueItemId"]?.jsonPrimitive?.content
-            ?: return errorResponse("缺少 queueItemId")
-        return try {
-            val r = project.zCodeService().getClient().sendQueuedNowViaV4(sessionId, queueItemId)
-            log.info("queued input promoted: $queueItemId status=${r["status"]}")
-            buildJsonObject {
-                put("op", "promoteQueuedInput")
-                put("sessionId", sessionId)
-                put("queueItemId", queueItemId)
-                put("ok", true)
-            }
-        } catch (e: Exception) {
-            log.warn("queued input promote failed: $queueItemId — ${e.message}")
-            buildJsonObject {
-                put("op", "promoteQueuedInput")
-                put("sessionId", sessionId)
-                put("queueItemId", queueItemId)
-                put("ok", false)
                 put("error", "${e.message}")
             }
         }

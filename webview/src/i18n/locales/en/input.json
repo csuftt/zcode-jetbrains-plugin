@@ -56,8 +56,7 @@
     "steerNowShort": "Steer",
     "steerDisabled": "A message is already steering — wait for it to land",
     "imageOnly": "(image)",
-    "imageBadge": "{{count}} image(s)",
-    "steerImageNow": "Steer (with image: sends right after this turn)"
+    "imageBadge": "{{count}} image(s)"
   },
   "pasted": {
     "clickToPreview": "Click to preview full content",
@@ -132,7 +131,6 @@
     "failedPrefix": "Steer failed: ",
     "badge": "Steered",
     "badgeTitle": "This message was steered into the running turn",
-    "pendingImage": "Image steer · sends right after this turn",
     "cancel": "Cancel steer",
     "cancelling": "Cancelling…",
     "cancelTooLate": "Steer already injected into the running turn, cannot cancel"
