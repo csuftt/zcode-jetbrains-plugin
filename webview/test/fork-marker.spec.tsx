@@ -148,6 +148,27 @@ describe('分叉入口（assistant 回复 footer）', () => {
   })
 })
 
+describe('守卫消息级（diag-fork29 定案：回合中历史轮可分叉）', () => {
+  it('会话 streaming 中，历史完成回复的分叉仍放行（store 消息级守卫）', () => {
+    useStore.setState({ streaming: true, streamingMessageId: 'msg_reply_other' })
+    useStore.getState().forkFromMessage(SID, 'msg_reply_b')
+    expect(useStore.getState().forkBusy).toBe(true)
+  })
+
+  it('目标消息本身在流式 → 拒绝并提示（双保险兜底）', () => {
+    useStore.setState({ streaming: true, streamingMessageId: 'msg_reply_b' })
+    useStore.getState().forkFromMessage(SID, 'msg_reply_b')
+    expect(useStore.getState().forkBusy).toBe(false)
+    expect(useStore.getState().lastError).toContain('无法分叉')
+  })
+
+  it('编辑重放期 → 拒绝（rewind 截断历史中，分叉目标可能被截）', () => {
+    useStore.setState({ streaming: false, editReplay: { targetMsgId: 'msg_x', text: 'x', rewound: true } })
+    useStore.getState().forkFromMessage(SID, 'msg_reply_b')
+    expect(useStore.getState().forkBusy).toBe(false)
+  })
+})
+
 describe('历史列表 fork 会话徽标', () => {
   it('sessionKind=fork 的列表条目渲染分支图标徽标', async () => {
     const { SessionItem } = await import('@/components/SessionItem')

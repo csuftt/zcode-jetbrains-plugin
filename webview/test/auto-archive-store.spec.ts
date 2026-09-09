@@ -49,6 +49,7 @@ beforeEach(() => {
     autoArchiveRunning: false,
     autoArchiveLastRunCount: null,
     autoArchiveLastRunSkipped: false,
+    autoArchiveLastSweepAt: null,
   })
 })
 
@@ -85,19 +86,29 @@ describe('listSessions staleLocal 收窄', () => {
 })
 
 describe('autoArchiveRan skipped', () => {
-  it('skipped=disabled：不动 lastRunCount、置 skipped、不刷新会话列表', () => {
+  it('skipped=disabled：不动 lastRunCount/lastSweepAt、置 skipped、不刷新会话列表', () => {
+    useStore.setState({ autoArchiveLastSweepAt: 11111 })
     const before = sentRequests.filter((r) => r.op === 'listSessions').length
-    pushResponse({ op: 'autoArchiveRan', count: 0, skipped: 'disabled', records: [] })
+    pushResponse({ op: 'autoArchiveRan', count: 0, skipped: 'disabled', lastSweepAt: 11111, records: [] })
     expect(useStore.getState().autoArchiveLastRunSkipped).toBe(true)
     expect(useStore.getState().autoArchiveLastRunCount).toBeNull()
+    expect(useStore.getState().autoArchiveLastSweepAt).toBe(11111)
     expect(sentRequests.filter((r) => r.op === 'listSessions').length).toBe(before)
   })
 
-  it('正常轮：落 count、清 skipped、触发列表刷新', () => {
-    pushResponse({ op: 'autoArchiveRan', count: 3, records: [] })
+  it('正常轮：落 count/lastSweepAt、清 skipped、触发列表刷新', () => {
+    pushResponse({ op: 'autoArchiveRan', count: 3, lastSweepAt: 22222, records: [] })
     expect(useStore.getState().autoArchiveLastRunCount).toBe(3)
     expect(useStore.getState().autoArchiveLastRunSkipped).toBe(false)
+    expect(useStore.getState().autoArchiveLastSweepAt).toBe(22222)
     expect(sentRequests.some((r) => r.op === 'listSessions')).toBe(true)
+  })
+
+  it('autoArchiveConfig：落 lastSweepAt（0=从未 → null）', () => {
+    pushResponse({ op: 'autoArchiveConfig', enabled: false, olderThanDays: 7, lastSweepAt: 33333 })
+    expect(useStore.getState().autoArchiveLastSweepAt).toBe(33333)
+    pushResponse({ op: 'autoArchiveConfig', enabled: false, olderThanDays: 7, lastSweepAt: 0 })
+    expect(useStore.getState().autoArchiveLastSweepAt).toBeNull()
   })
 
   it('未启用时 runAutoArchiveNow 不发起 op', () => {

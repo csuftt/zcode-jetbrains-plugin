@@ -35,6 +35,7 @@
     "daysLabel": "Retention period",
     "daysValue": "After {{count}} days",
     "sharedHint": "The switch and retention period are shared with the ZCode desktop client; changes on either side take effect on both",
+    "lastSweep": "Last scan: {{time}}",
     "runTitle": "Manual scan",
     "runNow": "Scan now",
     "running": "Scanning…",

@@ -35,6 +35,7 @@
     "daysLabel": "归档保留时长",
     "daysValue": "{{count}} 天后归档",
     "sharedHint": "开关与保留时长和 ZCode 客户端共享，两端任一处修改均同步生效",
+    "lastSweep": "最近扫描：{{time}}",
     "runTitle": "手动扫描",
     "runNow": "立即扫描",
     "running": "扫描中…",

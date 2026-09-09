@@ -2026,6 +2026,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("op", "autoArchiveConfig")
             put("enabled", cfg.enabled)
             put("olderThanDays", cfg.olderThanDays)
+            put("lastSweepAt", autoArchiveService().lastSweepAt())
         }
     }
 
@@ -2060,6 +2061,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("op", "autoArchiveRan")
             put("count", record?.count ?: 0)
             if (!enabled) put("skipped", "disabled")
+            put("lastSweepAt", autoArchiveService().lastSweepAt())
             put("records", handleGetAutoArchiveRecords()["records"] ?: JsonArray(emptyList()))
         }
     }

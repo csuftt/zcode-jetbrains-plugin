@@ -38,6 +38,7 @@ export function AutoArchivePanel() {
   const running = useStore((s) => s.autoArchiveRunning)
   const lastRunCount = useStore((s) => s.autoArchiveLastRunCount)
   const lastRunSkipped = useStore((s) => s.autoArchiveLastRunSkipped)
+  const lastSweepAt = useStore((s) => s.autoArchiveLastSweepAt)
   const loadAutoArchiveData = useStore((s) => s.loadAutoArchiveData)
   const setAutoArchiveConfig = useStore((s) => s.setAutoArchiveConfig)
   const runAutoArchiveNow = useStore((s) => s.runAutoArchiveNow)
@@ -67,6 +68,13 @@ export function AutoArchivePanel() {
           disabled={!configLoaded}
           onToggle={() => setAutoArchiveConfig(!enabled, days)}
         />
+        {/* 开启时显示最近一次成功扫描时间（无论有无归档；手动/定时共用一行） */}
+        {enabled && lastSweepAt != null && (
+          <small className="auto-archive-panel__hint auto-archive-panel__last-sweep">
+            <span className="codicon codicon-clock" />
+            <span>{t('history.autoArchive.lastSweep', { time: formatTs(lastSweepAt) })}</span>
+          </small>
+        )}
         {/* 保留天数常显：开关关着也能预览当前档位/调整（与客户端一致——时长独立于开关） */}
         <div className="selector-button-wrap auto-archive-panel__days">
           <span className="auto-archive-panel__days-label">{t('history.autoArchive.daysLabel')}</span>

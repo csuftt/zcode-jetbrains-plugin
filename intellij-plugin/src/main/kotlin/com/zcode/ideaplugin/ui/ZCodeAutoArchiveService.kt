@@ -53,6 +53,9 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
         /** 归档记录存储 key（project 级，JSON 数组，新记录插头部） */
         const val STORAGE_KEY = "zcode.autoArchiveRecords.v1"
 
+        /** 最近成功扫描时间 key（独立于归档记录：大多数轮次归档 0 条不落记录，但时间要记） */
+        const val LAST_SWEEP_KEY = "zcode.autoArchive.lastSweep.v1"
+
         /** 记录上限（超出丢最旧）；单轮归档条目上限（防御性：极端项目一次归档数百条） */
         const val RECORDS_MAX = 50
         private const val SESSIONS_MAX_PER_RECORD = 200
@@ -141,6 +144,10 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
     /** 读取全部归档记录（损坏降级空表，不阻塞展示） */
     fun loadRecords(): List<ArchiveRecord> = parseRecords(PropertiesComponent.getInstance(project).getValue(STORAGE_KEY))
 
+    /** 最近一次成功扫描的时间戳（无论有无归档；0=从未扫过）。失败轮不更新。
+     *  存字符串——241 平台 PropertiesComponent 无 long 存取重载 */
+    fun lastSweepAt(): Long = PropertiesComponent.getInstance(project).getValue(LAST_SWEEP_KEY)?.toLongOrNull() ?: 0L
+
     /**
      * 单轮扫描（mode: auto=定时 / manual=手动触发）。
      * **两种模式都受共享开关约束**（用户定案 2026-09-08：未启用时手动扫描也不生效——
@@ -161,6 +168,9 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
         } catch (e: Exception) {
             log.warn("[auto-archive] sweep failed: ${e.message}"); return null
         }
+        // 成功跑完就记最近扫描时间（无论归档 0 条还是 N 条——"最近扫描"是调度健康度信号，
+        // 放在 isEmpty 判定之前；失败轮不更新，保持上一次成功值）
+        PropertiesComponent.getInstance(project).setValue(LAST_SWEEP_KEY, System.currentTimeMillis().toString())
         if (archived.isEmpty()) return null
         val record = ArchiveRecord(
             ts = System.currentTimeMillis(),

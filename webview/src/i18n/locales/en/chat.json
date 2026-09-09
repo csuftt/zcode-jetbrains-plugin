@@ -152,7 +152,7 @@
     "compact": "Compact conversation history to free up context space"
   },
   "fork": {
-    "busy": "Can't fork while a turn is running — wait for it to finish",
+    "busy": "Can't fork while the reply is generating or an edit replay is in progress",
     "confirmTitle": "Fork a new session from this reply?",
     "confirmMessage": "History is kept up to this reply (inclusive); the original session stays untouched.",
     "confirmOk": "Fork"

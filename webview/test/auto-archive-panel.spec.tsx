@@ -52,6 +52,7 @@ beforeEach(() => {
     autoArchiveRunning: false,
     autoArchiveLastRunCount: null,
     autoArchiveLastRunSkipped: false,
+    autoArchiveLastSweepAt: 1700000000000,
   })
 })
 
@@ -104,6 +105,13 @@ describe('自动归档面板', () => {
     expect(mockedSend).not.toHaveBeenCalledWith({ op: 'runAutoArchiveNow' })
     expect(useStore.getState().autoArchiveRunning).toBe(false)
     expect(screen.getByText('开启上方「自动归档旧任务」开关后可手动触发扫描')).not.toBeNull()
+  })
+
+  it('开启且有扫描史：配置卡小字显示最近扫描时间；关闭后不显示', () => {
+    render(<AutoArchivePanel />)
+    expect(screen.getByText(/最近扫描：\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)).not.toBeNull()
+    fireEvent.click(document.querySelector('.setting-toggle__switch')!)
+    expect(screen.queryByText(/最近扫描：/)).toBeNull()
   })
 
   it('skipped 轮：显示未执行提示而非归档数', () => {

@@ -832,10 +832,10 @@ export type JavaResponse =
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }
   | { op: 'sessionArchiveDeleted'; sessionId: string }
-  | { op: 'autoArchiveConfig'; enabled: boolean; olderThanDays: number }
+  | { op: 'autoArchiveConfig'; enabled: boolean; olderThanDays: number; lastSweepAt: number }
   | { op: 'autoArchiveConfigChanged'; enabled: boolean; olderThanDays: number }
   | { op: 'autoArchiveRecords'; records: AutoArchiveRecord[] }
-  | { op: 'autoArchiveRan'; count: number; skipped?: 'disabled'; records: AutoArchiveRecord[] }
+  | { op: 'autoArchiveRan'; count: number; skipped?: 'disabled'; lastSweepAt: number; records: AutoArchiveRecord[] }
   | { op: 'archivedSessions'; sessions: SessionInfo[] }
   /** copyImage 回执：Java 系统剪贴板写入结果 */
   | { op: 'imageCopied'; ok: boolean; error?: string }

@@ -661,6 +661,8 @@ interface StoreState {
   autoArchiveLastRunCount: number | null
   /** 最近一轮手动扫描被跳过（开关未启用——扫描不生效）*/
   autoArchiveLastRunSkipped: boolean
+  /** 最近一次成功扫描时间（无论有无归档；null=从未，Kotlin 持久化）*/
+  autoArchiveLastSweepAt: number | null
   /** 进自动归档 tab 拉取配置+记录 */
   loadAutoArchiveData: () => void
   /** 写共享配置（乐观更新，ack 校正）*/
@@ -903,6 +905,7 @@ export const useStore = create<StoreState>((set, get) => ({
   autoArchiveRunning: false,
   autoArchiveLastRunCount: null,
   autoArchiveLastRunSkipped: false,
+  autoArchiveLastSweepAt: null,
 
   messages: [],
   loadingMessages: false,
@@ -1341,13 +1344,16 @@ export const useStore = create<StoreState>((set, get) => ({
    * 从历史消息分叉新会话（B2 一期）：session/fork 保留到目标消息（含）。
    * 入口在 assistant 回复的 footer「已工作」行，target=该回复（保留到它为止，从这条
    * 回复之后岔出去试另一方案）。命名/打开编排见 case 'sessionForked'。
-   * 运行中分叉服务端并不拒绝（diag-fork2.py ⑤ 实测与文档不符），但分叉到的是中间态，
-   * 且与编辑/停止交互未定义——此处兜底拒绝（按钮已按 streaming 隐藏，双保险）。
+   * 守卫是消息级而非会话级（diag-fork29 实测定案）：回合进行中分叉已完成历史轮，
+   * 服务端照常受理——canFork 不随活跃回合收回、CAS 用 revisionAtDecision 重试一次即过、
+   * 新会话快照完整（历史两条原文保留+fork 来源合成消息，不含进行中轮）、原回合不受扰。
+   * 只挡：目标消息本身在流式（中间态无意义，按钮层已按消息级 streaming 隐藏，双保险）
+   * 与编辑重放期（rewind 截断历史中，分叉目标可能被截）。
    */
   forkFromMessage: (sessionId, messageId) => {
     const st = get()
     if (st.forkBusy) return
-    if (st.streaming || st.editReplay) {
+    if (st.editReplay || messageId === st.streamingMessageId) {
       set({ lastError: i18n.t('chat.fork.busy') })
       return
     }
@@ -2857,7 +2863,7 @@ export function handleResponse(
 
     case 'autoArchiveConfig': {
       // 共享配置水合（进自动归档 tab 拉取；Kotlin 读 ~/.zcode/v2/setting.json）
-      set({ autoArchiveConfigLoaded: true, autoArchiveEnabled: msg.enabled, autoArchiveDays: msg.olderThanDays })
+      set({ autoArchiveConfigLoaded: true, autoArchiveEnabled: msg.enabled, autoArchiveDays: msg.olderThanDays, autoArchiveLastSweepAt: msg.lastSweepAt || null })
       break
     }
 
@@ -2881,6 +2887,8 @@ export function handleResponse(
         autoArchiveRunning: false,
         autoArchiveLastRunCount: skipped ? null : msg.count,
         autoArchiveLastRunSkipped: skipped,
+        // skipped 轮没扫过，最近扫描时间保持原值
+        autoArchiveLastSweepAt: skipped ? get().autoArchiveLastSweepAt : msg.lastSweepAt || null,
       })
       if (!skipped) get().loadSessions()
       break

@@ -902,13 +902,13 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
     case 'deleteArchivedSession':
       return { op: 'sessionArchiveDeleted', sessionId: req.sessionId }
     case 'getAutoArchiveConfig':
-      return { op: 'autoArchiveConfig', enabled: true, olderThanDays: 7 }
+      return { op: 'autoArchiveConfig', enabled: true, olderThanDays: 7, lastSweepAt: Date.now() - 20 * 60_000 }
     case 'setAutoArchiveConfig':
       return { op: 'autoArchiveConfigChanged', enabled: req.enabled, olderThanDays: req.olderThanDays }
     case 'getAutoArchiveRecords':
       return { op: 'autoArchiveRecords', records: mockArchiveRecords }
     case 'runAutoArchiveNow':
-      return { op: 'autoArchiveRan', count: 2, records: mockArchiveRecords }
+      return { op: 'autoArchiveRan', count: 2, lastSweepAt: Date.now(), records: mockArchiveRecords }
     case 'locateSession':
       // mock：固定无宿主标签，让「覆盖当前标签页 / 新标签页打开」弹窗在 dev 可验收
       return { op: 'sessionTabLocated', sessionId: req.sessionId, found: false }

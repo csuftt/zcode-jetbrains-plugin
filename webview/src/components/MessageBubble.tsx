@@ -419,7 +419,8 @@ function AssistantBubble({
 
   // 分叉（B2 一期）：入口在 footer「已工作」行——fork 锚点是已完成的回复（保留到该回复含，
   // 从这条回复之后岔出去试另一方案），未获回答的用户消息没有分叉价值；
-  // 流式中/本地乐观消息不显示（运行中分叉到中间态无意义且与编辑/停止交互未定义）；
+  // 本条消息流式中/本地乐观消息不显示（分叉中间态无意义；其余历史轮回合中照常可分叉，
+  // diag-fork29 实测服务端受理且快照完整）；
   // 老 CLI 无 v4 面（forkSupported=false）隐藏。通道=v4 forkAssistant（官方同款，零文件操作）
   const [confirmFork, setConfirmFork] = useState(false)
   const forkBusy = useStore((s) => s.forkBusy)
