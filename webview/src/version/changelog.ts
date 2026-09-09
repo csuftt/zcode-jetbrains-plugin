@@ -23,6 +23,58 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    "version": "0.3.4",
+    "date": "2026-09-09",
+    "zh": {
+      "sections": [
+        {
+          "title": "新增",
+          "items": [
+            "**历史会话归档与自动归档**：历史视图新增「已归档」页签——不常用的会话可手动归档收起、随时还原，已归档会话也可删除；开启自动归档后，超过保留天数的已完成会话自动移入归档（开关与保留天数和 ZCode 客户端共享），每次自动归档有记录可查。",
+            "**排队消息支持图片**：AI 生成中发送的带图消息正常排队（卡片显示图片徽标），编辑回填不再丢图。",
+            "**询问用户弹窗升级**：弹窗停靠面板底部、可折叠最小化，不再遮挡对话；默认一直等待回答（不再 5 分钟超时强制继续），也可在设置中开启「提问自动继续」恢复超时自动继续；回合结束后提问工具卡可回看——点开即见当时的问题与你的回答（多问题翻页展示）。",
+            "**任务执行中也可分叉**：会话分叉不再要求等待回合结束，AI 执行任务时可随时从历史回复分叉出新会话。",
+            "**状态栏可折叠**：输入框底部状态栏（模型/上下文/额度）可从工具条收起，折叠状态重启后保持。",
+            "**内置渠道自定义 API Key**（issue #8）：团队套餐用户可在设置「模型管理」为内置渠道手动指定 API Key（插件自有配置 ~/.zcgui/config.json，渠道地址与模型清单仍自动跟随客户端）；模型卡片显示当前实际计费的 Key（脱敏展示、可点眼睛查看全部）及来源（自定义 / ZCode 配置 / OAuth），套餐用量页的查询凭证同步显示；客户端选中团队套餐但未配置 Key 时，输入框与卡片给出计费提醒，一键直达配置；清空自定义 Key 即恢复客户端原有计费方式。"
+          ]
+        },
+        {
+          "title": "修复",
+          "items": [
+            "**团队套餐误显示为个人套餐**（issue #8）：团队套餐用户在模型选择器与设置页的套餐徽章此前错误兜底显示「个人套餐」，现已正确识别为「团队套餐」。",
+            "**模型设置栏信息显示不全**：渠道卡片信息过长被截断，现改为头部两行制并允许徽章换行。",
+            "**IDE 2026.1 兼容性**：消除插件验证器自 2026.1 起报告的 ReadAction 弃用警告。",
+            "**远程开发兼容**（issue #6）：Gateway/WSL 远程开发下不再误报「浏览器调试通道不可用」，浏览器控制卡明示远程环境下浏览器工具不可用。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "**History archive & auto-archive**: The history view gains an \"Archived\" tab — archive sessions you rarely use and restore them anytime, or delete archived ones for good. With auto-archive enabled, completed sessions older than the retention window move to the archive automatically (the switch and days are shared with the ZCode client), and every sweep is logged.",
+            "**Images in queued messages**: Messages with images sent while the AI is generating now queue properly (the card shows an image badge), and editing no longer loses the attachments.",
+            "**Ask-user dialog overhaul**: The dialog docks at the bottom of the panel and can be minimized so it no longer covers the conversation. It now waits for your answer indefinitely by default (no more 5-minute forced timeout); opt into \"auto-continue\" in settings to restore the timeout. After the turn ends, the question tool card becomes a reviewable record — click it to see the questions and your answers, paginated.",
+            "**Fork while a task is running**: Session forking no longer requires the turn to finish — fork from any earlier reply even while the AI is working.",
+            "**Collapsible status bar**: The status bar below the input box (model / context / quota) can be collapsed from the toolbar; the state survives restarts.",
+            "**Custom API Key for built-in providers** (issue #8): Team-plan users can now assign a custom API Key to a built-in provider in Settings → Model Management (stored in the plugin's own ~/.zcgui/config.json; the endpoint and model list still follow the client config). The provider card shows the key actually used for billing — masked by default, reveal via the eye icon — along with its source (custom / ZCode config / OAuth), and the usage page shows the same for its query credential. When a team plan is selected but no team key is configured, the input box and the card warn that requests are billed to the personal key, with a one-click shortcut to configure it. Clearing the custom key restores the client's original billing."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "**Team plans shown as personal plan** (issue #8): For team-plan users the plan badge in the model selector and settings wrongly fell back to \"Personal plan\"; it is now recognized as \"Team plan\".",
+            "**Model settings cards truncated**: Channel cards clipped long info; the header is now two-line and badges can wrap.",
+            "**IDE 2026.1 compatibility**: Resolved ReadAction deprecation warnings reported by the plugin verifier since 2026.1.",
+            "**Remote development compatibility** (issue #6): No more false \"browser debug channel unavailable\" banner under Gateway/WSL remote development; the browser control card now makes clear that browser tools are unavailable in remote sessions."
+          ]
+        }
+      ]
+    }
+  },
+  {
     "version": "0.3.3",
     "date": "2026-09-07",
     "zh": {
