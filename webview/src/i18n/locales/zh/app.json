@@ -23,7 +23,10 @@
     "dismiss": "关闭",
     "page": "{{current}} / {{total}}",
     "prev": "上一版",
-    "next": "下一版"
+    "next": "下一版",
+    "starBanner": "开源不易，如果这个插件帮到了你，欢迎分享，顺手点个 Star 支持一下～",
+    "starBtn": "去 Star",
+    "starBtnAria": "打开 GitHub 仓库页面点 Star"
   },
   "newSession": {
     "title": "新建会话",

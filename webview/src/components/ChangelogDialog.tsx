@@ -7,12 +7,15 @@
  *   PropertiesComponent——内置 server 随机端口导致 localStorage 跨重启失效）；
  *   欢迎页版本角标 / 设置页「版本记录」手动打开。
  * 交互：←/→ 翻页、Esc / 点遮罩关闭；≤10 版圆点导航，页码文本（当前/总数）恒显。
+ * 顶部 GitHub 引导横幅（参考 cc-gui ChangelogDialog）：求分享文案 + Star 按钮
+ *   经 openExternal 桥调系统浏览器直达仓库（星标用内联 SVG，不依赖 codicon 字体字形）。
  * props 驱动（entries 可注入，测试用；缺省真实 CHANGELOG_DATA）。
  */
 
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CHANGELOG_DATA, type ChangelogEntry, type ChangelogContent } from '@/version/changelog'
+import { openExternalUrl, GITHUB_REPO_URL } from '@/ipc/bridge'
 import '../styles/changelog-dialog.less'
 
 /** 已读标记的 persist key（App 自动弹判定 + 关闭写回共用；IDE 侧 kvstore 持久） */
@@ -127,6 +130,29 @@ export function ChangelogDialog({ entries = CHANGELOG_DATA, onClose }: Props) {
             aria-label={t('app.changelog.dismiss')}
           >
             <span className="codicon codicon-close" />
+          </button>
+        </div>
+
+        {/* GitHub 引导横幅：求分享文案 + Star 按钮直达仓库（每页恒显） */}
+        <div className="changelog-dialog__star-banner">
+          <span className="changelog-dialog__star-banner-text">{t('app.changelog.starBanner')}</span>
+          <button
+            type="button"
+            className="changelog-dialog__star-btn"
+            onClick={() => openExternalUrl(GITHUB_REPO_URL)}
+            title={t('app.changelog.starBtnAria')}
+            aria-label={t('app.changelog.starBtnAria')}
+          >
+            <svg
+              className="changelog-dialog__star-icon"
+              viewBox="0 0 24 24"
+              width="12"
+              height="12"
+              aria-hidden="true"
+            >
+              <path d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.46L12 17.9l-5.8 3.05 1.11-6.46-4.7-4.58 6.49-.94z" />
+            </svg>
+            <span>{t('app.changelog.starBtn')}</span>
           </button>
         </div>
 

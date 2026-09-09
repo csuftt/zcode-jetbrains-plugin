@@ -6,6 +6,7 @@
  *   - 双语条目：中文段在前英文段在后，中间有语言分隔线
  *   - ←/→ 翻页、Esc 关闭（键盘 capture）；点遮罩关闭
  *   - 页码文本（当前 / 总数）恒显；≤10 版另有圆点导航（active 圆点），>10 版仅页码
+ *   - 顶部 GitHub 引导横幅恒显；Star 按钮经 openExternalUrl 打开仓库地址
  */
 
 // @vitest-environment jsdom
@@ -15,6 +16,13 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import '@/i18n/config'
 import { ChangelogDialog } from '@/components/ChangelogDialog'
 import type { ChangelogEntry } from '@/version/changelog'
+
+vi.mock('@/ipc/bridge', () => ({
+  openExternalUrl: vi.fn(),
+  GITHUB_REPO_URL: 'https://github.com/csuftt/zcode-jetbrains-plugin',
+}))
+
+import { openExternalUrl, GITHUB_REPO_URL } from '@/ipc/bridge'
 
 afterEach(cleanup)
 
@@ -109,5 +117,17 @@ describe('ChangelogDialog 渲染', () => {
   it('entries 为空数组不渲染', () => {
     const { container } = render(<ChangelogDialog entries={[]} onClose={() => {}} />)
     expect(container.querySelector('.changelog-dialog__overlay')).toBeNull()
+  })
+
+  it('GitHub 引导横幅恒显，点 Star 按钮经 openExternalUrl 打开仓库', () => {
+    render(<ChangelogDialog entries={twoEntries} onClose={() => {}} />)
+    expect(document.querySelector('.changelog-dialog__star-banner')).not.toBeNull()
+    expect(document.querySelector('.changelog-dialog__star-banner-text')?.textContent).toBeTruthy()
+    vi.mocked(openExternalUrl).mockClear()
+    fireEvent.click(document.querySelector('.changelog-dialog__star-btn') as HTMLElement)
+    expect(openExternalUrl).toHaveBeenCalledWith(GITHUB_REPO_URL)
+    // 翻到历史版本横幅仍在
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    expect(document.querySelector('.changelog-dialog__star-banner')).not.toBeNull()
   })
 })

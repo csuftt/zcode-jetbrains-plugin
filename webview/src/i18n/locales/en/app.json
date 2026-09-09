@@ -23,7 +23,10 @@
     "dismiss": "Close",
     "page": "{{current}} / {{total}}",
     "prev": "Previous version",
-    "next": "Next version"
+    "next": "Next version",
+    "starBanner": "Enjoying it? Share it with a colleague and give it a star!",
+    "starBtn": "Star on GitHub",
+    "starBtnAria": "Open the GitHub repository and star it"
   },
   "newSession": {
     "title": "New Session",

@@ -23,7 +23,10 @@
     "dismiss": "닫기",
     "page": "{{current}} / {{total}}",
     "prev": "이전 버전",
-    "next": "다음 버전"
+    "next": "다음 버전",
+    "starBanner": "도움이 되셨다면 동료에게 공유하고 스타를 눌러주세요!",
+    "starBtn": "스타 남기기",
+    "starBtnAria": "GitHub 저장소를 열고 스타 누르기"
   },
   "newSession": {
     "title": "새 세션",

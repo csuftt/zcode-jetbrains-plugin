@@ -23,7 +23,10 @@
     "dismiss": "閉じる",
     "page": "{{current}} / {{total}}",
     "prev": "前のバージョン",
-    "next": "次のバージョン"
+    "next": "次のバージョン",
+    "starBanner": "良かったら同僚にシェアして、スターで応援してね！",
+    "starBtn": "スターを付ける",
+    "starBtnAria": "GitHub リポジトリを開いてスターを付ける"
   },
   "newSession": {
     "title": "新規セッション",
