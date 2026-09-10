@@ -28,7 +28,11 @@ import java.util.concurrent.TimeUnit
  * - 配置与客户端共享：~/.zcode/v2/setting.json 的 taskAutoArchiveEnabled /
  *   taskAutoArchiveOlderThanDays（[ZCodeClientSettingStore]，客户端改了插件生效、反之亦然）
  * - 定时扫描本工作区（[TaskIndexStore.autoArchiveStale]：客户端同款判据 + 插件会话补行）；
- *   客户端不跑时自动归档依然由插件执行，两端写同一份 tasks-index 无冲突
+ *   两端写同一份 tasks-index 无冲突
+ * - 调度器随项目启动（[com.zcode.ideaplugin.ZCodeProjectActivity] eager init，缺陷BH：
+ *   懒加载时只有打开归档 tab 才创建，重启后自动归档静默不跑）；扫描「搭便车」——
+ *   客户端未起跳过（不为 7 天粒度的归档在闲置项目拉 node 进程），app-server 新进程
+ *   就绪时 [sweepAfterClientReady] 15s 内补扫一轮
  * - 归档记录落 project 级 PropertiesComponent（不上 webview localStorage：多标签同 origin
  *   串台坑），仅记录归档数 > 0 的轮次，供历史视图「自动归档」tab 展示与展开详情
  */
@@ -64,6 +68,9 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
         /** 扫描周期与首轮延迟（归档是 7 天粒度的低频事务，30min 足够新鲜） */
         private const val SWEEP_PERIOD_MIN = 30L
         private const val FIRST_SWEEP_DELAY_MIN = 2L
+
+        /** 客户端就绪补扫延迟（秒）：给协议握手留缓冲，仍远小于 30min 周期 */
+        private const val CLIENT_READY_SWEEP_DELAY_SEC = 15L
 
         fun getInstance(project: Project): ZCodeAutoArchiveService =
             project.getService(ZCodeAutoArchiveService::class.java)
@@ -141,6 +148,15 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
         log.info("[auto-archive] service initialized")
     }
 
+    /**
+     * 客户端就绪补扫（缺陷BH）：app-server 新进程起来后 [CLIENT_READY_SWEEP_DELAY_SEC] 秒
+     * 投一轮扫描。与定时轮共用同一单线程 executor（串行无并发）；窗口期重复触发无害——
+     * 归档判据幂等（已归档不重复入），扫空轮只刷新时间戳。
+     */
+    fun sweepAfterClientReady() {
+        executor.schedule({ sweepSafely("auto") }, CLIENT_READY_SWEEP_DELAY_SEC, TimeUnit.SECONDS)
+    }
+
     /** 读取全部归档记录（损坏降级空表，不阻塞展示） */
     fun loadRecords(): List<ArchiveRecord> = parseRecords(PropertiesComponent.getInstance(project).getValue(STORAGE_KEY))
 
@@ -152,14 +168,18 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
      * 单轮扫描（mode: auto=定时 / manual=手动触发）。
      * **两种模式都受共享开关约束**（用户定案 2026-09-08：未启用时手动扫描也不生效——
      * 「自动归档」tab 的立即扫描是提前触发定时轮，不是独立归档器）。
-     * 返回本轮记录；未启用/无可归档/环境不可用/扫描失败返回 null（不落记录）。
+     * 返回本轮记录；未启用/客户端未起/无可归档/环境不可用/扫描失败返回 null（不落记录）。
      */
     fun runSweep(mode: String): ArchiveRecord? {
         val cfg = ZCodeClientSettingStore.readAutoArchiveConfig()
         if (!cfg.enabled) return null
         val basePath = project.basePath?.takeIf { it.isNotBlank() } ?: return null
+        // 客户端未起不扫（缺陷BH 语义定案：不为 7 天粒度的归档在闲置项目拉起 node 进程，
+        // 调度器只「搭便车」于已运行的 app-server；客户端就绪场景由 sweepAfterClientReady 兜住）
+        val svc = project.zCodeService()
+        if (!svc.isStarted()) return null
         val client = try {
-            project.zCodeService().getClient()
+            svc.getClient()
         } catch (e: Exception) {
             log.warn("[auto-archive] client unavailable, skip: ${e.message}"); return null
         }

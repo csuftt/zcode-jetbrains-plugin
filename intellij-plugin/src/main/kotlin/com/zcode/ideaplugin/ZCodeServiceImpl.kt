@@ -269,6 +269,15 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             // 面板初始化时环境未就绪会抛 EnvCheckException 跳过注册，若不在此补注册，
             // 用户配好环境后 handler 永远缺席（Mac 首启 PATH 探测失败即触发过）
             registerProtocolHandlersLocked(newClient)
+            // app-server 新进程就绪即补扫自动归档（缺陷BH）：调度器已随项目启动（eager init）
+            // 但客户端可能晚起，此处保证「客户端一起来 15s 内必有一轮」，不必等 30min 周期或
+            // 归档 tab 打开。扫描内部 isStarted 短路，不会递归拉起新进程；只在新进程构造路径
+            // 触发（存量 client 的 getClient 快路径不经此处），无重入风险
+            try {
+                com.zcode.ideaplugin.ui.ZCodeAutoArchiveService.getInstance(project).sweepAfterClientReady()
+            } catch (e: Exception) {
+                log.warn("[auto-archive] client-ready sweep trigger failed: ${e.message}")
+            }
             newClient
         }
     }

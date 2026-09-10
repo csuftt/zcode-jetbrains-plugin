@@ -43,6 +43,8 @@
                     canCloseContents="true"/>
         <!-- 编辑器右键动作的气泡通知（复制AI引用结果反馈） -->
         <notificationGroup id="ZCode" displayType="BALLOON"/>
+        <!-- 项目启动即预热自动归档调度器（缺陷BH：懒加载导致重启后不碰归档 tab 就静默不跑） -->
+        <postStartupActivity implementation="com.zcode.ideaplugin.ZCodeProjectActivity"/>
     </extensions>
 
     <actions>
