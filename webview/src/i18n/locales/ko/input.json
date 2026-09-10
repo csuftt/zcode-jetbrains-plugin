@@ -135,5 +135,9 @@
   "statusPanel": {
     "hide": "상태 표시줄 접기",
     "show": "상태 표시줄 펼치기"
+  },
+  "billing": {
+    "teamNoOverride": "팀 플랜이 선택되었지만 팀 키가 설정되지 않아 개인 플랜 키로 과금되고 있습니다",
+    "goConfig": "설정하기"
   }
 }

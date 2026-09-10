@@ -12,7 +12,8 @@
   "errorLoad": "讀取失敗：{{error}}",
   "plan": {
     "personal": "個人套餐",
-    "trial": "體驗套餐"
+    "trial": "體驗套餐",
+    "team": "團隊套餐"
   },
   "section": {
     "builtin": "內建渠道",
@@ -43,5 +44,26 @@
   "viaFallback": "兜底生效",
   "viaFallbackHint": "客戶端所選渠道憑證不可用，已回退到設定中首個可用的內建渠道",
   "viaFallbackCaptcha": "體驗套餐已兜底",
-  "viaFallbackCaptchaHint": "體驗套餐渠道需人機驗證（滑塊），插件無法代為完成，已兜底到設定中首個可用的內建渠道（個人套餐/API Key）"
+  "viaFallbackCaptchaHint": "體驗套餐渠道需人機驗證（滑塊），插件無法代為完成，已兜底到設定中首個可用的內建渠道（個人套餐/API Key）",
+  "customKeyBadge": "自訂 Key",
+  "customKeyBadgeHint": "該渠道已設定插件自訂 apiKey 覆蓋（~/.zcgui/config.json），會話請求使用此 key",
+  "customKeyTitle": "自訂渠道 Key",
+  "customKeyHint": "為 {{provider}} 手動指定 apiKey，儲存後插件的會話請求改用此 key（渠道位址與模型清單仍跟隨 ZCode 用戶端設定）。團隊套餐用戶：在 bigmodel 開放平台的團隊專案中建立 API Key 後填入，即可使用團隊額度。",
+  "customKeyPlaceholder": "貼上 API Key（留空儲存 = 清除自訂，恢復用戶端設定）",
+  "customKeySave": "儲存",
+  "customKeyClearHint": "目前輸入為空：儲存後將清除自訂 key，恢復用戶端設定",
+  "customKeyKeepHint": "目前未設定自訂 key：留空儲存無變更",
+  "customKeyApplyHint": "儲存後立即生效（新會話起使用此 key）",
+  "activeKeyLabel": "計費 Key",
+  "activeKeyCustom": "自訂",
+  "activeKeyConfig": "ZCode 設定",
+  "activeKeyOauth": "OAuth 登入憑證",
+  "showKey": "顯示完整 Key",
+  "hideKey": "隱藏 Key",
+  "showKeyTitle": "點擊右側眼睛圖示可查看完整 key",
+  "teamNoOverrideWarn": "客戶端選取了團隊方案，但未設定團隊 key，目前請求按個人方案 key 計費",
+  "teamNoOverrideAction": "設定團隊 key",
+  "overrideOnPersonalWarn": "自訂 key 生效中：ZCode 客戶端設定的 key 未被使用",
+  "customKeyClearBtn": "清空自訂 key",
+  "customKeyClearNote": "清空後恢復 ZCode 客戶端設定的 key（OAuth 登入則用登入憑證）"
 }

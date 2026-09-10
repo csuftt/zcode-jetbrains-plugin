@@ -68,10 +68,15 @@ object RuntimeModels {
      *
      * @return provider 不存在或无模型时返回 null
      */
-    fun buildRuntimeModel(providerId: String, modelId: String, configPath: Path = Credentials.defaultConfigPath()): JsonObject? {
+    fun buildRuntimeModel(
+        providerId: String,
+        modelId: String,
+        configPath: Path = Credentials.defaultConfigPath(),
+        keyOverrides: Map<String, String> = ZcGuiConfig.providerKeyOverrides(),
+    ): JsonObject? {
         val pv = readProviders(configPath)?.get(providerId)?.jsonObject ?: return null
         if (pv["models"]?.jsonObject?.keys.isNullOrEmpty()) return null
-        return build(providerId, modelId, pv)
+        return build(providerId, modelId, pv, keyOverrides)
     }
 
     /** config 缺失/解析失败返回 null */
@@ -90,7 +95,12 @@ object RuntimeModels {
         return enabled && pv["kind"]?.jsonPrimitive?.jsonStringOrNull == "anthropic"
     }
 
-    private fun build(providerId: String, modelId: String, pv: JsonObject): JsonObject = buildJsonObject {
+    private fun build(
+        providerId: String,
+        modelId: String,
+        pv: JsonObject,
+        keyOverrides: Map<String, String> = ZcGuiConfig.providerKeyOverrides(),
+    ): JsonObject = buildJsonObject {
         put("revision", "0")
         put("generatedAt", System.currentTimeMillis())
         put("model", buildJsonObject {
@@ -106,15 +116,18 @@ object RuntimeModels {
             options?.get("baseURL")?.jsonPrimitive?.jsonStringOrNull
                 ?.takeIf { it.isNotBlank() }
                 ?.let { put("baseURL", it) }
-            // apiKey 空（oauth 等走凭据存储）时不传该字段——schema 可选，服务端自行解析
-            options?.get("apiKey")?.jsonPrimitive?.jsonStringOrNull
-                ?.takeIf { it.isNotBlank() }
-                ?.let {
-                    put("apiKey", buildJsonObject {
-                        put("source", "inline")
-                        put("value", it)
-                    })
-                }
+            // apiKey 空（oauth 等走凭据存储）时不传该字段——schema 可选，服务端自行解析。
+            // 手填覆盖（~/.zcgui/config.json，issue #8）优先于 config.json 值：runtimeModel
+            // 会把 provider 刷进服务端 workspace 目录（会话链每次 send/resume 都带），
+            // 在此合并即全链路生效，无需注册表推送（推送会被本链覆盖，实测结构性冲突）。
+            val apiKeyValue = keyOverrides[providerId]?.takeIf { it.isNotBlank() }
+                ?: options?.get("apiKey")?.jsonPrimitive?.jsonStringOrNull?.takeIf { it.isNotBlank() }
+            if (apiKeyValue != null) {
+                put("apiKey", buildJsonObject {
+                    put("source", "inline")
+                    put("value", apiKeyValue)
+                })
+            }
             // 该 provider 的全部模型都注册（后续切换同一 provider 的模型不再需要 runtimeModel）。
             // 模型定义必须携带 limit/modalities（缺陷 2026-08-26：只传 modelId 时服务端用残缺模型
             // 覆盖 workspace 里完整定义，custom provider 的 contextWindow 归零 → autocompact

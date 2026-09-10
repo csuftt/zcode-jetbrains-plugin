@@ -35,6 +35,16 @@ data class ZCodeCredentials(
 object Credentials {
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** selectedKey 的团队套餐 mode 前缀（issue #8，自客户端 asar 逆向：team-plan:<providerId>:<产品ID>[:<机构ID>[:<项目ID>]]） */
+    private const val TEAM_PLAN_PREFIX = "team-plan:"
+
+    /**
+     * builtin 渠道 id 段（团队套餐后缀截断用）：providerId 全段为小写字母/数字/连字符
+     * （builtin:bigmodel-coding-plan 等），遇到 productId 的冒号自然停，天然覆盖全部
+     * 内置渠道而无需枚举；截断失败（未来未知形态）按解析失败走兜底链
+     */
+    private val BUILTIN_ID_RE = Regex("^builtin:[a-z0-9-]+")
+
     /**
      * 从 ~/.zcode/v2/config.json 读凭证
      * @throws IllegalStateException 配置缺失或无效（仅展示用；主流程应改用 [loadOrNull] 降级）
@@ -80,17 +90,17 @@ object Credentials {
      * @return 激活的 providerId；未登录内置渠道 / setting 缺失 / 结构不符返回 null
      */
     fun activeBuiltinProviderId(configPath: Path = defaultConfigPath()): String? =
-        activeBuiltinProviderId(
-            configPath,
-            System.getProperty("user.home")?.let { h -> Path.of(h, ".zcode", "v2", "setting.json") },
-        )
+        activeSelection(configPath, System.getProperty("user.home")?.let { h -> Path.of(h, ".zcode", "v2", "setting.json") })?.providerId
 
     /**
      * 双候选 setting.json：config.json 兄弟目录（未迁移场景同目录）优先；不存在则回
      * [entrySetting]（生产 = home 入口；单测注入 fake home）。回退前须过 [ownsConfig]
      * 归属校验，防止读到与本 config 无关的 setting（单测 fake home 与真实机器并存）。
      */
-    internal fun activeBuiltinProviderId(configPath: Path, entrySetting: Path?): String? {
+    internal fun activeBuiltinProviderId(configPath: Path, entrySetting: Path?): String? =
+        activeSelection(configPath, entrySetting)?.providerId
+
+    internal fun activeSelection(configPath: Path, entrySetting: Path?): ActiveSelection? {
         val settingPath = configPath.resolveSibling("setting.json").takeIf { it.exists() }
             ?: entrySetting?.takeIf { it.exists() && ownsConfig(it, configPath) }
         if (settingPath == null) return null
@@ -104,12 +114,16 @@ object Credentials {
             val rawEntry = domain?.let { selected[it] } ?: selected.values.firstOrNull()
             val raw = rawEntry?.jsonPrimitive?.content?.trim()
             if (raw.isNullOrBlank()) return null
-            // selectedKey 形如 "<mode>:<providerId>"（实测 preset:builtin:bigmodel =
-            // API Key 模式、coding-plan:builtin:bigmodel-coding-plan = 订阅模式）；
-            // providerId 自身含冒号（builtin: 前缀），只能按已知 mode 前缀剥，不能按
-            // 冒号切末段
-            val providerId = raw.removePrefix("preset:").removePrefix("coding-plan:")
-            providerId.takeIf { it.isNotEmpty() }
+            // selectedKey 形如 "<mode>:<providerId>[:<组织/项目段>]"（实测 preset:builtin:bigmodel
+            // = API Key 模式、coding-plan:builtin:bigmodel-coding-plan = 订阅模式；团队套餐
+            // = team-plan:builtin:bigmodel-coding-plan:<productId>[:<orgId>:<projectId>]，
+            // issue #8）。渠道条目与个人套餐同一条、同一 oauth 凭证，后缀只是选中上下文。
+            // providerId 自身含冒号（builtin: 前缀），只能按已知 mode 前缀剥，不能按冒号
+            // 切末段；team-plan 剥完还拖着 productId/orgId/projectId，按 builtin 段截断
+            val teamPlan = raw.startsWith(TEAM_PLAN_PREFIX)
+            val stripped = raw.removePrefix("preset:").removePrefix("coding-plan:").removePrefix(TEAM_PLAN_PREFIX)
+            val providerId = if (teamPlan) BUILTIN_ID_RE.find(stripped)?.value else stripped
+            providerId?.takeIf { it.isNotEmpty() }?.let { ActiveSelection(it, teamPlan) }
         } catch (e: Exception) {
             null
         }
@@ -123,7 +137,23 @@ object Credentials {
  * 兜底原因区分于凭证失效（设置页徽章据此展示"体验套餐无法使用"）。
  * 设置页据此展示命中方式徽章。
  */
-data class BuiltinResolution(val providerId: String?, val viaSelected: Boolean, val selectedGated: Boolean = false)
+/**
+ * teamPlan：当前生效渠道是客户端选中的团队套餐（issue #8，selectedKey 带 team-plan:
+ * 前缀）。仅权威命中时为 true——兜底命中的渠道与团队无关（渠道条目与个人套餐同一条，
+ * 是否团队由 selectedKey 前缀决定而非 providerId，UI 徽章据此显示「团队套餐」）。
+ */
+data class BuiltinResolution(
+    val providerId: String?,
+    val viaSelected: Boolean,
+    val selectedGated: Boolean = false,
+    val teamPlan: Boolean = false,
+)
+
+/** setting.json selectedKey 的解析结果：渠道 id + 是否团队套餐选中形态（[Credentials.activeSelection]） */
+internal data class ActiveSelection(
+    val providerId: String,
+    val teamPlan: Boolean,
+)
 
 /**
  * 展示用的有效内置 provider（selectedKey 权威 + config 兜底）。
@@ -145,11 +175,15 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     return try {
         val providers = json.parseToJsonElement(configPath.readText()).jsonObject["provider"]?.jsonObject
             ?: return BuiltinResolution(null, false)
-        val active = activeBuiltinProviderId(configPath)
-        if (active != null && providers[active] != null &&
+        val sel = activeSelection(
+            configPath,
+            System.getProperty("user.home")?.let { h -> Path.of(h, ".zcode", "v2", "setting.json") },
+        )
+        val active = sel?.providerId
+        if (sel != null && active != null && providers[active] != null &&
             isBuiltinUsable(active, providers[active]!!.jsonObject, configPath)
         ) {
-            return BuiltinResolution(active, true)
+            return BuiltinResolution(active, true, teamPlan = sel.teamPlan)
         }
         // 兜底原因标注：激活渠道存在但被门控排除（体验套餐）≠ 凭证失效
         val selectedGated = active != null && providers[active]?.jsonObject?.let { pv ->
@@ -176,8 +210,9 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
         return !apiKey.isNullOrBlank() || hasFamilyOAuthToken(providerId, configPath)
     }
 
-    /** 单个 provider 节点转凭证：enabled + anthropic + baseURL/apiKey/model 非空白才可用 */
-    private fun credentialOf(pv: JsonObject): ZCodeCredentials? {
+    /** 单个 provider 节点转凭证：enabled + anthropic + baseURL/apiKey/model 非空白才可用。
+     *  apiKey 取值 zcgui 覆盖 > config.json（issue #8：env 注入/环境检测与实际计费同源） */
+    private fun credentialOf(pv: JsonObject, providerId: String? = null): ZCodeCredentials? {
         // enabled 缺省视为启用（与 RuntimeModels.isEnabledAnthropic 同口径）：config.json
         // 存在无 enabled 字段但实际启用的自定义 provider（如 DeepSeek），若按不启用
         // 跳过会误报"没有找到 enabled 的 anthropic provider"
@@ -192,7 +227,8 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
         // 体验套餐(zcode-plan 网关)渠道不作为凭证来源：env 注入的 key 必须是插件
         // 实际可用的兜底渠道，否则 app-server 默认模型落在门控渠道上每回合必失败
         if (RuntimeModels.isCaptchaGatedBaseUrl(baseURL)) return null
-        val apiKey = options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return null
+        val apiKey = (providerId?.let { ZcGuiConfig.providerKeyOverrides()[it] }?.takeIf { k -> k.isNotBlank() }
+            ?: options["apiKey"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }) ?: return null
         val model = pv["models"]?.jsonObject?.keys?.firstOrNull() ?: return null
         return ZCodeCredentials(model = model, baseURL = baseURL, apiKey = apiKey)
     }
@@ -200,10 +236,10 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     /** 在 provider 表里找凭证：优先激活渠道，回退首个 enabled + anthropic 完整凭证 */
     private fun pickCredential(providers: JsonObject, activeProviderId: String? = null): ZCodeCredentials? {
         activeProviderId?.let { id ->
-            providers[id]?.let { credentialOf(it.jsonObject) }?.let { return it }
+            providers[id]?.let { credentialOf(it.jsonObject, id) }?.let { return it }
         }
-        for ((_, provider) in providers) {
-            credentialOf(provider.jsonObject)?.let { return it }
+        for ((id, provider) in providers) {
+            credentialOf(provider.jsonObject, id)?.let { return it }
         }
         return null
     }
@@ -225,6 +261,13 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
      * 旧位置，保证探测失败不误伤默认场景。
      */
     fun defaultConfigPath(): Path = configPathFor(System.getProperty("user.home"))
+
+    /** 同 [defaultConfigPath]，home 参数化便于单测（真实 home 无法在测试内替换） */
+    internal fun configPathFor(home: String): Path {
+        val legacy = Path.of(home, ".zcode", "v2", "config.json")
+        val redirected = readDataBaseDir(home)?.let { Path.of(it, ".zcode", "v2", "config.json") }
+        return if (redirected?.isRegularFile() == true) redirected else legacy
+    }
 
     /**
      * ZCode 用户级数据根（dataBaseDir 感知）：`~/.zcode` 或 `<dataBaseDir>/.zcode`。
@@ -250,8 +293,10 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
             val pv = config["provider"]?.jsonObject?.get(providerId)?.jsonObject ?: return null
             val options = pv["options"]?.jsonObject ?: return null
             val baseURL = options["baseURL"]?.jsonPrimitive?.content ?: return null
-            val apiKey = options["apiKey"]?.jsonPrimitive?.content ?: return null
-            if (baseURL.isBlank() || apiKey.isBlank()) return null
+            // 手填覆盖（~/.zcgui/config.json，issue #8）优先于 config.json 值（与 RuntimeModels 同口径）
+            val apiKey = ZcGuiConfig.providerKeyOverrides()[providerId]?.takeIf { it.isNotBlank() }
+                ?: options["apiKey"]?.jsonPrimitive?.content
+            if (baseURL.isBlank() || apiKey.isNullOrBlank()) return null
             ZCodeCredentials(model = modelId, baseURL = baseURL, apiKey = apiKey)
         } catch (e: Exception) {
             null
@@ -270,28 +315,26 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
      *
      * credentials.json 与 config.json 同目录（跟随 dataBaseDir 迁移）。
      */
-    fun hasFamilyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): Boolean {
+    fun hasFamilyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): Boolean =
+        familyOAuthToken(providerId, configPath) != null
+
+    /** 家族 oauth access_token 明文（credentials.json）；订阅套餐无明文 apiKey 时的调用期凭证（设置页激活 key 展示用） */
+    fun familyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): String? {
         val tokenKey = when (providerId) {
             "builtin:bigmodel-coding-plan" -> "oauth:bigmodel:access_token"
             "builtin:zai-coding-plan" -> "oauth:zai:access_token"
-            else -> return false
+            else -> return null
         }
         val credFile = configPath.resolveSibling("credentials.json")
-        if (!credFile.exists()) return false
+        if (!credFile.exists()) return null
         return try {
             json.parseToJsonElement(credFile.readText()).jsonObject[tokenKey]
-                ?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } != null
+                ?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
-            false
+            null
         }
     }
 
-    /** 同 [defaultConfigPath]，home 参数化便于单测（真实 home 无法在测试内替换） */
-    internal fun configPathFor(home: String): Path {
-        val legacy = Path.of(home, ".zcode", "v2", "config.json")
-        val redirected = readDataBaseDir(home)?.let { Path.of(it, ".zcode", "v2", "config.json") }
-        return if (redirected?.isRegularFile() == true) redirected else legacy
-    }
 
     /** 读 setting.json 的 dataBaseDir；未配置/文件缺失/解析失败均返回 null（按未配置处理） */
     private fun readDataBaseDir(home: String): String? =

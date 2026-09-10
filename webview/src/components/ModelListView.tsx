@@ -31,10 +31,14 @@ function formatTokens(n: number): string {
   return `${n}`
 }
 
-/** 待提示的动作（add=工具栏新增、delete=行内删除），null=对话框关闭 */
+/** 待提示的动作（add=工具栏新增、delete=行内删除、key=自定义渠道 key），null=对话框关闭 */
 type PendingAction =
   | { kind: 'add' }
   | { kind: 'delete'; providerName: string; modelName: string }
+  | { kind: 'key'; providerId: string; providerName: string }
+
+/** 自定义 key 输入值（PendingAction.kind=key 期间的受控状态；空=清除） */
+type KeyDraft = { value: string; configured: boolean }
 
 /** 单个模型行：名称 + ID + 上下文/输出徽章 + 删除（提示前往 Zcode 配置）*/
 function ModelRow({ model, onDelete }: { model: ModelManageModel; onDelete: () => void }) {
@@ -83,15 +87,19 @@ function ProviderCard({
   provider,
   builtin = false,
   onDeleteModel,
+  onEditKey,
 }: {
   provider: ModelManageProvider
   builtin?: boolean
   onDeleteModel: (provider: ModelManageProvider, model: ModelManageModel) => void
+  onEditKey?: (provider: ModelManageProvider) => void
 }) {
   const { t } = useTranslation()
   const modelTogglingId = useStore((s) => s.modelTogglingId)
   const toggleModelProvider = useStore((s) => s.toggleModelProvider)
   const toggling = modelTogglingId === provider.providerId
+  // 激活 key 眼睛切换（常态脱敏，点开看全）
+  const [keyVisible, setKeyVisible] = useState(false)
 
   const handleToggle = () => {
     if (!toggling) toggleModelProvider(provider.providerId, !provider.enabled)
@@ -100,69 +108,128 @@ function ProviderCard({
   return (
     <div className={cx('model-list-view__provider', !provider.enabled && 'disabled')}>
       <div className="model-list-view__provider-header">
-        {builtin ? (
-          <span
-            className="model-list-view__provider-active"
-            title={t('models.builtinReadonlyHint')}
-          >
-            <span className="codicon codicon-pass-filled" />
-          </span>
-        ) : (          <button
-            className={cx('model-list-view__toggle', provider.enabled && 'on')}
-            onClick={handleToggle}
-            disabled={toggling}
-            title={provider.enabled ? t('models.disableHint') : t('models.enableHint')}
-          >
+        <div className="model-list-view__provider-main">
+          {builtin ? (
             <span
-              className={cx(
-                'codicon',
-                toggling ? 'codicon-loading spin' : provider.enabled ? 'codicon-check' : 'codicon-circle-slash',
-              )}
-            />
-          </button>
-        )}
-        {builtin && provider.via && (() => {
-          // 兜底原因细分：captchaGated（体验套餐被门控排除）换专属文案，区分于凭证失效
-          const captchaFallback = provider.via === 'fallback' && provider.viaReason === 'captchaGated'
-          const viaText = captchaFallback
-            ? t('models.viaFallbackCaptcha')
-            : provider.via === 'fallback'
-              ? t('models.viaFallback')
-              : t('models.viaSelected')
-          const viaTitle = captchaFallback
-            ? t('models.viaFallbackCaptchaHint')
-            : provider.via === 'fallback'
-              ? t('models.viaFallbackHint')
-              : t('models.viaSelectedHint')
-          return (
-            <span
-              className={cx(
-                'model-list-view__provider-via',
-                provider.via === 'fallback' && 'is-fallback',
-              )}
-              title={viaTitle}
+              className="model-list-view__provider-active"
+              title={t('models.builtinReadonlyHint')}
             >
-              {viaText}
+              <span className="codicon codicon-pass-filled" />
             </span>
-          )
-        })()}
-        <span className={cx('codicon', provider.enabled ? 'codicon-server-environment' : 'codicon-server-process')} />
-        <span className="model-list-view__provider-name">{provider.providerName}</span>
-        <PlanBadge plan={provider.plan} />
-        <span className="model-list-view__provider-id" title={provider.providerId}>
-          {provider.providerId}
-        </span>
-        {!provider.enabled && (
-          <span className="model-list-view__provider-off">{t('models.providerDisabled')}</span>
-        )}
-        {provider.baseURL && (
-          <span className="model-list-view__provider-url" title={provider.baseURL}>
-            {provider.baseURL}
+          ) : (          <button
+              className={cx('model-list-view__toggle', provider.enabled && 'on')}
+              onClick={handleToggle}
+              disabled={toggling}
+              title={provider.enabled ? t('models.disableHint') : t('models.enableHint')}
+            >
+              <span
+                className={cx(
+                  'codicon',
+                  toggling ? 'codicon-loading spin' : provider.enabled ? 'codicon-check' : 'codicon-circle-slash',
+                )}
+              />
+            </button>
+          )}
+          {builtin && provider.via && (() => {
+            // 兜底原因细分：captchaGated（体验套餐被门控排除）换专属文案，区分于凭证失效
+            const captchaFallback = provider.via === 'fallback' && provider.viaReason === 'captchaGated'
+            const viaText = captchaFallback
+              ? t('models.viaFallbackCaptcha')
+              : provider.via === 'fallback'
+                ? t('models.viaFallback')
+                : t('models.viaSelected')
+            const viaTitle = captchaFallback
+              ? t('models.viaFallbackCaptchaHint')
+              : provider.via === 'fallback'
+                ? t('models.viaFallbackHint')
+                : t('models.viaSelectedHint')
+            return (
+              <span
+                className={cx(
+                  'model-list-view__provider-via',
+                  provider.via === 'fallback' && 'is-fallback',
+                )}
+                title={viaTitle}
+              >
+                {viaText}
+              </span>
+            )
+          })()}
+          <span className={cx('codicon', provider.enabled ? 'codicon-server-environment' : 'codicon-server-process')} />
+          <span className="model-list-view__provider-name">{provider.providerName}</span>
+          <PlanBadge plan={provider.plan} />
+          {/* 自定义 key 入口=状态合一的文字按钮：已配置紫色、未配置灰色弱化，点击打开编辑弹窗 */}
+          {builtin && (
+            <button
+              className={cx('model-list-view__provider-key-btn', provider.customKey && 'is-set')}
+              onClick={() => onEditKey?.(provider)}
+              title={provider.customKey ? t('models.customKeyBadgeHint') : t('models.customKeyTitle')}
+            >
+              <span className="codicon codicon-key" />
+              {t('models.customKeyBadge')}
+            </button>
+          )}
+          {!provider.enabled && (
+            <span className="model-list-view__provider-off">{t('models.providerDisabled')}</span>
+          )}
+          <span className="model-list-view__provider-count">
+            {t('models.modelsCount', { count: provider.models.length })}
           </span>
+        </div>
+        <div className="model-list-view__provider-meta">
+          <span className="model-list-view__provider-id" title={provider.providerId}>
+            {provider.providerId}
+          </span>
+          {provider.baseURL && (
+            <span className="model-list-view__provider-url" title={provider.baseURL}>
+              {provider.baseURL}
+            </span>
+          )}
+        </div>
+        {/* 实际生效的计费 key（与 RuntimeModels 构造同优先级，所见即所扣） */}
+        {provider.activeKeyMasked && (
+          <div className="model-list-view__active-key">
+            <span className="model-list-view__active-key-label">
+              <span className="codicon codicon-key" />
+              {t('models.activeKeyLabel')}
+            </span>
+            <span className="model-list-view__active-key-value" title={keyVisible ? undefined : t('models.showKeyTitle')}>
+              {keyVisible ? provider.activeKeyValue : provider.activeKeyMasked}
+            </span>
+            <span className={cx('model-list-view__active-key-src', `src-${provider.activeKeySource}`)}>
+              {provider.activeKeySource === 'custom'
+                ? t('models.activeKeyCustom')
+                : provider.activeKeySource === 'config'
+                  ? t('models.activeKeyConfig')
+                  : t('models.activeKeyOauth')}
+            </span>
+            <button
+              type="button"
+              className="model-list-view__key-eye"
+              onClick={() => setKeyVisible((v) => !v)}
+              title={keyVisible ? t('models.hideKey') : t('models.showKey')}
+            >
+              <span className={cx('codicon', keyVisible ? 'codicon-eye-closed' : 'codicon-eye')} />
+            </button>
+          </div>
         )}
-        <span className="model-list-view__provider-count">
-          {t('models.modelsCount', { count: provider.models.length })}
-        </span>
+        {/* 团队选中未配覆盖：实际按个人 key 计费（黄色提醒 + 直达配置） */}
+        {provider.teamPlanNoOverride && (
+          <div className="model-list-view__bill-warn" role="alert">
+            <span className="codicon codicon-warning" />
+            <span className="model-list-view__bill-warn-text">{t('models.teamNoOverrideWarn')}</span>
+            <button type="button" className="model-list-view__bill-warn-btn" onClick={() => onEditKey?.(provider)}>
+              {t('models.teamNoOverrideAction')}
+            </button>
+          </div>
+        )}
+        {/* 个人选中配了覆盖：客户端 key 未使用（歧义消解提示） */}
+        {provider.overrideOnPersonal && (
+          <div className="model-list-view__bill-note" role="status">
+            <span className="codicon codicon-info" />
+            <span>{t('models.overrideOnPersonalWarn')}</span>
+          </div>
+        )}
       </div>
       {provider.models.length > 0 ? (
         <div className="model-list-view__models">
@@ -191,6 +258,11 @@ export function ModelListView() {
 
   const [query, setQuery] = useState('')
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const setProviderKey = useStore((s) => s.setProviderKey)
+  // 自定义 key 对话框的受控草稿（configured=当前已配置，供"清除"语义提示）
+  const [keyDraft, setKeyDraft] = useState<KeyDraft>({ value: '', configured: false })
+  // 输入框明文切换（密码态常态，眼睛看全——与卡片激活 key 同模式）
+  const [keyInputVisible, setKeyInputVisible] = useState(false)
 
   useEffect(() => {
     loadModelManage()
@@ -226,6 +298,27 @@ export function ModelListView() {
       providerName: provider.providerName,
       modelName: model.modelName,
     })
+  }
+
+  const openKeyEditor = (provider: ModelManageProvider) => {
+    // 已存覆盖回填明文（本地手填值）；无覆盖开空表单
+    setKeyDraft({ value: provider.customKeyValue ?? '', configured: !!provider.customKey })
+    setPendingAction({ kind: 'key', providerId: provider.providerId, providerName: provider.providerName })
+  }
+
+  const commitKey = () => {
+    if (pendingAction?.kind === 'key') {
+      setProviderKey(pendingAction.providerId, keyDraft.value.trim())
+    }
+    setPendingAction(null)
+  }
+
+  // 一键清空：等价留空保存，但明确告诉用户清空后回到什么（客户端配置 key / OAuth）
+  const commitClear = () => {
+    if (pendingAction?.kind === 'key') {
+      setProviderKey(pendingAction.providerId, '')
+    }
+    setPendingAction(null)
   }
 
   return (
@@ -309,6 +402,7 @@ export function ModelListView() {
                 provider={p}
                 builtin
                 onDeleteModel={handleDeleteModel}
+                onEditKey={openKeyEditor}
               />
             ))}
 
@@ -326,7 +420,58 @@ export function ModelListView() {
         </div>
       )}
 
-      {pendingAction && (
+      {pendingAction?.kind === 'key' && (
+        <ConfirmDialog
+          title={t('models.customKeyTitle')}
+          message={
+            <div className="model-list-view__dialog-body">
+              <p>
+                {t('models.customKeyHint', { provider: pendingAction.providerName })}
+              </p>
+              <div className="model-list-view__key-input-wrap">
+                <input
+                  className="model-list-view__key-input"
+                  type={keyInputVisible ? 'text' : 'password'}
+                  value={keyDraft.value}
+                  onChange={(e) => setKeyDraft({ ...keyDraft, value: e.target.value })}
+                  placeholder={t('models.customKeyPlaceholder')}
+                  spellCheck={false}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="model-list-view__key-eye"
+                  onClick={() => setKeyInputVisible((v) => !v)}
+                  title={keyInputVisible ? t('models.hideKey') : t('models.showKey')}
+                >
+                  <span className={cx('codicon', keyInputVisible ? 'codicon-eye-closed' : 'codicon-eye')} />
+                </button>
+              </div>
+              <p className="model-list-view__key-sub">
+                {keyDraft.value.trim() === ''
+                  ? keyDraft.configured
+                    ? t('models.customKeyClearHint')
+                    : t('models.customKeyKeepHint')
+                  : t('models.customKeyApplyHint')}
+              </p>
+              {keyDraft.configured && (
+                <div className="model-list-view__key-clear-row">
+                  <button type="button" className="model-list-view__key-clear-btn" onClick={commitClear}>
+                    {t('models.customKeyClearBtn')}
+                  </button>
+                  <span className="model-list-view__key-clear-note">{t('models.customKeyClearNote')}</span>
+                </div>
+              )}
+            </div>
+          }
+          confirmText={t('models.customKeySave')}
+          cancelText={t('models.dialog.dismiss')}
+          onConfirm={commitKey}
+          onCancel={() => setPendingAction(null)}
+        />
+      )}
+
+      {pendingAction && pendingAction.kind !== 'key' && (
         <ConfirmDialog
           title={
             pendingAction.kind === 'add'

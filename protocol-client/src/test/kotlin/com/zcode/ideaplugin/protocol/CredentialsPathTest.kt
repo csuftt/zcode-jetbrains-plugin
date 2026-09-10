@@ -451,4 +451,114 @@ class CredentialsPathTest {
         assertEquals("builtin:zai", r.providerId)
         assertEquals(false, r.viaSelected)
     }
+
+    // ============ 团队套餐 selectedKey（issue #8） ============
+
+    @Test
+    fun `team-plan selectedKey 剥前缀并截断组织项目后缀`() {
+        // 团队套餐选中标识：team-plan:<providerId>:<productId>[:<orgId>:<projectId>]，
+        // 渠道条目与个人套餐同一条（builtin:bigmodel-coding-plan），后缀只是选中上下文
+        givenSelection(
+            """{"bigmodel": "team-plan:builtin:bigmodel-coding-plan:1069:656077:10086"}""",
+            "bigmodel",
+        )
+        assertEquals(
+            "builtin:bigmodel-coding-plan",
+            Credentials.activeBuiltinProviderId(Credentials.configPathFor(home.toString())),
+        )
+        // 仅 productId 无 org/project 的形态（asar 内 FR 函数的另一分支）
+        givenSelection(
+            """{"bigmodel": "team-plan:builtin:bigmodel-coding-plan:1069"}""",
+            "bigmodel",
+        )
+        assertEquals(
+            "builtin:bigmodel-coding-plan",
+            Credentials.activeBuiltinProviderId(Credentials.configPathFor(home.toString())),
+        )
+        // zai 家族同构
+        givenSelection(
+            """{"zai": "team-plan:builtin:zai-coding-plan:1069:656077"}""",
+            "zai",
+        )
+        assertEquals(
+            "builtin:zai-coding-plan",
+            Credentials.activeBuiltinProviderId(Credentials.configPathFor(home.toString())),
+        )
+    }
+
+    @Test
+    fun `resolution 团队套餐权威命中并标记 teamPlan`() {
+        givenConfig("""
+            {"builtin:bigmodel-coding-plan": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": "sk-plan"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        givenSelection(
+            """{"bigmodel": "team-plan:builtin:bigmodel-coding-plan:1069:656077:10086"}""",
+            "bigmodel",
+        )
+        val r = Credentials.builtinResolution(Credentials.configPathFor(home.toString()))
+        assertEquals("builtin:bigmodel-coding-plan", r.providerId)
+        assertEquals(true, r.viaSelected)
+        assertEquals(true, r.teamPlan)
+    }
+
+    @Test
+    fun `resolution 兜底命中时 teamPlan 不跟随`() {
+        // 团队套餐选中但渠道凭证不可用 → 兜底渠道与团队无关，teamPlan 须为 false
+        givenConfig("""
+            {"builtin:bigmodel-coding-plan": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": ""},
+              "models": {"GLM-5.3": {}}},
+             "builtin:bigmodel": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": "sk-apikey"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        givenSelection(
+            """{"bigmodel": "team-plan:builtin:bigmodel-coding-plan:1069:656077:10086"}""",
+            "bigmodel",
+        )
+        val r = Credentials.builtinResolution(Credentials.configPathFor(home.toString()))
+        assertEquals("builtin:bigmodel", r.providerId)
+        assertEquals(false, r.viaSelected)
+        assertEquals(false, r.teamPlan)
+    }
+
+    @Test
+    fun `team-plan 未知渠道形态解析失败走兜底`() {
+        // builtin 段之后的 productId 无法与前缀分离时（未来未知形态），截断失败
+        // 按解析失败处理 → 兜底首个可用内置，不劣化于修复前行为
+        givenConfig("""
+            {"builtin:bigmodel-coding-plan": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://example.com/api", "apiKey": "sk-plan"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        givenSelection("""{"bigmodel": "team-plan:custom-id:1069"}""", "bigmodel")
+        val r = Credentials.builtinResolution(Credentials.configPathFor(home.toString()))
+        assertEquals("builtin:bigmodel-coding-plan", r.providerId)
+        assertEquals(false, r.viaSelected)
+    }
+
+    @Test
+    fun `team-plan 真实形态解析（issue #8 用户回贴数据）`() {
+        // 2026-09-09 issue 作者回贴的真实 selectedKey：productId 含连字符、org/project
+        // 段含大写与下划线——截断正则锚定 builtin: 段遇冒号即停，后缀字符集无关
+        givenConfig("""
+            {"builtin:bigmodel-coding-plan": {"enabled": true, "kind": "anthropic",
+              "options": {"baseURL": "https://open.bigmodel.cn/api/anthropic", "apiKey": "sk-plan"},
+              "models": {"GLM-5.3": {}}}}
+        """.trimIndent())
+        givenSelection(
+            """{"bigmodel": "team-plan:builtin:bigmodel-coding-plan:product-9cef7c:org-68A67D0703B44CF7A48b016717e0Da62:proj_64e8de92B703471D9754838B997B6a5B"}""",
+            "bigmodel",
+        )
+        val cfg = Credentials.configPathFor(home.toString())
+        assertEquals(
+            "builtin:bigmodel-coding-plan",
+            Credentials.activeBuiltinProviderId(cfg),
+        )
+        val r = Credentials.builtinResolution(cfg)
+        assertEquals(true, r.viaSelected)
+        assertEquals(true, r.teamPlan)
+    }
 }

@@ -311,7 +311,7 @@ interface StoreState {
   /** envSave 请求进行中（设置页环境 tab 保存按钮禁用/转圈）*/
   envSaving: boolean
   /** EnvBanner「去设置」的跳转意图：App 切 settings 视图同时置位，BasicSettingsView 消费后清除 */
-  pendingSettingsSection: 'env' | 'agents' | null
+  pendingSettingsSection: 'env' | 'agents' | 'models' | null
 
   // 会话
   sessions: SessionInfo[]
@@ -505,7 +505,7 @@ interface StoreState {
   /** quota 上次成功拉取时间戳（圆环 popover 缓存 TTL 用）*/
   quotaFetchedAt: number
   /** monitor HTTP 实际取 key 的渠道（用量页提示数据口径；成功响应携带）*/
-  usageProvider: { id: string; name: string } | null
+  usageProvider: { id: string; name: string; keyMasked?: string } | null
 
   // 记忆文件（设置视图「记忆」条目，Kotlin 端固定清单扫描）
   memoryFiles: MemoryFileInfo[] | null
@@ -706,6 +706,10 @@ interface StoreState {
   refreshModels: () => void
   /** 模型清单手动刷新进行中（下拉刷新按钮转圈标记）*/
   modelsRefreshing: boolean
+  /** 生效渠道实际计费 key 来源（custom/config/oauth；展示须与实际扣费一致） */
+  billingKeySource: 'custom' | 'config' | 'oauth' | null
+  /** 客户端选中团队套餐但未配覆盖 → 输入框黄色提醒（配好覆盖后刷新复位） */
+  teamPlanNoOverride: boolean
   /** 切换当前会话模型（session/setModel）*/
   setModel: (modelId: string, providerId: string) => void
   /** 把 persist 记忆的模型下发给指定会话（models 列表已就绪时才生效）*/
@@ -776,6 +780,8 @@ interface StoreState {
   loadMcpLogs: () => void
   /** 拉取模型管理清单（设置视图「模型」条目，config.json 只读结构）*/
   loadModelManage: () => void
+  /** 设置/清除内置渠道的自定义 apiKey 覆盖（空串=清除），写 ~/.zcgui/config.json 并触发注册表推送 */
+  setProviderKey: (providerId: string, apiKey: string) => void
   /** 切换 provider 启用/禁用（写 config.json enabled 字段，回包 modelToggled）*/
   toggleModelProvider: (providerId: string, enabled: boolean) => void
   /** 设置用量明细时间范围并重拉 model/tool 曲线 */
@@ -794,7 +800,7 @@ interface StoreState {
   /** 清除驻留水位提醒（toast 自动消失/手动关闭）*/
   clearResidentPoolNotice: () => void
   /** 设置 EnvBanner「去设置」的跳转意图（BasicSettingsView 消费后清除）*/
-  setPendingSettingsSection: (section: 'env' | 'agents' | null) => void
+  setPendingSettingsSection: (section: 'env' | 'agents' | 'models' | null) => void
   /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
   checkEnv: () => void
   /**
@@ -973,6 +979,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   models: [],
   modelsRefreshing: false,
+  billingKeySource: null,
+  teamPlanNoOverride: false,
   currentModel: null,
   modelInvalidated: false,
   modelAppliedForSession: null,
@@ -1839,9 +1847,9 @@ export const useStore = create<StoreState>((set, get) => ({
     const exists = models.some((m) => m.modelId === saved!.modelId && m.providerId === saved!.providerId)
     if (!exists) {
       // 记忆的模型已不在可选列表（典型：体验套餐 captcha 门控渠道被后端过滤，或配置已删）：
-      // 兜底个人套餐首选、其次列表首个，并回写记忆——否则会话静默跑在服务端默认模型上、
-      // 选择器空占位（2026-08-28 体验套餐过滤定案）
-      const fb = models.find((m) => m.plan === 'personal') ?? models[0]
+      // 兜底生效套餐（个人/团队，issue #8）首选、其次列表首个，并回写记忆——否则会话静默
+      // 跑在服务端默认模型上、选择器空占位（2026-08-28 体验套餐过滤定案）
+      const fb = models.find((m) => m.plan === 'personal' || m.plan === 'team') ?? models[0]
       const fallback = { modelId: fb.modelId, providerId: fb.providerId }
       setPersisted('zcode.currentModel', JSON.stringify(fallback))
       set({ currentModel: fallback, modelAppliedForSession: sessionId, modelSwitchInFlightAt: Date.now() })
@@ -2155,6 +2163,10 @@ export const useStore = create<StoreState>((set, get) => ({
   loadModelManage: () => {
     set({ modelManageLoading: true, modelManageError: null })
     sendToJava({ op: 'modelManageList' })
+  },
+
+  setProviderKey: (providerId: string, apiKey: string) => {
+    sendToJava({ op: 'modelSetProviderKey', providerId, apiKey })
   },
 
   toggleModelProvider: (providerId, enabled) => {
@@ -3430,7 +3442,12 @@ export function handleResponse(
 
     case 'models':
       // modelsRefreshing 与 models 同帧复位（手动刷新的转圈标记，见 refreshModels）
-      set({ models: msg.models, modelsRefreshing: false })
+      set({
+        models: msg.models,
+        modelsRefreshing: false,
+        billingKeySource: msg.billingKeySource ?? null,
+        teamPlanNoOverride: msg.teamPlanNoOverride ?? false,
+      })
       // 模型清单变更后（设置页禁用 provider / Zcode 侧增删模型），已选模型若已不在
       // 列表 → 取消选择，下拉回占位提示让用户重新选；persist 记忆一并清除（防下次水合复活）。
       // modelInvalidated 同时置位：挡住下方 inferCurrentModel——它按消息 footer 的模型名
@@ -3769,7 +3786,11 @@ export function handleResponse(
           usageError: null,
           quotaFetchedAt: Date.now(),
           ...(msg.providerId && {
-            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+            usageProvider: {
+              id: msg.providerId,
+              name: msg.providerName ?? msg.providerId,
+              ...(msg.providerKeyMasked && { keyMasked: msg.providerKeyMasked }),
+            },
           }),
         })
       }
@@ -3900,6 +3921,11 @@ export function handleResponse(
       })
       break
 
+    case 'modelSetProviderKey':
+      // 自定义 key 写入成功（~/.zcgui/config.json + 注册表推送已触发）：重拉管理页刷新徽章
+      if (msg.ok) get().loadModelManage()
+      break
+
     case 'modelManage':
       set({
         modelProviders: msg.providers,
@@ -3950,7 +3976,11 @@ export function handleResponse(
         set({
           modelUsage: msg.data ?? null,
           ...(msg.providerId && {
-            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+            usageProvider: {
+              id: msg.providerId,
+              name: msg.providerName ?? msg.providerId,
+              ...(msg.providerKeyMasked && { keyMasked: msg.providerKeyMasked }),
+            },
           }),
         })
       }
@@ -3963,7 +3993,11 @@ export function handleResponse(
         set({
           toolUsage: msg.data ?? null,
           ...(msg.providerId && {
-            usageProvider: { id: msg.providerId, name: msg.providerName ?? msg.providerId },
+            usageProvider: {
+              id: msg.providerId,
+              name: msg.providerName ?? msg.providerId,
+              ...(msg.providerKeyMasked && { keyMasked: msg.providerKeyMasked }),
+            },
           }),
         })
       }

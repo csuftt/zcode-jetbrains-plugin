@@ -135,5 +135,9 @@
   "statusPanel": {
     "hide": "收起狀態列",
     "show": "展開狀態列"
+  },
+  "billing": {
+    "teamNoOverride": "已選取團隊方案，但未設定團隊 key，目前按個人方案 key 計費",
+    "goConfig": "前往設定"
   }
 }

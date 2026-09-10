@@ -5,6 +5,8 @@ import com.zcode.ideaplugin.protocol.LogRedactor
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
+import com.zcode.ideaplugin.protocol.Credentials
+import com.zcode.ideaplugin.protocol.ZcGuiConfig
 import com.zcode.ideaplugin.protocol.ZCodeProtocolClient
 import com.zcode.ideaplugin.ui.ZCodeToolWindowPanel
 import kotlinx.serialization.json.JsonElement
@@ -13,6 +15,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.concurrent.CompletableFuture

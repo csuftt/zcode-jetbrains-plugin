@@ -12,9 +12,19 @@
   "errorLoad": "读取失败：{{error}}",
   "plan": {
     "personal": "个人套餐",
-    "trial": "体验套餐"
+    "trial": "体验套餐",
+    "team": "团队套餐"
   },
   "vision": "视觉",
+  "customKeyBadge": "自定义 Key",
+  "customKeyBadgeHint": "该渠道已配置插件自定义 apiKey 覆盖（~/.zcgui/config.json），会话请求使用此 key",
+  "customKeyTitle": "自定义渠道 Key",
+  "customKeyHint": "为 {{provider}} 手动指定 apiKey，保存后插件的会话请求改用此 key（渠道地址与模型清单仍跟随 ZCode 客户端配置）。团队套餐用户：在 bigmodel 开放平台的团队项目中创建 API Key 后填入，即可使用团队额度。",
+  "customKeyPlaceholder": "粘贴 API Key（留空保存 = 清除自定义，恢复客户端配置）",
+  "customKeySave": "保存",
+  "customKeyClearHint": "当前输入为空：保存后将清除自定义 key，恢复客户端配置",
+  "customKeyKeepHint": "当前未配置自定义 key：留空保存无变更",
+  "customKeyApplyHint": "保存后立即生效（新会话起使用此 key）",
   "section": {
     "builtin": "内置渠道",
     "builtinHint": "以 ZCode 客户端配置为准，同一时间仅一个生效，切换请前往客户端；体验套餐需人机验证，插件无法使用，已从列表剔除",
@@ -44,5 +54,17 @@
   "viaFallback": "兜底生效",
   "viaFallbackHint": "客户端所选渠道凭证不可用，已回退到配置中首个可用的内置渠道",
   "viaFallbackCaptcha": "体验套餐已兜底",
-  "viaFallbackCaptchaHint": "体验套餐渠道需人机验证（滑块），插件无法代为完成，已兜底到配置中首个可用的内置渠道（个人套餐/API Key）"
+  "viaFallbackCaptchaHint": "体验套餐渠道需人机验证（滑块），插件无法代为完成，已兜底到配置中首个可用的内置渠道（个人套餐/API Key）",
+  "activeKeyLabel": "计费 Key",
+  "activeKeyCustom": "自定义",
+  "activeKeyConfig": "ZCode 配置",
+  "activeKeyOauth": "OAuth 登录凭证",
+  "showKey": "显示完整 Key",
+  "hideKey": "隐藏 Key",
+  "showKeyTitle": "点击右侧眼睛图标可查看完整 key",
+  "teamNoOverrideWarn": "客户端选中了团队套餐，但未配置团队 key，当前请求按个人套餐 key 计费",
+  "teamNoOverrideAction": "配置团队 key",
+  "overrideOnPersonalWarn": "自定义 key 生效中：ZCode 客户端配置的 key 未被使用",
+  "customKeyClearBtn": "清空自定义 key",
+  "customKeyClearNote": "清空后恢复 ZCode 客户端配置的 key（OAuth 登录则用登录凭证）"
 }

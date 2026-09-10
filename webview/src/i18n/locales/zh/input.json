@@ -140,5 +140,9 @@
   "statusPanel": {
     "hide": "收起状态栏",
     "show": "展开状态栏"
+  },
+  "billing": {
+    "teamNoOverride": "已选中团队套餐，但未配置团队 key，当前按个人套餐 key 计费",
+    "goConfig": "去配置"
   }
 }

@@ -51,8 +51,8 @@ export function SettingsView({ onBack }: Props) {
   const pendingSection = useStore((s) => s.pendingSettingsSection)
   const setPendingSection = useStore((s) => s.setPendingSettingsSection)
   useEffect(() => {
-    if (pendingSection === 'agents') {
-      setTab('agents')
+    if (pendingSection === 'agents' || pendingSection === 'models') {
+      setTab(pendingSection)
       setPendingSection(null)
     }
   }, [pendingSection, setPendingSection])

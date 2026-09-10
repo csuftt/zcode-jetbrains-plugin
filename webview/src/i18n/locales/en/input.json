@@ -140,5 +140,9 @@
   "statusPanel": {
     "hide": "Collapse status bar",
     "show": "Expand status bar"
+  },
+  "billing": {
+    "teamNoOverride": "Team plan selected but no team key configured — billed to your personal key",
+    "goConfig": "Configure"
   }
 }

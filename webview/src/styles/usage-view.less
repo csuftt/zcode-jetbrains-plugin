@@ -113,6 +113,13 @@
   }
 
   // 套餐用量查询凭证提示（回退链落到非订阅渠道时 is-foreign 变警示色）
+  /* 查询凭证的脱敏 key（等宽字体，与渠道名同行） */
+  &__cred-key {
+    font-family: var(--font-mono, Consolas, monospace);
+    opacity: 0.85;
+    margin-left: 6px;
+  }
+
   &__cred-hint {
     font-size: var(--fs-hint);
     color: var(--text-muted);

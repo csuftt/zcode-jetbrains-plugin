@@ -382,6 +382,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'modelManageList' }
   /** 切换 provider 启用/禁用（Kotlin 备份+原子写回 config.json 的 enabled 字段）*/
   | { op: 'modelToggleProvider'; providerId: string; enabled: boolean }
+  /** 设置/清除内置渠道自定义 apiKey 覆盖（apiKey 空串=清除），写 ~/.zcgui/config.json 并触发注册表推送 */
+  | { op: 'modelSetProviderKey'; providerId: string; apiKey: string }
   | { op: 'setModel'; sessionId: string; modelId: string; providerId: string }
   /** 撤销回合中挂起的延迟切换（用户在等待期重新选回生效模型）*/
   | { op: 'cancelModelSwitch'; sessionId: string }
@@ -478,8 +480,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
 export interface ModelOption {
   providerId: string
   providerName: string
-  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验 */
-  plan?: 'personal' | 'trial'
+  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验、team=客户端选中的团队套餐 */
+  plan?: 'personal' | 'trial' | 'team'
   modelId: string
   modelName: string
   /** 上下文窗口大小（config.json limit.context），如 GLM-5.2=1000000 / GLM-5-Turbo=204800 */
@@ -505,13 +507,25 @@ export interface ModelManageModel {
 export interface ModelManageProvider {
   providerId: string
   providerName: string
-  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验 */
-  plan?: 'personal' | 'trial'
+  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验、team=客户端选中的团队套餐 */
+  plan?: 'personal' | 'trial' | 'team'
   /** 内置渠道命中方式：selected=客户端选中渠道生效；fallback=所选渠道凭证不可用回退首个可用内置 */
   via?: 'selected' | 'fallback'
   /** 兜底原因（via=fallback 时）：captchaGated=客户端所选渠道是体验套餐(zcode-plan 网关)
    *  被门控排除，徽章换"体验套餐无法使用"专属文案，区分于凭证失效 */
   viaReason?: 'captchaGated'
+  /** 已配置插件自定义 apiKey 覆盖（~/.zcgui/config.json，issue #8）→ 卡片徽章 */
+  customKey?: boolean
+  /** 已存覆盖 key 明文（弹窗回填；本地手填值，非窃取客户端机密） */
+  customKeyValue?: string
+  /** 实际生效计费 key：来源/脱敏态/明文（眼睛切换） */
+  activeKeySource?: 'custom' | 'config' | 'oauth'
+  activeKeyMasked?: string
+  activeKeyValue?: string
+  /** 团队选中未配覆盖（按个人 key 计费）→ 卡片提醒 */
+  teamPlanNoOverride?: boolean
+  /** 个人选中配了覆盖（客户端 key 未使用）→ 卡片提醒 */
+  overrideOnPersonal?: boolean
   baseURL?: string
   enabled: boolean
   models: ModelManageModel[]
@@ -900,10 +914,18 @@ export type JavaResponse =
   | { op: 'files'; files: string[] }
   | { op: 'commands'; commands: SlashCommand[] }
   | { op: 'filesToInput'; refs: string[]; source?: 'drag' | 'menu' | 'picker' }
-  | { op: 'models'; models: ModelOption[] }
+  | {
+      op: 'models'
+      models: ModelOption[]
+      /** 生效渠道实际计费 key 来源（custom=zcgui 覆盖 / config=客户端配置 / oauth=订阅 token） */
+      billingKeySource?: 'custom' | 'config' | 'oauth'
+      /** 客户端选中团队套餐但未配覆盖（实际按个人 key 计费）→ 输入框黄色提醒 */
+      teamPlanNoOverride?: boolean
+    }
   | { op: 'modelManage'; configPath?: string; providers: ModelManageProvider[]; error?: string }
   /** 切换回包：changes 含全部实际变更（启用内置套餐时其余内置套餐联动禁用，互斥）*/
   | { op: 'modelToggled'; changes: { providerId: string; enabled: boolean }[] }
+  | { op: 'modelSetProviderKey'; ok: boolean; providerId: string; cleared: boolean }
   | { op: 'modelSet'; sessionId: string; modelId: string; providerId: string }
   /** 回合中切换挂起（缺陷AC）：Java 挂起目标模型等回合结束补发，前端回滚选中态并提示 */
   | { op: 'modelSetPending'; sessionId: string; modelId: string; providerId: string }
@@ -926,10 +948,10 @@ export type JavaResponse =
   | { op: 'usage'; sessionId?: string; used: number; size: number; hitRate?: number; breakdown?: ContextBreakdownItem[]; activeTurnKind?: string; activeTurnId?: string }
   // providerId/providerName：monitor 三路 HTTP 实际取 key 的渠道（回退链不筛身份，
   // 可能落到非 coding-plan 渠道，用量页据此提示数据口径）
-  | { op: 'quota'; data?: QuotaData | null; error?: string; providerId?: string; providerName?: string }
+  | { op: 'quota'; data?: QuotaData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
   | { op: 'appUsage'; data?: AppUsageData | null; error?: string }
-  | { op: 'modelUsage'; data?: ModelUsageData | null; error?: string; providerId?: string; providerName?: string }
-  | { op: 'toolUsage'; data?: ToolUsageData | null; error?: string; providerId?: string; providerName?: string }
+  | { op: 'modelUsage'; data?: ModelUsageData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
+  | { op: 'toolUsage'; data?: ToolUsageData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
   | { op: 'fileOpened' }
   | { op: 'diffShown' }
   | { op: 'fileRefreshed' }

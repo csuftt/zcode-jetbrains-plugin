@@ -308,6 +308,9 @@ function PlanUsageTab() {
             {SUBSCRIPTION_PROVIDERS.has(usageProvider.id)
               ? t('usage.plan.credHint', { name: usageProvider.name })
               : t('usage.plan.credForeign', { name: usageProvider.name })}
+            {usageProvider.keyMasked && (
+              <span className="usage-view__cred-key">{usageProvider.keyMasked}</span>
+            )}
           </div>
         )}
         {quotaLoading && !quota ? (

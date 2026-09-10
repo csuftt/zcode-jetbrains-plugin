@@ -12,9 +12,19 @@
   "errorLoad": "Failed to load: {{error}}",
   "plan": {
     "personal": "Personal Plan",
-    "trial": "Trial Plan"
+    "trial": "Trial Plan",
+    "team": "Team Plan"
   },
   "vision": "Vision",
+  "customKeyBadge": "Custom Key",
+  "customKeyBadgeHint": "A custom apiKey override is configured for this provider (~/.zcgui/config.json); session requests use it",
+  "customKeyTitle": "Custom Provider Key",
+  "customKeyHint": "Manually set the apiKey for {{provider}}. Session requests will use this key (provider baseURL and model list still follow the ZCode client config). Team plan users: create an API key in your team project on the BigModel open platform and paste it here to use team quota.",
+  "customKeyPlaceholder": "Paste API key (empty + save = clear override)",
+  "customKeySave": "Save",
+  "customKeyClearHint": "Empty input: saving clears the custom key and restores client config",
+  "customKeyKeepHint": "No custom key configured: saving an empty input changes nothing",
+  "customKeyApplyHint": "Takes effect immediately (new sessions use this key)",
   "section": {
     "builtin": "Built-in Channels",
     "builtinHint": "Follows the ZCode client config; only one is active at a time — switch in the client. The trial plan requires human verification (CAPTCHA) and cannot be used in this plugin, so it is excluded",
@@ -44,5 +54,17 @@
   "viaFallback": "Fallback",
   "viaFallbackHint": "The client-selected channel has no valid credential; fell back to the first usable builtin channel",
   "viaFallbackCaptcha": "Trial-plan fallback",
-  "viaFallbackCaptchaHint": "The trial-plan channel requires CAPTCHA (slider) verification, which the plugin cannot complete; fell back to the first usable builtin channel (personal plan / API key)"
+  "viaFallbackCaptchaHint": "The trial-plan channel requires CAPTCHA (slider) verification, which the plugin cannot complete; fell back to the first usable builtin channel (personal plan / API key)",
+  "activeKeyLabel": "Billing key",
+  "activeKeyCustom": "Custom",
+  "activeKeyConfig": "ZCode config",
+  "activeKeyOauth": "OAuth token",
+  "showKey": "Show full key",
+  "hideKey": "Hide key",
+  "showKeyTitle": "Use the eye icon to reveal the full key",
+  "teamNoOverrideWarn": "Team plan is selected in the ZCode client but no team key is configured — requests are billed to the personal plan key",
+  "teamNoOverrideAction": "Configure team key",
+  "overrideOnPersonalWarn": "Custom key is active — the key configured in the ZCode client is not in use",
+  "customKeyClearBtn": "Clear custom key",
+  "customKeyClearNote": "After clearing, requests use the key configured in the ZCode client (or the OAuth token)"
 }

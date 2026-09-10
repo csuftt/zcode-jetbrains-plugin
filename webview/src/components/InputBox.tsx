@@ -100,9 +100,11 @@ interface Props {
   onModelSelect?: (modelId: string, providerId: string) => void
   /** 打开设置页「子智能体」管理（AgentSelect 下拉「管理」入口）*/
   onOpenAgentSettings?: () => void
+  /** 团队计费提醒条「去配置」：跳设置页模型管理（跳转意图经 store 传递） */
+  onOpenModelSettings?: () => void
 }
 
-export function InputBox({ onSend, isStreaming = false, onStop, disabled = false, placeholder, currentModel, onModelSelect, onOpenAgentSettings }: Props) {
+export function InputBox({ onSend, isStreaming = false, onStop, disabled = false, placeholder, currentModel, onModelSelect, onOpenAgentSettings, onOpenModelSettings }: Props) {
   const { t } = useTranslation()
   const editorRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -203,6 +205,11 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         m.supportsImages === true,
     )
   }, [models, currentModel])
+
+  // ============ 团队计费提醒（issue #8）============
+  // 客户端选中团队套餐但未配覆盖：实际按个人套餐 key 计费（构造出口优先级可证），
+  // 黄色提醒 + 直达模型管理配置团队 key；配好覆盖后 listModels 刷新自动消隐
+  const teamPlanNoOverride = useStore((s) => s.teamPlanNoOverride)
 
   // ============ 提示词润色 ============
   const enhancing = useStore((s) => s.enhancing)
@@ -1301,6 +1308,21 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                 </button>
               )}
             </div>
+          </div>
+        )}
+
+        {/* 团队计费提醒（客户端选中团队套餐但未配覆盖，实际按个人 key 计费） */}
+        {teamPlanNoOverride && (
+          <div className="img-unsupported-tip billing-team-tip" role="alert">
+            <span className="codicon codicon-warning" />
+            <span className="billing-team-tip__text">{t('input.billing.teamNoOverride')}</span>
+            <button
+              type="button"
+              className="billing-team-tip__btn"
+              onClick={() => onOpenModelSettings?.()}
+            >
+              {t('input.billing.goConfig')}
+            </button>
           </div>
         )}
 

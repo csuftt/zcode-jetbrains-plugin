@@ -310,6 +310,10 @@ export default function App() {
               setPendingSettingsSection('agents')
               setCurrentView('settings')
             }}
+            onOpenModelSettings={() => {
+              setPendingSettingsSection('models')
+              setCurrentView('settings')
+            }}
           />
         </div>
 

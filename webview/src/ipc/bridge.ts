@@ -946,6 +946,13 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       })
       return { op: 'modelToggled', changes }
     }
+    case 'modelSetProviderKey': {
+      // mock：与生产同口径——写覆盖表（内存模拟 ~/.zcgui/config.json），内置渠道生效
+      mockModelProviders().forEach((p) => {
+        if (p.providerId === req.providerId) p.customKey = !!req.apiKey
+      })
+      return { op: 'modelSetProviderKey', ok: true, providerId: req.providerId, cleared: !req.apiKey }
+    }
     case 'modelManageList':
       // 模拟设置页「模型管理」结构（与生产同口径：内置渠道只返回生效的，第三方含
       // disabled 标记；mockModelProviders 可变，第三方切换写回后重新读取反映变更）

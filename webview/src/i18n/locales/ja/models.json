@@ -12,7 +12,8 @@
   "errorLoad": "読み込みに失敗しました：{{error}}",
   "plan": {
     "personal": "個人プラン",
-    "trial": "体験プラン"
+    "trial": "体験プラン",
+    "team": "チームプラン"
   },
   "section": {
     "builtin": "内蔵チャネル",
@@ -43,5 +44,26 @@
   "viaFallback": "フォールバック",
   "viaFallbackHint": "クライアント選択のチャネルに有効な資格情報がないため、最初に利用可能な内蔵チャネルにフォールバックしました",
   "viaFallbackCaptcha": "トライアルプランからフォールバック",
-  "viaFallbackCaptchaHint": "トライアルプランのチャネルにはCAPTCHA（スライダー）認証が必要でプラグインでは完了できません。最初に利用可能な内蔵チャネル（個人プラン/APIキー）にフォールバックしました"
+  "viaFallbackCaptchaHint": "トライアルプランのチャネルにはCAPTCHA（スライダー）認証が必要でプラグインでは完了できません。最初に利用可能な内蔵チャネル（個人プラン/APIキー）にフォールバックしました",
+  "customKeyBadge": "カスタム Key",
+  "customKeyBadgeHint": "このプロバイダーにはプラグインのカスタム apiKey オーバーライド（~/.zcgui/config.json）が設定され、セッションリクエストで使用されます",
+  "customKeyTitle": "カスタムプロバイダー Key",
+  "customKeyHint": "{{provider}} の apiKey を手動指定すると、保存後のセッションリクエストで使用されます（baseURL とモデル一覧は引き続き ZCode クライアント設定に従います）。チームプランの場合：BigModel オープンプラットフォームのチームプロジェクトで API キーを作成して入力すると、チーム枠を使用できます。",
+  "customKeyPlaceholder": "API キーを貼り付け（空のまま保存 = オーバーライド解除）",
+  "customKeySave": "保存",
+  "customKeyClearHint": "空のため、保存するとカスタム key を解除してクライアント設定に戻します",
+  "customKeyKeepHint": "カスタム key 未設定：空のまま保存しても変更されません",
+  "customKeyApplyHint": "保存後すぐ有効（新しいセッションから適用）",
+  "activeKeyLabel": "課金キー",
+  "activeKeyCustom": "カスタム",
+  "activeKeyConfig": "ZCode 設定",
+  "activeKeyOauth": "OAuth トークン",
+  "showKey": "キーを表示",
+  "hideKey": "キーを隠す",
+  "showKeyTitle": "右の目のアイコンで完全なキーを表示できます",
+  "teamNoOverrideWarn": "ZCode クライアントでチームプランが選択されていますが、チームキーが未設定のため、リクエストは個人プランのキーで課金されます",
+  "teamNoOverrideAction": "チームキーを設定",
+  "overrideOnPersonalWarn": "カスタムキーが有効：ZCode クライアントに設定されたキーは使用されていません",
+  "customKeyClearBtn": "カスタムキーをクリア",
+  "customKeyClearNote": "クリア後、ZCode クライアントに設定されたキー（OAuth ログインの場合はトークン）を使用します"
 }

@@ -298,13 +298,20 @@
     }
   }
 
+  /* 卡片头部：主行（状态/名称/徽章/计数）+ 元信息行（providerId/baseURL）。
+     两行拆分解决窄面板下单行 flex 全 shrink:0 项溢出被卡片裁剪的问题（无省略号） */
   &__provider-header {
+    display: block;
+    background: var(--bg-tertiary, rgba(128, 128, 128, 0.08));
+    border-bottom: 1px solid var(--border-primary);
+    min-width: 0;
+  }
+
+  &__provider-main {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 9px 12px;
-    background: var(--bg-tertiary, rgba(128, 128, 128, 0.08));
-    border-bottom: 1px solid var(--border-primary);
+    padding: 9px 12px 4px;
     min-width: 0;
 
     > .codicon {
@@ -314,22 +321,254 @@
     }
   }
 
+  /* 元信息行：id 与 baseURL 各自省略截断，放不下时 baseURL 换行独占 */
+  &__provider-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px 8px;
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
   &__provider-name {
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: var(--fs-body);
     font-weight: 600;
     color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__provider-id {
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 80px;
     font-size: var(--fs-hint);
     color: var(--text-muted);
     font-family: var(--font-mono, Consolas, monospace);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 220px;
+  }
+
+  /* 自定义 key 入口（内置渠道卡片，文字按钮）：未配置灰色弱化；is-set=已配置覆盖，
+     紫色与套餐徽章区分。替代早期「徽章+笔图标」两件套（用户反馈图标不直观） */
+  &__provider-key-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: var(--fs-hint);
+    line-height: 16px;
+    padding: 0 7px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    cursor: pointer;
+
+    .codicon {
+      font-size: 11px;
+    }
+
+    &:hover {
+      color: var(--text-primary);
+      background: rgba(128, 128, 128, 0.1);
+    }
+
+    &.is-set {
+      background: rgba(156, 100, 246, 0.16);
+      color: var(--status-purple, #9c64f6);
+
+      &:hover {
+        color: var(--status-purple, #9c64f6);
+        background: rgba(156, 100, 246, 0.26);
+      }
+    }
+  }
+
+  /* 激活 key 行（卡片头部第三行）：所见即所扣的计费凭证 */
+  &__active-key {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px 6px;
+    margin-top: -5px; /* 抵消 meta 行 padding-bottom(8px) 的大半，行距视觉 ~3px */
+    font-size: var(--fs-hint);
+    min-width: 0;
+  }
+
+  &__active-key-label {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+
+    .codicon {
+      font-size: 11px;
+    }
+  }
+
+  &__active-key-value {
+    font-family: var(--font-mono, Consolas, monospace);
+    color: var(--text-secondary);
+    word-break: break-all;
+    min-width: 0;
+  }
+
+  &__active-key-src {
+    flex-shrink: 0;
+    line-height: 15px;
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    white-space: nowrap;
+    background: rgba(128, 128, 128, 0.14);
+    color: var(--text-tertiary);
+
+    &.src-custom {
+      background: rgba(156, 100, 246, 0.16);
+      color: var(--status-purple, #9c64f6);
+    }
+  }
+
+  /* 眼睛切换按钮（激活 key 与对话框输入框共用） */
+  &__key-eye {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 2px;
+    font-size: 12px;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  /* 团队选中未配覆盖：按个人 key 计费（黄色警示 + 配置按钮） */
+  &__bill-warn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 12px 8px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(204, 153, 51, 0.12);
+    color: #d9a355;
+    font-size: var(--fs-hint);
+    line-height: 1.4;
+  }
+
+  &__bill-warn-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__bill-warn-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid rgba(204, 153, 51, 0.45);
+    border-radius: 6px;
+    color: #d9a355;
+    font-size: var(--fs-hint);
+    padding: 1px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    &:hover {
+      background: rgba(204, 153, 51, 0.18);
+    }
+  }
+
+  /* 个人选中配了覆盖：客户端 key 未使用（中性提示） */
+  &__bill-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 12px 8px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(128, 128, 128, 0.1);
+    color: var(--text-secondary);
+    font-size: var(--fs-hint);
+    line-height: 1.4;
+  }
+
+  /* 自定义 key 对话框输入框（含眼睛的包裹层） */
+  &__key-input-wrap {
+    position: relative;
+    width: 100%;
+  }
+
+  &__key-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding-right: 30px;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    padding: 6px 9px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: var(--fs-body);
+    font-family: var(--font-mono, Consolas, monospace);
+    outline: none;
+
+    &:focus {
+      border-color: var(--accent-primary, #007fd4);
+    }
+  }
+
+  &__key-input-wrap &__key-eye {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  /* 一键清空行：弱化文字按钮 + 说明（清空后回到客户端配置/OAuth） */
+  &__key-clear-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  &__key-clear-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    margin-left: -4px;
+    border-radius: 4px;
+    color: var(--text-tertiary);
+    font-size: var(--fs-hint);
+    cursor: pointer;
+    text-decoration: underline dotted;
+
+    &:hover {
+      color: #e5705c;
+    }
+  }
+
+  &__key-clear-note {
+    color: var(--text-tertiary);
+    font-size: var(--fs-hint);
+    min-width: 0;
+  }
+
+  &__key-sub {
+    margin: 0;
+    font-size: var(--fs-hint);
+    color: var(--text-muted);
   }
 
   // 内置渠道命中方式徽章：selected=客户端选中生效（绿）；fallback=兜底生效（警示色）
@@ -358,7 +597,7 @@
   }
 
   &__provider-url {
-    flex: 1;
+    flex: 1 1 200px;
     min-width: 0;
     font-size: var(--fs-hint);
     color: var(--text-tertiary);
@@ -370,6 +609,7 @@
 
   &__provider-count {
     flex-shrink: 0;
+    margin-left: auto; /* 推到主行右端（原靠 url flex:1 推挤，url 移入元信息行后改显式）*/
     font-size: var(--fs-hint);
     line-height: 14px;
     padding: 0 6px;
@@ -390,11 +630,13 @@
     color: var(--text-muted);
   }
 
-  /* 单个模型行 */
+  /* 单个模型行：徽章放不下自动换行（用户反馈窄面板徽章被裁，issue 0.3.4）*/
   &__model {
     display: flex;
     align-items: center;
     gap: 8px;
+    row-gap: 3px;
+    flex-wrap: wrap;
     padding: 7px 12px;
     min-width: 0;
 
@@ -418,7 +660,8 @@
   }
 
   &__model-name {
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: var(--fs-body);
     font-weight: 600;
     color: var(--text-primary);

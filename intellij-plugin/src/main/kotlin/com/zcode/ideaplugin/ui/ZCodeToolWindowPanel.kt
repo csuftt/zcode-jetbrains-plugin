@@ -49,6 +49,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
@@ -883,6 +884,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "listModels" -> handleListModels(msg)
                         "modelManageList" -> handleModelManageList(msg)
                         "modelToggleProvider" -> handleModelToggleProvider(msg)
+                        "modelSetProviderKey" -> handleModelSetProviderKey(msg)
                         "setModel" -> handleSetModel(msg)
                         "cancelModelSwitch" -> handleCancelModelSwitch(msg)
                         "getSettings" -> handleGetSettings(msg)
@@ -2116,12 +2118,39 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     /**
      * 内置套餐类型（UI 徽章用）：两个内置套餐显示名相同（BigModel - Coding Plan），
-     * 靠 providerId 区分——coding-plan=个人套餐、start-plan=体验套餐。
+     * 靠 providerId 区分——coding-plan=个人套餐、start-plan=体验套餐；团队套餐
+     * （issue #8）与个人套餐共用同一条 providerId，团队与否由 selectedKey 的
+     * team-plan 前缀决定，从 resolution 传入。
      */
-    private fun builtinPlanOf(providerId: String): String? = when (providerId) {
-        "builtin:bigmodel-coding-plan" -> "personal"
-        "builtin:bigmodel-start-plan" -> "trial"
+    private fun builtinPlanOf(providerId: String, teamPlan: Boolean = false): String? = when {
+        providerId == "builtin:bigmodel-coding-plan" && teamPlan -> "team"
+        providerId == "builtin:bigmodel-coding-plan" -> "personal"
+        providerId == "builtin:bigmodel-start-plan" -> "trial"
         else -> null
+    }
+
+    /**
+     * 内置渠道当前实际生效的计费 key（issue #8）：custom=zcgui 手填覆盖、
+     * config=客户端 config.json 明文 apiKey、oauth=订阅套餐调用期家族 token
+     * （与 RuntimeModels/Credentials 构造出口同优先级——展示必须与实际计费一致，
+     * 否则就是新的歧义源）。返回 source to 明文。
+     */
+    private fun activeKeyOf(
+        providerId: String,
+        configApiKey: String?,
+        overrides: Map<String, String>,
+    ): Pair<String, String>? {
+        overrides[providerId]?.takeIf { it.isNotBlank() }?.let { return "custom" to it }
+        configApiKey?.takeIf { it.isNotBlank() }?.let { return "config" to it }
+        Credentials.familyOAuthToken(providerId)?.let { return "oauth" to it }
+        return null
+    }
+
+    /** key 脱敏：常态只露首尾（眼睛看全的对照面）；过短全遮 */
+    private fun maskKey(k: String): String = when {
+        k.length <= 8 -> k.take(2) + "••••"
+        k.length <= 12 -> k.take(4) + "••••" + k.takeLast(2)
+        else -> k.take(6) + "••••" + k.takeLast(4)
     }
 
     /** op=listModels — 读取 config.json 的 provider 注册表，返回可切换的模型列表 */
@@ -2148,7 +2177,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // activeBuiltin 来自 Credentials.builtinResolution：体验套餐(zcode-plan 网关)
         // 渠道在解析层整体排除——客户端选中它时自动兜底首个非门控内置（个人套餐/
         // API Key），模型列表/模型管理/额度/启动凭证全部跟随真实使用的兜底渠道
-        val activeBuiltin = Credentials.effectiveBuiltinProviderId()
+        val resolution = Credentials.builtinResolution()
+        val activeBuiltin = resolution.providerId
         val models = JsonArray(providers.mapNotNull { (providerId, providerEl) ->
             val pv = providerEl.jsonObject
             // enabled 缺省视为启用（config.json 现状：DeepSeek 无 enabled 字段但已启用）
@@ -2187,7 +2217,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 buildJsonObject {
                     put("providerId", providerId)
                     put("providerName", providerName)
-                    builtinPlanOf(providerId)?.let { put("plan", it) }
+                    builtinPlanOf(providerId, resolution.teamPlan)?.let { put("plan", it) }
                     put("modelId", modelId)
                     put("modelName", modelName)
                     limit?.get("context")?.jsonPrimitive?.content?.toLongOrNull()?.let { put("contextWindow", it) }
@@ -2197,9 +2227,24 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }.flatten())
         log.info("listModels returned ${models.size} model(s) (${providers.size} provider(s))")
+        // 生效渠道的实际计费 key 来源 + 团队选中未配覆盖提醒（聊天输入框黄色提醒条；
+        // 展示与 RuntimeModels 构造同优先级，用户看到的就是实际扣费的）
+        val overrides = com.zcode.ideaplugin.protocol.ZcGuiConfig.providerKeyOverrides()
+        val activeKey = activeBuiltin?.let { id ->
+            activeKeyOf(
+                id,
+                providers[id]?.jsonObject?.get("options")?.jsonObject
+                    ?.get("apiKey")?.jsonPrimitive?.contentOrNull,
+                overrides,
+            )
+        }
         return buildJsonObject {
             put("op", "models")
             put("models", models)
+            activeKey?.let { put("billingKeySource", it.first) }
+            if (resolution.teamPlan && activeBuiltin?.let { overrides[it].isNullOrBlank() } == true) {
+                put("teamPlanNoOverride", true)
+            }
         }
     }
 
@@ -2232,6 +2277,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
         val resolution = Credentials.builtinResolution()
         val activeBuiltin = resolution.providerId
+        // 插件自定义 key 覆盖表（~/.zcgui/config.json，issue #8）→ 卡片徽章 + 弹窗回填
+        val customKeys = com.zcode.ideaplugin.protocol.ZcGuiConfig.providerKeyOverrides()
         val providerArr = JsonArray(providers.mapNotNull { (providerId, providerEl) ->
             val pv = providerEl.jsonObject
             val options = pv["options"]?.jsonObject
@@ -2269,7 +2316,24 @@ if (!window.__ZCODE_LOG_HOOK__) {
             buildJsonObject {
                 put("providerId", providerId)
                 put("providerName", providerName)
-                builtinPlanOf(providerId)?.let { put("plan", it) }
+                builtinPlanOf(providerId, resolution.teamPlan)?.let { put("plan", it) }
+                if (providerId in customKeys) {
+                    put("customKey", true)
+                    customKeys[providerId]?.let { put("customKeyValue", it) }
+                }
+                // 实际生效的计费 key（脱敏展示 + 明文供前端眼睛切换；oauth 渠道 config
+                // 无明文 key 时 token 也是激活凭证，一并展示）
+                activeKeyOf(providerId, apiKey, customKeys)?.let { (src, value) ->
+                    put("activeKeySource", src)
+                    put("activeKeyMasked", maskKey(value))
+                    put("activeKeyValue", value)
+                }
+                // 双向失配提醒：团队选中未配覆盖（按个人 key 计费）/ 个人选中配了覆盖
+                // （客户端 key 未使用）——都只在生效渠道卡片上给
+                if (providerId == activeBuiltin) {
+                    if (resolution.teamPlan && providerId !in customKeys) put("teamPlanNoOverride", true)
+                    if (!resolution.teamPlan && providerId in customKeys) put("overrideOnPersonal", true)
+                }
                 // 命中方式：selected = 客户端选中渠道生效；fallback = 所选渠道凭证不可用，
                 // 回退 config 首个可用内置（前端据此显示徽章，兜底态提醒用户客户端选择失配）；
                 // viaReason=captchaGated = 所选渠道是体验套餐被门控排除（前端换"体验套餐
@@ -2293,7 +2357,32 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * op=modelToggleProvider — 设置页切换 provider 启用/禁用，写回 config.json。
+     * op=modelSetProviderKey — 设置/清除内置渠道的自定义 apiKey 覆盖（issue #8 终案）。
+     *
+     * 写 ~/.zcgui/config.json 的 providerKeyOverrides（插件自有文件，不碰客户端 config）；
+     * key 空 = 清除该条。覆盖在 RuntimeModels/credentialsFor 构造出口合并（send/resume
+     * 的 runtimeModel 每轮都带，服务端自动刷进 workspace 目录），无需额外推送。
+     * 渠道本体（baseURL/模型清单/上下文）仍以客户端 config.json 为准自动跟随。
+     */
+    private fun handleModelSetProviderKey(msg: JsonObject): JsonObject {
+        val providerId = msg["providerId"]?.jsonPrimitive?.contentOrNull
+            ?: return errorResponse("缺少 providerId")
+        if (!providerId.startsWith("builtin:")) {
+            return errorResponse("仅内置渠道支持自定义 key")
+        }
+        val key = msg["apiKey"]?.jsonPrimitive?.contentOrNull?.trim()
+        val ok = com.zcode.ideaplugin.protocol.ZcGuiConfig.setProviderKeyOverride(providerId, key?.takeIf { it.isNotEmpty() })
+        if (!ok) return errorResponse("写入 ~/.zcgui/config.json 失败")
+        log.info("modelSetProviderKey: $providerId -> ${if (key.isNullOrEmpty()) "cleared" else "set"}")
+        return buildJsonObject {
+            put("op", "modelSetProviderKey")
+            put("ok", true)
+            put("providerId", providerId)
+            put("cleared", key.isNullOrEmpty())
+        }
+    }
+
+    /** op=modelToggleProvider — 设置页切换 provider 启用/禁用，写回 config.json。
      *
      * 仅对第三方/自定义 provider 开放：内置渠道（builtin: 前缀）的启停以 ZCode
      * 客户端配置为准（客户端同一时间仅一个生效），插件代写 config 与客户端内存态
@@ -2423,6 +2512,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 从 config.json 读额度查询凭证（baseDomain + 裸 apiKey）。
      * 复用于 quota/limit、model-usage、tool-usage 三路 HTTP。
      * 路径走 [Credentials.defaultConfigPath]（dataBaseDir 感知，与模型列表/env 注入同源）。
+     * 激活渠道的「计费 Key」优先（issue #8：zcgui 覆盖 > config 明文，与 RuntimeModels
+     * 构造同源——查到的额度就是实际扣费那个 key 的）；激活渠道 oauth 态（无明文无覆盖）
+     * 不出凭证，维持回退链（首个有 key 的启用渠道，前端提示口径）。
      * @return Pair(凭证?, 错误信息) —— 凭证非空即成功
      */
     private fun loadQuotaCredentials(): Pair<QuotaCredentials?, String> {
@@ -2433,6 +2525,25 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: Exception) {
             return null to "Failed to parse config.json: ${e.message}"
         } ?: return null to "config.json 无 provider"
+
+        // 激活内置渠道直取（计费 Key 口径）：覆盖/明文任一命中即用
+        val overrides = com.zcode.ideaplugin.protocol.ZcGuiConfig.providerKeyOverrides()
+        val activeId = Credentials.builtinResolution().providerId
+        if (activeId != null) {
+            val pv = providers[activeId]?.jsonObject
+            val opts = pv?.get("options")?.jsonObject
+            val url = opts?.get("baseURL")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            if (url != null && !com.zcode.ideaplugin.protocol.RuntimeModels.isCaptchaGatedBaseUrl(url)) {
+                val key = overrides[activeId]?.takeIf { it.isNotBlank() }
+                    ?: opts.get("apiKey")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+                if (key != null) {
+                    val name = pv.get("name")?.jsonPrimitive?.contentOrNull ?: activeId
+                    log.info("quota credentials: provider=$activeId ($name, billing-key) keyLen=${key.length}")
+                    return quotaCredentialsOf(url, key, activeId, name)?.let { it to "" }
+                        ?: (null to "baseURL 格式非法: $url")
+                }
+            }
+        }
 
         // 找第一个有 apiKey 的启用 provider（优先 bigmodel-coding-plan）
         var baseURL: String? = null
@@ -2463,16 +2574,20 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
         // 脱敏日志：用量凭证选了哪个渠道（回退链不筛身份，出现"数据口径不对"时先看这行）
         log.info("quota credentials: provider=$hitId ($hitName) keyLen=${apiKey.length}")
+        return quotaCredentialsOf(baseURL, apiKey, hitId, hitName)?.let { it to "" }
+            ?: (null to "baseURL 格式非法: $baseURL")
+    }
 
-        // baseDomain：取 scheme://host[:port]，丢弃 path（如 /api/anthropic）
-        val baseDomain = try {
+    /** baseURL → QuotaCredentials（baseDomain 取 scheme://host[:port]，丢弃 path 如 /api/anthropic） */
+    private fun quotaCredentialsOf(baseURL: String, apiKey: String, hitId: String, hitName: String): QuotaCredentials? {
+        return try {
             val uri = java.net.URI(baseURL)
             val port = if (uri.port == -1) "" else ":${uri.port}"
-            "${uri.scheme}://${uri.host}$port"
+            QuotaCredentials("${uri.scheme}://${uri.host}$port", apiKey, hitId, hitName)
         } catch (e: Exception) {
-            return null to "baseURL 格式非法: $baseURL"
+            log.warn("quota baseURL invalid: $baseURL")
+            null
         }
-        return QuotaCredentials(baseDomain, apiKey, hitId, hitName) to ""
     }
 
     /** 用量查询的局部错误响应（带 op，不污染全局 error）*/
@@ -2509,6 +2624,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("op", op)
                 put("providerId", creds.providerId)
                 put("providerName", creds.providerName)
+                put("providerKeyMasked", maskKey(creds.apiKey))
                 val rawData = json.parseToJsonElement(resp.body()).jsonObject
                 rawData["data"]?.let { put("data", it) }
             }
@@ -2537,6 +2653,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("op", "quota")
                 put("providerId", creds.providerId)
                 put("providerName", creds.providerName)
+                put("providerKeyMasked", maskKey(creds.apiKey))
                 val rawData = json.parseToJsonElement(resp.body()).jsonObject
                 rawData["data"]?.let { put("data", it) }
             }

@@ -133,6 +133,30 @@
 
 /* ===== 粘贴图片附件（cc-gui AttachmentList 同款：缩略图 + hover 显示右上角 ×）===== */
 /* 模型不支持图片提示条（占满一行）*/
+/* 团队计费提醒条（复用 img-unsupported-tip 形态）：文案 + 「去配置」直达按钮 */
+.billing-team-tip {
+  .billing-team-tip__text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .billing-team-tip__btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid rgba(204, 153, 51, 0.45);
+    border-radius: 6px;
+    color: #d9a355;
+    font-size: 11px;
+    padding: 1px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    &:hover {
+      background: rgba(204, 153, 51, 0.18);
+    }
+  }
+}
+
 .img-unsupported-tip {
   width: 100%;
   display: flex;
