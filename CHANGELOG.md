@@ -6,6 +6,42 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.3.5] - 2026-09-15
+
+中文:
+
+### 新增
+
+- **会话引用**：输入框输入 `#` 可引用历史会话（同时支持斜杠命令与技能补全），引用以 chip 形式嵌入消息发送，AI 可直接读取被引用会话的内容继续工作。
+- **编辑消息全面升级**：AI 回复生成中也能编辑已发送的消息（自动停止当前回合后重新生成）；带图消息支持编辑重发、图片自动回填；编辑交互与弹窗统一。
+- **多图消息预览**：用户消息带多张图片时，点开大图可左右切换查看。
+- **网络代理支持**（issue #12）：设置 → 基础设置 → 环境 新增「网络代理」——代理地址、不走代理的地址（可选）、CA 证书路径（可选）三项，保存后一键重启生效。插件与 ZCode 客户端共用同一份代理配置，模型请求与额度查询全部走代理。
+- **模型切换卡显示供应商**：切换模型的提示卡显示供应商名，多渠道时一眼可辨。
+
+### 修复
+
+- **模型选择按会话隔离**（issue #9）：每个会话独立记忆自己的模型，切换模型不再影响其他会话；排队消息按切换后的模型发送；修复冷启动切模型误报 -32603、切换中乐观转圈丢卡等问题。
+- **升级后启动报错循环**（issue #11）：修复 0.3.4 在部分环境启动即报错并循环重试的问题——环境未就绪时给人话指引而非崩溃循环，冷启动增加就绪探测。
+- **思考块与工具组卡内部滚动**：AI 回复生成中，向上滚动查看思考块/工具卡的历史内容不再被自动置底拉回。
+- **其他**：消息气泡内文件 chip 尾部多出一个路径字符；大会话冷启动恢复更顺（打开历史会话不再长时间无响应）；模型请求 UA 版本号对齐官方客户端。
+
+<h3>English</h3>
+
+### Added
+
+- **Session references**: type `#` in the input box to reference a previous session (slash commands and skills are also completed), sent as chips embedded in the message so the AI can directly read the referenced session's content.
+- **Message editing overhaul**: edit a sent message even while the AI is still replying (the current turn is stopped and regenerated automatically); messages with images can be edited and re-sent with the images kept; unified editing entry and dialog.
+- **Multi-image preview**: when a user message carries multiple images, open one and swipe left/right to browse.
+- **Network proxy support** (issue #12): a new "Network Proxy" section under Settings → Basic → Environment — proxy URL, no-proxy list (optional) and CA certificate path (optional), with one-click restart to apply. The plugin shares the same proxy config with the ZCode desktop client; both model requests and quota queries go through the proxy.
+- **Provider name on model-switch card**: the model switch card now shows the provider name, easy to tell channels apart.
+
+### Fixed
+
+- **Model selection isolated per session** (issue #9): each session remembers its own model, switching no longer affects other sessions; queued messages are sent with the switched model; fixed false "-32603" on model switch during cold start and cards lost while switching.
+- **Startup error loop after upgrade** (issue #11): fixed 0.3.4 failing right at startup and retrying in a loop on some setups — a human-readable hint is shown instead of a crash loop, with a readiness probe on cold start.
+- **Inner scrolling of reasoning blocks and tool group cards**: scrolling up inside them while streaming is no longer dragged back to the bottom.
+- **Miscellaneous**: file chips in message bubbles no longer keep a trailing path character; cold start of large sessions recovers more smoothly (opening history no longer hangs); model request UA version aligned with the official client.
+
 ## [0.3.4] - 2026-09-09
 
 中文:
