@@ -35,6 +35,7 @@ import { EnvBanner } from '@/components/EnvBanner'
 import { ZoomIndicator } from '@/components/ZoomIndicator'
 import { sendToJava, isInJcef } from '@/ipc/bridge'
 import { getPersisted, setPersisted, isKvHydrated, KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
+import { readNewSessionConfig } from '@/utils/newSessionConfig'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
 import { APP_VERSION } from '@/version/version'
 import './styles/global.less'
@@ -231,6 +232,12 @@ export default function App() {
 
   const handleNewSession = () => {
     if (currentSessionEmpty) return // 按钮已置灰，此处兜底（无会话待命态 = 隐式新会话，无需再建）
+    // 行为设置「直接覆盖当前标签页」开启时免确认（utils/newSessionConfig.ts，默认关）。
+    // 只影响本按钮；历史列表的「覆盖 / 新标签页」选择弹窗（HistoryView）不走这里
+    if (readNewSessionConfig().directOverwrite) {
+      resetToNewSession() // = 确认弹窗 onConfirm 路径：重置待命态，首条消息懒创建
+      return
+    }
     setConfirmNewSession(true)
   }
 

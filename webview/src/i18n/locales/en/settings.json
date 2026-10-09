@@ -226,6 +226,14 @@
       "hint": "Affects only the first message of a new session: the chip auto-unchecks after sending (one-shot) and later messages carry nothing automatically; switching sessions is unaffected. Off by default — enable it if you use this constantly",
       "onHint": "Click to disable auto-enable for new sessions",
       "offHint": "Click to enable auto-enable for new sessions"
+    },
+    "newSessionTitle": "New session",
+    "newSessionDirect": {
+      "title": "Overwrite current tab directly",
+      "desc": "When enabled, clicking the \"New Session\" button in the toolbar skips the confirmation and starts a new session in the current tab",
+      "hint": "Affects only the toolbar \"New Session\" button; the confirmation when opening a past session from the session list is unaffected. The previous session stays in history and can be switched back to anytime. Off by default",
+      "onHint": "Click to disable direct overwrite",
+      "offHint": "Click to enable direct overwrite"
     }
   }
 }

@@ -24,6 +24,10 @@
  * 新建会话（按钮或新开标签页）自动点亮输入框的文件上下文 chip——仅影响新会话
  * 首条消息（发完即关）；读取方 = resetToNewSession + listSessions boot 待命分支
  * （均调用时取值），无变更事件。
+ *
+ * 新会话按钮直接覆盖当前标签页（默认关闭，utils/newSessionConfig.ts）：开启后
+ * 工具栏「新会话」按钮跳过「覆盖 / 新标签页」三选确认直接 resetToNewSession；
+ * 读取方 = App.tsx handleNewSession（调用时取值），历史列表的确认弹窗不受影响。
  */
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -35,6 +39,7 @@ import { readTurnCollapseConfig, writeTurnCollapseConfig, type TurnCollapseConfi
 import { readAskUserAutoConfig, writeAskUserAutoConfig } from '@/utils/askUserConfig'
 import { readCommitPromptConfig, writeCommitPromptConfig } from '@/utils/commitPromptConfig'
 import { readCurrentFileConfig, writeCurrentFileConfig } from '@/utils/currentFileConfig'
+import { readNewSessionConfig, writeNewSessionConfig } from '@/utils/newSessionConfig'
 import { useStore } from '@/store/useStore'
 import '../styles/basic-settings.less'
 import '../styles/agent-select.less'
@@ -50,6 +55,8 @@ export function BehaviorSettings() {
   const [askUserAuto, setAskUserAuto] = useState(readAskUserAutoConfig)
   // 文件上下文新会话自动点亮（persist kv 配置，默认关；读取方 = store.resetToNewSession）
   const [currentFileAuto, setCurrentFileAuto] = useState(readCurrentFileConfig)
+  // 新会话按钮免确认直接覆盖（persist kv 配置，默认关；读取方 = App.tsx handleNewSession）
+  const [newSessionDirect, setNewSessionDirect] = useState(readNewSessionConfig)
 
   // AI 提交信息附加要求（persist kv 配置，IDE 提交框 AI 按钮读取；失焦即存）
   const [commitPrompt, setCommitPrompt] = useState(readCommitPromptConfig)
@@ -72,6 +79,12 @@ export function BehaviorSettings() {
     const next = { ...currentFileAuto, ...patch }
     setCurrentFileAuto(next)
     writeCurrentFileConfig(next)
+  }
+
+  const updateNewSessionDirect = (patch: Partial<typeof newSessionDirect>) => {
+    const next = { ...newSessionDirect, ...patch }
+    setNewSessionDirect(next)
+    writeNewSessionConfig(next)
   }
 
 
@@ -287,6 +300,25 @@ export function BehaviorSettings() {
         <small className="basic-settings__hint">
           <span className="codicon codicon-info" />
           <span>{t('settings.behavior.currentFileAuto.hint')}</span>
+        </small>
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-add" />
+          <span className="basic-settings__field-label">{t('settings.behavior.newSessionTitle')}</span>
+        </div>
+        <SettingToggle
+          icon="codicon-add"
+          title={t('settings.behavior.newSessionDirect.title')}
+          desc={t('settings.behavior.newSessionDirect.desc')}
+          on={newSessionDirect.directOverwrite}
+          onToggle={() => updateNewSessionDirect({ directOverwrite: !newSessionDirect.directOverwrite })}
+          onHint={t('settings.behavior.newSessionDirect.onHint')}
+          offHint={t('settings.behavior.newSessionDirect.offHint')}
+        />
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.newSessionDirect.hint')}</span>
         </small>
       </section>
     </>
