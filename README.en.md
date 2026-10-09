@@ -79,28 +79,28 @@ It is more than a built-in browser — the plugin implements the ZCode app-serve
 
 **Chat & process visibility** (screenshots below are taken from the real IDE with demo sessions)
 
-| Streaming: thinking blocks / live subagent counters / stop button | Full session: tool-group cards / task lists / AI summary / per-turn file-change bar with one-click undo |
+| Streaming: thinking blocks / live subagent counters / stop button | Full session: tool-group cards / task lists / AI summary /<br>per-turn file-change bar with one-click undo |
 | :---: | :---: |
 | ![Streaming](docs/screenshots/streaming.png) | ![Full session](docs/screenshots/chat-main.png) |
-| **Subagent execution popup: task instructions / tool calls / summary** | **Subagent final-report popup: full Markdown reading, switchable with the execution popup** |
+| **Subagent execution popup: task instructions / tool calls / summary** | **Subagent final-report popup: full Markdown reading,<br>switchable with the execution popup** |
 | ![Subagent execution](docs/screenshots/subagent-detail.png) | ![Subagent final report](docs/screenshots/subagent-report.png) |
-| **Plan-mode approval (ExitPlanMode): full plan docked above the input box; approve / reject / give feedback to refine the plan; waits indefinitely** | |
-| ![Plan-mode approval](docs/screenshots/plan-mode.png) | |
-| **AskUserQuestion dialog: docked at the bottom, waits indefinitely, reviewable after the turn** | |
-| ![AskUserQuestion dialog](docs/screenshots/ask-dialog.png) | |
+
+| **Plan-mode approval (ExitPlanMode): full plan docked above the input box;<br>approve / reject / give feedback to refine the plan; waits indefinitely** | **AskUserQuestion dialog: docked at the bottom, waits indefinitely,<br>reviewable after the turn** |
+| :---: | :---: |
+| ![Plan-mode approval](docs/screenshots/plan-mode.png) | ![AskUserQuestion dialog](docs/screenshots/ask-dialog.png) |
 
 **Goal mode (/goal auto-continuing turns)**
 
-| Multi-turn progress: per-turn verification separator cards (not passed → next action) + goal card iterations / elapsed / verifying | All turns done: final verification passed, goal card switches to complete |
+| Multi-turn progress: per-turn verification separator cards<br>(not passed → next action) + goal card iterations / elapsed / verifying | All turns done: final verification passed, goal card switches to complete |
 | :---: | :---: |
 | ![Goal mode in progress](docs/screenshots/goal-processing.png) | ![Goal mode complete](docs/screenshots/goal-done.png) |
 
 **Scheduled tasks · mobile remote · runtime control**
 
-| Manually creating a scheduled send (preset time or quick presets, target model / new session) | An AI-created scheduled task (execution card + queued preview before it fires; send now / edit / cancel) |
+| Manually creating a scheduled send (preset time or quick presets,<br>target model / new session) | An AI-created scheduled task (execution card + queued preview<br>before it fires; send now / edit / cancel) |
 | :---: | :---: |
 | ![Scheduled send creation](docs/screenshots/scheduled-send.png) | ![AI-created scheduled task](docs/screenshots/scheduled-task.png) |
-| **Mobile remote pairing: scan to connect and control desktop sessions from the phone (pairing credential masked)** | **Model switcher dropdown: grouped by channel, marked selected / default, with a manage entry** |
+| **Mobile remote pairing: scan to connect and control desktop<br>sessions from the phone (pairing credential masked)** | **Model switcher dropdown: grouped by channel,<br>marked selected / default, with a manage entry** |
 | ![Mobile remote pairing](docs/screenshots/remote-pairing.png) | ![Model switcher](docs/screenshots/model-switcher.png) |
 
 **Input enhancements & multi-tasking**
@@ -108,8 +108,10 @@ It is more than a built-in browser — the plugin implements the ZCode app-serve
 | `@` file reference completion | `$` skill mentions (folded by source) | `/` skill invocation |
 | :---: | :---: | :---: |
 | ![@ file completion](docs/screenshots/input-at.png) | ![$ skill mentions](docs/screenshots/input-dollar.png) | ![Skill completion](docs/screenshots/input-slash.png) |
-| **Session list (pin / unread badges / search / multi-select delete)** | **Welcome page (standby preselect of mode & thinking level)** | |
-| ![Session list](docs/screenshots/history.png) | ![Welcome page](docs/screenshots/welcome.png) | |
+
+| **Session list (pin / unread badges / search / multi-select delete)** | **Welcome page (standby preselect of mode & thinking level)** |
+| :---: | :---: |
+| ![Session list](docs/screenshots/history.png) | ![Welcome page](docs/screenshots/welcome.png) |
 
 **Settings center**
 

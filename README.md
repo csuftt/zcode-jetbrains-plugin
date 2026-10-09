@@ -84,10 +84,10 @@ Header 地球按钮在聊天区右侧展开浏览器分栏（上图为完整 IDE
 | ![流式生成中](docs/screenshots/streaming.png) | ![完整会话](docs/screenshots/chat-main.png) |
 | **子代理执行过程弹窗：任务指令 / 工具调用 / 总结** | **子代理最终报告弹窗：Markdown 全文阅读，可与过程弹窗互切** |
 | ![子代理执行过程](docs/screenshots/subagent-detail.png) | ![子代理最终报告](docs/screenshots/subagent-report.png) |
-| **计划模式审批（ExitPlanMode）：计划全文停靠输入框上方，批准 / 拒绝 / 输入意见继续完善计划，等待不限时** | |
-| ![计划模式审批](docs/screenshots/plan-mode.png) | |
-| **AskUserQuestion 交互弹窗：底部停靠、等待不限时、回答后回合内可回看** | |
-| ![AskUserQuestion 交互弹窗](docs/screenshots/ask-dialog.png) | |
+
+| **计划模式审批（ExitPlanMode）：计划全文停靠输入框上方，<br>批准 / 拒绝 / 输入意见继续完善计划，等待不限时** | **AskUserQuestion 交互弹窗：底部停靠、等待不限时、<br>回答后回合内可回看** |
+| :---: | :---: |
+| ![计划模式审批](docs/screenshots/plan-mode.png) | ![AskUserQuestion 交互弹窗](docs/screenshots/ask-dialog.png) |
 
 **目标模式（/goal 自动多轮推进）**
 
@@ -108,8 +108,10 @@ Header 地球按钮在聊天区右侧展开浏览器分栏（上图为完整 IDE
 | `@` 引用文件补全 | `$` 技能提及（按来源折叠） | `/` 技能调用 |
 | :---: | :---: | :---: |
 | ![@ 文件补全](docs/screenshots/input-at.png) | ![$ 技能提及](docs/screenshots/input-dollar.png) | ![技能补全](docs/screenshots/input-slash.png) |
-| **会话列表（置顶 / 未读角标 / 搜索 / 多选删除）** | **欢迎页（待命态可预选模式与思考级别）** | |
-| ![会话列表](docs/screenshots/history.png) | ![欢迎页](docs/screenshots/welcome.png) | |
+
+| **会话列表（置顶 / 未读角标 / 搜索 / 多选删除）** | **欢迎页（待命态可预选模式与思考级别）** |
+| :---: | :---: |
+| ![会话列表](docs/screenshots/history.png) | ![欢迎页](docs/screenshots/welcome.png) |
 
 **设置中心**
 
