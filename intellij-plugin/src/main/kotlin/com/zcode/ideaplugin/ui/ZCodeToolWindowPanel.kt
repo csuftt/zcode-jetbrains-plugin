@@ -4343,33 +4343,62 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val line = msg["line"]?.jsonPrimitive?.content?.toIntOrNull()
         val findText = msg["findText"]?.jsonPrimitive?.content
         com.intellij.openapi.application.invokeLater {
+            // 前导 / 路径存在性回退：Unix 绝对形态在 Windows 上不存在时，实指项目根
+            // 相对（.gitignore 排除规则 `/docs/internal/` 这类写法）；存在性检查先行，
+            // Mac/Linux 的真 Unix 绝对路径不受影响
+            var resolvedPath = filePath
+            if (filePath.startsWith("/") && !java.io.File(filePath).exists()) {
+                val base = project.basePath
+                if (base != null) {
+                    val alt = java.io.File(base, filePath.trimStart('/'))
+                    if (alt.exists()) resolvedPath = alt.path
+                }
+            }
+            val ioFile = java.io.File(resolvedPath)
+            // 目录路由（消息内路径链接的文件夹打开）：IDE Project View 定位选中并聚焦
+            // （真机拍板 2026-10-09：不要系统文件管理器，要 IDE 内打开）；
+            // 目录不在 VFS/项目内容内时定位静默落空——与文件死链同款体验，不额外兜底
+            if (ioFile.isDirectory) {
+                val vdir = LocalFileSystem.getInstance().findFileByPath(resolvedPath)
+                    ?: if (ioFile.exists()) {
+                        com.intellij.openapi.application.ApplicationManager.getApplication()
+                            .runWriteAction<com.intellij.openapi.vfs.VirtualFile?> {
+                                LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
+                            }
+                    } else null
+                if (vdir != null) {
+                    com.intellij.ide.projectView.ProjectView.getInstance(project)
+                        .select(null, vdir, true)
+                } else {
+                    log.warn("Open directory failed: not found after VFS refresh $resolvedPath")
+                }
+                return@invokeLater
+            }
             // 归档扩展名路由（真机反馈：zip 链接点击"没反应"——IDEA 对归档容器没有
             // 编辑器形态，FileEditorManager.openFile 静默落空）：zip/7z/rar/tar/gz/tgz
             // 在系统文件管理器中定位（打开所在目录并选中：Windows explorer /select、
             // macOS open -R、Linux 打开父目录）。jar/war 刻意不路由：
             // .jar 的文件关联可能是 javaw 直接运行，系统打开等于执行它
-            val ext = filePath.substringAfterLast('.', "").lowercase()
+            val ext = resolvedPath.substringAfterLast('.', "").lowercase()
             if (ext in setOf("zip", "7z", "rar", "tar", "gz", "tgz")) {
-                val f = java.io.File(filePath)
-                if (!f.exists()) {
-                    log.warn("Reveal archive in file manager failed: not found $filePath")
+                if (!ioFile.exists()) {
+                    log.warn("Reveal archive in file manager failed: not found $resolvedPath")
                     return@invokeLater
                 }
                 runCatching {
                     when {
                         com.intellij.openapi.util.SystemInfo.isWindows ->
-                            ProcessBuilder("explorer", "/select,${f.absolutePath}").start()
+                            ProcessBuilder("explorer", "/select,${ioFile.absolutePath}").start()
                         com.intellij.openapi.util.SystemInfo.isMac ->
-                            ProcessBuilder("open", "-R", f.absolutePath).start()
-                        else -> java.awt.Desktop.getDesktop().open(f.parentFile)
+                            ProcessBuilder("open", "-R", ioFile.absolutePath).start()
+                        else -> java.awt.Desktop.getDesktop().open(ioFile.parentFile)
                     }
                 }.onFailure { log.warn("Reveal archive in file manager failed: ${it.message}") }
                 return@invokeLater
             }
             // VFS 刷新兜底（AI 刚创建的文件可能尚未进 LocalFileSystem VFS——"打开初始
             // 打不开，IDEA 没刷新"实锤）：找不到时同步刷新该文件后重取
-            val ioFile = java.io.File(filePath)
-            val vfile = LocalFileSystem.getInstance().findFileByPath(filePath)
+            val vfile = LocalFileSystem.getInstance().findFileByPath(resolvedPath)
                 ?: if (ioFile.exists()) {
                     com.intellij.openapi.application.ApplicationManager.getApplication()
                         .runWriteAction<com.intellij.openapi.vfs.VirtualFile?> {
@@ -4390,7 +4419,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     openEditorSearch(editor, findText)
                 }
             } else {
-                log.warn("Open file failed: file not found after VFS refresh $filePath")
+                log.warn("Open file failed: file not found after VFS refresh $resolvedPath")
             }
         }
         return buildJsonObject { put("op", "fileOpened") }

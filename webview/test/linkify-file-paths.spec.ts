@@ -40,6 +40,14 @@ describe('resolveFileLink 解析与从严校验', () => {
     ['括号粘连裁剪', '(webview/src/a.ts)', 'E:/ws/webview/src/a.ts', undefined],
     ['句尾点号裁剪', 'webview/src/a.ts.', 'E:/ws/webview/src/a.ts', undefined],
     ['中文行文粘字剥离', '见webview/src/a.ts', 'E:/ws/webview/src/a.ts', undefined],
+    // 2026-10-09 缺口修复：带行号裸文件名 + 目录形态（feat/file-link-linenum-folder-open）
+    ['裸文件名+行号（.gitignore:37）', '.gitignore:37', 'E:/ws/.gitignore', 37],
+    ['裸文件名+行号（长文件名）', 'ZCodeToolWindowPanel.kt:1606', 'E:/ws/ZCodeToolWindowPanel.kt', 1606],
+    ['裸文件名+GitHub #L 行号', 'CHANGELOG.md#L12', 'E:/ws/CHANGELOG.md', 12],
+    ['目录 Unix 绝对（原样下发，Kotlin 前导 / 回退兜底）', '/docs/internal/', '/docs/internal/', undefined],
+    ['目录相对', 'webview/src/', 'E:/ws/webview/src/', undefined],
+    ['目录 Windows 绝对', 'E:/proj/a/b/', 'E:/proj/a/b/', undefined],
+    ['目录相对带尾反斜杠（归一为正斜杠）', 'webview\\src\\', 'E:/ws/webview/src/', undefined],
   ])('%s：%s', (_name, raw, absPath, line) => {
     const target = resolveFileLink(raw, ROOT)
     expect(target).not.toBeNull()
@@ -55,7 +63,10 @@ describe('resolveFileLink 解析与从严校验', () => {
   })
 
   it.each([
-    ['裸文件名（无分隔符）', 'App.tsx'],
+    ['裸文件名（无分隔符无行号，维持从严）', 'App.tsx'],
+    ['裸文件名无行号（.gitignore）', '.gitignore'],
+    ['时间形态（无扩展名）', '12:30'],
+    ['目录形态无尾斜杠（无法与版本号串区分）', 'docs/internal'],
     ['分支名误报（扩展名白名单挡）', 'feature/0.2.1'],
     ['and/or 碎片', 'and/or'],
     ['~ 开头（基准非工作区根）', '~/.zcode/v2/setting.json'],
@@ -119,6 +130,38 @@ describe('linkifyFilePaths HTML 后处理', () => {
   it('CJK 句号留在链接外', () => {
     const out = linkifyFilePaths('<p>见 docs/internal/feat/x.md。</p>', ROOT)
     expect(out).toContain('>docs/internal/feat/x.md</span>。')
+  })
+
+  // 2026-10-09 缺口修复：裸文件名行号 + 目录形态（feat/file-link-linenum-folder-open）
+  it('裸文件名+行号链接化（纯裸文件名文本不被快速门禁短路）', () => {
+    const out = linkifyFilePaths('<p>排除 <code>.gitignore:37</code> 是既定规则</p>', ROOT)
+    expect(out).toContain('class="md-file-link"')
+    expect(out).toContain('data-file-path="E:/ws/.gitignore"')
+    expect(out).toContain('data-file-line="37"')
+    expect(out).toContain('>.gitignore:37</span>')
+  })
+
+  it('无行号裸文件名不链接（token 层不命中）', () => {
+    const html = '<p>改动在 <code>changelog.ts</code> 与 <code>ZCodeToolWindowPanel.kt</code></p>'
+    expect(linkifyFilePaths(html, ROOT)).toBe(html)
+  })
+
+  it('时间形态 12:30 不链接（门禁整文短路）', () => {
+    const html = '<p>时长 12:30 结束</p>'
+    expect(linkifyFilePaths(html, ROOT)).toBe(html)
+  })
+
+  it('目录路径链接化（结尾 /，无行号属性）', () => {
+    const out = linkifyFilePaths('<p>见 <code>/docs/internal/</code> 与 <code>webview/src/</code></p>', ROOT)
+    expect(out).toContain('data-file-path="/docs/internal/"')
+    expect(out).toContain('data-file-path="E:/ws/webview/src/"')
+    expect(out).not.toContain('data-file-line')
+    expect(out).toContain('>/docs/internal/</span>')
+  })
+
+  it('目录无尾斜杠不链接', () => {
+    const html = '<p>文档在 docs/internal 下面</p>'
+    expect(linkifyFilePaths(html, ROOT)).toBe(html)
   })
 })
 
@@ -195,5 +238,16 @@ describe('renderMarkdown 集成（workspaceRoot 第三参）', () => {
     expect(out).toContain('>webview/vite.config.ts#L31-32</span>')
     expect(out).toContain('data-file-path="E:/ws/webview/vite.config.ts"')
     expect(out).toContain('data-file-line="31"')
+  })
+
+  it('真机回归（2026-10-09）：commit 报告场景——.gitignore:37 与 /docs/internal/ 双双链接', () => {
+    const html = renderMarkdown(
+      '设计文档未随提交——`.gitignore:37` 排除 `/docs/internal/` 是项目既定规则',
+      false,
+      ROOT,
+    )
+    expect(html).toContain('data-file-path="E:/ws/.gitignore"')
+    expect(html).toContain('data-file-line="37"')
+    expect(html).toContain('data-file-path="/docs/internal/"')
   })
 })

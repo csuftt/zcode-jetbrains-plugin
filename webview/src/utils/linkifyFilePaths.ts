@@ -15,8 +15,15 @@
  *   - Windows 绝对路径 X:\... / X:/...、Unix 绝对路径 /...
  *   - 工作区相对路径（含分隔符 + 扩展名白名单），靠 workspaceRoot 解析成绝对路径
  *   - 可选行号后缀 :123 / :L123 / :123-456 与 GitHub 风格 #L123 / #L123-456 / #L123-L456（跳首行）
- *   - 不识别：pre/a/button 子树内文本、裸文件名（无分隔符）、~ 与 .. 开头
+ *   - 不识别：pre/a/button 子树内文本、~ 与 .. 开头
  *     （基准非工作区根，v1 解析不了就不链接——死链不如不链）、含空格路径
+ *
+ * 2026-10-09 缺口修复（feat/file-link-linenum-folder-open）：
+ *   - 带行号后缀的裸文件名放行（.gitignore:37 / App.kt:1606——:行号是强文件指代
+ *     信号，误报面远小于裸文件名本体；无行号裸文件名维持不链），按工作区根解析
+ *   - 目录路径（结尾 / 的显式形态，如 /docs/internal/、webview/src/）放行，
+ *     无行号；打开方式=系统文件管理器（Kotlin handleOpenFile 目录路由），
+ *     前导 / 路径不存在时 Kotlin 侧剥前导拼项目根回退
  */
 
 export interface FileLinkTarget {
@@ -48,7 +55,11 @@ const KNOWN_EXTENSIONS = new Set([
 
 /**
  * 路径候选 token（宽松匹配，严格校验在 resolveFileLink）：
- *   可选 Windows 盘符 + 段* + (分隔符+段)+ + 可选行号后缀
+ *   分支1：可选 Windows 盘符 + 段* + (分隔符+段)+ + 可选结尾分隔符（目录形态
+ *     /docs/internal/、webview/src/——结尾 / 不进 token 的话 resolveFileLink
+ *     收不到目录信号）+ 可选行号后缀
+ *   分支2：裸文件名.扩展名 + 行号后缀（后缀经 lookahead 绑定为必选——
+ *     无行号裸文件名不进 token，从源头挡 App.tsx 类误报）
  * 段字符类含 CJK（-鿿，docs/静夜思.md 这类中文文件名路径）；
  * 刻意不含：空格/引号/冒号/逗号/书名号——含空格路径 v1 不支持
  * （无法判定词边界，截断错比不链更糟）。
@@ -56,10 +67,14 @@ const KNOWN_EXTENSIONS = new Set([
  * （http://x.com/a.ts 里的 com/a.ts 会被 . 前置拒绝）。
  */
 const PATH_TOKEN =
-  /(?<![\w/\\:.])(?:[A-Za-z]:)?[\w$.~@+%&()[\]一-鿿-]*(?:[\\/][\w$.~@+%&()[\]一-鿿-]+)+(?:(?::|#L)L?\d{1,6}(?:-L?\d{1,6})?)?/gu
+  /(?<![\w/\\:.])(?:(?:[A-Za-z]:)?[\w$.~@+%&()[\]一-鿿-]*(?:[\\/][\w$.~@+%&()[\]一-鿿-]+)+[\\/]?|[\w$.~@+%&()[\]一-鿿-]*\.[A-Za-z0-9]{1,10}(?=(?::|#L)L?\d))(?:(?::|#L)L?\d{1,6}(?:-L?\d{1,6})?)?/gu
 
-/** 快速门禁：全文没有"分隔符+扩展名"形态直接原样返回（流式每帧都过这里，省 DOMParser） */
-const PATH_GATE = /[\\/][^<>\s]*\.[A-Za-z0-9]{1,10}/
+/**
+ * 快速门禁：命中以下任一形态才进 DOMParser（流式每帧都过这里，省解析）：
+ *   分隔符+扩展名（常规路径）/ 裸文件名.扩展名:行号 / 双分隔符（目录形态 a/b/）
+ */
+const PATH_GATE =
+  /[\\/][^<>\s]*\.[A-Za-z0-9]{1,10}|[\w$~@+%&()[\]一-鿿-]*\.[A-Za-z0-9]{1,10}(?::|#L)L?\d|[\\/][^<>\s]*[\\/]/
 
 /** 首尾粘连标点裁剪（只裁 token 字符类里含有的：. ( ) [ ]）*/
 const LEADING_TRIM = /^[(\[]+/
@@ -111,10 +126,25 @@ export function resolveFileLink(raw: string, workspaceRoot: string): FileLinkTar
   // 统一正斜杠（IntelliJ system-independent 路径；显示文本不受影响）
   let p = path.replace(/\\/g, '/')
   if (p.startsWith('./')) p = p.slice(2)
-  // 必须有分隔符（裸文件名 App.tsx 误报率太高；绝对路径天然含分隔符不受影响）
-  if (!p || p.includes('/../') || p.includes('/./') || !p.includes('/')) return null
+  if (!p || p.includes('/../') || p.includes('/./')) return null
 
-  // 扩展名白名单：最后一段必须带已知扩展名（目录路径、版本号串全在这里被挡）
+  // 目录形态（只认结尾 / 的显式目录，无扩展名目录名与版本号串难区分不猜）：
+  // 跳过扩展名闸门；行号对目录无意义强制丢弃；前导 / 原样下发
+  // （Windows 上不存在该绝对路径时由 Kotlin handleOpenFile 剥前导拼项目根回退）
+  if (p.endsWith('/')) {
+    if (/^[A-Za-z]:\//.test(p) || p.startsWith('/')) {
+      return { absPath: p, line: undefined, display }
+    }
+    const dirRoot = workspaceRoot.replace(/\\/g, '/').replace(/\/+$/, '')
+    if (!dirRoot) return null
+    return { absPath: `${dirRoot}/${p}`, line: undefined, display }
+  }
+
+  // 必须有分隔符——例外：带行号后缀的裸文件名（.gitignore:37 / App.kt:1606，
+  // :行号是强文件指代信号；无行号裸文件名 App.tsx 误报率太高维持不链）
+  if (!p.includes('/') && line == null) return null
+
+  // 扩展名白名单：最后一段必须带已知扩展名（版本号串全在这里被挡）
   const lastSeg = p.slice(p.lastIndexOf('/') + 1)
   const extMatch = lastSeg.match(/\.([A-Za-z0-9]{1,10})$/)
   if (!extMatch || !KNOWN_EXTENSIONS.has(extMatch[1].toLowerCase())) return null
