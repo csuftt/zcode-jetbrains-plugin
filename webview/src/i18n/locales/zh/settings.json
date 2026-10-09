@@ -176,13 +176,25 @@
     }
   },
   "behavior": {
-    "notifyTitle": "对话结束提醒",
+    "notifyTitle": "任务系统通知",
     "notifyEnabled": {
-      "title": "任务完成系统通知",
-      "desc": "AI 完成一轮对话时始终弹出 IDE 系统通知（含回复预览，点击直达对话）",
-      "hint": "默认关闭；仅系统消息提示（不含提示音），手动停止的回合不通知",
+      "title": "IDE 内气泡通知",
+      "desc": "AI 完成一轮对话时始终弹出 IDE 内气泡通知（含回复预览，点击直达对话）",
+      "hint": "默认关闭；无提示音，手动停止的回合不通知",
+      "onHint": "点击开启气泡通知",
+      "offHint": "点击关闭气泡通知"
+    },
+    "popupNotifyEnabled": {
+      "title": "系统通知",
+      "desc": "AI 提问、审批等待与任务完成时，在屏幕角落弹出置顶悬浮卡片（点击直达对话）",
+      "hint": "默认关闭；全平台可用（Windows/macOS/Linux），仅在 IDE 窗口非激活时弹",
       "onHint": "点击开启系统通知",
-      "offHint": "点击关闭系统通知"
+      "offHint": "点击关闭系统通知",
+      "durationLabel": "弹窗时长（秒）",
+      "durationHint": "时长 0 = 常驻直到点击或手动关闭",
+      "positionLabel": "弹窗位置",
+      "positionTopRight": "右上角",
+      "positionBottomRight": "右下角"
     },
     "enhanceTitle": "提示词润色",
     "enhanceEnabled": {

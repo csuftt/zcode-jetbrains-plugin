@@ -1,7 +1,9 @@
 /**
  * 基础设置「行为」子页签（BasicSettingsView 第三个子页签）
  *
- * 对话结束系统通知（仅系统消息，无提示音、无焦点门控——开启即始终弹，默认关闭）：
+ * 任务系统通知（IDE 内气泡通知 + 系统通知悬浮弹窗，两通道收进同一张卡片，均默认关闭）：
+ * 气泡通知无提示音、无焦点门控——开启即始终弹；悬浮弹窗为纯 Swing
+ * 置顶卡片（全平台），仅在 IDE 窗口非激活时弹，时长/位置可配（开关打开才显示）。
  * 配置走 persist kv 通道（utils/notifyConfig.ts），Kotlin ZCodeNotifyService
  * 触发通知时即时读同一 key——前端无请求往返，改动即时生效。
  * 手动 stop 的回合不通知（Kotlin 侧 markManualStop 语义，无需前端配置）。
@@ -74,6 +76,9 @@ export function BehaviorSettings() {
     writeCurrentFileConfig(next)
   }
 
+  // 悬浮弹窗时长输入（秒）本地态：允许编辑中间态（空串），合法整数才落配置，失焦回显
+  const [popupDurationInput, setPopupDurationInput] = useState(() => String(readNotifyConfig().popupDurationSec))
+
 
   const update = (patch: Partial<typeof config>) => {
     const next = { ...config, ...patch }
@@ -116,19 +121,81 @@ export function BehaviorSettings() {
           <span className="codicon codicon-bell" />
           <span className="basic-settings__field-label">{t('settings.behavior.notifyTitle')}</span>
         </div>
-        <SettingToggle
-          icon="codicon-bell"
-          title={t('settings.behavior.notifyEnabled.title')}
-          desc={t('settings.behavior.notifyEnabled.desc')}
-          on={config.notifyEnabled}
-          onToggle={() => update({ notifyEnabled: !config.notifyEnabled })}
-          onHint={t('settings.behavior.notifyEnabled.offHint')}
-          offHint={t('settings.behavior.notifyEnabled.onHint')}
-        />
-        <small className="basic-settings__hint">
-          <span className="codicon codicon-info" />
-          <span>{t('settings.behavior.notifyEnabled.hint')}</span>
-        </small>
+        <div className="behavior-popup-card">
+          <SettingToggle
+            icon="codicon-bell"
+            title={t('settings.behavior.notifyEnabled.title')}
+            desc={t('settings.behavior.notifyEnabled.desc')}
+            on={config.notifyEnabled}
+            onToggle={() => update({ notifyEnabled: !config.notifyEnabled })}
+            onHint={t('settings.behavior.notifyEnabled.offHint')}
+            offHint={t('settings.behavior.notifyEnabled.onHint')}
+          />
+          <small className="basic-settings__hint">
+            <span className="codicon codicon-info" />
+            <span>{t('settings.behavior.notifyEnabled.hint')}</span>
+          </small>
+          <SettingToggle
+            icon="codicon-browser"
+            title={t('settings.behavior.popupNotifyEnabled.title')}
+            desc={t('settings.behavior.popupNotifyEnabled.desc')}
+            on={config.popupNotifyEnabled}
+            onToggle={() => update({ popupNotifyEnabled: !config.popupNotifyEnabled })}
+            onHint={t('settings.behavior.popupNotifyEnabled.offHint')}
+            offHint={t('settings.behavior.popupNotifyEnabled.onHint')}
+          />
+          {config.popupNotifyEnabled && (
+            <div className="basic-settings__path-row">
+              <span className="basic-settings__field-label">
+                {t('settings.behavior.popupNotifyEnabled.durationLabel')}
+              </span>
+              <input
+                type="number"
+                className="basic-settings__path-input"
+                min={0}
+                max={3600}
+                value={popupDurationInput}
+                onChange={(e) => {
+                  setPopupDurationInput(e.target.value)
+                  const v = Number(e.target.value)
+                  if (e.target.value !== '' && Number.isInteger(v) && v >= 0) {
+                    update({ popupDurationSec: Math.min(v, 3600) })
+                  }
+                }}
+                onBlur={() => setPopupDurationInput(String(config.popupDurationSec))}
+              />
+            </div>
+          )}
+          {config.popupNotifyEnabled && (
+            <small className="basic-settings__hint">
+              <span className="codicon codicon-info" />
+              <span>{t('settings.behavior.popupNotifyEnabled.durationHint')}</span>
+            </small>
+          )}
+          {config.popupNotifyEnabled && (
+            <div className="basic-settings__path-row behavior-popup-position-row">
+              <span className="basic-settings__field-label">
+                {t('settings.behavior.popupNotifyEnabled.positionLabel')}
+              </span>
+              <div className="behavior-popup-position">
+                <button
+                  type="button"
+                  className={config.popupPosition === 'TOP_RIGHT' ? 'is-active' : ''}
+                  onClick={() => update({ popupPosition: 'TOP_RIGHT' })}
+                >
+                  {t('settings.behavior.popupNotifyEnabled.positionTopRight')}
+                </button>
+                <button
+                  type="button"
+                  className={config.popupPosition === 'BOTTOM_RIGHT' ? 'is-active' : ''}
+                  onClick={() => update({ popupPosition: 'BOTTOM_RIGHT' })}
+                >
+                  {t('settings.behavior.popupNotifyEnabled.positionBottomRight')}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">

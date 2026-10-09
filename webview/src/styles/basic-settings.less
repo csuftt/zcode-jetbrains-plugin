@@ -483,6 +483,62 @@
   margin-bottom: 8px;
 }
 
+/* 悬浮弹窗位置：两段选择器（右上角/右下角），标签垂直居中对齐按钮 */
+.behavior-popup-position-row {
+  align-items: center;
+  margin-top: 8px;
+}
+
+.behavior-popup-position {
+  display: inline-flex;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+
+  button {
+    padding: 6px 14px;
+    border: none;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: var(--fs-body);
+    cursor: pointer;
+    transition: background 0.15s;
+
+    & + button {
+      border-left: 1px solid var(--border-secondary);
+    }
+
+    &.is-active {
+      background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+      color: var(--accent-primary);
+    }
+  }
+}
+
+/* 悬浮提醒弹窗卡片：开关与其关联配置（时长/位置）收进同一容器。
+   容器复刻 setting-toggle 卡片外观；内层开关卡片去壳（边框/背景/内外边距交由外层） */
+.behavior-popup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 4px 0 8px;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+
+  > .setting-toggle {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+  }
+
+  .behavior-popup-position-row {
+    margin-top: 0;
+  }
+}
+
 /* AI 提交信息附加要求（多行输入；样式对齐消息编辑 textarea）*/
 .basic-settings__textarea {
   width: 100%;

@@ -34,7 +34,12 @@ describe('对话结束提醒配置', () => {
 
   it('无配置时默认关闭（不弹）', () => {
     expect(readNotifyConfig()).toEqual(DEFAULT_NOTIFY_CONFIG)
-    expect(DEFAULT_NOTIFY_CONFIG).toEqual({ notifyEnabled: false })
+    expect(DEFAULT_NOTIFY_CONFIG).toEqual({
+      notifyEnabled: false,
+      popupNotifyEnabled: false,
+      popupDurationSec: 10,
+      popupPosition: 'TOP_RIGHT',
+    })
   })
 
   it('损坏 JSON 回默认值', () => {
@@ -49,12 +54,59 @@ describe('对话结束提醒配置', () => {
 
   it('旧版遗留的 notifyOnlyUnfocused 字段被忽略（废弃不迁移）', () => {
     store.set('zcode.notify.config', JSON.stringify({ notifyEnabled: true, notifyOnlyUnfocused: true }))
-    expect(readNotifyConfig()).toEqual({ notifyEnabled: true })
+    expect(readNotifyConfig()).toEqual({
+      notifyEnabled: true,
+      popupNotifyEnabled: false,
+      popupDurationSec: 10,
+      popupPosition: 'TOP_RIGHT',
+    })
+  })
+
+  it('已删除的 osNotifyEnabled 字段被忽略（toast 通道移除后向后兼容）', () => {
+    store.set('zcode.notify.config', JSON.stringify({ notifyEnabled: true, osNotifyEnabled: true }))
+    expect(readNotifyConfig()).toEqual({
+      notifyEnabled: true,
+      popupNotifyEnabled: false,
+      popupDurationSec: 10,
+      popupPosition: 'TOP_RIGHT',
+    })
+  })
+
+  it('悬浮弹窗时长解析：0（常驻）合法，负数/非数回默认 10', () => {
+    store.set('zcode.notify.config', JSON.stringify({ popupNotifyEnabled: true, popupDurationSec: 0 }))
+    expect(readNotifyConfig().popupDurationSec).toBe(0)
+
+    store.set('zcode.notify.config', JSON.stringify({ popupDurationSec: -5 }))
+    expect(readNotifyConfig().popupDurationSec).toBe(10)
+
+    store.set('zcode.notify.config', JSON.stringify({ popupDurationSec: '30' }))
+    expect(readNotifyConfig().popupDurationSec).toBe(10)
+  })
+
+  it('悬浮弹窗位置解析：BOTTOM_RIGHT 合法，非法值/类型不对回默认 TOP_RIGHT', () => {
+    store.set('zcode.notify.config', JSON.stringify({ popupPosition: 'BOTTOM_RIGHT' }))
+    expect(readNotifyConfig().popupPosition).toBe('BOTTOM_RIGHT')
+
+    store.set('zcode.notify.config', JSON.stringify({ popupPosition: 'LEFT' }))
+    expect(readNotifyConfig().popupPosition).toBe('TOP_RIGHT')
+
+    store.set('zcode.notify.config', JSON.stringify({ popupPosition: 1 }))
+    expect(readNotifyConfig().popupPosition).toBe('TOP_RIGHT')
   })
 
   it('写入后回读一致', () => {
-    writeNotifyConfig({ notifyEnabled: true })
-    expect(readNotifyConfig()).toEqual({ notifyEnabled: true })
+    writeNotifyConfig({
+      notifyEnabled: true,
+      popupNotifyEnabled: true,
+      popupDurationSec: 30,
+      popupPosition: 'BOTTOM_RIGHT',
+    })
+    expect(readNotifyConfig()).toEqual({
+      notifyEnabled: true,
+      popupNotifyEnabled: true,
+      popupDurationSec: 30,
+      popupPosition: 'BOTTOM_RIGHT',
+    })
     expect(store.get('zcode.notify.config')).toBeTruthy()
   })
 })

@@ -176,13 +176,25 @@
     }
   },
   "behavior": {
-    "notifyTitle": "会話終了リマインダー",
+    "notifyTitle": "タスクのシステム通知",
     "notifyEnabled": {
-      "title": "タスク完了のシステム通知",
-      "desc": "AI が 1 ターンを完了したとき常に IDE のシステム通知を表示します（返信プレビュー付き、クリックで会話へ）",
-      "hint": "デフォルトはオフ。システムメッセージのみ（サウンドなし）。手動停止したターンは通知しません",
+      "title": "IDE 内バルーン通知",
+      "desc": "AI が 1 ターンを完了したとき常に IDE 内バルーン通知を表示します（返信プレビュー付き、クリックで会話へ）",
+      "hint": "デフォルトはオフ。サウンドなし。手動停止したターンは通知しません",
       "onHint": "クリックで通知を有効化",
       "offHint": "クリックで通知を無効化"
+    },
+    "popupNotifyEnabled": {
+      "title": "システム通知",
+      "desc": "AI が入力・承認を待っているときやターン完了時に、画面の隅に最前面のフローティングカードを表示します（クリックで会話へ）",
+      "hint": "デフォルトはオフ。Windows/macOS/Linux で動作し、IDE ウィンドウが非アクティブなときだけ表示します",
+      "onHint": "クリックでシステム通知を有効化",
+      "offHint": "クリックでシステム通知を無効化",
+      "durationLabel": "表示時間（秒）",
+      "durationHint": "0 = クリックまたは閉じるまで常駐",
+      "positionLabel": "表示位置",
+      "positionTopRight": "右上",
+      "positionBottomRight": "右下"
     },
     "enhanceTitle": "プロンプト改善",
     "enhanceEnabled": {

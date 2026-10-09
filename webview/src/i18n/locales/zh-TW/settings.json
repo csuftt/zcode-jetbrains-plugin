@@ -160,13 +160,25 @@
     }
   },
   "behavior": {
-    "notifyTitle": "對話結束提醒",
+    "notifyTitle": "任務系統通知",
     "notifyEnabled": {
-      "title": "任務完成系統通知",
-      "desc": "AI 完成一輪對話時始終彈出 IDE 系統通知（含回覆預覽，點擊直達對話）",
-      "hint": "預設關閉；僅系統訊息提示（不含提示音），手動停止的回合不通知",
+      "title": "IDE 內氣泡通知",
+      "desc": "AI 完成一輪對話時始終彈出 IDE 內氣泡通知（含回覆預覽，點擊直達對話）",
+      "hint": "預設關閉；無提示音，手動停止的回合不通知",
+      "onHint": "點擊開啟氣泡通知",
+      "offHint": "點擊關閉氣泡通知"
+    },
+    "popupNotifyEnabled": {
+      "title": "系統通知",
+      "desc": "AI 提問、審批等待與任務完成時，在螢幕角落彈出置頂懸浮卡片（點擊直達對話）",
+      "hint": "預設關閉；全平台可用（Windows/macOS/Linux），僅在 IDE 視窗非啟用時彈",
       "onHint": "點擊開啟系統通知",
-      "offHint": "點擊關閉系統通知"
+      "offHint": "點擊關閉系統通知",
+      "durationLabel": "彈窗時長（秒）",
+      "durationHint": "時長 0 = 常駐直到點擊或手動關閉",
+      "positionLabel": "彈窗位置",
+      "positionTopRight": "右上角",
+      "positionBottomRight": "右下角"
     },
     "enhanceTitle": "提示詞潤色",
     "enhanceEnabled": {

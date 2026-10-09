@@ -176,13 +176,25 @@
     }
   },
   "behavior": {
-    "notifyTitle": "대화 종료 알림",
+    "notifyTitle": "작업 시스템 알림",
     "notifyEnabled": {
-      "title": "작업 완료 시스템 알림",
-      "desc": "AI가 턴을 마치면 항상 IDE 시스템 알림을 표시합니다(답변 미리보기 포함, 클릭 시 대화로 이동)",
-      "hint": "기본 꺼짐; 시스템 메시지만 표시(소리 없음). 수동으로 중지한 턴은 알리지 않음",
+      "title": "IDE 풍선 알림",
+      "desc": "AI가 턴을 마치면 항상 IDE 풍선 알림을 표시합니다(답변 미리보기 포함, 클릭 시 대화로 이동)",
+      "hint": "기본 꺼짐; 소리 없음. 수동으로 중지한 턴은 알리지 않음",
       "onHint": "클릭하여 알림 켜기",
       "offHint": "클릭하여 알림 끄기"
+    },
+    "popupNotifyEnabled": {
+      "title": "시스템 알림",
+      "desc": "AI가 입력/승인을 기다리거나 턴을 마치면 화면 모서리에 항상 위 플로팅 카드를 표시합니다(클릭 시 대화로 복귀)",
+      "hint": "기본 꺼짐; Windows/macOS/Linux 지원, IDE 창이 비활성일 때만 표시",
+      "onHint": "클릭하여 시스템 알림 켜기",
+      "offHint": "클릭하여 시스템 알림 끄기",
+      "durationLabel": "표시 시간(초)",
+      "durationHint": "0 = 클릭하거나 닫을 때까지 유지",
+      "positionLabel": "팝업 위치",
+      "positionTopRight": "오른쪽 위",
+      "positionBottomRight": "오른쪽 아래"
     },
     "enhanceTitle": "프롬프트 개선",
     "enhanceEnabled": {

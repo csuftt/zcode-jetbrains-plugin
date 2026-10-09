@@ -176,13 +176,25 @@
     }
   },
   "behavior": {
-    "notifyTitle": "Conversation reminders",
+    "notifyTitle": "Task notifications",
     "notifyEnabled": {
-      "title": "Task completion notification",
-      "desc": "Always shows an IDE notification (with reply preview, click to open) when the AI finishes a turn",
-      "hint": "Off by default; system message only (no sound); manually stopped turns are not notified",
+      "title": "IDE balloon notification",
+      "desc": "Always shows an IDE balloon notification (with reply preview, click to open) when the AI finishes a turn",
+      "hint": "Off by default; no sound; manually stopped turns are not notified",
       "onHint": "Click to enable notifications",
       "offHint": "Click to disable notifications"
+    },
+    "popupNotifyEnabled": {
+      "title": "System notification",
+      "desc": "Shows an always-on-top floating card in a corner of the screen when the AI waits for input/approval or finishes a turn (click to jump back)",
+      "hint": "Off by default; works on Windows/macOS/Linux; only pops while the IDE window is inactive",
+      "onHint": "Click to enable system notifications",
+      "offHint": "Click to disable system notifications",
+      "durationLabel": "Popup duration (seconds)",
+      "durationHint": "Duration 0 = stays until clicked or closed",
+      "positionLabel": "Popup position",
+      "positionTopRight": "Top-right",
+      "positionBottomRight": "Bottom-right"
     },
     "enhanceTitle": "Prompt Enhancer",
     "enhanceEnabled": {
