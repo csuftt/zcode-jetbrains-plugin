@@ -65,8 +65,12 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             } ?: return false
             toolWindow.show(null)
             if (cm.selectedContent !== existing) cm.setSelectedContent(existing)
-            // 已是选中标签时 setSelectedContent 不触发 selectionChanged，懒加载场景需手动激活
-            else (existing.component as? ZCodeToolWindowPanel)?.ensureJcefCreated()
+            // 已是选中标签时 setSelectedContent 不触发 selectionChanged，懒加载场景需手动激活；
+            // 外部跳转（定时补发/任务列表）带到已选中标签 = 可见即清「回合结束待查看」标记
+            else (existing.component as? ZCodeToolWindowPanel)?.let {
+                it.ensureJcefCreated()
+                it.clearTabTurnFinished()
+            }
             return true
         }
 
@@ -214,6 +218,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 // 标题栏按钮随选中标签切换实例（Run 面板 Stop 同机制；右键菜单无插件扩展点，见 #18/#21）
                 toolWindow.setTitleActions(listOf(RenameTabAction(panel)))
                 panel.ensureJcefCreated() // 懒加载标签激活（已激活时为 no-op）
+                panel.clearTabTurnFinished() // 点进标签即清「回合结束待查看」标记
                 project.zCodeService().setActivePanel(panel)
                 // 内嵌浏览器全局共享：展开状态下随标签切换迁移挂载（宽度延续）——
                 // 修复「切到新标签后聊天独占被浏览器拉宽的 TW、主界面特别大」

@@ -128,6 +128,10 @@ class ZCodeToolWindowPanel(
     // 本标签当前会话是否生成中（displayName 后缀 ●）
     @Volatile
     private var tabStreaming: Boolean = false
+    // 本标签是否有「回合结束待查看」标记（displayName 后缀 TAB_TURN_FINISHED_MARK）：
+    // 与 ● 互斥、● 优先；回合结束时本标签未被选中才点亮，点进标签即清；易失态不持久化
+    @Volatile
+    private var tabTurnFinished: Boolean = false
 
     // ============ 流式订阅状态 ============
     // 当前选中的 sessionId（标签持久化 + 生成中状态归属判断）
@@ -272,6 +276,13 @@ class ZCodeToolWindowPanel(
     internal companion object {
         const val KEY_BROWSER_EXPANDED = "zcode.browser.paneExpanded"
         const val KEY_CHAT_BASE_WIDTH = "zcode.browser.chatBaseWidth"
+
+        /** 标签「回合结束待查看」标记的 displayName 后缀（与 ● 生成中互斥、● 优先）。
+         *  演变：✓(U+2713) → 实测期 ✓✅ 并排（Swing 不渲染 emoji 彩色，✅ 退化单色勾）→
+         *  ✔(U+2714 Heavy Check Mark 粗体勾，displayName 纯文本无富文本通道，粗字形只能换字符）。
+         *  豆腐风险已排查：逻辑字体 Dialog/SansSerif 级联链全覆盖 U+2714（单字体缺口由
+         *  Segoe UI Symbol 兜底渲染为单色粗勾，与 ● 同级风险），2026-10-09 */
+        const val TAB_TURN_FINISHED_MARK = "✔"
 
         /** 浏览器缩放基准（Chromium zoom level 1.0 = 原生 120%）：webview 观感按此档
          *  调校，原生 100% 在 HiDPI 下过小（真机 2026-10-08 反馈「120% 才正常，
@@ -1233,12 +1244,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /**
      * 「新建会话」延迟创建（对齐新标签）：前端清空 currentSessionId 进入待命态后通知本 op，
      * Java 侧同步清 TabState 绑定（否则重启恢复会绑回旧会话）、标签 tooltip（旧会话标题）
-     * 与「●」生成中标记（turn.completed 归属判断依赖 currentSessionId，清空后收不到复位）。
+     * 与「●」生成中/回合完成标记（turn 事件归属判断依赖 currentSessionId，清空后收不到复位）。
      * 不 unsubscribe 旧会话（同切换会话策略：切回不丢事件；前端按 currentSessionId 过滤不串扰）。
      */
     private fun handleClearTabSession(): JsonObject {
         currentSessionId = null
         setTabStreaming(false)
+        clearTabTurnFinished()
         persistSelfTabState()
         val content = attachedContent
         if (content != null) {
@@ -1600,10 +1612,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 更新标签 displayName：baseTitle + 生成中后缀（EDT）*/
+    /** 更新标签 displayName：baseTitle + 状态后缀（生成中 ● 优先于回合完成标记；EDT）*/
     private fun applyTabDisplayName() {
         val content = attachedContent ?: return
-        val display = if (tabStreaming) "$baseTabTitle ●" else baseTabTitle
+        val display = when {
+            tabStreaming -> "$baseTabTitle ●"
+            tabTurnFinished -> "$baseTabTitle $TAB_TURN_FINISHED_MARK"
+            else -> baseTabTitle
+        }
         SwingUtilities.invokeLater {
             if (!disposed) content.displayName = display
         }
@@ -1613,6 +1629,36 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun setTabStreaming(active: Boolean) {
         if (tabStreaming == active) return
         tabStreaming = active
+        applyTabDisplayName()
+    }
+
+    /** 本标签回合开始：● 亮 + 完成标记灭（新一轮开始即覆盖旧完成态）*/
+    private fun onTurnStartedForTab() {
+        tabStreaming = true
+        tabTurnFinished = false
+        applyTabDisplayName()
+    }
+
+    /**
+     * 本标签回合结束（completed/failed）：● 灭；本标签未被选中则亮「回合结束待查看」标记。
+     * 选中态是 Swing 状态须 EDT 读取；两个标志同拍置位后刷新，避免 ●→无→标记 闪烁。
+     * EDT 排队与 selectionChanged 的清除天然有序：先切进标签则此处读到已选中不点亮，
+     * 先点亮则随后的选中事件走 clearTabTurnFinished 清除——两种交错结果都正确。
+     */
+    private fun onTurnEndedForTab() {
+        SwingUtilities.invokeLater {
+            if (disposed) return@invokeLater
+            tabStreaming = false
+            val manager = attachedContent?.manager
+            tabTurnFinished = manager != null && manager.selectedContent !== attachedContent
+            applyTabDisplayName()
+        }
+    }
+
+    /** 清除「回合结束待查看」标记（点进标签即清；幂等）*/
+    fun clearTabTurnFinished() {
+        if (!tabTurnFinished) return
+        tabTurnFinished = false
         applyTabDisplayName()
     }
 
@@ -5779,11 +5825,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
             }
         }
 
-        // 本标签当前会话的 turn 生命周期 → 标签「●」生成中状态
+        // 本标签当前会话的 turn 生命周期 → 标签「●」生成中 /「回合结束待查看」标记
         if (sessionId == currentSessionId) {
             when (event.type) {
-                "turn.started" -> setTabStreaming(true)
-                "turn.completed", "turn.failed" -> setTabStreaming(false)
+                "turn.started" -> onTurnStartedForTab()
+                "turn.completed", "turn.failed" -> onTurnEndedForTab()
             }
         }
 
