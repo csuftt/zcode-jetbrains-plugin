@@ -86,12 +86,16 @@ export function applyStreamEvent(
       // turn.failed 读取 payload.error 供 UI 展示（此前错误信息被整体丢弃，
       // 失败只表现为"转圈停了"）；turn.completed 无错误
       const turnError = type === 'turn.failed' ? extractTurnError(payload) : undefined
+      // 本地补完成时间：completed 的权威来源是轮末重拉快照，但自动续轮场景重拉响应
+      // 会撞上下一轮的 streaming 守卫被拦（useStore case 'messages'），旧壳永远缺
+      // completed、footer 恒亮"工作中"。终态帧时间戳（服务端 sentAt）就地落账
+      const stamped = stampTurnCompleted(messages, event, streamingMessageId)
       // 兜底：turn 结束时把所有还在 pending/running 的工具标记为已完成。
       // 真实场景：ExitPlanMode/AskUserQuestion 等控制流工具不发 tool.updated(kind:result)，
       // 只发 batch（streamReducer 内处理）或 permission.resolved；若 batch 也丢失，
       // turn 结束时这些工具会永远停在 pending/running，表现为"工具卡住"。
       return {
-        messages: finalizePendingTools(messages, event.timestamp),
+        messages: finalizePendingTools(stamped, event.timestamp),
         streamingMessageId,
         turnEnded: true,
         ...(turnError ? { turnError } : {}),
@@ -136,6 +140,19 @@ function handleTurnStarted(
     }
   }
 
+  // 同 turn 判重（双"工作中"行根治，必须先于 messageId 判重）：v4 行流每个 step
+  // 边界的 turnHeader upsert 都会重投影 turn.started，且 messageId 指向本轮 user
+  // 消息——重投影永远先命中下方的 user 分支再建一条 stream_ 壳（主通道）；另有
+  // 迟到订阅自愈壳（v4-late-）、快照兜底壳（v4-snap-）与真实 entityId 不同族、
+  // upsert 缺 entityId 退化 stream_<turnId> 等旁路。按壳记录的 turnId 对账：同一
+  // 回合一律复用首壳，三条路径全收敛
+  if (event.turnId) {
+    const byTurn = messages.find((m) => m.info.role === 'assistant' && m.info.turnId === event.turnId)
+    if (byTurn) {
+      return { messages, streamingMessageId: byTurn.info.id, turnEnded: false }
+    }
+  }
+
   // 避免重复创建（turn.started 可能重发）；命中 user 消息不算重发——
   // 协议的 messageId 是触发 turn 的 user 消息 id，与重拉后的服务端 user 消息
   // 同 id，直接复用会让后续 delta 叠进用户气泡（排队消息过期重拉竞态），
@@ -166,9 +183,37 @@ function createAssistantMessage(event: StreamEvent, id: string): ZCodeMessage {
       time: { created: event.timestamp },
       id,
       sessionID: event.sessionId,
+      ...(event.turnId ? { turnId: event.turnId } : {}),
     },
     parts: [],
   }
+}
+
+/**
+ * turn 终态时给本 turn 的流式壳补 completed（找不到再退而求其次按 streamingMessageId，
+ * 兜底只服务缺 turnId 的 legacy 流——legacy 无自动续轮，不会误写新壳）。
+ * 已有终态的不覆盖（重放安全）
+ */
+function stampTurnCompleted(
+  messages: ZCodeMessage[],
+  event: StreamEvent,
+  streamingMessageId: string | null,
+): ZCodeMessage[] {
+  const target =
+    (event.turnId
+      ? messages.find(
+          (m) => m.info.role === 'assistant' && m.info.turnId === event.turnId && !m.info.time.completed,
+        )
+      : undefined) ??
+    (streamingMessageId
+      ? messages.find((m) => m.info.id === streamingMessageId && !m.info.time.completed)
+      : undefined)
+  if (!target) return messages
+  return messages.map((m) =>
+    m === target
+      ? { ...m, info: { ...m.info, time: { ...m.info.time, completed: event.timestamp } } }
+      : m,
+  )
 }
 
 // ============ model.streaming：累加 text_delta / reasoning_delta / 工具输入流 ============

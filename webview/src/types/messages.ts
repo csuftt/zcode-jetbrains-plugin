@@ -227,6 +227,12 @@ export interface MessageInfo {
   anchor?: Record<string, unknown>
   path?: { cwd?: string; root?: string }
   /**
+   * 协议回合 id(本地流式壳专属):turn.started 事件携带,同 turn 重复投递的幂等
+   * 判重键 + turn.completed 本地补 completed 的对账键。服务端转录真身无此字段,
+   * 快照落地被真身顶替后自然消失
+   */
+  turnId?: string
+  /**
    * /compact 压缩摘要消息（role=user）的顶层字段（2026-08-21 RPC 实测）：
    * {title:"Compact summary", body:"摘要全文"}。消息级无 synthetic 标记（仅
    * part 级有），不能靠 isHiddenSyntheticMessage 过滤，须专门识别渲染。
