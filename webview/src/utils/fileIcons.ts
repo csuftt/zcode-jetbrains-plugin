@@ -2,8 +2,9 @@
  * 文件类型 SVG 图标（按文件名/扩展名映射，对齐 cc-gui fileIconMaps 精简版）
  *
  * SVG 为内联字符串（适配 vite-plugin-singlefile 打包，无外部资源请求）。
- * 来源：jetbrains-cc-gui（MIT）webview/src/utils/fileIconMaps.ts，
- * 由 scripts/extract-file-icons.mjs 提取生成，勿手改。
+ * 来源：jetbrains-cc-gui（MIT）webview/src/utils/fileIconMaps.ts。
+ * ICONS 段由 webview/scripts/extract-file-icons.mjs 提取生成勿手改；
+ * EXTENSION_MAP/FILE_NAME_MAP 为手工维护，改动须同步脚本内模板（重生成整体覆盖）。
  */
 
 /** 图标 SVG 常量 */
@@ -126,7 +127,7 @@ const EXTENSION_MAP: Record<string, string> = {
   // 文档
   md: 'markdown', markdown: 'markdown', mdx: 'markdown',
   txt: 'document', rtf: 'document',
-  csv: 'table', tsv: 'table',
+  csv: 'table', tsv: 'table', xls: 'table', xlsx: 'table',
   // 构建 / 脚本
   gradle: 'gradle', cmake: 'makefile',
   sh: 'console', bash: 'console', zsh: 'console', fish: 'console',
@@ -137,8 +138,8 @@ const EXTENSION_MAP: Record<string, string> = {
   // 媒体 / 二进制
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image',
   ico: 'image', bmp: 'image',
-  mp4: 'video', webm: 'video', mov: 'video', avi: 'video', mkv: 'video',
-  mp3: 'audio', wav: 'audio', ogg: 'audio', flac: 'audio',
+  mp4: 'video', webm: 'video', mov: 'video', m4v: 'video', avi: 'video', mkv: 'video',
+  mp3: 'audio', wav: 'audio', m4a: 'audio', ogg: 'audio', opus: 'audio', flac: 'audio', weba: 'audio',
   ttf: 'font', otf: 'font', woff: 'font', woff2: 'font', eot: 'font',
   pdf: 'pdf',
   doc: 'word', docx: 'word',
