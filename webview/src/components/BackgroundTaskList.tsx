@@ -13,7 +13,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { useStore } from '@/store/useStore'
-import { mergeBackgroundWorks } from '@/utils/backgroundTask'
+import { mergeBackgroundWorks, sortBackgroundWorksRunningFirst } from '@/utils/backgroundTask'
 import { relativeTime } from '@/utils/time'
 import type { BackgroundBashOutputResult, BackgroundWorkSummary } from '@/types/messages'
 import { onMessage, sendToJava } from '@/ipc/bridge'
@@ -125,8 +125,9 @@ export function BackgroundTaskList({ sessionId }: { sessionId: string | null }) 
     [projection, fromTranscript, deliveredWorkStatuses],
   )
 
-  // 子代理条目不在本列表（子代理子 tab），bash+workflow 全状态展示
-  const tasks = works.filter((w) => w.kind !== 'subagent')
+  // 子代理条目不在本列表（子代理子 tab），bash+workflow 全状态展示；
+  // 运行中置顶、置顶组内外各按启动时间倒序（拼接序只是数据序，运行中可能沉底）
+  const tasks = sortBackgroundWorksRunningFirst(works.filter((w) => w.kind !== 'subagent'))
 
   if (tasks.length === 0) {
     return <div className="status-panel-empty">{t('app.status.bgWorks.empty')}</div>

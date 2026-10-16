@@ -84,8 +84,23 @@ export function parseDeliveredWorkStatuses(
 }
 
 /**
+ * 面板展示排序（读取处 BackgroundTaskList 用）：运行中（running，含 blocked——
+ * 同属 running 态）置顶，置顶组与其余组各自按启动时间倒序（新→旧，缺时间戳沉组尾）。
+ * 拼接序不能承担展示序：投影组内部是服务端顺序，运行中条目可能沉底（真机反馈）。
+ */
+export function sortBackgroundWorksRunningFirst<T extends { status: string; startedAt: number }>(works: T[]): T[] {
+  return [...works].sort((a, b) => {
+    const pa = a.status === 'running' ? 0 : 1
+    const pb = b.status === 'running' ? 0 : 1
+    if (pa !== pb) return pa - pb
+    return (b.startedAt ?? 0) - (a.startedAt ?? 0)
+  })
+}
+
+/**
  * 投影 ∪ 转录重建合并（读取处用）：按 workId 去重、投影优先（运行时权威状态覆盖
- * 重建的 ended 猜测）；投影组在前——运行中条目天然置顶显示。
+ * 重建的 ended 猜测）；投影组在前（仅数据序，展示排序由 sortBackgroundWorksRunningFirst
+ * 在渲染处收口）。
  *
  * deliveredStatuses 非空时先对投影做投递升级：resultPending 且转录已见完成通知的
  * 条目本地翻终态（单向升级——running/resultPending 之外的投影状态不碰、转录重建

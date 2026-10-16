@@ -42,7 +42,7 @@ import '@/i18n/config'
 import { useStore, handleResponse } from '@/store/useStore'
 import { BackgroundTaskList } from '@/components/BackgroundTaskList'
 import { StatusPanel } from '@/components/StatusPanel'
-import { parseBackgroundTaskWorks, mergeBackgroundWorks } from '@/utils/backgroundTask'
+import { parseBackgroundTaskWorks, mergeBackgroundWorks, sortBackgroundWorksRunningFirst } from '@/utils/backgroundTask'
 import type { BackgroundWorkSummary, ZCodeMessage } from '@/types/messages'
 
 const SID = 'sess_bgw_panel'
@@ -122,6 +122,41 @@ describe('BackgroundTaskList 后台任务列表', () => {
       })
     })
     expect(screen.getByText('building... 42%')).toBeTruthy()
+  })
+})
+
+describe('运行中置顶排序（sortBackgroundWorksRunningFirst）', () => {
+  const s = (over: Partial<BackgroundWorkSummary>): BackgroundWorkSummary => ({
+    workId: 'w', kind: 'bash', title: 't', status: 'ended', startedAt: 0, ...over,
+  })
+
+  it('running 置顶；置顶组与非置顶组各自按 startedAt 倒序', () => {
+    const sorted = sortBackgroundWorksRunningFirst([
+      s({ workId: 'run_old', status: 'running', startedAt: 1000 }),
+      s({ workId: 'done_new', status: 'ended', startedAt: 5000 }),
+      s({ workId: 'run_new', status: 'running', startedAt: 3000 }),
+      s({ workId: 'fail', status: 'failed', startedAt: 2000 }),
+    ])
+    expect(sorted.map((w) => w.workId)).toEqual(['run_new', 'run_old', 'done_new', 'fail'])
+  })
+
+  it('resultPending（干完待投递）不属置顶集合；blocked 运行中仍在置顶组', () => {
+    const sorted = sortBackgroundWorksRunningFirst([
+      s({ workId: 'pend', status: 'resultPending', startedAt: 9000 }),
+      s({ workId: 'blk', status: 'running', blocked: true, startedAt: 100 }),
+    ])
+    expect(sorted.map((w) => w.workId)).toEqual(['blk', 'pend'])
+  })
+
+  it('面板渲染顺序 = 运行中在前（投影组内沉底的运行中条目被提起）', () => {
+    injectWorks([
+      work({ workId: 'b1', title: '旧运行', startedAt: Date.now() - 60_000 }),
+      work({ workId: 'b2', title: '已失败', status: 'failed', startedAt: Date.now() - 30_000 }),
+      work({ workId: 'b3', title: '新运行', startedAt: Date.now() - 10_000 }),
+    ])
+    const { container } = render(<BackgroundTaskList sessionId={SID} />)
+    const titles = [...container.querySelectorAll('.bgwork-item__title')].map((n) => n.textContent)
+    expect(titles).toEqual(['新运行', '旧运行', '已失败'])
   })
 })
 
