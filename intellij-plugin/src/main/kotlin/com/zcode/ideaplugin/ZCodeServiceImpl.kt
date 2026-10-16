@@ -247,6 +247,16 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
     @Volatile
     private var embeddedBrowserOwner: ZCodeToolWindowPanel? = null
 
+    /**
+     * 浏览器是否已弹出到独立窗口。弹出 = 面板从侧栏分栏摘出、装进 [browserDetachDialog]：
+     * JCEF reparent 下页面与 CDP target 不销毁，AI 操作零中断。
+     */
+    @Volatile
+    private var browserDetached = false
+
+    /** 浏览器弹窗（搬运式弹出；仅 EDT 访问）*/
+    private var browserDetachDialog: com.zcode.ideaplugin.ui.BrowserDetachDialog? = null
+
     // ============ AskUserQuestion / ExitPlanMode 协调（跨标签共享）============
     // 协议客户端的 userInputRequestHandler 是单例，必须全局只注册一次。
     // serverRequestId → 等待项：前端用户选择后 complete future。
@@ -883,10 +893,13 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         sharedBrowserPanel?.let { return it }
         return synchronized(this) {
             sharedBrowserPanel?.let { return it }
-            // 收起按钮作用于「当前挂载 owner」——闭包读实时状态，跨标签迁移后仍然正确
-            val panel = com.zcode.ideaplugin.ui.ZCodeBrowserPanel(project, onClose = {
-                embeddedBrowserOwner?.hideEmbeddedBrowser()
-            })
+            // 收起按钮作用于「当前挂载 owner」——闭包读实时状态，跨标签迁移后仍然正确；
+            // 弹出独立窗口期间「收起」= 收回侧栏（collapseBrowserPane 内部收口）。
+            // 弹出按钮走全局 detachBrowserToWindow（弹窗是项目级单实例）。
+            val panel = com.zcode.ideaplugin.ui.ZCodeBrowserPanel(project,
+                onClose = { embeddedBrowserOwner?.collapseBrowserPane() },
+                onDetach = { detachBrowserToWindow() },
+            )
             sharedBrowserPanel = panel
             log.info("[browser-use] Global shared browser panel created (cross-session tab)")
             panel
@@ -897,6 +910,78 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
 
     override fun setEmbeddedBrowserOwner(panel: ZCodeToolWindowPanel?) {
         embeddedBrowserOwner = panel
+    }
+
+    override fun isBrowserDetached(): Boolean = browserDetached
+
+    /**
+     * 弹出浏览器到独立窗口（工具条「弹出」按钮；EDT，幂等）。
+     * 搬运式：先置弹出标志（[ZCodeToolWindowPanel.showEmbeddedBrowser] 据此短路，不挂侧栏），
+     * 复用收起内核摘出侧栏并还原 ToolWindow 宽度，再把面板整体装进非模态弹窗——
+     * JCEF 在 removeNotify/addNotify 时重挂窗口句柄，页面与 CDP target 不销毁。
+     */
+    override fun detachBrowserToWindow(): Boolean {
+        if (!javax.swing.SwingUtilities.isEventDispatchThread()) {
+            var result = false
+            javax.swing.SwingUtilities.invokeAndWait { result = detachBrowserToWindow() }
+            return result
+        }
+        if (browserDetached) {
+            browserDetachDialog?.let { it.getWindow()?.toFront() }
+            return true
+        }
+        val panel = getOrCreateSharedBrowserPanel() ?: return false
+        browserDetached = true
+        try {
+            // 未挂载侧栏（收起态）时 owner 为 null 或摘无可摘，均无害
+            embeddedBrowserOwner?.hideEmbeddedBrowser()
+            browserDetachDialog = com.zcode.ideaplugin.ui.BrowserDetachDialog.showWindow(project, panel) {
+                // 弹窗任何路径关闭（标题栏 × / 外部 dispose）：收回侧栏
+                javax.swing.SwingUtilities.invokeLater {
+                    if (browserDetached) restoreBrowserFromWindow()
+                }
+            }
+            panel.setBrowserDetachedUI(true)
+            log.info("[browser-use] Browser pane detached to standalone window")
+            return true
+        } catch (e: Exception) {
+            browserDetached = false
+            log.warn("[browser-use] Failed to detach browser window: ${e.message}")
+            return false
+        }
+    }
+
+    /**
+     * 收回浏览器到侧栏（弹窗关闭回调/AI visibilitySet(false)/Header 开关共用收口；EDT，幂等）。
+     * 优先挂当前激活面板（用户在哪个标签收回就在哪个标签展开），无激活面板保持收起态。
+     */
+    override fun restoreBrowserFromWindow() {
+        if (!javax.swing.SwingUtilities.isEventDispatchThread()) {
+            javax.swing.SwingUtilities.invokeAndWait { restoreBrowserFromWindow() }
+            return
+        }
+        if (!browserDetached) return
+        // 先复位标志：阻断弹窗 Disposer 回调（下方主动 dispose 触发）的二次进入
+        browserDetached = false
+        val dialog = browserDetachDialog
+        browserDetachDialog = null
+        sharedBrowserPanel?.setBrowserDetachedUI(false)
+        // 面板从弹窗内容树摘出（dispose 弹窗前摘干净，防销毁链摸到仍在弹窗里的活面板）
+        sharedBrowserPanel?.let { p ->
+            p.parent?.remove(p)
+        }
+        dialog?.let {
+            if (!it.isDisposed()) {
+                try {
+                    com.intellij.openapi.util.Disposer.dispose(it.getDisposable())
+                } catch (e: Exception) {
+                    log.warn("[browser-use] Failed to dispose browser detach dialog: ${e.message}")
+                }
+            }
+        }
+        val target = activePanel ?: embeddedBrowserOwner ?: panels.firstOrNull()
+        val shown = target?.showEmbeddedBrowser()
+        log.info("[browser-use] Browser restored from standalone window (remounted=${shown != null})")
     }
 
     override fun dispose() {
@@ -911,6 +996,19 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         activeInstances.remove(this)
         // 关闭收尾通知调度器（挂起的延迟任务一并作废，防 dispose 后触达死项目）
         notifyScheduler.shutdownNow()
+        // 先静默关浏览器弹窗（browserDetached 置 false 阻断收回回调——项目都要销毁，无处可收），
+        // 再释放共享浏览器实例（弹窗若不先关，销毁链会摸到已 dispose 的面板）
+        if (browserDetached) {
+            browserDetached = false
+            browserDetachDialog?.let {
+                try {
+                    com.intellij.openapi.util.Disposer.dispose(it.getDisposable())
+                } catch (e: Exception) {
+                    log.warn("Failed to close browser detach dialog on dispose: ${e.message}")
+                }
+            }
+        }
+        browserDetachDialog = null
         // 释放共享浏览器实例（所有标签共用这一个）
         sharedBrowserPanel?.let {
             try {

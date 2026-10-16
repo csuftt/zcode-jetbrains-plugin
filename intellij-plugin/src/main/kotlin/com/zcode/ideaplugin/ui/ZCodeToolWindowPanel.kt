@@ -1728,6 +1728,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (embeddedSplit != null) {
             embeddedBrowser?.let { return it }
         }
+        // 弹出独立窗口期间不挂侧栏：只返回面板实例（AI ensureBrowserPanel / visibilityGet
+        // 走此路径——弹窗本体即"可见"，不得把面板从弹窗拽回侧栏）
+        if (service.isBrowserDetached()) {
+            return embeddedBrowser ?: service.getSharedBrowserPanel()
+        }
         val panel = embeddedBrowser ?: service.getOrCreateSharedBrowserPanel() ?: return null
         // 他处展开中：摘除迁移（返回摘除前浏览器宽，>0 表示迁移；-1 表示收起/未挂载）。
         // owner 面板销毁时已把 owner 清 null，这里的 owner 必然活着
@@ -1901,6 +1906,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
             SwingUtilities.invokeAndWait { visible = toggleEmbeddedBrowser() }
             return visible
         }
+        val service = project.zCodeService()
+        // 弹出独立窗口中：开关语义 = 收回侧栏（在当前标签重新展开分栏）
+        if (service.isBrowserDetached()) {
+            service.restoreBrowserFromWindow()
+            return true
+        }
         if (embeddedSplit != null) {
             hideEmbeddedBrowser()
             return false
@@ -1909,8 +1920,23 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return true
     }
 
-    /** 内嵌浏览器分栏当前是否展开（browser-use browserVisibilityGet 用；只读不创建）*/
-    fun isEmbeddedBrowserVisible(): Boolean = embeddedSplit != null && embeddedBrowser != null
+    /**
+     * 收起浏览器（统一收口：弹窗中 → 收回侧栏；侧栏中 → 摘分栏）。
+     * 浏览器工具条「收起」按钮与 AI visibilitySet(false) 共用——两种承载形态下
+     * 都收敛到「用户眼前不再有浏览器」。
+     */
+    internal fun collapseBrowserPane() {
+        val service = project.zCodeService()
+        if (service.isBrowserDetached()) {
+            service.restoreBrowserFromWindow()
+            return
+        }
+        hideEmbeddedBrowser()
+    }
+
+    /** 内嵌浏览器当前是否可见（browser-use browserVisibilityGet 用；弹窗中恒可见）*/
+    fun isEmbeddedBrowserVisible(): Boolean =
+        (embeddedSplit != null && embeddedBrowser != null) || project.zCodeService().isBrowserDetached()
 
     /** 只读拿内嵌浏览器面板（已创建返回实例，未创建返回 null——不触发创建）*/
     fun embeddedBrowserPanelOrNull(): ZCodeBrowserPanel? = embeddedBrowser
@@ -1926,6 +1952,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             return result
         }
         if (!visible) {
+            // 弹出独立窗口是用户主动开的：AI visibilitySet(false) 不抢着收回，
+            // 如实报告仍可见；侧栏形态正常摘分栏
+            if (project.zCodeService().isBrowserDetached()) return true
             hideEmbeddedBrowser()
             return false
         }

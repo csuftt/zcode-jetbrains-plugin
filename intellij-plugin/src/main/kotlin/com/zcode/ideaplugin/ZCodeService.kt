@@ -97,6 +97,15 @@ interface ZCodeService {
 
     fun setEmbeddedBrowserOwner(panel: ZCodeToolWindowPanel?)
 
+    /** 浏览器是否已弹出到独立窗口（弹出期间侧栏分栏收起，页面与 CDP target 原样保留）*/
+    fun isBrowserDetached(): Boolean
+
+    /** 把共享浏览器面板弹出到独立窗口（幂等；返回是否处于弹出态）*/
+    fun detachBrowserToWindow(): Boolean
+
+    /** 把弹出的浏览器收回侧栏（幂等；优先挂当前激活面板，无激活面板保持收起态）*/
+    fun restoreBrowserFromWindow()
+
     /**
      * 注册 interaction/requestUserInput 协调器（幂等，多面板共享一个协议 handler）。
      * 第一个 panel 初始化时调用。

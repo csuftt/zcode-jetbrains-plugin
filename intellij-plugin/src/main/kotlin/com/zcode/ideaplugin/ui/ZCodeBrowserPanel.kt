@@ -53,6 +53,8 @@ class ZCodeBrowserPanel(
     private val project: com.intellij.openapi.project.Project?,
     /** 关闭回调（会话内嵌分栏形态时提供：点关闭按钮收回分栏；独立 Content 形态为 null）*/
     private val onClose: (() -> Unit)? = null,
+    /** 弹出回调（共享单例形态提供：把面板弹出到独立窗口；弹窗中由 setBrowserDetachedUI 隐藏按钮）*/
+    private val onDetach: (() -> Unit)? = null,
 ) : JPanel(BorderLayout()), Disposable {
 
     companion object {
@@ -131,6 +133,9 @@ class ZCodeBrowserPanel(
     private lateinit var backBtn: JButton
     private lateinit var forwardBtn: JButton
     private lateinit var toolbarPanel: JPanel
+
+    /** 「弹出到独立窗口」按钮（onDetach 为 null 不创建；弹窗中经 setBrowserDetachedUI 隐藏）*/
+    private var detachBtn: JButton? = null
 
     // ============ 主题（跟 webview 生效主题：显式偏好优先，否则 IDE 主题）============
 
@@ -440,6 +445,12 @@ class ZCodeBrowserPanel(
                 add(viewportBtn)
                 add(devtoolsBtn)
                 add(externalBtn)
+                if (onDetach != null) {
+                    detachBtn = navButton(AllIcons.Actions.MoveToWindow, message("browser.detach.tooltip")) {
+                        onDetach.invoke()
+                    }
+                    add(detachBtn)
+                }
                 if (onClose != null) {
                     add(navButton(AllIcons.Actions.Close, "收起浏览器") { onClose.invoke() })
                 }
@@ -447,6 +458,14 @@ class ZCodeBrowserPanel(
             BorderLayout.EAST,
         )
         return toolbar
+    }
+
+    /**
+     * 弹出态 UI 切换（EDT）：弹窗里工具条不重复放「弹出」按钮（标题栏 × 即收回语义，
+     * 与「收起浏览器」一致），仅侧栏形态可见。
+     */
+    fun setBrowserDetachedUI(detached: Boolean) {
+        detachBtn?.isVisible = !detached
     }
 
     /**
