@@ -5820,7 +5820,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
             // 电脑控制截图回填：历史投影把 display.media 剥成 "[Attached image/...]"
             // 占位文本（实时流经 CuaMediaStore.persist 落盘），按 callID 命中即注回
             // state.media——会话重开/轮末重拉后工具卡仍可渲染截图
-            com.zcode.ideaplugin.cua.CuaMediaStore.injectIntoMessages(sessionId, mapped)
+            com.zcode.ideaplugin.cua.CuaMediaStore.injectIntoMessages(sessionId, mapped).let { injected ->
+                // 工具结果文件路径兜底：未走 persist 的老会话/截图，按输出文本里的
+                // 落盘路径现场读图注入（ToolResultMediaEnricher）
+                com.zcode.ideaplugin.cua.ToolResultMediaEnricher.enrichMessages(sessionId, injected)
+            }
         }
     }
 
@@ -6298,19 +6302,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
         // 每个流式事件一行，高频：debug 级防 log 风暴
         log.debug("[stream] event type=${event.type} seq=${event.seq} (forwarded to frontend)")
-        // 电脑控制截图落盘（会话重载回填数据源）：tool.updated(kind=result) 带
-        // display.media 时按 (sessionId, toolCallId) 持久化——session/messages 历史装配
-        // 的服务端投影把图剥成占位文本，重载后只有这里落过盘的才能回填（CuaMediaStore）
-        if (event.type == "tool.updated") {
-            val payload = event.payload
-            if (payload["kind"]?.jsonPrimitive?.contentOrNull == "result") {
-                val media = payload["result"]?.jsonObject
-                    ?.get("display")?.jsonObject?.get("media") as? JsonArray
-                val callId = payload["toolCallId"]?.jsonPrimitive?.contentOrNull
-                if (media != null && media.isNotEmpty() && callId != null) {
-                    com.zcode.ideaplugin.cua.CuaMediaStore.persist(sessionId, callId, media)
-                }
-            }
+        // 工具结果媒体注入（tool.updated kind=result）：CUA 原生 display.media 照旧
+        // 落盘（会话重载回填数据源，session/messages 历史投影把图剥成占位文本）；
+        // 普通 MCP 工具的图片被服务端压成 "[Attached image/...]" 占位，但浏览器截图
+        // 等输出文本自带落盘路径——读文件合成 display.media 注回，下游缩略图/放大/
+        // 回填链路对任意工具通用（ToolResultMediaEnricher，fail-soft）
+        val outPayload = if (event.type == "tool.updated") {
+            com.zcode.ideaplugin.cua.ToolResultMediaEnricher.enrich(sessionId, event.payload)
+        } else {
+            event.payload
         }
         val eventJson = buildJsonObject {
             put("type", event.type)
@@ -6320,7 +6320,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("timestamp", event.timestamp)
             // v4 快照回放标记（前端切片回放据此跳过；legacy 流恒 null 不发）
             event.deliveryKind?.let { put("deliveryKind", it) }
-            put("payload", event.payload)
+            put("payload", outPayload)
         }
 
         // 关键事件：立即 flush 缓冲 + 直接推送（保证 turn 生命周期即时响应）
