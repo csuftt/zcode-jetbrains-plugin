@@ -797,7 +797,10 @@ class ZCodeToolWindowPanel(
      * 延迟推送：JCEF 页面可能还没 load 完，用定时重试确保前端收到。
      */
     private fun registerThemeListener() {
-        val busConn = project.messageBus.connect()
+        // LafManagerListener.TOPIC 方向=BroadcastDirection.NONE：广播只在发布侧的
+        // Application 级 bus 投递，project bus 订阅收不到（真机实证切主题 0 条回调日志），
+        // 须挂 app 级 bus（ZCodeBrowserPanel 同款订阅即 app 级）
+        val busConn = com.intellij.openapi.application.ApplicationManager.getApplication().messageBus.connect()
         themeBusConn = busConn
         busConn.subscribe(
             com.intellij.ide.ui.LafManagerListener.TOPIC,
@@ -874,7 +877,8 @@ class ZCodeToolWindowPanel(
     /** 推送当前 IDE 主题给前端（通过 executeJavaScript 调 onIdeThemeChanged）*/
     private fun pushTheme() {
         if (!::jbCefBrowser.isInitialized) return // 懒加载标签未激活
-        val isDark = !JBColor.isBright()
+        // 须用新鲜值：JBColor.isBright 是进程级缓存，切主题链路不刷新（缺陷FC）
+        val isDark = ZCodeAppearanceStore.isIdeDarkNow()
         val js = "if (window.onIdeThemeChanged) window.onIdeThemeChanged($isDark);"
         SwingUtilities.invokeLater {
             try {
@@ -1038,7 +1042,7 @@ class ZCodeToolWindowPanel(
      */
     private fun buildBridgeJs(): String {
         val funcName = jsQuery.funcName
-        val isDark = !JBColor.isBright()
+        val isDark = ZCodeAppearanceStore.isIdeDarkNow()
         val theme = if (isDark) "dark" else "light"
         val workspace = (project.basePath ?: "").replace("\\", "\\\\").replace("'", "\\'")
         val initialSession = (initialSessionId ?: "").replace("\\", "\\\\").replace("'", "\\'")

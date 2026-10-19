@@ -365,13 +365,17 @@ class ZCodeBrowserPanel(
             add(tabScrollPane, BorderLayout.SOUTH)
             add(cardPanel, BorderLayout.CENTER)
             // 跟随 IDE 模式下 IDE 主题切换时刷新分栏配色（显式偏好模式 IDE 切换不生效，
-            // 由 webview 保存时的 onAppearanceThemeChanged 刷新）
+            // 由 webview 保存时的 onAppearanceThemeChanged 刷新）。
+            // 走 onAppearanceThemeChanged 而非裸 applyPanelTheme：后者只刷 Swing 组件色，
+            // 欢迎页 HTML 不重载会留旧配色（真机：主背景切主题不变，新建网页标签才变）
             lafConn = com.intellij.openapi.application.ApplicationManager.getApplication()
                 .messageBus.connect().also { conn ->
                     conn.subscribe(
                         com.intellij.ide.ui.LafManagerListener.TOPIC,
                         com.intellij.ide.ui.LafManagerListener {
-                            if (ZCodeAppearanceStore.themePref().isEmpty()) applyPanelTheme()
+                            if (ZCodeAppearanceStore.themePref().isEmpty()) {
+                                javax.swing.SwingUtilities.invokeLater { onAppearanceThemeChanged() }
+                            }
                         },
                     )
                 }
@@ -856,8 +860,12 @@ class ZCodeBrowserPanel(
 
         override fun getPreferredSize(): java.awt.Dimension {
             val fm = getFontMetrics(font)
-            return java.awt.Dimension(fm.stringWidth(text) + JBUI.scale(24), JBUI.scale(24))
+            // 收敛边框：24 高 + 左右 12px 实底边框在工具栏图标(28 含留白视觉块小)旁显得臃肿
+            return java.awt.Dimension(fm.stringWidth(text) + JBUI.scale(14), JBUI.scale(20))
         }
+
+        /** 钉死上限防 HorizontalBox 拉到工具栏行高（28）——不钉则 preferredSize 收小无效 */
+        override fun getMaximumSize(): java.awt.Dimension = preferredSize
 
         override fun paintComponent(g: java.awt.Graphics) {
             val g2 = g as? java.awt.Graphics2D ?: return
