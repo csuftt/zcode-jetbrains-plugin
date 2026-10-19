@@ -250,12 +250,14 @@ export function streamCharsTotal(): number {
   return charsTotal
 }
 
-/** 滑动窗口内字符速率（chars/s）；样本跨度不足 1.5s 时返回 null（防瞬时毛刺）*/
+/** 滑动窗口内字符速率（chars/s）；样本活跃跨度（首尾样本间隔）不足 1.5s 时返回
+ *  null（防瞬时毛刺）。跨度按样本首尾计而非墙钟（缺陷FE）：流停顿期不再把停顿前
+ *  的字符摊到整个 5s 上造成"数字线性衰减"，纯突发的短样本群也正确判 null */
 export function streamCharsPerSec(now = Date.now()): number | null {
   const cutoff = now - PACE_WINDOW_MS
   while (paceSamples.length > 0 && paceSamples[0].t < cutoff) paceSamples.shift()
   if (paceSamples.length === 0) return null
-  const span = now - paceSamples[0].t
+  const span = paceSamples[paceSamples.length - 1].t - paceSamples[0].t
   if (span < 1500) return null
   let chars = 0
   for (const s of paceSamples) chars += s.chars

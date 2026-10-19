@@ -11,6 +11,8 @@
  * 有真值就显示——非生成期（工具执行/请求间隙）恒显最近真值；生成期真值 8s 新鲜，
  * 过期交估算接管（流式字符速率×自校准系数，~ 前缀）。数据是 agent 进程内存，
  * 重启后从新回合开始积累；组件卸载（回合结束）轮询即停。
+ * 缺陷FE（2026-10-19）：估算窗口饥饿期（流起步/≥5s 停顿恢复后的 ~1.5s）不再清屏，
+ * 保留最近估算值兜底——长思考请求（真值必然过期）+ 渠道停顿组合下数字不再闪没。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -106,11 +108,15 @@ export function WaitingIndicator({ since }: Props) {
     : null
   const estRaw =
     streamActive && realTps == null ? estimateTpsFromChars(streamCharsPerSec()) : null
-  const estHold = estHoldRef.current
-  if (estRaw == null) {
-    if (estHold.v != null) estHoldRef.current = { v: null, at: 0 }
-  } else if (estHold.v == null || Date.now() - estHold.at >= EST_HOLD_MS) {
-    estHoldRef.current = { v: estRaw, at: Date.now() }
+  if (estRaw != null) {
+    // 数值 2s 一更新（防跳动）；estRaw 为 null（流起步/停顿恢复的估算窗口饥饿期，
+    // 约 1.5s）不再立即清屏——保留最近估算值兜底，数字不闪没（缺陷FE：千帆长思考
+    // 请求真值过期+渠道停顿恢复时速率消失）。回合结束组件卸载自然复位；新鲜真值
+    // 或新鲜估算落地时按渲染优先级原样接管
+    const estHold = estHoldRef.current
+    if (estHold.v == null || Date.now() - estHold.at >= EST_HOLD_MS) {
+      estHoldRef.current = { v: estRaw, at: Date.now() }
+    }
   }
   const estTps = estHoldRef.current.v
 
