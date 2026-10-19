@@ -550,6 +550,9 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'steerMessage'; sessionId: string; text: string; commandId: string }
   /** 撤回引导中/服务端队列中的条目（v4 deleteQueueItem）：引导 chip ✕ 触发 */
   | { op: 'cancelSteer'; sessionId: string; queueItemId: string }
+  /** 促发服务端队列条目立即执行（v4 sendQueuedNow，缺陷FD）：发送被服务端繁忙窗口
+   *  静默降级进队列后的捞回；失败回退分类见应答 promoteQueuedInput */
+  | { op: 'promoteQueuedInput'; sessionId: string; queueItemId: string }
   | { op: 'getIdeTheme' }
   | { op: 'listFiles'; query: string }
   | { op: 'listCommands'; query?: string }
@@ -1318,6 +1321,10 @@ export type JavaResponse =
   | { op: 'steerMessage'; sessionId: string; accepted?: boolean; delivery?: string; queueItemId?: string; error?: string }
   /** cancelSteer 应答：removed=true 已撤销（清 chip + 队列条目回插）；false=已注入落位（queue.itemMissing），提示不可撤 */
   | { op: 'cancelSteer'; sessionId: string; queueItemId: string; removed: boolean; error?: string }
+  /** promoteQueuedInput 应答（缺陷FD 兜底）：发送被服务端静默降级进队列后的促发结果。
+   *  ok=true 已促发执行；ok=false 时 removed=true 条目已取消（前端回插本地队列重发）/
+   *  removed=false 条目已不存在（已落位或他方促发中，前端不重发）/ 缺省=促发与删除都失败 */
+  | { op: 'promoteQueuedInput'; sessionId: string; queueItemId: string; ok: boolean; removed?: boolean; error?: string }
   | { op: 'sessionDeleted'; sessionId: string }
   | { op: 'sessionArchived'; sessionId: string }
   | { op: 'sessionRestored'; sessionId: string }

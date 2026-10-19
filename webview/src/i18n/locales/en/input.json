@@ -59,7 +59,10 @@
     "imageOnly": "(image)",
     "imageBadge": "{{count}} image(s)",
     "moveUp": "Move up (send earlier)",
-    "moveDown": "Move down"
+    "moveDown": "Move down",
+    "promoteFailedRequeued": "Send now did not take effect: the message was queued while the agent was busy and has been put back in the queue for a later resend",
+    "promoteFailedServerSide": "Send now did not take effect: the message was handed back to the server and should appear in the conversation shortly",
+    "promoteFailedUnknown": "Send now did not take effect: the message may still be sitting in the server queue; if it never shows up, please send it again"
   },
   "pasted": {
     "clickToPreview": "Click to preview full content",

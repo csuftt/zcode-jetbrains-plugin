@@ -59,7 +59,10 @@
     "imageOnly": "（画像）",
     "imageBadge": "画像 {{count}} 枚",
     "moveUp": "上へ（先に送信）",
-    "moveDown": "下へ"
+    "moveDown": "下へ",
+    "promoteFailedRequeued": "「今すぐ送信」が反映されませんでした：サーバー混雑中にキューへ入れられたため、キューに戻して後で再送します",
+    "promoteFailedServerSide": "「今すぐ送信」が反映されませんでした：メッセージはサーバー側で処理中です。まもなく会話に表示されます",
+    "promoteFailedUnknown": "「今すぐ送信」が反映されませんでした：メッセージがサーバーのキューに残っている可能性があります。表示されない場合は再送してください"
   },
   "pasted": {
     "clickToPreview": "クリックで全文をプレビュー",

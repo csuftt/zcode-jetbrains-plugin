@@ -3310,6 +3310,55 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * v4/command {type:"sendQueuedNow"} — 促发队列条目立即执行（官方客户端"排队消息立即
+     * 发送"同款原语，官方 auto-drain 亦走它）。缺陷FD：legacy session/send 落在服务端
+     * "回合工作在途"窗口（stop 异步拆卸/通知批次起轮前）时会被 admitPrompt 静默降级为
+     * delivery=queue 且 ack 正常——本方法把这类被吞的输入从服务端队列捞出执行。
+     * 手动路径语义（非 autoDrainPromotion）：preempt 当前回合 + requireIdle 重新准入，
+     * 拆卸等待在 runtime 内部完成，无客户端 stop+send 的竞态窗口。
+     *
+     * CAS 形状与 deleteQueueItemViaV4 相同（同为 znn 集合命令）：baseRevision 必填，
+     * stale 带 revisionAtDecision 重试收敛；accepted=已促发；noop=条目不存在（已落位/
+     * 已移除，旧版 queue.itemMissing error 的新形态）；其余拒绝（guard.queuePromotionBusy
+     * / guard.queueItemReserved 等）带 reasonCode，重试耗尽后抛出由调用方兜底。
+     * 老版本 CLI 无该命令时报 -32601/-32602。
+     */
+    fun sendQueuedNowViaV4(sessionId: String, queueItemId: String, timeoutMs: Long = 8000): JsonObject {
+        var baseRevision = 0L
+        var lastReject = ""
+        repeat(5) { attempt ->
+            val params = buildJsonObject {
+                put("commandId", "qnow-${java.util.UUID.randomUUID()}")
+                put("clientId", "zcode-idea-plugin")
+                put("sessionId", sessionId)
+                put("type", "sendQueuedNow")
+                put("payload", buildJsonObject { put("queueItemId", queueItemId) })
+                put("issuedAt", System.currentTimeMillis())
+                put("connectionId", "zcode-idea-plugin")
+                put("clientMode", "desktop-continuous")
+                put("baseRevision", baseRevision)
+            }
+            val r = requireOk(request("v4/command", params, timeoutMs))
+            val result = r["result"]?.jsonObject ?: JsonObject(emptyMap())
+            when (result["status"]?.jsonPrimitive?.content) {
+                "accepted" -> return result
+                // 条目不存在（已落位/已促发/已移除）：调用方按 queue.itemMissing 处理
+                "noop" -> throw IllegalStateException("queue.itemMissing (status=noop)")
+                else -> {
+                    lastReject = "status=${result["status"]?.jsonPrimitive?.content}" +
+                        " reason=${result["reasonCode"]?.jsonPrimitive?.content}"
+                    result["revisionAtDecision"]?.jsonPrimitive?.content?.toLongOrNull()?.let {
+                        baseRevision = it
+                    }
+                    if (attempt == 4) throw IllegalStateException(
+                        "sendQueuedNow not accepted ($lastReject, baseRevision=$baseRevision)")
+                }
+            }
+        }
+        throw IllegalStateException("sendQueuedNow retry loop exited unexpectedly")
+    }
+
+    /**
      * v4/command {type:"renameSession"} — 设置会话标题（服务端落库，zcode.cjs 内部
      * 走 runtime.setCustomSessionTitle，titleSource=custom）。
      * 用途：AI 重新生成会话标题（op=regenerateSessionTitle 生成后经此持久化）。

@@ -1157,6 +1157,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "stop" -> handleStop(msg)
                         "steerMessage" -> handleSteerMessage(msg)
                         "cancelSteer" -> handleCancelSteer(msg)
+                        "promoteQueuedInput" -> handlePromoteQueuedInput(msg)
                         "listFiles" -> handleListFiles(msg)
                         "listCommands" -> handleListCommands(msg)
                         "listMemoryFiles" -> handleListMemoryFiles(msg)
@@ -6615,6 +6616,61 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("sessionId", sessionId)
                 put("queueItemId", queueItemId)
                 put("removed", false)
+                put("error", "${e.message}")
+            }
+        }
+    }
+
+    /**
+     * promoteQueuedInput — 服务端队列条目促发（缺陷FD 兜底修复的 Java 侧）。
+     *
+     * 背景：legacy session/send 落在服务端"回合工作在途"窗口（stop 的异步拆卸里/
+     * 通知批次起轮前）时会被 admitPrompt 静默降级为 delivery=queue——ack 正常、
+     * 无任何错误，前端只有 turn.steerQueued（带 input 全文）一个信号。识别后调
+     * 本 op 把条目捞出执行：v4/command sendQueuedNow（官方客户端"立即发送"同款
+     * 原语，手动路径 = preempt 当前回合 + runtime 内部等拆卸完成后以该输入开新轮，
+     * 无客户端 stop+send 的竞态窗口）。
+     *
+     * 促发失败时尽力 deleteQueueItem 取消条目，防其日后被排空成迟到重复：
+     *   removed=true  → 条目已取消，前端回插本地队列重发；
+     *   removed=false → 条目已不存在（已落位/已促发，含促发报 queue.itemMissing 与
+     *                   queuePromotionBusy/queueItemReserved=他方扬升中），前端不重发；
+     *   removed 缺省  → 两操作都失败（条目可能残留），前端按可重试提示。
+     */
+    private fun handlePromoteQueuedInput(msg: JsonObject): JsonObject {
+        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 sessionId")
+        val queueItemId = msg["queueItemId"]?.jsonPrimitive?.content
+            ?: return errorResponse("缺少 queueItemId")
+        return try {
+            val result = project.zCodeService().getClient().sendQueuedNowViaV4(sessionId, queueItemId)
+            log.info("promoteQueuedInput: sendQueuedNow accepted: $sessionId/$queueItemId (status=${result["status"]})")
+            buildJsonObject {
+                put("op", "promoteQueuedInput")
+                put("sessionId", sessionId)
+                put("queueItemId", queueItemId)
+                put("ok", true)
+            }
+        } catch (e: Exception) {
+            val m = e.message ?: ""
+            // 条目已消失（已落位/他方已促发）或他方正持有扬升 lease：不再删、不重发
+            val handledElsewhere = m.contains("queue.itemMissing") ||
+                m.contains("queuePromotionBusy") || m.contains("queueItemReserved")
+            val removed: Boolean? = if (handledElsewhere) false else try {
+                project.zCodeService().getClient().deleteQueueItemViaV4(sessionId, queueItemId)
+                true
+            } catch (e2: Exception) {
+                if (e2.message?.contains("queue.itemMissing") == true) false else null
+            }
+            log.warn(
+                "promoteQueuedInput: sendQueuedNow failed (${e.message}), delete fallback removed=$removed: $sessionId/$queueItemId"
+            )
+            buildJsonObject {
+                put("op", "promoteQueuedInput")
+                put("sessionId", sessionId)
+                put("queueItemId", queueItemId)
+                put("ok", false)
+                removed?.let { put("removed", it) }
                 put("error", "${e.message}")
             }
         }

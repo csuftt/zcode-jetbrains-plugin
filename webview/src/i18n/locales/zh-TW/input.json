@@ -59,7 +59,10 @@
     "imageOnly": "（圖片）",
     "imageBadge": "{{count}} 張圖片",
     "moveUp": "上移（提前發送）",
-    "moveDown": "下移"
+    "moveDown": "下移",
+    "promoteFailedRequeued": "「立即傳送」未生效：訊息在伺服器繁忙時被排入佇列，已放回佇列稍後自動重送",
+    "promoteFailedServerSide": "「立即傳送」未生效：訊息已交回伺服器處理，稍後應會出現在對話中",
+    "promoteFailedUnknown": "「立即傳送」未生效：訊息可能仍停留在伺服器佇列中；若一直未出現，請重新傳送"
   },
   "pasted": {
     "clickToPreview": "點選預覽完整內容",

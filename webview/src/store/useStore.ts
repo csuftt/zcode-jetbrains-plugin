@@ -201,6 +201,146 @@ function handleEditSteerQueuedDefence(
   return false
 }
 
+/* ============ 「已发出但被服务端排队」防御（缺陷FD） ============
+ * legacy session/send 落在服务端"回合工作在途"窗口（stop 的异步拆卸里 / 取消通知
+ * 批次起轮前）时会被 admitPrompt 静默降级为 delivery=queue：ack 正常、无任何错误，
+ * 但消息不进转录、不开轮，且**不会自动排空**（回合取消时服务端置 queueAutoDrain=false，
+ * 且队列排空是客户端职责——官方客户端用 v4 sendQueuedNow/setAutoDrain 促发）。
+ * 服务端唯一信号 = turn.steerQueued 事件带 input 全文（deferred input 排队事件；
+ * steer 自身的同名事件不带 input；编辑重发场景由 handleEditSteerQueuedDefence 先拦）。
+ * 处置：调 Java promoteQueuedInput（v4 sendQueuedNow，官方客户端"立即发送"同款原语）
+ * 把条目捞出立即执行；失败回退见 case 'promoteQueuedInput'。补插乐观气泡的原因：
+ * 消息发出后 +300ms 的轮末快照会把它抹掉（服务端当时没有这条消息），不补插则促发
+ * 成功后要等下一轮末重拉才可见（"实时流用户消息丢失"同族，见 editedUserBubble 注释）。
+ */
+interface RecentFlushedSend {
+  sid: string
+  text: string
+  attachments?: SendAttachmentInput[]
+  scheduledFireAt?: number
+  at: number
+}
+const recentFlushedSends: RecentFlushedSend[] = []
+const RECENT_FLUSH_TTL_MS = 60_000
+const RECENT_FLUSH_MAX = 8
+/** 促发在途记录（queueItemId → 上下文）：promoteQueuedInput 应答回来做兜底决策 */
+const pendingQueuePromotions = new Map<
+  string,
+  { sid: string; text: string; attachments?: SendAttachmentInput[]; bubbleId: string }
+>()
+/** 已处置的 queueItemId（防事件重放二次促发；有界）*/
+const handledQueueItems: string[] = []
+const HANDLED_QUEUE_MAX = 20
+
+/** 发送侧打点：doSend 真实发出时登记（供"被服务端排队"防御按文本认领）*/
+function recordRecentFlushedSend(
+  sid: string,
+  text: string,
+  attachments?: SendAttachmentInput[],
+  scheduledFireAt?: number,
+): void {
+  recentFlushedSends.push({ sid, text, attachments, scheduledFireAt, at: Date.now() })
+  if (recentFlushedSends.length > RECENT_FLUSH_MAX) {
+    recentFlushedSends.splice(0, recentFlushedSends.length - RECENT_FLUSH_MAX)
+  }
+}
+
+/** 乐观用户消息构造（sendMessage 与「已发出但被服务端排队」防御补插共用）：
+ *  图片附件以 dataUrl 直渲（就地名接服务端 id 后 parts 不被帧覆盖），currentFile
+ *  走轻量 file part（气泡 chip 回显「这条消息带了什么」） */
+function optimisticUserMessage(
+  sid: string,
+  text: string,
+  attachments?: SendAttachmentInput[],
+  opts?: { id?: string; scheduledFireAt?: number },
+): ZCodeMessage {
+  return {
+    info: {
+      role: 'user',
+      time: { created: Date.now() },
+      id: opts?.id ?? `local_u_${Date.now()}`,
+      sessionID: sid,
+      ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
+    },
+    parts: [
+      ...(attachments ?? [])
+        .filter((a): a is ImageAttachmentInput => a.kind === 'image')
+        .map((a) => ({
+          type: 'image' as const,
+          mediaType: a.mimeType,
+          dataUrl: `data:${a.mimeType};base64,${a.dataBase64}`,
+          dataBase64: a.dataBase64,
+          source: { kind: 'inline' as const, filename: a.filename },
+        })),
+      ...(attachments ?? [])
+        .filter((a): a is CurrentFileAttachmentInput => a.kind === 'currentFile')
+        .map(fileContextPartFromAttachment),
+      { type: 'text', text },
+    ],
+  }
+}
+
+/**
+ * 「已发出但被服务端排队」防御（缺陷FD，2026-10-19 真机实测定案）。
+ * 命中时：登记促发在途、发出 promoteQueuedInput op，并返回"补插气泡"——
+ * **调用方负责并入消息列表**（批处理路径必须进其 messages 本地累加器：直写
+ * store 会被批末统一 set 覆盖；单推路径直接 set）。
+ * 防重复：原乐观气泡若还没被轮末快照抹掉（currentMessages 里已有同文本 local_u_），
+ * 复用其 id 且不重复补插（返回 true = 已处置无需插入）。
+ * @return null=未命中（事件与本流程无关）；true=命中且气泡已在列表；ZCodeMessage=命中待插入
+ */
+function handleFlushedSendQueuedDefence(
+  payload: unknown,
+  sessionId: string,
+  currentMessages: ZCodeMessage[],
+): ZCodeMessage | true | null {
+  const p = payload as {
+    input?: unknown
+    delivery?: unknown
+    intent?: { queueItemId?: unknown }
+    pendingInputId?: unknown
+  } | null
+  if (!p) return null
+  const text = typeof p.input === 'string' ? p.input.trim() : ''
+  if (!text) return null
+  // 仅排队形态：guide 注入走 steerDrained 正常落位；delivery 缺省按排队处理
+  if (typeof p.delivery === 'string' && p.delivery !== 'queue') return null
+  const queueItemId = typeof p.intent?.queueItemId === 'string' && p.intent.queueItemId
+    ? p.intent.queueItemId
+    : typeof p.pendingInputId === 'string'
+      ? p.pendingInputId
+      : ''
+  if (!queueItemId) return null
+  if (handledQueueItems.includes(queueItemId)) return null // 事件重放：已处置过，静默忽略
+  const now = Date.now()
+  const idx = recentFlushedSends.findIndex(
+    (r) => r.sid === sessionId && r.text.trim() === text && now - r.at < RECENT_FLUSH_TTL_MS,
+  )
+  if (idx < 0) return null
+  const [rec] = recentFlushedSends.splice(idx, 1)
+  handledQueueItems.push(queueItemId)
+  if (handledQueueItems.length > HANDLED_QUEUE_MAX) handledQueueItems.shift()
+  // 原乐观气泡健在（事件先于轮末快照到达）则复用，不重复补插
+  const existing = currentMessages.find(
+    (m) => m.info.role === 'user' && String(m.info.id).startsWith('local_u_') && userTextOf(m) === rec.text,
+  )
+  const bubbleId = existing ? String(existing.info.id) : `local_u_${Date.now()}`
+  pendingQueuePromotions.set(queueItemId, {
+    sid: sessionId,
+    text: rec.text,
+    attachments: rec.attachments,
+    bubbleId,
+  })
+  diagWarn(`[store] 发送被服务端排队（繁忙窗口降级），尝试促发: ${queueItemId}`)
+  sendToJava({ op: 'promoteQueuedInput', sessionId, queueItemId })
+  if (existing) return true
+  // 补插乐观气泡（可能已被轮末快照抹掉；服务端真身到达时按同文本自动顶替）
+  return optimisticUserMessage(sessionId, rec.text, rec.attachments, {
+    id: bubbleId,
+    ...(rec.scheduledFireAt ? { scheduledFireAt: rec.scheduledFireAt } : {}),
+  })
+}
+
 /**
  * 编辑重放编排终点提前（2026-09-12 用户三轮反馈三）：editReplay 原本挂到编辑后
  * 新回合 turnEnded 才清，其间 editOpen/startEdit/submitEdit 三处守卫全挡——表现为
@@ -2177,6 +2317,10 @@ export const useStore = create<StoreState>((set, get) => ({
         ...(finalModel && get().thoughtLevel?.enabled ? { thoughtLevel: get().thoughtLevel?.current } : {}),
         ...(attachments?.length ? { attachments } : {}),
       })
+      // 「已发出但被服务端排队」防御打点（缺陷FD）：服务端在繁忙窗口把发送静默降级
+      // 为 delivery=queue 时，flushQueue/入队链路无感知——此处登记供 turn.steerQueued
+      // （带 input 全文）回认领并促发（见 handleFlushedSendQueuedDefence）
+      recordRecentFlushedSend(sid, text, attachments, opts?.scheduledFireAt)
       // 首条 send 落地即关闭 applyModelIfReady 的新建豁免（缺陷EF）：send 恒带
       // runtimeModel 已兜正服务端模型，此后重放链对该会话只承担"真切换"职责
       set({ modelSettledSessions: new Set(get().modelSettledSessions).add(sid) })
@@ -2201,36 +2345,9 @@ export const useStore = create<StoreState>((set, get) => ({
     // hiddenCommand（编辑重放的 /rewind 命令）：不插乐观消息——命令轮不进 UI
     //（快照侧服务端已剪除，diag-rewind-meta.py 实测），乐观标题同理不占位
     if (!opts?.hiddenCommand) {
-      const userMsg: ZCodeMessage = {
-        info: {
-          role: 'user',
-          time: { created: Date.now() },
-          id: `local_u_${Date.now()}`,
-          sessionID: sid,
-          // 定时消息徽标（定时 HH:mm 执行）；历史重拉为服务端权威数据，不带此标记（预期）
-          ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
-        },
-        parts: [
-          // 图片附件乐观 part（dataUrl 直接渲染）；currentFile 上下文附件乐观
-          // 轻量 file part——气泡 chip 回显「这条消息带了什么」（隐式通道气泡
-          // 本不显示，两来源说明见 utils/fileContextParts 头注释）。乐观消息
-          // 就地改名接服务端 id 后 parts 不被帧覆盖，快照重拉才由服务端同构
-          // part 顶替，chip 无缝接管
-          ...(attachments ?? [])
-            .filter((a): a is ImageAttachmentInput => a.kind === 'image')
-            .map((a) => ({
-              type: 'image' as const,
-              mediaType: a.mimeType,
-              dataUrl: `data:${a.mimeType};base64,${a.dataBase64}`,
-              dataBase64: a.dataBase64,
-              source: { kind: 'inline' as const, filename: a.filename },
-            })),
-          ...(attachments ?? [])
-            .filter((a): a is CurrentFileAttachmentInput => a.kind === 'currentFile')
-            .map(fileContextPartFromAttachment),
-          { type: 'text', text },
-        ],
-      }
+      const userMsg = optimisticUserMessage(sid, text, attachments, {
+        ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
+      })
       set((s) => ({ messages: [...s.messages, userMsg] }))
 
       // 乐观标题：新会话首条消息立即占位（CLI 要等首轮对话结束才生成正式标题，长任务期间
@@ -4553,6 +4670,44 @@ export function handleResponse(
       break
     }
 
+    case 'promoteQueuedInput': {
+      // 「已发出但被服务端排队」防御的促发应答（缺陷FD）。ok=true：条目已被 runtime
+      // 捞出执行（preempt 当前回合 + 以该输入开新轮），气泡等服务端真身同文本顶替，
+      // 无需动作。ok=false 按 Java 侧兜底分类：
+      //   removed=true  条目已取消 → 句柄回插本地队列队头（保住消息，下一轮末重发）、
+      //                 撤下补插气泡（队列卡片接管表现）+ 横幅提示；
+      //   removed=false 条目已不存在（已落位/他方促发中）→ 保留气泡等真身，仅提示；
+      //   缺省          促发与删除都失败（条目可能残留）→ 提示可手动处置，刻意不自动
+      //                 重发（残留条目日后若被排空会成迟到重复）
+      const promo = pendingQueuePromotions.get(msg.queueItemId)
+      if (!promo) break
+      pendingQueuePromotions.delete(msg.queueItemId)
+      if (msg.ok) break
+      diagWarn(`promoteQueuedInput failed (removed=${msg.removed}): ${msg.error ?? ''}`)
+      // 切会话后丢弃：本地队列随会话切换清空（sessionResetBase 语义），
+      // 往新会话队列插旧会话消息会把消息发错会话
+      if (promo.sid !== get().currentSessionId) break
+      if (msg.removed === true) {
+        const requeued: QueuedMessage = {
+          id: `queue_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          text: promo.text,
+          ...(promo.attachments?.length ? { attachments: promo.attachments } : {}),
+          queuedAt: Date.now(),
+        }
+        const st = get()
+        set({
+          messages: st.messages.filter((m) => m.info.id !== promo.bubbleId),
+          queuedMessages: [requeued, ...st.queuedMessages],
+          lastNotice: i18n.t('input.queue.promoteFailedRequeued'),
+        })
+      } else if (msg.removed === false) {
+        set({ lastNotice: i18n.t('input.queue.promoteFailedServerSide') })
+      } else {
+        set({ lastNotice: i18n.t('input.queue.promoteFailedUnknown') })
+      }
+      break
+    }
+
     case 'archivedSessions': {
       // 标题合并（persist 手动重命名优先，同 listSessions 逻辑简化版）
       const merged = msg.sessions.map((s) => {
@@ -6500,6 +6655,16 @@ function handleStreamBatchDirect(
     if (event.type === 'turn.steerQueued' && handleEditSteerQueuedDefence(event.payload, set, get)) {
       continue
     }
+    // 「已发出但被服务端排队」防御（缺陷FD）：繁忙窗口降级为 delivery=queue 的发送
+    // 按 input 全文回认领并促发（见函数注释；编辑防御在前，两者不冲突）。
+    // 气泡并入本批累加器（messages 批末统一 set，直写 store 会被覆盖）
+    if (event.type === 'turn.steerQueued') {
+      const rescued = handleFlushedSendQueuedDefence(event.payload, sessionId, messages)
+      if (rescued) {
+        if (rescued !== true) messages = [...messages, rescued]
+        continue
+      }
+    }
     // 编辑重放的 rewind 生效确认（同单推路径）：截断本批局部 messages（编辑目标
     // 轮到尾部，含 turn.started 建的流式空壳）+ kv 落记忆，不走消息归约。
     // 截断不再要求 editReplay 匹配：v4 editUserQuery 的 ack 应答与事件乱序（探针
@@ -6767,6 +6932,15 @@ function handleStreamEvent(
   // queueLength 不带 input，不受影响）
   if (event.type === 'turn.steerQueued' && handleEditSteerQueuedDefence(event.payload, set, get)) {
     return
+  }
+  // 「已发出但被服务端排队」防御（同批量路径，缺陷FD）：补插气泡直写 store
+  //（单推路径无批末统一 set，不会覆盖）
+  if (event.type === 'turn.steerQueued') {
+    const rescued = handleFlushedSendQueuedDefence(event.payload, sessionId, get().messages)
+    if (rescued) {
+      if (rescued !== true) set({ messages: [...get().messages, rescued] })
+      return
+    }
   }
 
   // 编辑重放的 rewind 生效确认（diag-edit-rewind.py 实测时序：turn.started →
