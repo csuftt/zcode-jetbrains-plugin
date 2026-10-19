@@ -112,6 +112,8 @@ class ZCodeToolWindowPanel(
     private lateinit var jsQuery: JBCefJSQuery
     // 懒加载占位组件（激活时移除）
     private var lazyPlaceholder: JComponent? = null
+    // JCEF 初始化失败降级占位（非 null=失败态；重试成功后在 initJcef 尾部移除）
+    private var jcefFailurePlaceholder: JComponent? = null
     // 面板创建时刻（「前端已就绪」耗时统计基准）
     private val panelCreatedAt = System.currentTimeMillis()
     // 前端首条 JS 消息是否已到达（就绪信号；executeJavaScript 是 fire-and-forget，注入成功不代表页面活着）
@@ -558,24 +560,37 @@ class ZCodeToolWindowPanel(
             add(placeholder, BorderLayout.CENTER)
             log.info("Tab lazy-load ready (JCEF not created, activates on tab switch; initialSessionId=$initialSessionId)")
         } else {
-            initJcef()
-            registerThemeListener()
-            restoreWidthAfterRestart()
+            activateJcef()
         }
     }
 
     /**
      * 懒加载标签激活：首次切到本标签时创建 JCEF（幂等；须在 EDT，非 EDT 自动转）。
      * 激活后前端 boot → listSessions → 按 initialSessionId 恢复会话，与正常路径一致。
+     * JCEF 初始化失败的「重试初始化」按钮也走这里（失败降级态放行守卫）。
      */
     fun ensureJcefCreated() {
-        if (disposed || ::jbCefBrowser.isInitialized || !JBCefApp.isSupported()) return
+        if (disposed || !JBCefApp.isSupported()) return
+        // 健康已建即返回；失败降级态放行（半成品 browser 已 dispose，lateinit 仍 isInitialized）
+        if (::jbCefBrowser.isInitialized && jcefFailurePlaceholder == null) return
         if (!SwingUtilities.isEventDispatchThread()) {
             SwingUtilities.invokeLater { ensureJcefCreated() }
             return
         }
         log.info("Lazy tab activated, creating JCEF panel (initialSessionId=$initialSessionId)")
+        activateJcef()
+    }
+
+    /**
+     * JCEF 创建 + 周边装配（init{} 直接路径 / lazy 标签激活 / 失败重试三处共用）。
+     * revalidate/repaint 对未显示组件是 no-op，只有运行中替换组件的两个入口实际生效。
+     */
+    private fun activateJcef() {
         initJcef()
+        // 失败降级：占位已挂，主题监听/宽还原等重试成功再补（重复装配会叠 messageBus 连接）
+        if (jcefFailurePlaceholder != null) return
+        themeBusConn?.let { runCatching { it.dispose() } }
+        themeBusConn = null
         registerThemeListener()
         restoreWidthAfterRestart()
         revalidate()
@@ -593,60 +608,120 @@ class ZCodeToolWindowPanel(
         return wrapper
     }
 
-    private fun initJcef() {
-        log.info("Initializing JCEF panel")
-        jbCefBrowser = JBCefBrowser()
-
-        // ============ JS → Java：用 JBCefJSQuery（官方推荐，签名稳定）============
-        // JBCefJSQuery.create(JBCefBrowser) 已弃用（forRemoval），改用 create(JBCefBrowserBase) 重载
-        jsQuery = JBCefJSQuery.create(jbCefBrowser as com.intellij.ui.jcef.JBCefBrowserBase)
-        log.info("JBCefJSQuery created, funcName=${jsQuery.funcName}")
-        jsQuery.addHandler { request ->
-            if (!frontendReady) {
-                val op = Regex("\"op\"\\s*:\\s*\"([^\"]+)\"").find(request)?.groupValues?.get(1) ?: "?"
-                // __jsLog 只是诊断回传（可能是崩溃报告），不算前端就绪
-                if (op != "__jsLog") {
-                    frontendReady = true
-                    log.info("Frontend ready: first JS message arrived (op=$op, ${System.currentTimeMillis() - panelCreatedAt}ms after panel creation)")
-                }
+    /**
+     * JCEF 初始化失败降级：拆掉半成品、挂错误占位（带重试按钮）。
+     * 占位态下 jsQuery 未初始化，sendToJs/dispose 等消费者由既有 isInitialized 守卫兜住；
+     * 「重试初始化」走 [ensureJcefCreated]（失败降级态放行守卫），成功后占位在 initJcef 尾部移除。
+     */
+    private fun showJcefFailurePlaceholder(t: Throwable) {
+        if (::jbCefBrowser.isInitialized) {
+            try {
+                remove(jbCefBrowser.component)
+            } catch (_: Exception) {
             }
-            log.info("JS message received: ${LogRedactor.redact(request.take(600)).take(200)}")
-            handleJsMessage(request)
-            JBCefJSQuery.Response("ok")
+            try {
+                Disposer.dispose(jbCefBrowser)
+            } catch (e: Exception) {
+                log.warn("[initJcef] failed browser dispose: ${e.message}")
+            }
         }
-
-        // ============ 观测：页面加载状态 + 前端 console 转发（排查白屏用）============
-        // 2026-08-15 白屏故障的教训：executeJavaScript 是 fire-and-forget，渲染进程死掉也不报错，
-        // 必须靠 loadError / console 日志才能看到渲染层发生了什么
-        registerDiagnostics()
-
-        // ============ 加载 webview（dev 优先 → 生产 → fallback）============
-        loadWebview()
-        // AskUser/ExitPlanMode 协调器与 browser-use 执行器在 Service 层注册（多标签共享）。
-        // 这两个调用内部会 getClient() 启动协议客户端，触发 ZCodeEnvChecker 环境检查；
-        // CLI 未安装/未配置时抛 EnvCheckException——必须捕获，否则 ToolWindow 创建失败
-        // 导致整个 IDE 主界面不渲染。捕获后 webview 正常加载，前端通过 checkEnv 渲染环境提醒。
-        // IOException 同样必须拦（2026-09-17 实锤：CLI 升级挪走 provider 配置 → app-server
-        // 启动即退出 → getClient 抛 IOException 穿透 → Cannot init toolwindow → 标签恢复
-        // 断在 selectionChanged listener 注册之前，懒加载占位永远等不到切换激活）
-        try {
-            project.zCodeService().ensureUserInputHandler()
-            project.zCodeService().ensureBrowserExecutor()
-        } catch (e: com.zcode.ideaplugin.env.EnvCheckException) {
-            log.warn("[initJcef] ZCode CLI unavailable, protocol handlers not registered (frontend will show env reminder): ${e.message}")
-        } catch (e: java.io.IOException) {
-            log.warn("[initJcef] app-server failed to start, protocol handlers not registered (frontend will show env reminder): ${e.message}")
-        }
-
-        // 开启 JCEF 外部链接（开发期）
-        jbCefBrowser.setOpenLinksInExternalBrowser(true)
-
-        // 移除懒加载占位（如有）
         lazyPlaceholder?.let { remove(it) }
         lazyPlaceholder = null
-        add(jbCefBrowser.component, BorderLayout.CENTER)
-        // OS 文件拖入拦截：必须在 component 加入面板后才挂（否则 Swing DnD 无目标组件）
-        registerFileDropTarget()
+        jcefFailurePlaceholder?.let { remove(it) }
+        val summary = escapeHtml((t.message ?: t.javaClass.simpleName).take(200))
+        val label = javax.swing.JLabel(com.zcode.ideaplugin.ZCodeBundle.message("panel.jcefInitFailed.html", summary))
+        label.horizontalAlignment = javax.swing.SwingConstants.CENTER
+        label.verticalAlignment = javax.swing.SwingConstants.CENTER
+        val retry = javax.swing.JButton(com.zcode.ideaplugin.ZCodeBundle.message("panel.jcefInitFailed.retry"))
+        retry.addActionListener { ensureJcefCreated() }
+        val buttonBar = javax.swing.JPanel()
+        buttonBar.isOpaque = false
+        buttonBar.add(retry)
+        val panel = JPanel(BorderLayout())
+        panel.background = JBColor.background()
+        panel.add(label, BorderLayout.CENTER)
+        panel.add(buttonBar, BorderLayout.SOUTH)
+        jcefFailurePlaceholder = panel
+        add(panel, BorderLayout.CENTER)
+        revalidate()
+        repaint()
+    }
+
+    private fun initJcef() {
+        log.info("Initializing JCEF panel")
+        // 半成品清理：上次在 jsQuery 创建等处炸掉时 jbCefBrowser 可能已建立——
+        // lateinit 无法置回未初始化，Disposer 释放防 Chromium 进程泄漏
+        // （正常成功路径 jsQuery 已建、dispose 路径两判据均不命中，自然跳过）
+        if (::jbCefBrowser.isInitialized && !::jsQuery.isInitialized) {
+            try {
+                Disposer.dispose(jbCefBrowser)
+            } catch (e: Exception) {
+                log.warn("[initJcef] leftover browser dispose failed: ${e.message}")
+            }
+        }
+        try {
+            // ============ JS → Java：用 JBCefJSQuery（官方推荐，签名稳定）============
+            // JBCefJSQuery.create(JBCefBrowser) 已弃用（forRemoval），改用 create(JBCefBrowserBase) 重载
+            jbCefBrowser = JBCefBrowser()
+            jsQuery = JBCefJSQuery.create(jbCefBrowser as com.intellij.ui.jcef.JBCefBrowserBase)
+            log.info("JBCefJSQuery created, funcName=${jsQuery.funcName}")
+            jsQuery.addHandler { request ->
+                if (!frontendReady) {
+                    val op = Regex("\"op\"\\s*:\\s*\"([^\"]+)\"").find(request)?.groupValues?.get(1) ?: "?"
+                    // __jsLog 只是诊断回传（可能是崩溃报告），不算前端就绪
+                    if (op != "__jsLog") {
+                        frontendReady = true
+                        log.info("Frontend ready: first JS message arrived (op=$op, ${System.currentTimeMillis() - panelCreatedAt}ms after panel creation)")
+                    }
+                }
+                log.info("JS message received: ${LogRedactor.redact(request.take(600)).take(200)}")
+                handleJsMessage(request)
+                JBCefJSQuery.Response("ok")
+            }
+
+            // ============ 观测：页面加载状态 + 前端 console 转发（排查白屏用）============
+            // 2026-08-15 白屏故障的教训：executeJavaScript 是 fire-and-forget，渲染进程死掉也不报错，
+            // 必须靠 loadError / console 日志才能看到渲染层发生了什么
+            registerDiagnostics()
+
+            // ============ 加载 webview（dev 优先 → 生产 → fallback）============
+            loadWebview()
+            // AskUser/ExitPlanMode 协调器与 browser-use 执行器在 Service 层注册（多标签共享）。
+            // 这两个调用内部会 getClient() 启动协议客户端，触发 ZCodeEnvChecker 环境检查；
+            // CLI 未安装/未配置时抛 EnvCheckException——必须捕获，否则 ToolWindow 创建失败
+            // 导致整个 IDE 主界面不渲染。捕获后 webview 正常加载，前端通过 checkEnv 渲染环境提醒。
+            // IOException 同样必须拦（2026-09-17 实锤：CLI 升级挪走 provider 配置 → app-server
+            // 启动即退出 → getClient 抛 IOException 穿透 → Cannot init toolwindow → 标签恢复
+            // 断在 selectionChanged listener 注册之前，懒加载占位永远等不到切换激活）
+            try {
+                project.zCodeService().ensureUserInputHandler()
+                project.zCodeService().ensureBrowserExecutor()
+            } catch (e: com.zcode.ideaplugin.env.EnvCheckException) {
+                log.warn("[initJcef] ZCode CLI unavailable, protocol handlers not registered (frontend will show env reminder): ${e.message}")
+            } catch (e: java.io.IOException) {
+                log.warn("[initJcef] app-server failed to start, protocol handlers not registered (frontend will show env reminder): ${e.message}")
+            }
+
+            // 开启 JCEF 外部链接（开发期）
+            jbCefBrowser.setOpenLinksInExternalBrowser(true)
+
+            // 移除懒加载占位 / 上次失败降级占位（如有）
+            lazyPlaceholder?.let { remove(it) }
+            lazyPlaceholder = null
+            jcefFailurePlaceholder?.let { remove(it) }
+            jcefFailurePlaceholder = null
+            add(jbCefBrowser.component, BorderLayout.CENTER)
+            // OS 文件拖入拦截：必须在 component 加入面板后才挂（否则 Swing DnD 无目标组件）
+            registerFileDropTarget()
+        } catch (t: Throwable) {
+            // 平台侧 JCEF 故障兜底：remote 路由创建 NPE 等（JBR-9234 家族，JCEF 基础设施在
+            // 长会话中途死亡后所有创建永久失败）。异常炸穿=Cannot init toolwindow，整个工具窗
+            // 死透+标签恢复断链（2026-10-19 PyCharm 实锤，与 2026-09-17 缺陷BT 同族教训）。
+            // 降级为错误占位 + 重试按钮，失败只损失本标签
+            log.error("[initJcef] JCEF init failed, degrading tab to error placeholder", t)
+            showJcefFailurePlaceholder(t)
+            return
+        }
         log.info("JCEF panel initialized")
 
         // 装上编辑器上下文 tracker：tab 切换 / 选区变化 200ms 防抖后主动推 currentFile op。

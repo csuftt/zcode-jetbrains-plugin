@@ -15,6 +15,9 @@ import com.intellij.ui.content.ContentManagerListener
 import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.action.RenameTabAction
 import com.zcode.ideaplugin.zCodeService
+import javax.swing.JComponent
+import javax.swing.JLabel
+import javax.swing.SwingConstants
 
 /**
  * ZCode ToolWindow 工厂（多标签页，对齐 cc-gui ContentManager 方案）
@@ -125,22 +128,43 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             tabName: String,
             lazy: Boolean = false,
         ): Content {
-            val panel = ZCodeToolWindowPanel(project, initialSessionId, lazyStart = lazy)
+            val panel: JComponent = try {
+                ZCodeToolWindowPanel(project, initialSessionId, lazyStart = lazy)
+            } catch (t: Throwable) {
+                // 工具窗创建的最后一道兜底：面板构造异常炸穿=Cannot init toolwindow，
+                // 整个工具窗死透+标签恢复断链（2026-10-19 JCEF 基础设施死亡、2026-09-17 缺陷BT
+                // 两次实锤）。降级为错误占位标签：工具窗保活、其余标签恢复不受影响
+                com.intellij.openapi.diagnostic.Logger.getInstance("ZCodePlugin")
+                    .error("ZCode panel creation failed, degrading tab to error placeholder", t)
+                buildPanelErrorPlaceholder(t)
+            }
             val content = ContentFactory.getInstance().createContent(panel, tabName, false)
             content.isCloseable = true
-            // 标签右键菜单：重命名标签（issue #18/#21；改名与持久化封装在 panel.renameTab）
-            content.setActions(
-                DefaultActionGroup(RenameTabAction(panel)),
-                ActionPlaces.TOOLWINDOW_CONTENT,
-                panel,
-            )
-            // 标签关闭/销毁时释放 panel（JCEF 资源）
-            content.setDisposer(panel)
-            panel.attachContent(content)
+            if (panel is ZCodeToolWindowPanel) {
+                // 标签右键菜单：重命名标签（issue #18/#21；改名与持久化封装在 panel.renameTab）
+                content.setActions(
+                    DefaultActionGroup(RenameTabAction(panel)),
+                    ActionPlaces.TOOLWINDOW_CONTENT,
+                    panel,
+                )
+                // 标签关闭/销毁时释放 panel（JCEF 资源）
+                content.setDisposer(panel)
+                panel.attachContent(content)
+                project.zCodeService().registerPanel(panel)
+            }
             toolWindow.contentManager.addContent(content)
-            project.zCodeService().registerPanel(panel)
             if (!lazy) toolWindow.contentManager.setSelectedContent(content)
             return content
+        }
+
+        /** 面板构造失败的最小占位（工厂层兜底；panel 未能建成无法原地重试，建议重启 IDE）*/
+        private fun buildPanelErrorPlaceholder(t: Throwable): JComponent {
+            val summary = (t.message ?: t.javaClass.simpleName).take(200)
+                .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            val label = JLabel(message("panel.initFailed.html", summary))
+            label.verticalAlignment = SwingConstants.CENTER
+            label.horizontalAlignment = SwingConstants.CENTER
+            return label
         }
 
         /** 把当前标签布局全量写入 TabState（名字 + sessionId + activeIndex）*/
