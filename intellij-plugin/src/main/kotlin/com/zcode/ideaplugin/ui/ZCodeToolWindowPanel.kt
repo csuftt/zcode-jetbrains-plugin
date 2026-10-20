@@ -1279,7 +1279,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     } else {
                         log.error("op=$op handling failed", e)
                     }
-                    sendToJs(errorResponse("处理失败: ${e.message}"))
+                    // send 的兜底失败也带归属（缺陷FF）：客户端 send 抛 IOException/
+                    // ZCodeProtocolException 之外的意外形态时，前端快路同样能退回队列
+                    sendToJs(if (op == "send") {
+                        errorResponseFor(msg, "处理失败: ${e.message}", msg["sessionId"]?.jsonPrimitive?.contentOrNull)
+                    } else {
+                        errorResponse("处理失败: ${e.message}")
+                    })
                 }
             }
         } catch (e: Exception) {
@@ -5545,9 +5551,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     private fun handleSend(msg: JsonObject): JsonObject {
         val sessionId = msg["sessionId"]?.jsonPrimitive?.content
-            ?: return errorResponse("缺少 sessionId")
+            ?: return errorResponseFor(msg, "缺少 sessionId")
         val text = msg["text"]?.jsonPrimitive?.content
-            ?: return errorResponse("缺少 text")
+            ?: return errorResponseFor(msg, "缺少 text", sessionId)
         val workspacePath = effectiveWorkspacePath(msg)
         // 前端 currentModel 透传：-32031 恢复时优先用用户选择的 provider 构造 runtimeModel，
         // 避免恢复链路静默切回默认 provider（个人套餐）；缺省时协议端走原有默认路径
@@ -5610,7 +5616,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             val promptRunning = e.code == -32010 || e.message?.contains("-32010") == true
             if (!coldSession && !promptRunning) {
                 log.error("send failed", e)
-                return errorResponse("发送失败: ${e.message}")
+                // sourceOp=send + sessionId：前端落位看门狗快路据此秒级退回队列（缺陷FF）
+                return errorResponseFor(msg, "发送失败: ${e.message}", sessionId)
             }
             try {
                 if (promptRunning) {
@@ -5642,7 +5649,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 } else {
                     log.error("send failed (still failing after recovery retry)", e2)
                 }
-                return errorResponse("发送失败: ${e2.message}")
+                return errorResponseFor(msg, "发送失败: ${e2.message}", sessionId)
             }
         }
 
@@ -6831,14 +6838,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * 带 sourceOp 归属的错误应答：钩子族 handler 专用。全局 error 无来源标记，
-     * 任何操作的失败都会被前端钩子域监听误吞；带 sourceOp 后前端只对钩子域
-     * 错误做乐观回退与展示。
+     * 带 sourceOp 归属的错误应答：钩子族与 send 族 handler 用。全局 error 无来源标记，
+     * 任何操作的失败都会被前端钩子域监听误吞；带 sourceOp 后前端只对对应域
+     * 错误做乐观回退与展示。sessionId 可选（send 来源附带目标会话，前端落位
+     * 看门狗快路据此定位凭据，缺陷FF）。
      */
-    private fun errorResponseFor(msg: JsonObject, text: String): JsonObject = buildJsonObject {
+    private fun errorResponseFor(msg: JsonObject, text: String, sessionId: String? = null): JsonObject = buildJsonObject {
         put("op", "error")
         put("sourceOp", msg["op"]?.jsonPrimitive?.contentOrNull ?: "")
         put("message", text)
+        if (sessionId != null) put("sessionId", sessionId)
     }
 
     /** 新建标签页（前端「新标签页」按钮）：切 EDT 创建新 Content 并选中 */

@@ -62,7 +62,10 @@
     "moveDown": "아래로",
     "promoteFailedRequeued": "'즉시 전송'이 적용되지 않았습니다: 서버가 바쁜 동안 메시지가 대기열에 들어가, 대기열로 되돌려 나중에 다시 보냅니다",
     "promoteFailedServerSide": "'즉시 전송'이 적용되지 않았습니다: 메시지가 서버로 넘어갔으며 곧 대화에 표시됩니다",
-    "promoteFailedUnknown": "'즉시 전송'이 적용되지 않았습니다: 메시지가 서버 대기열에 남아 있을 수 있습니다. 계속 표시되지 않으면 다시 보내주세요"
+    "promoteFailedUnknown": "'즉시 전송'이 적용되지 않았습니다: 메시지가 서버 대기열에 남아 있을 수 있습니다. 계속 표시되지 않으면 다시 보내주세요",
+    "sendFailedRequeued": "전송 실패: 메시지를 대기열로 되돌렸습니다. 다시 보낼 수 있습니다",
+    "admissionTimeoutRequeued": "보낸 메시지가 서버에서 적용되지 않아 대기열로 되돌렸습니다. 다시 보낼 수 있습니다",
+    "admissionServerUnresponsive": "app-server가 응답하지 않습니다: 메시지를 대기열로 되돌렸습니다. 설정·프로세스 관리에서 재시작한 뒤 다시 보내주세요"
   },
   "pasted": {
     "clickToPreview": "클릭하여 전체 내용 미리보기",

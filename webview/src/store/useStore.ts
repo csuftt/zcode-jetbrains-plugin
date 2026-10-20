@@ -341,6 +341,197 @@ function handleFlushedSendQueuedDefence(
   })
 }
 
+/* ============ 发送落位看门狗（缺陷FF，2026-10-20） ============
+ * app-server 僵死形态（10-19 二例）：send 写入 stdin、服务端已开始构建模型请求
+ * （providerRuntimeHeaders 触发）后进程整体挂死——ack 可能正常，但 turn.started
+ * 永不到达、无任何错误，消息无痕丢失（session_input 无落账），UI 恒转圈直到重启。
+ * 与 FD（delivery=queue 降级，有 steerQueued 事件可认领）互补，守的是「发出之后
+ * 没有任何落位信号」的真空；send 显式报错（sourceOp=send，10s 请求超时/管道断）
+ * 走秒级快路。落位信号：turn.started/turn.userInput 携带同文本、messages 应答中
+ * 出现该文本（时间戳窗口防历史同文误认领）、turn.steerQueued 命中（移交 FD）。
+ * 失败处置复用 FD removed=true 形态：撤乐观气泡 + 原文退回队列头（保真附件）+
+ * 横幅；刻意不自动重发（与 FD 同裁定：防迟到重复，重发由用户一键触发）。
+ * 防误报（集中声明，仿 probeTurnState 豁免清单）：同会话任何流事件到达即顺延
+ * 截止（服务端活着不判死，长插队轮让位）、10min 硬帽、切会话失败静默丢弃
+ * （FD 同裁定）、探测用普通 messages 拉取（不带 reconcile 标记，不与 M 看门狗
+ * 的对账判决互扰）。
+ */
+interface PendingAdmission {
+  sid: string
+  text: string
+  attachments?: SendAttachmentInput[]
+  /** 乐观气泡 id（hiddenCommand 发送无气泡为 null） */
+  bubbleId: string | null
+  sentAt: number
+  deadline: number
+  /** 探测已发出（等 messages 应答或探测超时收尾） */
+  probing: boolean
+  probeDeadline: number
+}
+const pendingAdmissions = new Map<string, PendingAdmission>()
+const ADMISSION_TIMEOUT_MS = 30_000
+const ADMISSION_PROBE_TIMEOUT_MS = 20_000
+const ADMISSION_HARD_CAP_MS = 600_000
+const ADMISSION_TICK_MS = 5_000
+const ADMISSION_MAX = 8
+let admissionTicker: ReturnType<typeof setInterval> | null = null
+
+function disarmAdmission(id: string): void {
+  pendingAdmissions.delete(id)
+}
+
+/** 单例轮询哨：有在途凭据才跑，空了自停（编辑 ack 超时同款 module 级生命周期） */
+function ensureAdmissionTicker(): void {
+  if (admissionTicker) return
+  admissionTicker = setInterval(() => {
+    const now = Date.now()
+    for (const [id, e] of Array.from(pendingAdmissions)) {
+      if (!e.probing && now >= e.deadline) {
+        startAdmissionProbe(e)
+      } else if (e.probing && now >= e.probeDeadline) {
+        failAdmission(id, 'unresponsive')
+      }
+    }
+    if (pendingAdmissions.size === 0 && admissionTicker) {
+      clearInterval(admissionTicker)
+      admissionTicker = null
+    }
+  }, ADMISSION_TICK_MS)
+}
+
+function armAdmission(
+  sid: string,
+  text: string,
+  attachments?: SendAttachmentInput[],
+  bubbleId?: string,
+): void {
+  const t = text.trim()
+  if (!t) return
+  // 同会话同文本已有在途凭据：不重复登记（deadline 以先发为准）
+  for (const e of pendingAdmissions.values()) {
+    if (e.sid === sid && e.text === t) return
+  }
+  const id = `adm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  pendingAdmissions.set(id, {
+    sid,
+    text: t,
+    ...(attachments?.length ? { attachments } : {}),
+    bubbleId: bubbleId ?? null,
+    sentAt: Date.now(),
+    deadline: Date.now() + ADMISSION_TIMEOUT_MS,
+    probing: false,
+    probeDeadline: 0,
+  })
+  if (pendingAdmissions.size > ADMISSION_MAX) {
+    // 有界（正常在途 ≤1~2 条）：最旧的直接撤哨让位
+    const oldest = pendingAdmissions.keys().next().value
+    if (oldest) disarmAdmission(oldest)
+  }
+  ensureAdmissionTicker()
+}
+
+/**
+ * 失败收尾（notLanded=探测回来了但转录无此文本 / unresponsive=探测也超时 /
+ * sendError=send 显式报错快路）：删凭据（防迟到 steerQueued 二次促发）+ 撤 FD
+ * 打点（防退回队列后再被 FD 认领成双条）→ 切会话静默丢弃 → 撤气泡 + 队头重建 + 横幅。
+ */
+function failAdmission(id: string, kind: 'notLanded' | 'unresponsive' | 'sendError', detail?: string): void {
+  const e = pendingAdmissions.get(id)
+  if (!e) return
+  pendingAdmissions.delete(id)
+  const ridx = recentFlushedSends.findIndex((r) => r.sid === e.sid && r.text === e.text)
+  if (ridx >= 0) recentFlushedSends.splice(ridx, 1)
+  diagWarn(`[store] 发送落位看门狗收尾（${kind}）: ${e.text.slice(0, 60)}`)
+  const st = useStore.getState()
+  if (e.sid !== st.currentSessionId) return
+  const requeued: QueuedMessage = {
+    id: `queue_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    text: e.text,
+    ...(e.attachments?.length ? { attachments: e.attachments } : {}),
+    queuedAt: Date.now(),
+  }
+  useStore.setState({
+    ...(e.bubbleId ? { messages: st.messages.filter((m) => m.info.id !== e.bubbleId) } : {}),
+    queuedMessages: [requeued, ...st.queuedMessages],
+    lastNotice:
+      kind === 'unresponsive'
+        ? i18n.t('input.queue.admissionServerUnresponsive')
+        : kind === 'sendError'
+          ? `${i18n.t('input.queue.sendFailedRequeued')}（${detail ?? ''}）`
+          : i18n.t('input.queue.admissionTimeoutRequeued'),
+  })
+}
+
+function startAdmissionProbe(e: PendingAdmission): void {
+  e.probing = true
+  e.probeDeadline = Date.now() + ADMISSION_PROBE_TIMEOUT_MS
+  sendToJava({
+    op: 'messages',
+    sessionId: e.sid,
+    workspacePath: useStore.getState().currentWorkspacePath,
+  })
+}
+
+/**
+ * 流事件预挂钩（批量/单推两路、会话过滤之前）：同文本落位认领 + 活性续期。
+ * steerQueued 同文本命中也认领——FD 防御已接管促发，看门狗撤哨。
+ */
+function hookAdmissionStreamEvent(sessionId: string, event: StreamEvent): void {
+  if (pendingAdmissions.size === 0) return
+  let claimText = ''
+  if (event.type === 'turn.started' || event.type === 'turn.userInput' || event.type === 'turn.steerQueued') {
+    const p = event.payload as { input?: unknown; text?: unknown } | null
+    claimText = typeof p?.input === 'string'
+      ? p.input.trim()
+      : typeof p?.text === 'string'
+        ? p.text.trim()
+        : ''
+  }
+  const now = Date.now()
+  for (const [id, e] of Array.from(pendingAdmissions)) {
+    if (e.sid !== sessionId) continue
+    if (claimText && claimText === e.text) {
+      disarmAdmission(id)
+      continue
+    }
+    // 活性续期：同会话事件到达 = 服务端活着（落位可能排在别的轮后面），顺延截止；
+    // 硬帽内才续（10min 仍无落位 = 深度异常，按期收尾）；探测中不顺延（等应答/超时）
+    if (!e.probing && now - e.sentAt < ADMISSION_HARD_CAP_MS) {
+      e.deadline = now + ADMISSION_TIMEOUT_MS
+    }
+  }
+}
+
+/** messages 应答扫描：非 local 气泡的 user 消息按「文本全等 + 创建时刻 ≥ 发出前 2s」
+ *  认领（时间窗防历史同文如重复「继续」误认领）；探测中的凭据若未命中即收尾退回 */
+function claimAdmissionsFromMessages(sessionId: string, messages: ZCodeMessage[]): void {
+  if (pendingAdmissions.size === 0) return
+  for (const [id, e] of Array.from(pendingAdmissions)) {
+    if (e.sid !== sessionId) continue
+    const landed = messages.some(
+      (m) =>
+        m.info.role === 'user' &&
+        !String(m.info.id).startsWith('local_u_') &&
+        userTextOf(m).trim() === e.text &&
+        (m.info.time?.created ?? 0) >= e.sentAt - 2_000,
+    )
+    if (landed) {
+      disarmAdmission(id)
+    } else if (e.probing) {
+      failAdmission(id, 'notLanded')
+    }
+  }
+}
+
+/** 测试隔离专用：清空落位凭据与轮询哨（账本/哨是模块级，页面生命周期语义） */
+export function resetAdmissionWatchdog(): void {
+  pendingAdmissions.clear()
+  if (admissionTicker) {
+    clearInterval(admissionTicker)
+    admissionTicker = null
+  }
+}
+
 /**
  * 编辑重放编排终点提前（2026-09-12 用户三轮反馈三）：editReplay 原本挂到编辑后
  * 新回合 turnEnded 才清，其间 editOpen/startEdit/submitEdit 三处守卫全挡——表现为
@@ -2349,6 +2540,8 @@ export const useStore = create<StoreState>((set, get) => ({
         ...(opts?.scheduledFireAt ? { scheduledFireAt: opts.scheduledFireAt } : {}),
       })
       set((s) => ({ messages: [...s.messages, userMsg] }))
+      // 发送落位凭据登记（缺陷FF）：hiddenCommand（编辑 /rewind 等内部编排）不挂哨
+      armAdmission(sid, text, attachments, String(userMsg.info.id))
 
       // 乐观标题：新会话首条消息立即占位（CLI 要等首轮对话结束才生成正式标题，长任务期间
       // header/标签 tooltip 一直是「新会话」）。仅该会话首个临时标题生效（与 CLI 取首轮
@@ -4719,6 +4912,10 @@ export function handleResponse(
     }
 
     case 'messages': {
+      // 发送落位凭据扫描（缺陷FF）：任何 messages 应答先扫一遍（reconcile/常规/
+      // 快照均权威）——落位即认领；探测中的凭据未命中即收尾退回（探测应答回来
+      // 走的就是这里；20s 无应答由 ticker 按 unresponsive 收尾）
+      claimAdmissionsFromMessages(msg.sessionId, msg.messages)
       // 对账探测响应（看门狗只读快照）：不直接落地，先判定回合是否已在服务端结束。
       // 误判风险低——能走到这里说明已静默 60s+：末尾若有完整 assistant 回复，要么
       // 回合真结束了，要么 send 从未被服务端受理（两种情况收尾都是正确行为）
@@ -4985,6 +5182,19 @@ export function handleResponse(
       break
 
     case 'error': {
+      // 发送落位快路（缺陷FF）：sourceOp=send 的显式失败（10s 请求超时/管道断/
+      // 恢复重试仍败）——对应凭据秒级收尾退回队列，不让乐观气泡悬死；sessionId
+      // 由 Kotlin 携带（缺省回退当前会话最新一条在途凭据）
+      const sendSourced = msg.sourceOp === 'send'
+      if (sendSourced) {
+        const errSid = msg.sessionId ?? get().currentSessionId
+        let newestId: string | null = null
+        for (const [id, e] of pendingAdmissions) {
+          if (e.sid !== errSid) continue
+          newestId = id // Map 迭代按插入序，最后一条即最新
+        }
+        if (newestId) failAdmission(newestId, 'sendError', msg.message)
+      }
       // 建会话失败（Java 外层 catch 回 error）：复位懒创建标志与暂存消息（防卡死、防误重试）
       // -32004（Session is not active）追加人话提示：CLI 升级/重启后的新进程里会话
       // 未激活，此前用户只看到协议原文不知道该怎么办（2026-08-19 升级中断实测）
@@ -5050,8 +5260,10 @@ export function handleResponse(
       })
       console.error('[store] Java 错误:', msg.message)
       // 错误清 streaming 后继续发队列下一条（排队意图明确；持续失败时用户可删队列项）；
-      // -32010 例外：悬挂回合未清，队列再发必再撞
-      if (!promptRunning) get().flushQueue()
+      // -32010 例外：悬挂回合未清，队列再发必再撞；send 来源同样例外（缺陷FF）——
+      // app-server 僵死/断管时续灌只会把下一条也丢进死管道（10-19 实测 88 连发），
+      // 失败条目已退回队列，由用户处置后重发
+      if (!promptRunning && !sendSourced) get().flushQueue()
       break
     }
 
@@ -6514,6 +6726,9 @@ function handleStreamBatchDirect(
       })
     }
   }
+  // 发送落位看门狗预处理（缺陷FF）：同批量路径——会话过滤前认领/续期
+  //（切走的会话事件仍驱动凭据认领，回来时不误判）
+  for (const event of events) hookAdmissionStreamEvent(sessionId, event)
   if (sessionId !== get().currentSessionId) {
     // 已注册子会话的原生事件流 → 实时归约成完整对话（运行中详情弹窗数据源，
     // 含 AI 文本增量；Java 全局监听器本就把所有会话事件推到了前端）
@@ -6892,6 +7107,9 @@ function handleStreamEvent(
     applyTitleUpdated(sessionId, event, set, get)
     return
   }
+
+  // 发送落位看门狗（缺陷FF）：会话过滤前认领/续期（同批量路径）
+  hookAdmissionStreamEvent(sessionId, event)
 
   // 非当前会话：已注册子会话的原生事件流 → 实时归约（同批量路径）
   if (sessionId !== get().currentSessionId) {

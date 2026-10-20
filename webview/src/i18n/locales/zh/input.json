@@ -62,7 +62,10 @@
     "moveDown": "下移",
     "promoteFailedRequeued": "「立即发送」未生效：消息在服务端繁忙窗口被排队，已放回队列稍后自动重发",
     "promoteFailedServerSide": "「立即发送」未生效：消息已交回服务端处理，稍后应会出现在对话中",
-    "promoteFailedUnknown": "「立即发送」未生效：消息可能仍停留在服务端队列；若一直未出现，请重新发送"
+    "promoteFailedUnknown": "「立即发送」未生效：消息可能仍停留在服务端队列；若一直未出现，请重新发送",
+    "sendFailedRequeued": "发送失败，消息已放回队列，可重新发送",
+    "admissionTimeoutRequeued": "消息发出后一直未在服务端生效，已放回队列，可重新发送",
+    "admissionServerUnresponsive": "app-server 无响应：消息已放回队列，可在设置·进程管理重启后再发送"
   },
   "pasted": {
     "clickToPreview": "点击预览完整内容",
