@@ -33,6 +33,11 @@
 5. **GitHub release**（csuftt/zcode-jetbrains-plugin，gh 全路径 `"/c/Program Files/GitHub CLI/gh.exe"`）：
    - `git tag vx.y.z <合并提交>` + push tag；
    - `gh release create` 或覆盖旧版（移 tag / `delete-asset`+`upload` / `edit --notes-file`）；notes 写 CHANGELOG 块 + 附件说明，**用 `--notes-file` 别用 `--body`**。
+   - notes 结尾固定格式（勿漏，0.4.1 实踩）：`---` 分隔线后接双语附件安装说明（中文段 + `English:` 段），再 `---` + 署名两句：
+     ```markdown
+     本版本由 @csuftt 发布维护，问题与建议欢迎到 [GitHub Issues](https://github.com/csuftt/zcode-jetbrains-plugin/issues) 反馈。
+     Released and maintained by @csuftt — feel free to report issues or suggestions at [GitHub Issues](https://github.com/csuftt/zcode-jetbrains-plugin/issues).
+     ```
 6. **Marketplace**（pluginId=33622）：
    ```bash
    curl -sS -w "\nHTTP %{http_code}\n" -X POST https://plugins.jetbrains.com/api/updates/upload \
