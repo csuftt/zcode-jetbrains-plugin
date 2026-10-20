@@ -48,6 +48,8 @@ class ZCodeProtocolClient private constructor(
     val proxyConfig: ProxyConfig?,
     /** CLI 协议代际（start() 判定注入；模型相关方法的参数形态按代分支，见 ProtocolGenerations） */
     val generation: ProtocolGeneration = ProtocolGeneration.OLD,
+    /** spawn 前 `--version` 探测结果（null=探测失败；协议参数版本门控用，见 supportsIncludeArchivedParam） */
+    val appVersion: String? = null,
 ) : AutoCloseable {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -308,6 +310,18 @@ class ZCodeProtocolClient private constructor(
      */
     private val sessionThoughtLevels = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+    /**
+     * 服务端实锤拒绝 includeArchived（-32602 Unrecognized key）后置位：版本探测失败
+     * （appVersion=null）时的运行时自愈。0.17.0 起该参数从 session/list strict schema
+     * 删除，发了即整请求失败（启动首个 listSessions 就炸）。
+     */
+    @Volatile
+    private var includeArchivedRejected = false
+
+    /** session/list 是否可带 includeArchived：版本门控（<0.17.0）+ 服务端拒绝记忆 */
+    private fun canSendIncludeArchived(): Boolean =
+        !includeArchivedRejected && supportsIncludeArchivedParam(appVersion)
+
     // 进程是否还活着
     @Volatile
     private var closed = false
@@ -338,8 +352,10 @@ class ZCodeProtocolClient private constructor(
             // 优先（w4i），官方客户端经 clientHello 带真实版本，插件不发握手 → 不注入则 UA 落
             // "ZCode/unknown"（工具级权益如 1.5 倍用量的识别信号在请求头族，2026-09-14 探针
             // 实证 env 路径生效）。用户显式设置时不覆盖；探测失败 fail-soft 不注入。
+            // UA 与协议门控同源：探测一次，UA 注入 env、能力门控传 client 构造
+            val appVersion = detectAppVersion(zcodePath, nodePath)
             if (env["ZCODE_APP_VERSION"].isNullOrBlank()) {
-                detectAppVersion(zcodePath, nodePath)?.let { env["ZCODE_APP_VERSION"] = it }
+                appVersion?.let { env["ZCODE_APP_VERSION"] = it }
             }
             // 代理：setting.json 配了就整套注入（对齐官方客户端 buildAgentRuntimeEnv，
             // issue #12——插件 spawn 的 app-server 不走系统代理）。setting 是用户在
@@ -374,7 +390,7 @@ class ZCodeProtocolClient private constructor(
 
             // 代际已提前判定（spawn 侧同款判据）：进程已在跑，文件即权威
             println("[ZCodeProtocolClient] CLI generation = $generation (zcode.cjs=${zcodePath.fileName})")
-            val client = ZCodeProtocolClient(process, stdin, stdout, zcodePath, nodePath, credentials, proxyConfig, generation)
+            val client = ZCodeProtocolClient(process, stdin, stdout, zcodePath, nodePath, credentials, proxyConfig, generation, appVersion)
             // 排障主线索（issue #12 用户实测三态：坏地址失败/清空直连/好地址成功——
             // 没有这行日志时分不清「代理坏了」还是「没注入」）：代理地址 userinfo 脱敏
             println("[ZCodeProxy] app-server spawn ${proxyConfig?.logSummary ?: "<no proxy, direct>"}")
@@ -441,6 +457,9 @@ class ZCodeProtocolClient private constructor(
 
         private const val VERSION_PROBE_TIMEOUT_SECONDS = 15L
 
+        /** session/list sessionIds 批量上限（zcodeSessionListParamsSchema：min1/max64） */
+        private const val SESSION_IDS_MAX = 64
+
         /**
          * 探测 CLI 版本注入 ZCODE_APP_VERSION（UA 用）。spawn `node <cli> --version`，
          * 与 ZCodeEnvChecker.probeCliVersion 同口径；仅首次/升级后探测（mtime 缓存）。
@@ -475,6 +494,24 @@ class ZCodeProtocolClient private constructor(
         /** `--version` 输出解析：取首个语义化版本号（"0.16.5" 形，含 prerelease/build 段）；无则 null */
         internal fun parseCliVersion(output: String): String? =
             Regex("""\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?""").find(output.trim())?.value
+
+        /**
+         * session/list 的 includeArchived 参数支持判定：CLI 0.17.0 起该 key 从 zod strict
+         * schema 删除（发即 -32602 Unrecognized key），归档会话改用 sessionIds 显式身份
+         * 查询。null/不可解析按"支持"处理（保持旧形态发送），由调用方在 -32602 时运行时
+         * 自愈（[includeArchivedRejected]）；prerelease 按核心版本号比较（0.17.0-rc 即新）。
+         */
+        internal fun supportsIncludeArchivedParam(version: String?): Boolean {
+            val core = version?.substringBefore('+')?.substringBefore('-')
+                ?.split('.')?.mapNotNull { it.toIntOrNull() }
+                ?.takeIf { it.size == 3 } ?: return true
+            val threshold = listOf(0, 17, 0)
+            for (i in 0..2) {
+                val cmp = core[i].compareTo(threshold[i])
+                if (cmp != 0) return cmp < 0
+            }
+            return false // 恰好 0.17.0 也不支持
+        }
 
         /** 从 PATH 找 node */
         private fun findNode(): String {
@@ -1535,6 +1572,9 @@ class ZCodeProtocolClient private constructor(
      * 反斜杠）后落库，0.16.5 起原样记录——DB 里同一项目存在反斜杠（历史行 + 本客户
      * 端统一原生形态写入）与正斜杠（IDE basePath VFS 形态直传）两种行，单形态查询
      * 各丢一半。这里两种形态各查一次，按 sessionId 去重取并集。
+     *
+     * [includeArchived] 仅 CLI <0.17.0 生效（该版起参数从 strict schema 删除）；
+     * ≥0.17.0 取归档会话须走 [listArchivedSessions]（sessionIds 显式身份查询）。
      */
     fun listSessions(
         workspacePath: String? = null,
@@ -1649,23 +1689,37 @@ class ZCodeProtocolClient private constructor(
         }
     }
 
+    /**
+     * @param sessionIds 显式身份查询（≥0.17.0 取隐藏/归档会话的唯一入口，单批 ≤[SESSION_IDS_MAX]）
+     */
     private fun listSessionsOnce(
         workspacePath: String?,
         includeArchived: Boolean,
         limit: Int,
-        timeoutMs: Long
+        timeoutMs: Long,
+        sessionIds: List<String>? = null,
     ): List<SessionInfo> {
-        val params = buildJsonObject {
+        fun buildParams(sendArchived: Boolean) = buildJsonObject {
             if (!workspacePath.isNullOrBlank()) {
                 put("workspace", buildJsonObject {
                     put("workspacePath", workspacePath)
                     put("workspaceKey", workspacePath)
                 })
             }
-            put("includeArchived", includeArchived)
+            if (sendArchived) put("includeArchived", includeArchived)
+            if (!sessionIds.isNullOrEmpty()) {
+                put("sessionIds", JsonArray(sessionIds.map { JsonPrimitive(it) }))
+            }
             put("limit", limit)
         }
-        val r = requestWithRetry("session/list", params, timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+        val sendArchived = includeArchived && canSendIncludeArchived()
+        var r = requestWithRetry("session/list", buildParams(sendArchived), timeoutMs, maxAttempts = 2, backoffMs = longArrayOf(500))
+        // 版本探测缺失时的兜底：strict schema 拒绝未知 key（0.17.0+），记忆后去 key 原样重发一次
+        if (sendArchived && isUnrecognizedKeyError(r["error"], "includeArchived")) {
+            includeArchivedRejected = true
+            println("[ZCodeProtocolClient] session/list rejected includeArchived (-32602); retrying without it (cli=${appVersion ?: "unknown"})")
+            r = requestWithRetry("session/list", buildParams(false), timeoutMs, maxAttempts = 1)
+        }
         requireOk(r)
 
         val sessionsArray = r["result"]?.jsonObject?.get("sessions")?.jsonArray ?: return emptyList()
@@ -1674,6 +1728,45 @@ class ZCodeProtocolClient private constructor(
                 json.decodeFromJsonElement(SessionInfo.serializer(), elem)
             } catch (e: Exception) { null }
         }
+    }
+
+    /** -32602 Invalid params 且文案点名某 Unrecognized key（strict schema 拒绝） */
+    private fun isUnrecognizedKeyError(errorEl: JsonElement?, key: String): Boolean {
+        val e = errorEl?.jsonObject ?: return false
+        val code = e["code"]?.jsonPrimitive?.jsonStringOrNull?.toIntOrNull() ?: return false
+        val msg = e["message"]?.jsonPrimitive?.jsonStringOrNull ?: return false
+        return code == -32602 && msg.contains("Unrecognized key") && msg.contains(key)
+    }
+
+    /**
+     * 显式身份批量查询会话（≥0.17.0 session/list 取归档等隐藏会话的唯一通道）。
+     * 每批 ≤[SESSION_IDS_MAX]，分批失败 fail-soft 保留其余，按 id 去重；工作区路径
+     * 双形态各查一遍（斜杠撕裂同 [listSessions]，tasks-index 行可能是任一形态）。
+     */
+    private fun listSessionsByIds(
+        ids: Collection<String>,
+        workspacePath: String,
+        altWorkspacePath: String? = null,
+        timeoutMs: Long,
+    ): List<SessionInfo> {
+        val distinct = ids.toSet()
+        if (distinct.isEmpty()) return emptyList()
+        val forms = listOfNotNull(workspacePath, altWorkspacePath?.takeIf { !it.equals(workspacePath, ignoreCase = true) })
+        val out = ArrayList<SessionInfo>(distinct.size)
+        val seen = HashSet<String>()
+        for (form in forms) {
+            for (chunk in distinct.chunked(SESSION_IDS_MAX)) {
+                val part = try {
+                    listSessionsOnce(form, includeArchived = false, limit = chunk.size,
+                        timeoutMs = timeoutMs, sessionIds = chunk)
+                } catch (e: Exception) {
+                    println("[ZCodeProtocolClient] listSessionsByIds chunk failed (${chunk.size}), keeping others: ${LogRedactor.redact(e.message ?: "").take(120)}")
+                    emptyList()
+                }
+                part.forEach { if (seen.add(it.sessionId)) out.add(it) }
+            }
+        }
+        return out
     }
 
     /**
@@ -3742,7 +3835,12 @@ class ZCodeProtocolClient private constructor(
      *
      * - 新机制：tasks-index archived=1（ZCode 客户端归档/自动归档 + 新版插件归档），
      *   archivedAt 取 tasks.updated_at（客户端同义，表无专门归档时间列）
-     * - 旧机制：session/list 响应的 archivedAt（session.time_archived，老版本插件归档）
+     * - 旧机制：session/time_archived（老版本插件归档）
+     *
+     * 按 CLI 版本分两条取数链路：
+     * - <0.17.0：session/list 带 includeArchived=true 返回全部隐藏会话（含 time_archived 行）
+     * - ≥0.17.0：该参数被 strict schema 删除，tasks-index 归档行走 sessionIds 显式身份
+     *   查询（≤64/批），time_archived 行直读 db.sqlite 补集
      *
      * 客户端归档后会话在其侧无恢复入口——插件的「已归档」列表即恢复出口。
      * tasks 里的 claude-import-* 等无 session 行的任务自然跳过。
@@ -3752,23 +3850,86 @@ class ZCodeProtocolClient private constructor(
         // 全局归档 id 交集会把**所有项目**的归档会话并进当前列表（0.3.0 装机实测缺陷：
         // 冷启动 workspacePath 空串直落全库）。空路径直接返回空，宁可空显示不跨项目污染
         if (workspacePath.isNullOrBlank()) return emptyList()
-        val all = listSessions(workspacePath, includeArchived = true, limit = limit, timeoutMs = timeoutMs)
         // deleted 必须排除：客户端删除归档会话只置 tasks.deleted=1（archived 位保持 1，
         // 2026-09-08 实库实证），不过滤则客户端删掉的会话在本列表阴魂不散。
         // deletedIds 兜底覆盖"软删但 time_archived 意外残留"的行（tasks-index 是客户端
         // 私有库无兼容承诺，删除语义必须严格执行，不适用"宁多显示"原则）
         val taskRows = taskIndex.listTasks()
-        val archivedById = taskRows.filter { it.archived && !it.deleted }.associateBy { it.taskId }
         val deletedIds = taskRows.asSequence().filter { it.deleted }.map { it.taskId }.toSet()
-        return all.mapNotNull { s ->
-            if (s.sessionId in deletedIds) return@mapNotNull null
-            val t = archivedById[s.sessionId]
-            when {
-                t != null -> s.copy(archivedAt = t.updatedAt)   // 新机制（tasks-index）
-                (s.archivedAt ?: 0L) > 0L -> s                  // 旧机制（time_archived）
-                else -> null
+
+        if (canSendIncludeArchived()) {
+            // 旧 CLI（<0.17.0）：includeArchived=true 一次拿全（工作区由 listSessions 限定）
+            val all = listSessions(workspacePath, includeArchived = true, limit = limit, timeoutMs = timeoutMs)
+            val archivedById = taskRows.filter { it.archived && !it.deleted }.associateBy { it.taskId }
+            return all.mapNotNull { s ->
+                if (s.sessionId in deletedIds) return@mapNotNull null
+                val t = archivedById[s.sessionId]
+                when {
+                    t != null -> s.copy(archivedAt = t.updatedAt)   // 新机制（tasks-index）
+                    (s.archivedAt ?: 0L) > 0L -> s                  // 旧机制（time_archived）
+                    else -> null
+                }
+            }.sortedByDescending { it.archivedAt ?: 0L }
+        }
+
+        // 新 CLI（≥0.17.0）：includeArchived 已删除，先按工作区筛 tasks-index 归档行，
+        // 再经 sessionIds 显式身份查询取会话详情（斜杠双形态匹配，同 listSessions 撕裂因）
+        val nativePath = workspacePath.replace('/', File.separatorChar)
+        val altPath = workspacePath.replace('\\', '/')
+        val archivedById = taskRows.asSequence()
+            .filter { it.archived && !it.deleted }
+            .filter {
+                it.workspacePath.equals(nativePath, ignoreCase = true) ||
+                    it.workspacePath.equals(altPath, ignoreCase = true)
             }
-        }.sortedByDescending { it.archivedAt ?: 0L }
+            .associateBy { it.taskId }
+        val seen = HashSet<String>()
+        val fromTasks = listSessionsByIds(archivedById.keys, nativePath, altPath, timeoutMs).mapNotNull { s ->
+            if (s.sessionId in deletedIds || !seen.add(s.sessionId)) return@mapNotNull null
+            s.copy(archivedAt = archivedById[s.sessionId]?.updatedAt ?: s.archivedAt)
+        }
+        // 旧机制补集：tasks 无行、仅 session.time_archived 非空（老版本插件归档的存量用户）
+        val fromLegacyDb = queryLegacyArchivedFromDb(nativePath, altPath)
+            .filter { it.sessionId !in deletedIds && seen.add(it.sessionId) }
+        return (fromTasks + fromLegacyDb).sortedByDescending { it.archivedAt ?: 0L }
+    }
+
+    /**
+     * 直读 db.sqlite 捞旧机制归档会话（session.time_archived IS NOT NULL）。
+     * ≥0.17.0 的 session/list 不再返回隐藏会话，老插件归档的存量行只能由此补集；
+     * 列存在性 fail-soft（未来 CLI 若删列，返回空，归档走 tasks-index 新机制不受影响）。
+     */
+    private fun queryLegacyArchivedFromDb(nativeDir: String, altDir: String): List<SessionInfo> {
+        if (!java.nio.file.Files.exists(cliDbPath)) return emptyList()
+        return try {
+            val pb = ProcessBuilder(nodePath, "-e", SESSION_ARCHIVED_LEGACY_JS)
+            pb.environment()["ZCODE_ARCH_DB"] = cliDbPath.toString()
+            pb.environment()["ZCODE_ARCH_DIR_NATIVE"] = nativeDir
+            pb.environment()["ZCODE_ARCH_DIR_ALT"] = altDir
+            pb.redirectError(ProcessBuilder.Redirect.DISCARD)
+            val p = pb.start()
+            val out = p.inputStream.bufferedReader().readText()
+            if (!p.waitFor(10, TimeUnit.SECONDS) || p.exitValue() != 0) return emptyList()
+            Json.parseToJsonElement(out.trim()).jsonArray.mapNotNull { el ->
+                try {
+                    val r = el.jsonObject
+                    SessionInfo(
+                        sessionId = r["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                        title = r["title"]?.jsonPrimitive?.contentOrNull ?: "",
+                        sessionKind = "interactive",
+                        workspace = Workspace(nativeDir),
+                        createdAt = r["time_created"]?.jsonPrimitive?.longOrNull ?: 0L,
+                        updatedAt = r["time_updated"]?.jsonPrimitive?.longOrNull ?: 0L,
+                        archivedAt = r["time_archived"]?.jsonPrimitive?.longOrNull,
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            println("[ZCodeProtocolClient] legacy archived query failed (degrading to empty): ${e.message}")
+            emptyList()
+        }
     }
 
     // 会话统计缓存：db 文件指纹（mtime:size，主库+WAL）→ 统计结果（见 getSessionStats）
@@ -4042,6 +4203,22 @@ internal val SESSION_LIST_EXTRAS_JS = """
         `WHERE s.directory IN (?, ?)`
     ).all(process.env.ZCODE_FORK_DIR_NATIVE, process.env.ZCODE_FORK_DIR_ALT).map(r => r.sid);
     console.log(JSON.stringify({ forks: forks, goalIds: goals }));
+""".trimIndent()
+
+/** 旧机制归档补查（≥0.17.0 listArchivedSessions 用）：session.time_archived IS NOT NULL。
+ *  列不存在（CLI 未来删列）输出空数组；目录双形态同 SESSION_LIST_EXTRAS_JS。JS 全单引号。 */
+private val SESSION_ARCHIVED_LEGACY_JS = """
+    const {DatabaseSync} = require('node:sqlite');
+    const db = new DatabaseSync(process.env.ZCODE_ARCH_DB);
+    db.exec('PRAGMA busy_timeout = 15000');
+    const cols = db.prepare('PRAGMA table_info(session)').all().map(c => c.name);
+    if (!cols.includes('time_archived')) { console.log('[]'); process.exit(0); }
+    const rows = db.prepare(
+        `SELECT id, title, time_created, time_updated, time_archived FROM session ` +
+        `WHERE time_archived IS NOT NULL AND directory IN (?, ?) ` +
+        `ORDER BY time_archived DESC LIMIT 500`
+    ).all(process.env.ZCODE_ARCH_DIR_NATIVE, process.env.ZCODE_ARCH_DIR_ALT);
+    console.log(JSON.stringify(rows));
 """.trimIndent()
 
 /** 会话统计（历史列表展示）：消息数 + message/part 内容字节和 */
