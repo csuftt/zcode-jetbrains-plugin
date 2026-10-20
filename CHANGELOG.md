@@ -6,6 +6,50 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.4.1] - 2026-10-20
+
+中文:
+
+### 适配
+
+- **适配 ZCode CLI 0.17.0**（#44，@Winminn）：CLI 升级 0.17.0 后会话列表加载失败（服务端删除 `includeArchived` 参数致 -32602 报错），归档列表改走新链路；旧版本 CLI 行为不变。
+
+### 新增
+
+- **浏览器独立窗口**：内嵌浏览器弹窗可弹出为独立窗口（细边框、最小化 / 最大化），弹出后独立呈现，AI 的浏览器操作继续在其中执行。
+- **MCP 工具图片恢复**：MCP 工具返回的图片恢复为消息卡片缩略图，点击可放大查看。
+
+### 修复
+
+- 修复排队消息两处丢失：点「立即发送」被服务端队列静默吞掉；app-server 僵死时排队消息无痕丢失（新增发送落位看门狗）。
+- 修复 IDE 切换深浅主题后插件界面与内嵌浏览器不实时跟随的问题。
+- 修复 JCEF 基础设施故障炸穿工具窗、导致插件面板整体不可用的问题。
+- 修复生成速率在渠道停顿恢复期闪没的问题。
+- 修复后台任务弹窗中运行中的条目沉底的问题（现固定置顶）。
+- 修复会话内出现两条同秒「工作中」读秒行的问题。
+- 修复产物预览卡 xlsx / m4v 等扩展名图标缺失、显示灰色兜底的问题。
+
+<h3>English</h3>
+
+### Compatibility
+
+- **Adapted to ZCode CLI 0.17.0** (#44, @Winminn): after upgrading to 0.17.0 the session list failed to load (the server removed the `includeArchived` parameter, causing -32602 errors); the archive list now uses a new path. Older CLI versions are unaffected.
+
+### Added
+
+- **Browser detached window**: the embedded browser popup can be detached into a standalone window (thin border, minimize / maximize); AI browser actions keep running inside it.
+- **MCP tool images restored**: images returned by MCP tools render again as clickable thumbnails in message cards, with zoom-in preview.
+
+### Fixed
+
+- Fixed two queued-message losses: "Send now" being silently swallowed by the server queue, and queued messages vanishing without a trace when the app-server hung (a send-settlement watchdog was added).
+- Fixed the plugin UI and embedded browser not following IDE light/dark theme switches in real time.
+- Fixed JCEF infrastructure failures crashing the tool window and taking the whole plugin panel down.
+- Fixed the generation-speed indicator flickering away when a channel paused and resumed.
+- Fixed running items sinking to the bottom in the background-task popup (they now stay on top).
+- Fixed duplicate same-second "working" timer rows appearing in a conversation.
+- Fixed preview cards for xlsx / m4v and other extensions missing their icons and falling back to a gray one.
+
 ## [0.4.0] - 2026-10-15
 
 中文:
