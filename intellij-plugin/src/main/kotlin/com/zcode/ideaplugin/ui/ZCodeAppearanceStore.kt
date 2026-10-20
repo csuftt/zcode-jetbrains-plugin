@@ -46,11 +46,33 @@ object ZCodeAppearanceStore {
      * 2023.3 上唯一写入口 JBColor.setDark 只在启动/设置导入/动态装主题插件时被调，
      * Settings 常规切主题链（setCurrentLookAndFeel→updateUI→notifyLookAndFeelChanged）
      * 不刷新——用它会在切主题后推旧值给前端，表现为「重启才跟随」。
-     * LafManager 不可用（headless 等）时回退 [JBColor.isBright]（启动后缓存正确）。
+     *
+     * `UIThemeLookAndFeelInfo` 是 internal API（0.4.1 平台 verifier 报 2 处 internal
+     * usage），getter 与 isDark 全走反射使字节码零类型引用（getter 方法签名的返回类型
+     * 也含该接口，直接调会被 verifier 抓到）。反射失败/不可用（headless 等）回退
+     * [JBColor.isBright]（启动后缓存正确）。
      */
     fun isIdeDarkNow(): Boolean = try {
-        LafManager.getInstance().currentUIThemeLookAndFeel?.isDark ?: !JBColor.isBright()
+        reflectCurrentThemeIsDark() ?: !JBColor.isBright()
     } catch (_: Exception) {
         !JBColor.isBright()
+    }
+
+    private val getThemeInfoMethod by lazy {
+        runCatching { LafManager::class.java.getMethod("getUIThemeLookAndFeel") }.getOrNull()
+    }
+
+    private val themeIsDarkMethod by lazy {
+        runCatching {
+            Class.forName("com.intellij.ide.ui.laf.UIThemeLookAndFeelInfo").getMethod("isDark")
+        }.getOrNull()
+    }
+
+    /** LafManager#getUIThemeLookAndFeel().isDark 的纯反射链（internal API 隔离层）*/
+    private fun reflectCurrentThemeIsDark(): Boolean? {
+        val getInfo = getThemeInfoMethod ?: return null
+        val isDark = themeIsDarkMethod ?: return null
+        val info = getInfo.invoke(LafManager.getInstance()) ?: return null
+        return isDark.invoke(info) as? Boolean
     }
 }
