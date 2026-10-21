@@ -24,6 +24,11 @@ import '../styles/tool-call-card.less'
 /** 列表最大可见高度（3.5 项 × 32px/项），超出内部滚动 */
 const MAX_VISIBLE_ITEMS = 3.5
 const ITEM_HEIGHT = 32
+/** 时间线上下内边距之和（8+8）。maxHeight 是 border-box 必须含内边距，
+ *  否则全部项恰好可见时也差 16px 成幻影滚动：挂载自动滚底停在 scrollTop=16
+ *  （顶 padding 被滚出），行内展开一次容器放宽又把 scrollTop 钳回 0 且收起后
+ *  不会还原 → 收起后所有行整体下移 16px（缺陷FG 实测复现） */
+const TIMELINE_PADDING_Y = 16
 /** 单项展开详情后的列表高度上限 */
 const EXPANDED_MAX_HEIGHT = 400
 /** 命令截断长度（无 description 时显示）*/
@@ -80,6 +85,11 @@ export function BashCommandGroupCard({ parts, softenError }: {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const prevCountRef = useRef(0)
+  // 行收起时把列表滚回展开前位置（缺陷FG）：行展开瞬间容器 maxHeight 放宽，
+  // 浏览器把 scrollTop 钳到新的（通常为 0）；收起后容器高度回落，钳走的位移
+  // 不会自动还原，行会整体跳位——展开前采样、收起后按新 max 还原
+  const savedScrollRef = useRef(0)
+  const prevExpandedIdxRef = useRef<number | null>(null)
   // 距底附近才自动跟滚：用户上滚回看历史命令时不被新命令置底打断，
   // 滚回底部附近自动恢复（语义同 ChatView 主容器跟滚）
   const stickToBottom = useRef(true)
@@ -104,6 +114,25 @@ export function BashCommandGroupCard({ parts, softenError }: {
     prevCountRef.current = items.length
   }, [items.length])
 
+  // 行收起（expandedIdx 非空 → null）后还原滚动位；挂载和直接换行展开不还原
+  //（挂载还原会覆盖自动滚底，换行展开容器未回落无需还原）
+  useEffect(() => {
+    const prev = prevExpandedIdxRef.current
+    prevExpandedIdxRef.current = expandedIdx
+    if (prev === null || expandedIdx !== null) return
+    const el = listRef.current
+    if (!el) return
+    const max = el.scrollHeight - el.clientHeight
+    if (max > 0) el.scrollTop = Math.min(savedScrollRef.current, max)
+  }, [expandedIdx])
+
+  const handleRowToggle = (index: number) => {
+    // 只在从全收起态展开时采样：展开后容器的 scrollTop 已被浏览器钳位，
+    // 收起/换行点击时再采样会采到钳后的值，还原即失效
+    if (expandedIdx === null) savedScrollRef.current = listRef.current?.scrollTop ?? 0
+    setExpandedIdx((prev) => (prev === index ? null : index))
+  }
+
   const handleListScroll = () => {
     const el = listRef.current
     if (!el) return
@@ -124,8 +153,9 @@ export function BashCommandGroupCard({ parts, softenError }: {
     return !!bg && !bg.endedAt
   }).length
 
-  // 列表高度：有项展开时放宽（详情可能很高），否则按可见项数封顶
-  const baseHeight = (totalCount > MAX_VISIBLE_ITEMS ? MAX_VISIBLE_ITEMS : totalCount) * ITEM_HEIGHT
+  // 列表高度：有项展开时放宽（详情可能很高），否则按可见项数封顶（含上下内边距）
+  const baseHeight =
+    (totalCount > MAX_VISIBLE_ITEMS ? MAX_VISIBLE_ITEMS : totalCount) * ITEM_HEIGHT + TIMELINE_PADDING_Y
   const listMaxHeight = expandedIdx !== null ? EXPANDED_MAX_HEIGHT : baseHeight
   const overflowY = (totalCount > MAX_VISIBLE_ITEMS || expandedIdx !== null) ? 'auto' : 'hidden'
 
@@ -189,7 +219,7 @@ export function BashCommandGroupCard({ parts, softenError }: {
                 </div>
                 <div
                   className={`bash-group__content${isItemExpanded ? ' bash-group__content--open' : ''}`}
-                  onClick={() => setExpandedIdx((prev) => (prev === index ? null : index))}
+                  onClick={() => handleRowToggle(index)}
                 >
                   <div className="bash-group__row">
                     <span

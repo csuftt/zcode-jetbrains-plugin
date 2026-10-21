@@ -23,6 +23,10 @@ type FileGroupKind = 'read' | 'edit' | 'search'
 /** 列表最大可见行数，超出内部滚动 */
 const MAX_VISIBLE_ITEMS = 3
 const ITEM_HEIGHT = 28
+/** 列表上下内边距之和（6+6）。maxHeight 是 border-box 须含内边距，否则全部项
+ *  恰好可见时也差 12px 成幻影滚动，挂载自动滚底会把顶部内边距滚出可视区
+ *  （同缺陷FG，本卡无行内展开不跳动，仅裁切隐患） */
+const LIST_PADDING_Y = 12
 
 /** 头部配置：图标 + 标题文案 key（标题经 i18n）*/
 const GROUP_META: Record<FileGroupKind, { icon: string; titleKey: string }> = {
@@ -167,7 +171,8 @@ export function FileToolGroupCard({ kind, parts, softenError }: {
   const totalAdditions = fileItems.reduce((s, i) => s + i.additions, 0)
   const totalDeletions = fileItems.reduce((s, i) => s + i.deletions, 0)
 
-  const listMaxHeight = (count > MAX_VISIBLE_ITEMS ? MAX_VISIBLE_ITEMS : count) * ITEM_HEIGHT
+  const listMaxHeight =
+    (count > MAX_VISIBLE_ITEMS ? MAX_VISIBLE_ITEMS : count) * ITEM_HEIGHT + LIST_PADDING_Y
   const overflowY = count > MAX_VISIBLE_ITEMS ? 'auto' : 'hidden'
 
   const meta = GROUP_META[kind]
