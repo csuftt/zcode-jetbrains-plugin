@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { ConfirmDialog } from './ConfirmDialog'
-import type { BrowserDataOverview, BrowserOverviewSite } from '@/types/messages'
+import type { BrowserDataOverview, BrowserOverviewSite, EnvStatus } from '@/types/messages'
 import type { TFunction } from 'i18next'
 import '../styles/browser-settings.less'
 
@@ -40,9 +40,42 @@ function siteTags(t: TFunction, s: BrowserOverviewSite): string[] {
   return tags
 }
 
+/** 浏览器调试通道降级档位（EnvBanner 撤出后状态在此常驻展示）*/
+type ChannelDown = 'cefDown' | 'handlerMissing' | 'generic'
+
+/** 由 envStatus.browserHost 推导降级档位；健康/未探测（null，RD/旧包）不评判 */
+function channelDownOf(status: EnvStatus | null): ChannelDown | null {
+  const bh = status?.browserHost
+  if (!bh || bh.ok) return null
+  if (bh.code === 'browserHostCefDown') return 'cefDown'
+  if (bh.code === 'browserHostHandlerMissing') return 'handlerMissing'
+  return 'generic'
+}
+
 /** 浏览器控制只读状态卡（状态与 ZCode 客户端共用，修改在客户端进行）*/
-function ControlStatusCard({ enabled, installed, rdHost }: { enabled: boolean; installed: boolean; rdHost: boolean }) {
+function ControlStatusCard({
+  enabled,
+  installed,
+  rdHost,
+  channelDown,
+}: {
+  enabled: boolean
+  installed: boolean
+  rdHost: boolean
+  channelDown: ChannelDown | null
+}) {
   const { t } = useTranslation()
+  const checkEnv = useStore((s) => s.checkEnv)
+  const [rechecking, setRechecking] = useState(false)
+
+  // 重新检测：Java 侧对 handlerMissing 有补注册自愈，cefDown 指引重启 IDE
+  const handleRecheck = () => {
+    if (rechecking) return
+    setRechecking(true)
+    checkEnv()
+    setTimeout(() => setRechecking(false), 3000)
+  }
+
   return (
     <div className={cx('browser-settings__readonly', enabled && 'on')}>
       <div className="browser-settings__action-body">
@@ -56,6 +89,27 @@ function ControlStatusCard({ enabled, installed, rdHost }: { enabled: boolean; i
           </span>
         </div>
         <div className="browser-settings__action-desc">{t('browser.control.switchDesc')}</div>
+        {channelDown && (
+          <div className="browser-settings__rd-note">
+            <span className="codicon codicon-warning" />
+            <span>
+              {channelDown === 'cefDown'
+                ? t('browser.control.cefDown')
+                : channelDown === 'handlerMissing'
+                  ? t('browser.control.handlerMissing')
+                  : t('browser.control.channelDown')}
+            </span>
+            <button
+              type="button"
+              className="browser-settings__recheck"
+              onClick={handleRecheck}
+              disabled={rechecking}
+            >
+              <span className={`codicon codicon-refresh${rechecking ? ' codicon-modifier-spin' : ''}`} />
+              {t('browser.control.recheck')}
+            </button>
+          </div>
+        )}
         {rdHost && (
           <div className="browser-settings__action-desc browser-settings__rd-note">
             <span className="codicon codicon-remote" />
@@ -145,7 +199,9 @@ export function BrowserSettingsView() {
   const error = useStore((s) => s.browserError)
   const cleared = useStore((s) => s.browserCleared)
   const overview = useStore((s) => s.browserOverview)
+  const envStatus = useStore((s) => s.envStatus)
   const rdHost = useStore((s) => s.envStatus?.rdHost === true)
+  const channelDown = channelDownOf(envStatus)
   const loadBrowserConfig = useStore((s) => s.loadBrowserConfig)
   const clearBrowserData = useStore((s) => s.clearBrowserData)
   const loadBrowserOverview = useStore((s) => s.loadBrowserOverview)
@@ -184,6 +240,7 @@ export function BrowserSettingsView() {
             enabled={config.browserControlEnabled}
             installed={config.pluginInstalled}
             rdHost={rdHost}
+            channelDown={channelDown}
           />
         ) : (
           <div className="browser-settings__readonly">{t('browser.loading')}</div>

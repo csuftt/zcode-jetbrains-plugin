@@ -122,6 +122,37 @@
     }
   }
 
+  /* 通道降级提示行内的「重新检测」小按钮（对齐 env-banner__btn 的轻量描边形态）*/
+  &__recheck {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 2px;
+    padding: 1px 8px;
+    border: 1px solid color-mix(in srgb, var(--status-warning) 50%, transparent);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: var(--fs-hint);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.15s, opacity 0.15s;
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--status-warning) 15%, transparent);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .codicon {
+      font-size: var(--fs-hint);
+    }
+  }
+
   /* 按钮组（查看 + 清除并排）*/
   &__action-btns {
     display: inline-flex;

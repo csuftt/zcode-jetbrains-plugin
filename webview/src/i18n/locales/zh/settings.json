@@ -11,6 +11,7 @@
     "mcp": "MCP",
     "hooks": "钩子",
     "browser": "浏览器",
+    "browserDown": "浏览器（通道不可用）",
     "other": "其他设置",
     "processes": "进程",
     "computer": "电脑控制"

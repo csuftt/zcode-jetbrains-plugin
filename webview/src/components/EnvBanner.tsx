@@ -1,11 +1,10 @@
 /**
  * 运行环境提醒条（主界面顶栏下方，仅异常时渲染）
  *
- * 两档：
- * - 阻断（allOk=false）：node / zcode.cjs 问题，插件暂不可用，warning 色；
- * - 建议（allOk=true 但有 advisory 项）：AI 浏览器工具不可用等，
- *   均不影响对话，info 色。
- * 提供「去设置」（直达基础设置→环境子tab）与「重新检测」（后者会触发宿主自愈重探）。
+ * 只保留阻断档（allOk=false）：node / zcode.cjs 问题，插件暂不可用，warning 色。
+ * browserHost 等非阻断项不再上横幅（用户反馈：对话功能不受影响却每次启动都弹，
+ * 很扰民）——降级状态收敛到 设置→浏览器 的控制卡片内常驻提示，左侧浏览器图标同步置灰。
+ * 提供「去设置」（直达基础设置→环境子tab）与「重新检测」（触发宿主自愈重探）。
  * 数据源：store envStatus（init checkEnv / envSave 重检 / IDE 广播 onEnvStatusChanged / error 附带）。
  */
 
@@ -34,30 +33,15 @@ function collectProblems(status: EnvStatus): { key: string; code?: string; arg?:
   return problems
 }
 
-/** browserHost 非阻断告警（未探测/健康时为 null）；渲染只按 code 选文案 */
-function browserHostProblem(status: EnvStatus): { code?: string } | null {
-  const bh = status.browserHost
-  if (!bh || bh.ok) return null
-  return { code: bh.code }
-}
-
 export function EnvBanner({ onGoSettings }: Props) {
   const { t } = useTranslation()
   const envStatus = useStore((s) => s.envStatus)
   const checkEnv = useStore((s) => s.checkEnv)
   const [checking, setChecking] = useState(false)
-  // advisory 档（browserHost）会话内可手动关闭；阻断档（node/cli）不可关——
-  // 那是真不可用，关了用户更困惑。不持久化：重启 IDE 再提示一次（宿主仍异常时）
-  const [dismissed, setDismissed] = useState(false)
 
   if (!envStatus) return null
   const problems = envStatus.allOk ? [] : collectProblems(envStatus)
-  const hostWarning = envStatus.allOk ? browserHostProblem(envStatus) : null
-  if (problems.length === 0 && !hostWarning) return null
-
-  // 阻断档沿用 warning 色；纯 advisory 档（browserHost）换 info 色（不吓用户，对话功能正常）
-  const advisory = problems.length === 0
-  if (advisory && dismissed) return null
+  if (problems.length === 0) return null
 
   const handleRecheck = () => {
     if (checking) return
@@ -68,12 +52,10 @@ export function EnvBanner({ onGoSettings }: Props) {
   }
 
   return (
-    <div className={`env-banner${advisory ? ' env-banner--advisory' : ''}`} role="alert">
-      <span className={`codicon ${advisory ? 'codicon-info' : 'codicon-warning'} env-banner__icon`} />
+    <div className="env-banner" role="alert">
+      <span className="codicon codicon-warning env-banner__icon" />
       <div className="env-banner__content">
-        <div className="env-banner__title">
-          {advisory ? t('app.envBanner.advisoryTitle') : t('app.envBanner.title')}
-        </div>
+        <div className="env-banner__title">{t('app.envBanner.title')}</div>
         <ul className="env-banner__problems">
           {problems.map((p) => {
             // 详情按 Java 侧错误码走 i18n（英文环境不再露中文）；无码（旧包/未知）回退原文
@@ -89,13 +71,6 @@ export function EnvBanner({ onGoSettings }: Props) {
               </li>
             )
           })}
-          {hostWarning && (
-            <li className="env-banner__problem">
-              {hostWarning.code === 'browserHostCefDown'
-                ? t('app.envBanner.browserHostCefDown')
-                : t('app.envBanner.browserHostHandlerMissing')}
-            </li>
-          )}
         </ul>
       </div>
       <div className="env-banner__actions">
@@ -107,17 +82,6 @@ export function EnvBanner({ onGoSettings }: Props) {
           <span className="codicon codicon-settings-gear" />
           {t('app.envBanner.goSettings')}
         </button>
-        {advisory && (
-          <button
-            type="button"
-            className="env-banner__btn"
-            onClick={() => setDismissed(true)}
-            title={t('app.envBanner.dismiss')}
-            aria-label={t('app.envBanner.dismiss')}
-          >
-            <span className="codicon codicon-close" />
-          </button>
-        )}
       </div>
     </div>
   )

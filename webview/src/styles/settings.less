@@ -120,6 +120,19 @@
         background: var(--accent-primary, #3574f0);
       }
     }
+
+    /* 浏览器调试通道降级：图标置灰示意不可用（详情见 设置→浏览器 控制卡提示）*/
+    &.down {
+      .codicon {
+        color: var(--text-tertiary);
+        opacity: 0.5;
+      }
+
+      &:hover .codicon,
+      &.active .codicon {
+        opacity: 0.75;
+      }
+    }
   }
 
   /* 右侧内容区 */

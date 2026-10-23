@@ -11,6 +11,7 @@
     "mcp": "MCP",
     "hooks": "훅",
     "browser": "브라우저",
+    "browserDown": "브라우저(채널 사용 불가)",
     "other": "기타 설정",
     "processes": "프로세스",
     "computer": "컴퓨터 제어"

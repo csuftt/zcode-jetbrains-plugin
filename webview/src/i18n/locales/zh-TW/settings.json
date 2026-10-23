@@ -11,6 +11,7 @@
     "mcp": "MCP",
     "hooks": "鉤子",
     "browser": "瀏覽器",
+    "browserDown": "瀏覽器（通道不可用）",
     "other": "其他設定",
     "processes": "處理程序",
     "computer": "電腦控制"

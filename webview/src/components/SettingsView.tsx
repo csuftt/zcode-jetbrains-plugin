@@ -49,6 +49,13 @@ export function SettingsView({ onBack }: Props) {
       : 'basic'
   const [tab, setTab] = useState<SettingsTab>(initialTab)
 
+  // 浏览器调试通道降级（browserHost 探针报异常）：左栏浏览器图标置灰提示，
+  // 详情在 设置→浏览器 的控制卡内常驻展示（不再上主界面横幅，用户反馈扰民）
+  const browserDown = useStore((s) => {
+    const bh = s.envStatus?.browserHost
+    return !!bh && !bh.ok
+  })
+
   // 跳转意图消费：AgentSelect 下拉「管理」入口（env 由 BasicSettingsView 消费；
   // 挂载时消费一次即清，避免切走再回重复跳转）
   const pendingSection = useStore((s) => s.pendingSettingsSection)
@@ -95,9 +102,13 @@ export function SettingsView({ onBack }: Props) {
           {navItems.map((it) => (
             <button
               key={it.key}
-              className={cx('settings-view__nav-item', tab === it.key && 'active')}
+              className={cx('settings-view__nav-item', tab === it.key && 'active', it.key === 'browser' && browserDown && 'down')}
               onClick={() => setTab(it.key)}
-              data-tooltip={t(`settings.tabs.${it.key}`)}
+              data-tooltip={
+                it.key === 'browser' && browserDown
+                  ? t('settings.tabs.browserDown')
+                  : t(`settings.tabs.${it.key}`)
+              }
             >
               {it.glyph
                 ? <span className="settings-view__nav-glyph">{it.glyph}</span>

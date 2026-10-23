@@ -6,6 +6,10 @@
     "stateOn": "已啟用",
     "stateOff": "已停用",
     "rdUnavailable": "遠端開發模式下不可用：瀏覽器工具依賴的 CEF 除錯通道執行在前端本機",
+    "cefDown": "瀏覽器除錯通道不可用：JCEF 已啟動但 CDP 連接埠不可達，AI 瀏覽器功能暫不可用，重啟 IDE 可恢復",
+    "handlerMissing": "瀏覽器宿主未註冊到協定用戶端，點「重新檢測」自動補註冊",
+    "channelDown": "瀏覽器除錯通道不可用，AI 瀏覽器功能暫不可用",
+    "recheck": "重新檢測",
     "notInstalledShort": "未安裝",
     "readonlyHint": "與 ZCode 客戶端共用設定，如需修改請在 ZCode 客戶端的設定中操作（新會話生效）"
   },

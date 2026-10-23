@@ -306,7 +306,8 @@ export default function App() {
         canRegenerateTitle={canRegenerateTitle}
         regeneratingTitle={!!currentSessionId && titleRegeneratingSessionId === currentSessionId}
       />
-      {/* 环境提醒条：node/zcode.cjs/凭证任一异常时显示（仅异常渲染，正常保持安静）*/}
+      {/* 环境提醒条：仅 node/zcode.cjs 阻断异常时显示；browserHost 降级不上横幅
+          （用户反馈扰民），收敛到 设置→浏览器 控制卡常驻提示 + 左栏图标置灰 */}
       <EnvBanner
         onGoSettings={() => {
           setPendingSettingsSection('env')

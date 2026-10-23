@@ -11,6 +11,7 @@
     "mcp": "MCP",
     "hooks": "Hooks",
     "browser": "Browser",
+    "browserDown": "Browser (channel unavailable)",
     "other": "Other",
     "processes": "Processes",
     "computer": "Computer Control"

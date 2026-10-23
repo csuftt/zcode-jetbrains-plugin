@@ -116,11 +116,7 @@
     "nodeTooLow": "Node.js のバージョンが低すぎます（{{version}}、v{{min}}+ が必要）",
     "cliMissing": "ZCode CLI が見つかりません：{{detail}}",
     "recheck": "再チェック",
-    "goSettings": "設定へ",
-    "browserHostCefDown": "ブラウザデバッグチャネルが利用不可：JCEF は起動していますが CDP ポートに到達できません。IDE を再起動して復旧してください（再チェックで自動修復を試みます）",
-    "browserHostHandlerMissing": "ブラウザホストがプロトコルクライアントに登録されていません。「再チェック」で再登録します",
-    "advisoryTitle": "実行環境の通知（チャットへの影響なし）",
-    "dismiss": "閉じる（機能に影響なし。IDE 再起動後も異常が残る場合は再表示されます）"
+    "goSettings": "設定へ"
   },
   "envErrors": {
     "nodeNotFound": "PATH・一般的なインストール先・ログインシェルを検索済み。設定でパスを指定してください",

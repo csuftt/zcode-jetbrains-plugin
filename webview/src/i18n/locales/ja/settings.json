@@ -11,6 +11,7 @@
     "mcp": "MCP",
     "hooks": "フック",
     "browser": "ブラウザ",
+    "browserDown": "ブラウザ（チャネル利用不可）",
     "other": "その他",
     "processes": "プロセス",
     "computer": "コンピューター操作"

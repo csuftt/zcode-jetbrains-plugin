@@ -117,11 +117,7 @@
     "nodeTooLow": "Node.js version too low ({{version}}, requires v{{min}}+)",
     "cliMissing": "ZCode CLI not found: {{detail}}",
     "recheck": "Recheck",
-    "goSettings": "Open Settings",
-    "browserHostCefDown": "Browser debug channel unavailable: JCEF is running but the CDP port is unreachable. Restart the IDE to recover (Recheck will attempt auto-repair)",
-    "browserHostHandlerMissing": "Browser host is not registered with the protocol client. Click \"Recheck\" to re-register",
-    "advisoryTitle": "Runtime notice (chat unaffected)",
-    "dismiss": "Dismiss (does not affect features; shows again after IDE restart if still degraded)"
+    "goSettings": "Open Settings"
   },
   "envErrors": {
     "nodeNotFound": "searched PATH, common install locations and login shell; set the path in Settings",

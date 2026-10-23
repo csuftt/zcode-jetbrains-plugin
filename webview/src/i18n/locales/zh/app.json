@@ -117,11 +117,7 @@
     "nodeTooLow": "Node.js 版本过低（{{version}}，需要 v{{min}}+）",
     "cliMissing": "ZCode CLI 未找到：{{detail}}",
     "recheck": "重新检测",
-    "goSettings": "去设置",
-    "browserHostCefDown": "浏览器调试通道不可用：JCEF 已启动但 CDP 端口不可达，请重启 IDE 恢复（重新检测会尝试自动修复）",
-    "browserHostHandlerMissing": "浏览器宿主未注册到协议客户端，点「重新检测」自动补注册",
-    "advisoryTitle": "运行环境提示（对话功能不受影响）",
-    "dismiss": "关闭提示（不影响功能，重启 IDE 后若仍异常会再次提示）"
+    "goSettings": "去设置"
   },
   "envErrors": {
     "nodeNotFound": "已尝试 PATH、常见安装位置与登录 shell，请在设置中配置路径",

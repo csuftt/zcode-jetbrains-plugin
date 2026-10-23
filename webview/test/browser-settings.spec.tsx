@@ -155,4 +155,24 @@ describe('浏览器设置页', () => {
     expect(note).toBeTruthy()
     expect(note!.textContent).toContain('远程开发模式下不可用')
   })
+
+  it('调试通道降级在控制卡常驻提示（替代横幅）并可重新检测，健康时不显示', () => {
+    setConfig({ browserControlEnabled: true, pluginInstalled: true })
+    useStore.setState({ envStatus: null })
+    // 健康/未探测：无提示行
+    render(<BrowserSettingsView />)
+    expect(document.querySelector('.browser-settings__recheck')).toBeFalsy()
+    cleanup()
+
+    // cefDown：提示行出现（主界面横幅已撤，降级状态收敛到此卡），重新检测发 op
+    useStore.setState({
+      envStatus: { allOk: true, browserHost: { ok: false, code: 'browserHostCefDown' } } as never,
+    })
+    render(<BrowserSettingsView />)
+    const note = document.querySelector('.browser-settings__rd-note')
+    expect(note).toBeTruthy()
+    expect(note!.textContent).toContain('CDP 端口不可达')
+    fireEvent.click(document.querySelector('.browser-settings__recheck')!)
+    expect(sent.some((m) => m.op === 'checkEnv')).toBe(true)
+  })
 })

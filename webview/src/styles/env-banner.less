@@ -1,6 +1,6 @@
-// 环境提醒条（EnvBanner）：顶栏下方的 warning 横条，仅环境异常时渲染。
+// 环境提醒条（EnvBanner）：顶栏下方的 warning 横条，仅 node/cli 阻断异常时渲染。
 // 配色对齐 .app__error-bar 模式（color-mix 柔化底色），换用 --status-warning。
-// --advisory 变体：browserHost 非阻断建议（对话不受影响），换 --status-info。
+// （--advisory 变体随 browserHost 非阻断横幅一并撤出：降级状态收敛到设置页浏览器卡）
 
 .env-banner {
   display: flex;
@@ -12,28 +12,6 @@
   color: var(--text-primary);
   font-size: 12px;
   flex-shrink: 0;
-
-  &--advisory {
-    background: color-mix(in srgb, var(--status-info) 12%, var(--bg-primary));
-    border-bottom-color: color-mix(in srgb, var(--status-info) 40%, transparent);
-
-    .env-banner__icon,
-    .env-banner__title {
-      color: var(--status-info);
-    }
-
-    .env-banner__btn {
-      border-color: color-mix(in srgb, var(--status-info) 50%, transparent);
-
-      &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--status-info) 15%, transparent);
-      }
-    }
-
-    .env-banner__btn--primary {
-      background: color-mix(in srgb, var(--status-info) 22%, transparent);
-    }
-  }
 
   &__icon {
     color: var(--status-warning);
