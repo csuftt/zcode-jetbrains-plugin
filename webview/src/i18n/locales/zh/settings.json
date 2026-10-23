@@ -165,7 +165,8 @@
       "label": "CDP 端口文件",
       "placeholder": "留空自动检测（默认 <system>/jcef_cache/DevToolsActivePort）",
       "hint": "JCEF 的 DevToolsActivePort 文件（浏览器调试通道）。自定义 idea.system.path 导致浏览器工具不可用时填写；保存时验证端口可达，清空并保存恢复自动检测",
-      "badge": "已配置"
+      "badge": "已配置",
+      "portBadge": "端口 {{port}}"
     },
     "proxy": {
       "label": "网络代理",

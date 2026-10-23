@@ -165,7 +165,8 @@
       "label": "CDP 포트 파일",
       "placeholder": "비워 두면 자동 감지(기본 <system>/jcef_cache/DevToolsActivePort)",
       "hint": "JCEF DevToolsActivePort 파일(브라우저 디버그 채널). idea.system.path 사용자 지정으로 브라우저 도구를 사용할 수 없을 때 입력하세요. 저장 시 포트 연결을 검증하며, 비우고 저장하면 자동 감지로 복귀",
-      "badge": "설정됨"
+      "badge": "설정됨",
+      "portBadge": "포트 {{port}}"
     },
     "proxy": {
       "label": "네트워크 프록시",

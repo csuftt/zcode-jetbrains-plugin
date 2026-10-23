@@ -32,6 +32,7 @@ class ZCodeEnvCheckerTest {
     fun cleanup() {
         ZCodeEnvChecker.setStoreForTest(WritableStore()) // 清理测试注入，恢复无副作用状态
         ZCodeEnvChecker.setBrowserHostProbe(null)
+        ZCodeEnvChecker.setCdpEndpointProbe(null)
     }
 
     // ============ 版本解析 ============
@@ -106,6 +107,32 @@ class ZCodeEnvCheckerTest {
         val s = ZCodeEnvChecker.check(force = true)
         // 三件套不满足时（真机差异）宿主不评判，两种结果都合法
         assertTrue(s.browserHost == null || s.browserHost!!.ok, "探针健康或未探测均合法，实际: ${s.browserHost}")
+    }
+
+    @Test
+    fun `statusJson cdpActive 序列化与缺席省略`() {
+        val absent = ZCodeEnvChecker.statusJson(EnvStatus(okNode(), okCli()))
+        assertTrue("cdpActiveFile" !in absent, "探针缺席应省略 cdpActiveFile")
+
+        val shown = ZCodeEnvChecker.statusJson(
+            EnvStatus(okNode(), okCli(), cdpActive = CdpEndpointStatus("/s/jcef_cache/DevToolsActivePort", 63520)),
+        )
+        assertEquals("/s/jcef_cache/DevToolsActivePort", shown["cdpActiveFile"]!!.jsonPrimitive.content)
+        assertEquals(63520, shown["cdpActivePort"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `check 组装 cdp 端点探针且探针异常不炸检测`() {
+        ZCodeEnvChecker.setStoreForTest(WritableStore())
+        // 探针异常按缺席处理（纯展示项，不能拖垮 check）
+        ZCodeEnvChecker.setCdpEndpointProbe { throw IllegalStateException("probe boom") }
+        kotlin.runCatching { ZCodeEnvChecker.check(force = true) }
+            .onFailure { fail("cdp 探针异常不应导致 check 抛错: ${it.message}") }
+        // 注入桩后 check 携带端点（与 node/cli 健康无关，两分支都挂）
+        ZCodeEnvChecker.setCdpEndpointProbe { CdpEndpointStatus("C:/x/jcef_cache/DevToolsActivePort", 9222) }
+        val s = ZCodeEnvChecker.check(force = true)
+        assertEquals("C:/x/jcef_cache/DevToolsActivePort", s.cdpActive?.file)
+        assertEquals(9222, s.cdpActive?.port)
     }
 
     @Test

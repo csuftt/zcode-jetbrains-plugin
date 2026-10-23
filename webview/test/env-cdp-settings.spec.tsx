@@ -43,12 +43,17 @@ function openEnvTab() {
 const INPUTS = () =>
   Array.from(document.querySelectorAll('.basic-settings__path-input')) as HTMLInputElement[]
 
-function envWith(cdpPortFile?: string, nodePath = 'C:\\node\\node.exe'): EnvStatus {
+function envWith(
+  cdpPortFile?: string,
+  nodePath = 'C:\\node\\node.exe',
+  cdpActive?: { file: string; port: number },
+): EnvStatus {
   return {
     node: { configured: false, path: nodePath, found: true, version: 'v20.11.1', versionTooLow: false, minVersion: 18 },
     cli: { configured: false, path: 'C:\\zcode\\zcode.cjs', found: true, version: '0.16.9' },
     allOk: true,
     ...(cdpPortFile !== undefined ? { cdpPortFile } : {}),
+    ...(cdpActive ? { cdpActiveFile: cdpActive.file, cdpActivePort: cdpActive.port } : {}),
   } as EnvStatus
 }
 
@@ -71,7 +76,7 @@ describe('环境设置 CDP 端口文件', () => {
     expect(document.body.textContent).toContain(i18n.t('settings.env.cdp.badge'))
   })
 
-  it('未配置时无徽章且输入框为空', async () => {
+  it('未配置且探针缺席时无徽章且输入框为空', async () => {
     render(<BasicSettingsView />)
     openEnvTab()
     useStore.setState({ envStatus: envWith() })
@@ -79,6 +84,30 @@ describe('环境设置 CDP 端口文件', () => {
       expect(INPUTS()[2].value).toBe('')
     })
     expect(document.body.textContent).not.toContain(i18n.t('settings.env.cdp.badge'))
+  })
+
+  it('未配置时回显实际生效文件与端口徽标，配置值优先', async () => {
+    render(<BasicSettingsView />)
+    openEnvTab()
+    // 未配置 + 探针有值：输入框回显生效文件，徽标显示端口
+    useStore.setState({
+      envStatus: envWith(undefined, 'C:\\node\\node.exe', { file: 'C:\\idea\\jcef_cache\\DevToolsActivePort', port: 63520 }),
+    })
+    await waitFor(() => {
+      expect(INPUTS()[2].value).toBe('C:\\idea\\jcef_cache\\DevToolsActivePort')
+    })
+    expect(document.body.textContent).toContain(i18n.t('settings.env.cdp.portBadge', { port: 63520 }))
+    expect(document.body.textContent).not.toContain(i18n.t('settings.env.cdp.badge'))
+
+    // 配置值优先于生效文件（已配置徽标回归，端口徽标退场）
+    useStore.setState({
+      envStatus: envWith('D:\\my\\DevToolsActivePort', 'C:\\node\\node.exe', { file: 'C:\\idea\\jcef_cache\\DevToolsActivePort', port: 63520 }),
+    })
+    await waitFor(() => {
+      expect(INPUTS()[2].value).toBe('D:\\my\\DevToolsActivePort')
+    })
+    expect(document.body.textContent).toContain(i18n.t('settings.env.cdp.badge'))
+    expect(document.body.textContent).not.toContain(i18n.t('settings.env.cdp.portBadge', { port: 63520 }))
   })
 
   it('保存只发 cdpPortFile 且 trim，node/cli 字段不入报文', () => {

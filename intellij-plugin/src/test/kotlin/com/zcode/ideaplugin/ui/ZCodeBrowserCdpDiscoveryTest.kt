@@ -10,6 +10,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -131,6 +132,20 @@ class ZCodeBrowserCdpDiscoveryTest {
             } finally {
                 variant.deleteRecursively()
             }
+        }
+    }
+
+    @Test
+    fun `activeCdpEndpoint 配置的活端口文件命中`() {
+        val store = MemStore()
+        ZCodeEnvChecker.setStoreForTest(store)
+        ServerSocket(0).use { ss ->
+            val configured = writePortFile(tempDir(), ss.localPort)
+            store.set(ZCodeEnvChecker.KEY_CDP_PORT_FILE, configured.absolutePath)
+            val hit = ZCodeBrowserExecutor.activeCdpEndpoint()
+            assertNotNull(hit, "配置钉首位的活端口文件必须命中")
+            assertEquals(configured.canonicalPath, hit.first.canonicalPath)
+            assertEquals(ss.localPort, hit.second)
         }
     }
 

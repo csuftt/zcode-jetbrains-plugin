@@ -165,7 +165,8 @@
       "label": "CDP ポートファイル",
       "placeholder": "空欄で自動検出（既定 <system>/jcef_cache/DevToolsActivePort）",
       "hint": "JCEF の DevToolsActivePort ファイル（ブラウザーデバッグチャネル）。idea.system.path をカスタマイズしてブラウザーツールが使えない場合に入力します。保存時にポート到達性を検証。空欄で保存すると自動検出に戻ります",
-      "badge": "設定済み"
+      "badge": "設定済み",
+      "portBadge": "ポート {{port}}"
     },
     "proxy": {
       "label": "ネットワークプロキシ",

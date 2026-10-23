@@ -76,6 +76,13 @@ class ZCodeBrowserExecutor(private val project: Project) {
             findDevToolsActivePortFiles().any { probePortFile(it) != null }
 
         /**
+         * 当前实际生效的 CDP 端点：发现池（配置值钉首位 → mtime 降序）里首个端口可达的
+         * DevToolsActivePort 文件。展示用（设置页 CDP 输入框回显），全不可达返回 null。
+         */
+        fun activeCdpEndpoint(): Pair<java.io.File, Int>? =
+            findDevToolsActivePortFiles().firstNotNullOfOrNull { f -> probePortFile(f)?.let { f to it } }
+
+        /**
          * 校验单个 DevToolsActivePort 文件：首行可解析为端口且 TCP 可达（IPv4/IPv6
          * 双栈，各 800ms），返回真实端口；文件损坏/端口无监听返回 null。
          * envSave 保存用户配置前用同一标准严格校验（无效不落盘）。

@@ -85,10 +85,19 @@ data class BrowserHostStatus(
     }
 }
 
+/**
+ * 当前实际生效的 CDP 端点（发现池里首个端口可达的 DevToolsActivePort 文件）。
+ * 纯展示用：设置页 CDP 输入框在未配置覆盖值时回显此文件（ZCode CLI 路径同款逻辑）。
+ * null = 全部候选不可达 / 探针缺席（RD、JCEF 未起、测试桩）。
+ */
+data class CdpEndpointStatus(val file: String, val port: Int)
+
 data class EnvStatus(
     val node: NodeStatus,
     val cli: CliStatus,
     val browserHost: BrowserHostStatus? = null,
+    /** 实际生效的 CDP 端点（展示用，不参与 allOk）；探针缺席 null */
+    val cdpActive: CdpEndpointStatus? = null,
 ) {
     /**
      * node + zcode.cjs 就绪即可启动 app-server；browserHost 是建议性检查，不计入。
@@ -179,6 +188,19 @@ object ZCodeEnvChecker {
         invalidate()
     }
 
+    /**
+     * CDP 实际端点探针（发现池首个可达文件；依赖 ui 包运行态，同 browserHostProbe
+     * 走注入。展示用非阻断：探测失败按缺席处理，不能拖垮 check）
+     */
+    @Volatile
+    private var cdpEndpointProbe: (() -> CdpEndpointStatus?)? = null
+
+    /** Service 层注入 CDP 端点探针；单测可注入桩后再清空 */
+    fun setCdpEndpointProbe(probe: (() -> CdpEndpointStatus?)?) {
+        cdpEndpointProbe = probe
+        invalidate()
+    }
+
     @Volatile
     private var cached: EnvStatus? = null
     @Volatile
@@ -244,9 +266,11 @@ object ZCodeEnvChecker {
                 null
             })
         } else status
-        cached = resolved
+        // CDP 实际端点与 node/cli 健康无关（纯展示），两分支都挂；失败按缺席
+        val withCdp = resolved.copy(cdpActive = try { cdpEndpointProbe?.invoke() } catch (_: Exception) { null })
+        cached = withCdp
         cachedAt = now
-        resolved
+        withCdp
     }
 
     fun invalidate() = synchronized(cacheLock) {
@@ -624,6 +648,9 @@ object ZCodeEnvChecker {
         // CDP 端口文件覆盖值（配置项回显走顶层常驻：browserHost 在 node/cli 未就绪、
         // app-server 未起、RD 等场景整体缺席，设置输入框在这些时候仍需显示已保存值）
         putStringOrNull("cdpPortFile", configuredCdpPortFile())
+        // 实际生效的 CDP 端点（设置页 CDP 输入框未配置时回显，ZCode CLI 路径同款逻辑）
+        putStringOrNull("cdpActiveFile", s.cdpActive?.file)
+        s.cdpActive?.let { put("cdpActivePort", it.port) }
         // 非阻断项（null = 未探测/未初始化，省略节点）
         s.browserHost?.let { bh ->
             put("browserHost", buildJsonObject {

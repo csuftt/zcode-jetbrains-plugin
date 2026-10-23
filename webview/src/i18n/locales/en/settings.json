@@ -165,7 +165,8 @@
       "label": "CDP Port File",
       "placeholder": "Leave empty to auto-detect (default <system>/jcef_cache/DevToolsActivePort)",
       "hint": "The JCEF DevToolsActivePort file (browser debug channel). Fill in when a customized idea.system.path makes browser tools unavailable; port reachability is verified on save, clear and save to restore auto-detection",
-      "badge": "Configured"
+      "badge": "Configured",
+      "portBadge": "Port {{port}}"
     },
     "proxy": {
       "label": "Network Proxy",

@@ -165,7 +165,8 @@
       "label": "CDP 連接埠檔案",
       "placeholder": "留空自動檢測（預設 <system>/jcef_cache/DevToolsActivePort）",
       "hint": "JCEF 的 DevToolsActivePort 檔案（瀏覽器除錯通道）。自訂 idea.system.path 導致瀏覽器工具無法使用時填寫；儲存時驗證連接埠可達，清空並儲存恢復自動檢測",
-      "badge": "已設定"
+      "badge": "已設定",
+      "portBadge": "連接埠 {{port}}"
     }
   },
   "behavior": {

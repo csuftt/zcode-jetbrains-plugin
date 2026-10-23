@@ -1237,6 +1237,10 @@ export interface EnvStatus {
   cli: EnvCliStatus
   /** 用户配置的 JCEF DevToolsActivePort 文件路径（未配置/旧包缺省 = 自动检测）*/
   cdpPortFile?: string
+  /** 实际生效的 CDP 端点文件（发现池首个端口可达；未探测/旧包缺省。设置页 CDP 输入框未配置时回显）*/
+  cdpActiveFile?: string
+  /** 实际生效的 CDP 端口号（随 cdpActiveFile 一起到达）*/
+  cdpActivePort?: number
   /** browser-use 宿主健康（非阻断建议项；null = 未探测/未初始化，旧包兼容）*/
   browserHost?: EnvBrowserHostStatus
   allOk: boolean

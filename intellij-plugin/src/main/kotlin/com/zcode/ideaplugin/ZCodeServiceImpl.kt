@@ -214,6 +214,12 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                 else -> com.zcode.ideaplugin.env.BrowserHostStatus(true, null)
             }
         }
+        // CDP 实际端点探针（设置页 CDP 输入框未配置时回显生效文件，CLI 路径同款逻辑）
+        com.zcode.ideaplugin.env.ZCodeEnvChecker.setCdpEndpointProbe {
+            com.zcode.ideaplugin.ui.ZCodeBrowserExecutor.activeCdpEndpoint()?.let { (f, port) ->
+                com.zcode.ideaplugin.env.CdpEndpointStatus(f.absolutePath, port)
+            }
+        }
     }
 
     @Volatile

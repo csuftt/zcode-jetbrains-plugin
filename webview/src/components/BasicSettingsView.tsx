@@ -507,7 +507,10 @@ function EnvironmentSettings() {
 
   const nodePath = envStatus?.node.path ?? ''
   const cliPath = envStatus?.cli.path ?? ''
-  const cdpPath = envStatus?.cdpPortFile ?? ''
+  // CDP 输入框跟随：配置值优先；未配置回显实际生效文件（发现池首个可达，CLI 路径同款逻辑）
+  const cdpConfigured = envStatus?.cdpPortFile ?? ''
+  const cdpEffective = envStatus?.cdpActiveFile ?? ''
+  const cdpPath = cdpConfigured || cdpEffective
 
   useEffect(() => {
     // 函数式 updater 由 React 延迟到渲染期执行，而 ref 赋值立即生效——
@@ -645,9 +648,14 @@ function EnvironmentSettings() {
         <div className="basic-settings__field-header">
           <span className="codicon codicon-browser" />
           <span className="basic-settings__field-label">{t('settings.env.cdp.label')}</span>
-          {cdpPath && (
-            <span className="basic-settings__version-badge is-ok" title={cdpPath}>
+          {cdpConfigured && (
+            <span className="basic-settings__version-badge is-ok" title={cdpConfigured}>
               {t('settings.env.cdp.badge')}
+            </span>
+          )}
+          {!cdpConfigured && cdpEffective && envStatus?.cdpActivePort != null && (
+            <span className="basic-settings__version-badge is-ok" title={cdpEffective}>
+              {t('settings.env.cdp.portBadge', { port: envStatus.cdpActivePort })}
             </span>
           )}
         </div>
