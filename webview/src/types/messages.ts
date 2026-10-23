@@ -751,8 +751,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
 export interface ModelOption {
   providerId: string
   providerName: string
-  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验、team=客户端选中的团队套餐 */
-  plan?: 'personal' | 'trial' | 'team'
+  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验、team=客户端选中的团队套餐、builtin=账号渠道统一标识（2026-10-23，团队/档位字样均有误导故统一） */
+  plan?: 'personal' | 'trial' | 'team' | 'builtin'
   modelId: string
   modelName: string
   /** 上下文窗口大小（config.json limit.context），如 GLM-5.2=1000000 / GLM-5-Turbo=204800 */
@@ -822,8 +822,8 @@ export interface NodeProcessInfo {
 /** 模型管理 provider 分组（与聊天 listModels 的差异：不去重、含 disabled、保留无 baseURL 项）*/
 export interface ModelManageProvider {  providerId: string
   providerName: string
-  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验、team=客户端选中的团队套餐 */
-  plan?: 'personal' | 'trial' | 'team'
+  /** 内置套餐类型（两个内置套餐显示名相同，靠 providerId 区分）：personal=个人、trial=体验、team=客户端选中的团队套餐、builtin=账号渠道统一标识（2026-10-23，团队/档位字样均有误导故统一） */
+  plan?: 'personal' | 'trial' | 'team' | 'builtin'
   /** 内置渠道命中方式：selected=客户端选中渠道生效；fallback=所选渠道凭证不可用回退首个可用内置 */
   via?: 'selected' | 'fallback'
   /** 兜底原因（via=fallback 时）：captchaGated=客户端所选渠道是体验套餐(zcode-plan 网关)

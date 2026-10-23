@@ -44,8 +44,13 @@ import kotlin.io.path.readText
  * - headersApplied:true 必须携带 requestAuth（runner-runtime-headers 校验非空）；
  *   官方所有 zhipu-account 场景都只回 apiKey（Authorization 由 CLI 自动派生），
  *   headers 仅 off-peak/组织头等特殊场景需要。
- * - team-coding-plan 的 apiKey 需远端 api_keys 列表/创建解析（accountProviderApiKeyResolver），
- *   插件不实现——该模式如实拒绝（headersApplied:false 快速失败，别拖 180s 超时）。
+ * - 【2026-10-23 材料链对齐官方 PAT 换发】实机定案：本地静态 api-key 键是 v1 遗留
+ *   （现行客户端不再写入/读取），open.bigmodel.cn/api/anthropic 端点校验的是
+ *   bigmodel.cn 管理面换发的短期项目令牌 PAT（三段式）——静态键直调必得
+ *   [1004] Authentication Token 验证失败。材料链改为：individual 静态键（老客户端
+ *   遗留，直连可用）优先、缺失走 PAT；team 只走 PAT（静态键 1004，org/project 取
+ *   setting.json 连接选择）；换发实现在 [ProjectAccessTokenClient]。渠道激活跟
+ *   selection 语义（连接选择是官方认的"当前连接事实"），不跟遗留键名。
  */
 object AccountProviderBridge {
 
@@ -162,25 +167,83 @@ object AccountProviderBridge {
      * 按模型请求的 accountAccess 选 apiKey（官方 accountProviderRequestAuthService
      * 材料选择判据的插件侧子集）。返回 null = 无法供给（调用方回 headersApplied:false）。
      *
+     * 材料链（2026-10-23 源码勘查定案）：
+     * - start-plan：credentials 的 zcodejwttoken（端点为 captcha 网关，实际不可激活）；
+     * - individual：本地静态键（老客户端落盘，直连可用）优先，缺失走 PAT 换发
+     *   （新客户端不再落静态键，官方正道=oauth access_token 换发短期项目令牌）；
+     * - team：静态键实机 1004【不可作材料】，只走 PAT（org/project 取 selection 的
+     *   team 连接值，官方 schema team 连接必带）。
+     *
      * @param providerId params.providerId，形如 "account:zai-individual-coding-plan"
      * @param mode params.accountAccess.mode（start-plan / individual-coding-plan / team-coding-plan）
+     * @param selection setting.json 连接选择（默认读真实文件；测试显式传）
+     * @param http HTTP 可注入（测试 fake；默认生产 java.net.http）
      */
-    fun requestAuthApiKey(providerId: String, mode: String?, entries: Map<String, String> = readCredentialEntries()): String? {
+    fun requestAuthApiKey(
+        providerId: String,
+        mode: String?,
+        entries: Map<String, String> = readCredentialEntries(),
+        selection: ProjectAccessTokenClient.Selection? = connectionSelection(),
+        clientVersion: String = "0.0.0",
+        http: ProjectAccessTokenClient.Http? = null,
+    ): String? {
         val family = FAMILY_BY_PROVIDER[providerId] ?: return null
         return when (mode) {
             "start-plan" -> entries["zcodejwttoken"]?.takeIf { it.isNotBlank() }
             "individual-coding-plan" -> {
                 val identity = identityOf(entries, family) ?: return null
                 entries[individualPlanKey(providerId, identity)]?.takeIf { it.isNotBlank() }
+                    ?: patKey(family, mode, entries, selection, clientVersion, http)
             }
-            // team 的 key 需远端 api_keys 解析，插件无此能力：不供给
+            "team-coding-plan" -> {
+                identityOf(entries, family) ?: return null
+                patKey(family, mode, entries, selection, clientVersion, http)
+            }
             else -> null
         }
     }
 
-    /** individual 套餐凭证 key（官方 accountProviderCredentialKey.ts L20-36；identity 走 JS encodeURIComponent 同款转义） */
+    /** PAT 材料解析：oauth access_token（防御性拒绝误存的 zcode JWT，官方同款守卫）→ 换发 */
+    private fun patKey(
+        family: String,
+        mode: String,
+        entries: Map<String, String>,
+        selection: ProjectAccessTokenClient.Selection?,
+        clientVersion: String,
+        http: ProjectAccessTokenClient.Http?,
+    ): String? {
+        val accessToken = entries["oauth:$family:access_token"]
+            ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] }
+            ?: return null
+        return ProjectAccessTokenClient.resolve(family, mode, accessToken, selection, clientVersion, http)
+    }
+
+    /** coding-plan 套餐凭证 key，individual/team 键模板同构（官方 accountProviderCredentialKey.ts L20-36；identity 走 JS encodeURIComponent 同款转义） */
     fun individualPlanKey(providerId: String, identity: String): String =
         "account-provider:coding-plan:$providerId:account:${jsEncodeURIComponent(identity)}:api-key"
+
+    /** setting.json 连接选择（官方连接事实的权威源：kind + team 档 org/project） */
+    fun connectionSelection(home: String = System.getProperty("user.home") ?: "."): ProjectAccessTokenClient.Selection? {
+        val setting = Path.of(home, ".zcode", "v2", "setting.json")
+        return try {
+            if (!setting.isRegularFile()) return null
+            val root = json.parseToJsonElement(setting.readText()).jsonObject
+            val selections = root["providerFamilyConnectionSelections"]?.jsonObject ?: return null
+            val domain = root["providerFamilyDomain"]?.jsonPrimitive?.contentOrNull
+                ?: selections.keys.firstOrNull()
+                ?: return null
+            val node = selections[domain]?.jsonObject ?: return null
+            val kind = node["kind"]?.jsonPrimitive?.contentOrNull ?: return null
+            ProjectAccessTokenClient.Selection(
+                domain = domain,
+                kind = kind,
+                organizationId = node["organizationId"]?.jsonPrimitive?.contentOrNull,
+                projectId = node["projectId"]?.jsonPrimitive?.contentOrNull,
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     // ============ 额度凭证：setting.json 选中账号渠道 ============
 
@@ -200,36 +263,26 @@ object AccountProviderBridge {
      * `providerFamilyConnectionSelections[providerFamilyDomain].kind` 指向账号渠道时，
      * 取该渠道目录条目的 baseUrl + [requestAuthApiKey] 解密 key（与
      * requestProviderRuntimeHeaders 供给同源——账号渠道计费态不在 provider_config.json，
-     * 明文链扫不到）。team（无材料）/ captcha 网关（start-plan）/ 选择非账号渠道 /
-     * 任一材料缺失 → null，调用方落回 provider_config.json 明文链。
+     * 明文链扫不到；材料链含 PAT 换发，2026-10-23）。team selection 缺 org/project /
+     * captcha 网关（start-plan）/ 选择非账号渠道 / 任一材料缺失 → null，
+     * 调用方落回 provider_config.json 明文链。
      */
     fun selectedAccountCredential(
         zcodePath: Path?,
         home: String = System.getProperty("user.home") ?: ".",
         entries: Map<String, String> = readCredentialEntries(),
+        selection: ProjectAccessTokenClient.Selection? = connectionSelection(home),
+        http: ProjectAccessTokenClient.Http? = null,
     ): SelectedAccountCredential? {
-        val setting = Path.of(home, ".zcode", "v2", "setting.json")
-        val (providerId, mode) = try {
-            if (!setting.isRegularFile()) return null
-            val root = json.parseToJsonElement(setting.readText()).jsonObject
-            val selections = root["providerFamilyConnectionSelections"]?.jsonObject ?: return null
-            val domain = root["providerFamilyDomain"]?.jsonPrimitive?.contentOrNull
-                ?: selections.keys.firstOrNull()
-                ?: return null
-            val kind = selections[domain]?.jsonObject?.get("kind")?.jsonPrimitive?.content
-                ?.takeIf { it in ACCOUNT_KINDS }
-                ?: return null
-            val pid = "account:$domain-$kind"
-            // FAMILY_BY_PROVIDER 复核：kind 形状漂移时不误挂未知渠道
-            if (pid in FAMILY_BY_PROVIDER) pid to kind else return null
-        } catch (_: Exception) {
-            return null
-        }
+        val kind = selection?.kind?.takeIf { it in ACCOUNT_KINDS } ?: return null
+        val pid = "account:${selection.domain}-$kind"
+        // FAMILY_BY_PROVIDER 复核：kind 形状漂移时不误挂未知渠道
+        if (pid !in FAMILY_BY_PROVIDER) return null
         val entry = BuiltinModelCatalog.accountProviderEntries(zcodePath, home)
-            .find { it.providerId == providerId } ?: return null
+            .find { it.providerId == pid } ?: return null
         if (RuntimeModels.isCaptchaGatedBaseUrl(entry.baseUrl)) return null
-        val key = requestAuthApiKey(providerId, mode, entries) ?: return null
-        return SelectedAccountCredential(providerId, entry.providerName, entry.baseUrl, key)
+        val key = requestAuthApiKey(pid, kind, entries, selection, http = http) ?: return null
+        return SelectedAccountCredential(pid, entry.providerName, entry.baseUrl, key)
     }
 
     /** JS encodeURIComponent 语义（Java URLEncoder 的空格→+ 与 !'()* 差异在此对齐） */
@@ -260,10 +313,11 @@ object AccountProviderBridge {
     fun buildAccountOverlay(
         builtinFile: Path,
         entries: Map<String, String> = readCredentialEntries(),
+        selection: ProjectAccessTokenClient.Selection? = connectionSelection(),
     ): AccountOverlay? {
         val basedOn = builtinRevision(builtinFile) ?: return null
         val channels = BuiltinModelCatalog.accountProviderEntriesFromFile(builtinFile)
-            .filter { isActivatable(it, entries) }
+            .filter { isActivatable(it, entries, selection) }
         if (channels.isEmpty()) return null
         val providers = LinkedHashMap<String, JsonObject>()
         val states = LinkedHashMap<String, JsonObject>()
@@ -292,37 +346,56 @@ object AccountProviderBridge {
     }
 
     /**
-     * 可激活的账号渠道（推送、模型列表、发送守卫三方共用的唯一判定，2026-09-21 收紧）：
+     * 可激活的账号渠道（推送、模型列表、发送守卫三方共用的唯一判定，2026-09-21 收紧；
+     * 2026-10-23 材料链对齐官方 PAT 换发）：
      * 1. 目录条目存在（模型权威 = builtinModelIds，官方 registry 同源）；
-     * 2. mode 排除 team-coding-plan（apiKey 需远端 api_keys 解析，插件无材料）与
-     *    off-peak（服务端票据）；
+     * 2. mode 排除 off-peak（服务端票据）；
      * 3. 端点非 captcha 门控（start-plan 系 zcode.z.ai 的 zcode-plan 网关，滑块人机验证
      *    插件无法代答——真机教训：JWT 存在只说明登录过，不等于有套餐，激活了也只是
      *    每回合必失败）；
-     * 4. 凭证材料齐备（individual 要 identity + coding-plan key）。
+     * 4. 材料（按 mode 分派，与 [requestAuthApiKey] 同源）：
+     *    - start-plan：zcodejwttoken + identity；
+     *    - individual：本地静态键（老客户端，直连可用）【或】selection=individual 连接 +
+     *      oauth access_token（新客户端不落静态键，走 PAT 换发）；
+     *    - team：selection=team 连接（官方 schema 必带 org/project）+ oauth access_token
+     *      ——静态 team 键实机 1004【不可作材料】（2026-10-23 定案）。
      */
     fun activatableAccountChannels(
         zcodePath: Path?,
         home: String = System.getProperty("user.home") ?: ".",
         entries: Map<String, String> = readCredentialEntries(),
+        selection: ProjectAccessTokenClient.Selection? = connectionSelection(home),
     ): List<BuiltinModelCatalog.AccountProviderEntry> =
-        BuiltinModelCatalog.accountProviderEntries(zcodePath, home).filter { isActivatable(it, entries) }
+        BuiltinModelCatalog.accountProviderEntries(zcodePath, home).filter { isActivatable(it, entries, selection) }
 
     private fun isActivatable(
         e: BuiltinModelCatalog.AccountProviderEntry,
         entries: Map<String, String>,
+        selection: ProjectAccessTokenClient.Selection?,
     ): Boolean {
-        if (e.mode == "team-coding-plan" || e.mode == "off-peak") return false
+        if (e.mode == "off-peak") return false
         if (RuntimeModels.isCaptchaGatedBaseUrl(e.baseUrl)) return false
         val family = FAMILY_BY_PROVIDER[e.providerId] ?: return false
         return when (e.mode) {
             "start-plan" -> !entries["zcodejwttoken"].isNullOrBlank() && identityOf(entries, family) != null
-            else -> {
+            "individual-coding-plan" -> {
                 val identity = identityOf(entries, family) ?: return false
                 !entries[individualPlanKey(e.providerId, identity)].isNullOrBlank()
+                    || (selection?.kind == "individual-coding-plan" && selection.domain == family && hasPatAccessToken(entries, family))
             }
+            "team-coding-plan" -> {
+                identityOf(entries, family) != null && selection?.kind == "team-coding-plan" && selection.domain == family
+                    && !selection.organizationId.isNullOrBlank() && !selection.projectId.isNullOrBlank()
+                    && hasPatAccessToken(entries, family)
+            }
+            else -> false
         }
     }
+
+    /** PAT 链可用前提：oauth access_token 存在且非误存的 zcode JWT（官方同款守卫） */
+    private fun hasPatAccessToken(entries: Map<String, String>, family: String): Boolean =
+        entries["oauth:$family:access_token"]
+            ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] } != null
 
     /**
      * Built-in revision 计算：`zcode-builtin:<json 顶层 revision>:<sha256(绝对路径)>`。

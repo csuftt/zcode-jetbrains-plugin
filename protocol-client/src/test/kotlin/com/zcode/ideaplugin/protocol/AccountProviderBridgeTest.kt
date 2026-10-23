@@ -16,9 +16,12 @@ import java.nio.file.Path
  * - entitled=true 渠道 states 必须带 boolean current
  * - builtin revision = "zcode-builtin:<json revision>:<sha256-hex(绝对路径)>"
  *
- * 激活判据（2026-09-21 真机教训后收紧）：目录条目 × mode 排除（team/off-peak）×
- * 端点门控（zcode-plan 网关）× 凭证材料——start-plan 的 JWT 存在只说明登录过，
- * 不等于有套餐，且其端点是滑块门控网关。
+ * 激活判据（2026-09-21 真机教训后收紧；2026-10-23 team 放开为同模板本地键）：目录条目 ×
+ * mode 判定（off-peak 排除 / team 同模板键在即激活）×端点门控（zcode-plan 网关）×
+ * 凭证材料——start-plan 的 JWT 存在只说明登录过，不等于有套餐，且其端点是滑块门控网关。
+ * team 放开依据：GLM Coding Max 个人档的 key 被新客户端落在本地 team 键名下（键模板
+ * 与 individual 同构、端点同 open.bigmodel.cn/api/anthropic），键缺（老团队远端解析）
+ * 维持 fail-closed 向后兼容。
  */
 class AccountProviderBridgeTest {
 
@@ -74,10 +77,97 @@ class AccountProviderBridgeTest {
     }
 
     @Test
-    fun `team 模式与未知渠道不供给`() {
-        assertNull(AccountProviderBridge.requestAuthApiKey("account:zai-team-coding-plan", "team-coding-plan", fullEntries()))
-        assertNull(AccountProviderBridge.requestAuthApiKey("unknown-provider", "individual-coding-plan", fullEntries()))
+    fun `team 静态键不供给（实机 1004 死路）走 PAT 链供给`() {
+        // 历史 team 静态键即使存在也不供给——实机调 anthropic 端点必得 [1004]
+        val legacy = fullEntries() + mapOf(
+            "account-provider:coding-plan:account:zai-team-coding-plan:account:user-zai-01:api-key" to "zai-team-key",
+        )
+        assertNull(AccountProviderBridge.requestAuthApiKey("account:zai-team-coding-plan", "team-coding-plan", legacy))
+        // team 无 selection org/project 或无 oauth token → PAT 链无法换发 → null
+        assertNull(
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-team-coding-plan", "team-coding-plan", fullEntries(),
+                ProjectAccessTokenClient.Selection("bigmodel", "team-coding-plan", "o", "p"),
+            ),
+        )
         assertNull(AccountProviderBridge.requestAuthApiKey("account:zai-individual-coding-plan", null, fullEntries()))
+    }
+
+    // ===== PAT 换发链（2026-10-23 材料链对齐官方）=====
+
+    /** PAT 全链 fake：getCustomerInfo → api_keys 列表 → access_tokens 三段响应 */
+    private fun patHttp(team: Boolean): ProjectAccessTokenClient.Http {
+        fun env(data: String) = """{"code":200,"data":$data}"""
+        val listBody = if (team) """{"api_keys":[{"apiKey":"key-9","name":"zcode-team-api-key","keyType":2}]}"""
+        else """{"api_keys":[{"apiKey":"key-1","name":"zcode-api-key"}]}"""
+        return ProjectAccessTokenClient.Http { method, url, _, _ ->
+            when {
+                url.endsWith("/getCustomerInfo") -> 200 to env(
+                    """{"organizations":[{"organizationId":"org-1","projects":[{"projectId":"proj-1","projectType":"1"}]}]}""",
+                )
+                url.endsWith("/api_keys") && method == "GET" -> 200 to env(listBody)
+                url.endsWith("/access_tokens") && method == "POST" -> 200 to env(
+                    """{"accessToken":"pat-token","tokenType":"Bearer","expiresIn":600}""",
+                )
+                else -> 404 to """{"code":404}"""
+            }
+        }
+    }
+
+    private fun patEntries(): Map<String, String> = mapOf(
+        "oauth:bigmodel:user_info" to """{"id":"user-bigmodel-01"}""",
+        "oauth:bigmodel:access_token" to "oauth-access-token",
+    )
+
+    @Test
+    fun `individual 新客户端无静态键走 PAT 换发供给`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        assertEquals(
+            "pat-token",
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+                patEntries(), sel, http = patHttp(team = false),
+            ),
+        )
+    }
+
+    @Test
+    fun `team 渠道 selection 带组织项目走 PAT 换发供给`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "team-coding-plan", "org-9", "proj-9")
+        var sawOrgHeader = false
+        var sawProjectHeader = false
+        val http = ProjectAccessTokenClient.Http { method, url, headers, _ ->
+            if (url.endsWith("/api_keys") && method == "GET") {
+                sawOrgHeader = headers.containsKey("bigmodel-organization")
+                sawProjectHeader = headers.containsKey("bigmodel-project")
+                200 to """{"code":200,"data":{"api_keys":[{"apiKey":"key-9","name":"zcode-team-api-key","keyType":2}]}}"""
+            } else if (url.endsWith("/access_tokens")) {
+                200 to """{"code":200,"data":{"accessToken":"team-pat","expiresIn":600}}"""
+            } else 404 to """{"code":404}"""
+        }
+        assertEquals(
+            "team-pat",
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-team-coding-plan", "team-coding-plan",
+                patEntries(), sel, http = http,
+            ),
+        )
+        assertTrue(sawOrgHeader && sawProjectHeader)
+    }
+
+    @Test
+    fun `access_token 误存 zcode JWT 拒绝走 PAT`() {
+        val entries = patEntries() + mapOf(
+            "oauth:bigmodel:access_token" to "jwt-token-value",
+            "zcodejwttoken" to "jwt-token-value",
+        )
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "team-coding-plan", "o", "p")
+        assertNull(
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-team-coding-plan", "team-coding-plan", entries, sel,
+                http = patHttp(team = true),
+            ),
+        )
     }
 
     @Test
@@ -98,7 +188,7 @@ class AccountProviderBridgeTest {
 
     @Test
     fun `全凭证齐备时只激活 individual 渠道（start-plan 网关门控与 team、off-peak 模式均排除）`() {
-        val overlay = AccountProviderBridge.buildAccountOverlay(builtinFile(), fullEntries())!!
+        val overlay = AccountProviderBridge.buildAccountOverlay(builtinFile(), fullEntries(), selection = null)!!
         assertEquals(
             setOf(
                 "account:zai-individual-coding-plan",
@@ -118,6 +208,25 @@ class AccountProviderBridgeTest {
     }
 
     @Test
+    fun `team 渠道 selection 带组织项目且 oauth token 在即激活（PAT 链）`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "team-coding-plan", "org-1", "proj-1")
+        val overlay = AccountProviderBridge.buildAccountOverlay(builtinFile(), patEntries(), sel)!!
+        assertTrue("account:bigmodel-team-coding-plan" in overlay.providers.keys)
+        // 历史 team 静态键不再是激活依据（实机 1004）
+        val legacy = fullEntries() + mapOf(
+            "account-provider:coding-plan:account:bigmodel-team-coding-plan:account:user-bigmodel-01:api-key" to "bigmodel-max-key",
+        )
+        assertNull(AccountProviderBridge.buildAccountOverlay(builtinFile(), legacy, sel)?.providers?.get("account:bigmodel-team-coding-plan"))
+    }
+
+    @Test
+    fun `individual 渠道静态键缺失但 selection 匹配且 oauth token 在即激活（新客户端形态）`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val overlay = AccountProviderBridge.buildAccountOverlay(builtinFile(), patEntries(), sel)!!
+        assertEquals(setOf("account:bigmodel-individual-coding-plan"), overlay.providers.keys)
+    }
+
+    @Test
     fun `无凭证时返回 null 不推送`() {
         assertNull(AccountProviderBridge.buildAccountOverlay(builtinFile(), emptyMap()))
         // 只有 identity 没有 key 同样不推
@@ -125,6 +234,7 @@ class AccountProviderBridgeTest {
             AccountProviderBridge.buildAccountOverlay(
                 builtinFile(),
                 mapOf("oauth:zai:user_info" to """{"id":"u1"}"""),
+                selection = null,
             ),
         )
         // 只有 JWT（start-plan 材料）没有 individual key：start-plan 被门控排除 → 无可激活
@@ -135,6 +245,7 @@ class AccountProviderBridgeTest {
                     "oauth:bigmodel:user_info" to """{"id":"u1"}""",
                     "zcodejwttoken" to "jwt",
                 ),
+                selection = null,
             ),
         )
     }
@@ -252,6 +363,21 @@ class AccountProviderBridgeTest {
                 fullEntries(),
             ),
         )
+    }
+
+    @Test
+    fun `team 选中且 oauth token 在走 PAT 返回凭证（2026-10-23 材料链）`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "team-coding-plan", "org-1", "proj-1")
+        val c = AccountProviderBridge.selectedAccountCredential(
+            null,
+            homeWithSetting("""{"providerFamilyConnectionSelections":{"bigmodel":{"kind":"team-coding-plan"}},"providerFamilyDomain":"bigmodel"}"""),
+            patEntries(),
+            sel,
+            patHttp(team = true),
+        )!!
+        assertEquals("account:bigmodel-team-coding-plan", c.providerId)
+        assertEquals("https://open.bigmodel.cn/api/anthropic", c.baseUrl)
+        assertEquals("pat-token", c.apiKey)
     }
 
     @Test

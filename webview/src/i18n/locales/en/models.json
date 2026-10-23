@@ -15,7 +15,8 @@
   "plan": {
     "personal": "Personal Plan",
     "trial": "Trial Plan",
-    "team": "Team Plan"
+    "team": "Team Plan",
+    "builtin": "Built-in"
   },
   "vision": "Vision",
   "customKeyBadge": "Custom Key",

@@ -15,7 +15,8 @@
   "plan": {
     "personal": "個人套餐",
     "trial": "體驗套餐",
-    "team": "團隊套餐"
+    "team": "團隊套餐",
+    "builtin": "內建渠道"
   },
   "section": {
     "builtin": "內建渠道",

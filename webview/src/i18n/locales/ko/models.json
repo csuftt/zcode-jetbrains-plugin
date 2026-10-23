@@ -15,7 +15,8 @@
   "plan": {
     "personal": "개인 플랜",
     "trial": "체험 플랜",
-    "team": "팀 플랜"
+    "team": "팀 플랜",
+    "builtin": "내장"
   },
   "section": {
     "builtin": "내장 채널",

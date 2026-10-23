@@ -15,7 +15,8 @@
   "plan": {
     "personal": "个人套餐",
     "trial": "体验套餐",
-    "team": "团队套餐"
+    "team": "团队套餐",
+    "builtin": "内置渠道"
   },
   "vision": "视觉",
   "customKeyBadge": "自定义 Key",

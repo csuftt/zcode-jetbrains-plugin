@@ -3793,10 +3793,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
             .activatableAccountChannels(com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps())
             .any { it.providerId == providerId }
 
-    /** 账号渠道 plan 徽章映射（前端 PlanBadge 三值，i18n 已有中文文案：个人/体验/团队套餐） */
-    private fun accountPlanOf(mode: String): String? = when (mode) {
+    /** 账号渠道 plan 徽章映射（前端 PlanBadge，i18n：个人/体验/团队/内置渠道）。
+     *  individual=个人套餐、trial=体验套餐（原生徽标不变）；team-coding-plan 是
+     *  兜底场景（2026-10-23 用户定稿：真团队连接才落此渠道，Lite/Pro/Max 档位本地
+     *  无数据源不可断言，统一中性「内置渠道」+绿色背景） */
+    private fun accountPlanOf(providerId: String, mode: String): String? = when (mode) {
         "individual-coding-plan" -> "personal"
-        "team-coding-plan" -> "team"
+        "team-coding-plan" -> "builtin"
         "start-plan" -> "trial"
         else -> null
     }
@@ -3845,7 +3848,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }.toMap()
         val perModelRules = newCliModelRules()
         return channels.flatMap { e ->
-            val plan = accountPlanOf(e.mode)
+            val plan = accountPlanOf(e.providerId, e.mode)
             // 展示名=品牌短名（官方 picker 形态「BigModel 个人」；全名在 zcode-builtin
             // providerName，徽标走 plan 字段——输入框下拉与设置页渠道卡同源）
             val brand = com.zcode.ideaplugin.protocol.AccountProviderBridge.brandOf(e.providerId, e.providerName)
@@ -3870,7 +3873,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         put("modelName", mid)
                         // 模型级开关（缺省启用；账号卡只读展示，不可在插件内切）
                         put("enabled", pr?.modelEnabled ?: true)
-                        plan?.let { put("plan", it) }
+                        // 管理页不带套餐徽标（2026-10-23 用户定稿：徽标只在输入框下拉）
                         ctx?.let { put("contextWindow", it) }
                         if (img) put("supportsImages", true)
                         if (vid) put("supportsVideo", true)
@@ -4013,7 +4016,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     put("providerId", e.providerId)
                     put("providerName", com.zcode.ideaplugin.protocol.AccountProviderBridge.brandOf(e.providerId, e.providerName))
                     put("enabled", true)
-                    accountPlanOf(e.mode)?.let { put("plan", it) }
+                    // 管理页不带套餐徽标（2026-10-23 用户定稿：徽标只在输入框下拉）
                     put("account", true)
                     put("models", JsonArray(mids.map { mid ->
                         val caps = com.zcode.ideaplugin.protocol.BuiltinModelCatalog.modelCaps(mid, zcodePath)

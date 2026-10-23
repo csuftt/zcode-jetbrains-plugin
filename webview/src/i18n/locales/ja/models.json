@@ -15,7 +15,8 @@
   "plan": {
     "personal": "個人プラン",
     "trial": "体験プラン",
-    "team": "チームプラン"
+    "team": "チームプラン",
+    "builtin": "組み込み"
   },
   "section": {
     "builtin": "内蔵チャネル",
