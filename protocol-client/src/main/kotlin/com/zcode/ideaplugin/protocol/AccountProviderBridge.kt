@@ -131,25 +131,35 @@ object AccountProviderBridge {
 
     /**
      * 读 credentials.json 全表并逐值解密。单值解密失败跳过该值（按缺失处理）——
-     * 一条坏值不该连坐整个账号渠道面；整体解析失败返回空表（调用方放弃推送）。
+     * 一条坏值不该连坐整个账号渠道面。
+     *
+     * 整体解析失败（2026-10-23 实机：官方客户端会话中后台刷新 oauth token 并重写
+     * 本文件，插件恰好读到写一半的瞬间 → 半截 JSON → 全表缺失 → 账号渠道供给
+     * 全断、几秒后自愈）时短暂重试——并发写窗口毫秒级，3 次足够跨过。
      */
     fun readCredentialEntries(credPath: Path = credentialsPath()): Map<String, String> {
         if (!credPath.isRegularFile()) return emptyMap()
-        return try {
-            val root = json.parseToJsonElement(credPath.readText()).jsonObject
-            buildMap {
-                root.forEach { (k, v) ->
-                    val raw = (v as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@forEach
-                    this[k] = try {
-                        CredentialCipher.decrypt(raw)
-                    } catch (_: CredentialCipher.CredentialDecryptException) {
-                        return@forEach
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                val root = json.parseToJsonElement(credPath.readText()).jsonObject
+                return buildMap {
+                    root.forEach { (k, v) ->
+                        val raw = (v as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@forEach
+                        this[k] = try {
+                            CredentialCipher.decrypt(raw)
+                        } catch (_: CredentialCipher.CredentialDecryptException) {
+                            return@forEach
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < 2) Thread.sleep(150)
             }
-        } catch (_: Exception) {
-            emptyMap()
         }
+        println("[AccountProviderBridge] credentials.json read failed after retry (concurrent write?): ${lastError?.javaClass?.simpleName}")
+        return emptyMap()
     }
 
     /** 账号身份：oauth:{family}:user_info JSON 的 id 字段（官方 loadAccountIdentity 同源） */
@@ -214,7 +224,10 @@ object AccountProviderBridge {
     ): String? {
         val accessToken = entries["oauth:$family:access_token"]
             ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] }
-            ?: return null
+        if (accessToken == null) {
+            println("[AccountProviderBridge] PAT skipped: oauth:$family:access_token missing or equals zcodejwttoken (entries=${entries.size})")
+            return null
+        }
         return ProjectAccessTokenClient.resolve(family, mode, accessToken, selection, clientVersion, http)
     }
 

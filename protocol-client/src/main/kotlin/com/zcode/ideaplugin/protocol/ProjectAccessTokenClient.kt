@@ -90,10 +90,18 @@ object ProjectAccessTokenClient {
     ): String? {
         if (family != "bigmodel") return null // zai 换发端点/鉴权形态不同，未实现
         val send = http ?: this.http
-        val ref = locateProject(mode, selection, accessToken, send) ?: return null
+        val ref = locateProject(mode, selection, accessToken, send)
+        if (ref == null) {
+            println("[PAT] locateProject failed (mode=$mode: getCustomerInfo bad/401 or no non-team project)")
+            return null
+        }
         val cacheKey = "${family}:${mode}:${ref.organizationId}:${ref.projectId}"
         cache[cacheKey]?.let { if (System.currentTimeMillis() < it.expiresAtMs) return it.token }
-        val pat = issueAccessToken(ref, accessToken, clientVersion, send) ?: return null
+        val pat = issueAccessToken(ref, accessToken, clientVersion, send)
+        if (pat == null) {
+            println("[PAT] issueAccessToken failed (list/create/issue step, see request above; org=${ref.organizationId}, project=${ref.projectId})")
+            return null
+        }
         cache[cacheKey] = pat
         return pat.token
     }
