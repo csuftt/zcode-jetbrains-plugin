@@ -43,7 +43,7 @@ import { AgentSelect, AgentColorDot } from './AgentSelect'
 import { PromptEnhancerDialog } from './PromptEnhancerDialog'
 import { sendToJava, onMessage } from '@/ipc/bridge'
 import type { JavaResponse, SlashCommand, AgentDef, ImageAttachmentInput, SendAttachmentInput, CurrentFileAttachmentInput } from '@/types/messages'
-import { insertChipAtCursor, insertCommandChipAtCursor, insertSessionChipAtCursor, insertSkillChipAtCursor, insertPasteChipAtCursor, convertCompletedPaths, convertCompletedSessionRefs, convertCompletedSkillRefs, matchSessionRefTrigger, serializeEditor, hasAnyInlineChip, type CmdChipKind } from '@/utils/inlineFileTags'
+import { insertChipAtCursor, insertCommandChipAtCursor, insertSessionChipAtCursor, insertSkillChipAtCursor, insertPasteChipAtCursor, convertCompletedPaths, convertCompletedSessionRefs, convertCompletedSkillRefs, matchSessionRefTrigger, serializeEditor, hasAnyInlineChip, pinCaretAfterChip, type CmdChipKind } from '@/utils/inlineFileTags'
 import { matchSkillRefTrigger } from '@/utils/skillRefPattern'
 import { relativeTime } from '@/utils/time'
 import { parseGoalCommand } from '@/utils/goalCommand'
@@ -1654,6 +1654,31 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const MIN_HEIGHT = 56 // 约 3 行
   const MAX_HEIGHT = 400 // 约 16 行
 
+  // ============ 点击卡片空白处聚焦编辑器（issue#45-2）============
+  // contenteditable 只有点到文字区才命中焦点，点顶栏/footer 空白与卡片留白无响应。
+  // 卡片容器级兜底：非交互目标一律转发焦点到编辑器并把光标钉到末尾；
+  // preventDefault 防 mousedown 默认行为把焦点抢走（先 blur 再 focus 闪一次）
+  function handleCardMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement
+    if (target.closest('button, a, input, textarea, select, [contenteditable], [role="button"], .file-ref, .skill-ref, .input-box__resize-handle')) return
+    const el = editorRef.current
+    if (!el) return
+    e.preventDefault()
+    el.focus()
+    // 光标钉到末尾；末尾恰好是 chip 时钉到 chip 后（EV：钉在 chip 前光标不可见）
+    const last = el.lastElementChild
+    if (last && last.matches('.file-ref, .file-ref--inline, .skill-ref')) {
+      pinCaretAfterChip(last)
+    } else {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      range.collapse(false)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }
+  }
+
   function handleResizeStart(e: React.MouseEvent) {
     e.preventDefault()
     const wrapper = wrapperRef.current
@@ -1816,7 +1841,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     <div className="input-area">
       {/* 拖拽调高手柄（顶部细条，向上拖增大）*/}
       <div className="input-box__resize-handle" onMouseDown={handleResizeStart} title={t('input.resizeHandle')} />
-      <div className="chat-input-box">
+      <div className="chat-input-box" onMouseDown={handleCardMouseDown}>
         {/* 定时消息（指定时间执行的提示词卡片，按时间升序；在排队消息上方）*/}
         <ScheduledMessages onReschedule={openReschedulePicker} />
 

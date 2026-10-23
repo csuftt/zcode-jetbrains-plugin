@@ -15,7 +15,9 @@
 .status-panel-tabs {
   display: flex;
   align-items: center;
-  background: var(--bg-secondary);
+  /* 底色与聊天区一致（issue#45-5.1）：原 --bg-secondary 比消息区明显偏灰，
+     用户反馈像贴了另一块底板 */
+  background: var(--bg-chat);
   border: 1px solid var(--border-primary);
   border-radius: 6px;
   padding: 3px 6px;

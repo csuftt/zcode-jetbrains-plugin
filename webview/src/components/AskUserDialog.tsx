@@ -13,7 +13,7 @@
  *     多问题 JSON.stringify 整体回传（Kotlin completeUserInput 透传字符串）
  */
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AskUserQuestion, AskUserResponseMsg } from '@/types/messages'
 import { sendToJava } from '@/ipc/bridge'
@@ -47,7 +47,34 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({})
   /** 收起态（最小化）：只留 header 一行（进度/倒计时/展开按钮），不打扰消息区 */
   const [collapsed, setCollapsed] = useState(false)
+  /** 收起横条悬浮位（issue#45-4.3）：输入框上沿 y + 水平中心 x（视口坐标）。
+      null=测量未就绪，横条回落 dock 贴底原位 */
+  const [dockPos, setDockPos] = useState<{ x: number; top: number } | null>(null)
   const customInputRef = useRef<HTMLInputElement>(null)
+
+  // 收起横条悬浮到输入框顶部中间（issue#45-4.3）：原随 dock 贴视口底，视觉上
+  // 混进输入框 footer 行。fixed 定位需输入框实时位置——拖拽调高、排队卡增减行
+  // 都会改变上沿，ResizeObserver + window resize 双跟随
+  useEffect(() => {
+    if (!collapsed) {
+      setDockPos(null)
+      return
+    }
+    const box = document.querySelector('.chat-input-box')
+    if (!box || typeof ResizeObserver === 'undefined') return
+    const update = () => {
+      const r = box.getBoundingClientRect()
+      setDockPos({ x: r.left + r.width / 2, top: r.top })
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(box)
+    window.addEventListener('resize', update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [collapsed])
 
   const list = useMemo(() => questions, [questions])
   // questions 变化（服务端重试推送）时 current 可能越界，clamp 兜底（cc-gui 同款防御）
@@ -141,6 +168,18 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
       <div
         className={`ask-user-dialog ${collapsed ? 'ask-user-dialog--collapsed' : ''}`}
         title={toolName}
+        style={
+          collapsed && dockPos
+            ? {
+                position: 'fixed',
+                left: dockPos.x,
+                top: dockPos.top - 8,
+                transform: 'translate(-50%, -100%)',
+                // 横条只有 header 一行，全宽太压消息区，适度收窄居中悬浮
+                width: 'min(calc(100vw - 24px), 640px)',
+              }
+            : undefined
+        }
       >
         <div
           className="ask-user-dialog__header"

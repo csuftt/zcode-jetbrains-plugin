@@ -20,12 +20,13 @@
    回看弹窗（AskUserReviewDialog，无 dock 类）保持全屏遮罩居中模态 */
 .ask-user-overlay--dock {
   align-items: flex-end;
-  padding-bottom: 12px;
+  padding: 0 12px 12px;
   background: transparent;
   pointer-events: none;
 
   .ask-user-dialog {
     pointer-events: auto;
+    width: 100%;
     animation: ask-user-slide-up 0.18s ease-out;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
   }
@@ -43,8 +44,10 @@
 }
 
 .ask-user-dialog {
-  width: 440px;
-  max-width: 90vw;
+  /* 占满插件宽度（issue#45-4.1）：原 440px 定宽在宽面板下两侧大片空白。
+     dock 态以 overlay 内边距（12px）控制边距、弹窗 100% 撑满；
+     回看模态（--review）由本基类 calc 留 24px 边距居中 */
+  width: calc(100vw - 48px);
   max-height: 70vh;
   overflow-y: auto;
   background: var(--bg-elevated);
@@ -174,6 +177,13 @@
 .ask-user-dialog--collapsed .ask-user-dialog__header {
   border-bottom: none;
   cursor: pointer;
+}
+
+/* 收起横条悬浮定位（issue#45-4.3）：原随 dock 贴视口底、视觉上混进输入框
+   footer 行；改为组件侧测量输入框上沿后 inline 定位（fixed + 位移到其上方
+   居中），这里只放测量未就绪时的兜底——仍走 dock 贴底，不闪跳 */
+.ask-user-dialog--collapsed {
+  will-change: transform;
 }
 
 /* 头部收起/展开按钮（dock 弹窗最小化，样式对齐回看的 __close） */
