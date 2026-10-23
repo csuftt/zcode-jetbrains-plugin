@@ -899,6 +899,7 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             val panel = com.zcode.ideaplugin.ui.ZCodeBrowserPanel(project,
                 onClose = { embeddedBrowserOwner?.collapseBrowserPane() },
                 onDetach = { detachBrowserToWindow() },
+                onToggleAlwaysOnTop = { toggleBrowserAlwaysOnTop() },
             )
             sharedBrowserPanel = panel
             log.info("[browser-use] Global shared browser panel created (cross-session tab)")
@@ -949,6 +950,24 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             log.warn("[browser-use] Failed to detach browser window: ${e.message}")
             return false
         }
+    }
+
+    /**
+     * 翻转独立浏览器窗口置顶（弹出态工具条图钉按钮；EDT）。
+     * 状态权威是 AWT Window 的 alwaysOnTop，按钮视觉回写面板；窗口关闭即失，
+     * 新弹出的窗口默认不置顶（[com.zcode.ideaplugin.ui.ZCodeBrowserPanel.setBrowserDetachedUI]
+     * 收回时已重置按钮视觉）。
+     */
+    private fun toggleBrowserAlwaysOnTop() {
+        if (!javax.swing.SwingUtilities.isEventDispatchThread()) {
+            javax.swing.SwingUtilities.invokeLater { toggleBrowserAlwaysOnTop() }
+            return
+        }
+        val window = browserDetachWindow ?: return
+        val pinned = !window.isAlwaysOnTop()
+        window.setAlwaysOnTop(pinned)
+        sharedBrowserPanel?.setAlwaysOnTopUI(pinned)
+        log.info("[browser-use] Browser detach window always-on-top=$pinned")
     }
 
     /**

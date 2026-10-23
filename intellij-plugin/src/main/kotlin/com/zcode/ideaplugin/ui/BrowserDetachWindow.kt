@@ -97,6 +97,13 @@ class BrowserDetachWindow private constructor(
         frameWrapper.setSize(size)
     }
 
+    /** 窗口置顶（WS_EX_TOPMOST）：JDK 标准 Window API，无平台/跨加载器依赖 */
+    fun setAlwaysOnTop(enabled: Boolean) {
+        if (!isDisposed) frameWrapper.getFrame()?.setAlwaysOnTop(enabled)
+    }
+
+    fun isAlwaysOnTop(): Boolean = !isDisposed && frameWrapper.getFrame()?.isAlwaysOnTop == true
+
     /** Service 层收回侧栏前主动关窗：dispose 骨架窗口，挂在其上的 onClosed 回调随之触发 */
     override fun dispose() {
         if (!isDisposed) {

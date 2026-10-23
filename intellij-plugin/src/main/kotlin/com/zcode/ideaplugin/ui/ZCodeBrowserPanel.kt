@@ -55,6 +55,8 @@ class ZCodeBrowserPanel(
     private val onClose: (() -> Unit)? = null,
     /** 弹出回调（共享单例形态提供：把面板弹出到独立窗口；弹窗中由 setBrowserDetachedUI 隐藏按钮）*/
     private val onDetach: (() -> Unit)? = null,
+    /** 置顶切换回调（共享单例形态提供：翻转独立窗口 always-on-top；按钮仅弹出态可见）*/
+    private val onToggleAlwaysOnTop: (() -> Unit)? = null,
 ) : JPanel(BorderLayout()), Disposable {
 
     companion object {
@@ -136,6 +138,9 @@ class ZCodeBrowserPanel(
 
     /** 「弹出到独立窗口」按钮（onDetach 为 null 不创建；弹窗中经 setBrowserDetachedUI 隐藏）*/
     private var detachBtn: JButton? = null
+
+    /** 独立窗口置顶按钮（onToggleAlwaysOnTop 为 null 不创建；仅弹出态经 setBrowserDetachedUI 显示）*/
+    private var alwaysOnTopBtn: JButton? = null
 
     // ============ 主题（跟 webview 生效主题：显式偏好优先，否则 IDE 主题）============
 
@@ -455,6 +460,15 @@ class ZCodeBrowserPanel(
                     }
                     add(detachBtn)
                 }
+                if (onToggleAlwaysOnTop != null) {
+                    alwaysOnTopBtn = navButton(
+                        pinIcon(pinned = false),
+                        message("browser.detach.pin.tooltip"),
+                    ) { onToggleAlwaysOnTop.invoke() }.apply {
+                        isVisible = false
+                    }
+                    add(alwaysOnTopBtn)
+                }
                 if (onClose != null) {
                     add(navButton(AllIcons.Actions.Close, "收起浏览器") { onClose.invoke() })
                 }
@@ -466,11 +480,30 @@ class ZCodeBrowserPanel(
 
     /**
      * 弹出态 UI 切换（EDT）：弹窗里工具条不重复放「弹出」按钮（标题栏 × 即收回语义，
-     * 与「收起浏览器」一致），仅侧栏形态可见。
+     * 与「收起浏览器」一致），仅侧栏形态可见；置顶按钮反之仅弹出态可见。
+     * 收回侧栏时重置置顶视觉——状态权威是刚关掉的窗口，新弹出的窗口默认不置顶。
      */
     fun setBrowserDetachedUI(detached: Boolean) {
         detachBtn?.isVisible = !detached
+        alwaysOnTopBtn?.isVisible = detached
+        if (!detached) setAlwaysOnTopUI(false)
     }
+
+    /**
+     * 置顶按钮视觉同步（Service 层翻转窗口置顶后回写）：置顶染品牌青绿、未置顶染主题前景。
+     */
+    fun setAlwaysOnTopUI(pinned: Boolean) {
+        alwaysOnTopBtn?.let { btn ->
+            btn.icon = pinIcon(pinned)
+            btn.toolTipText = message(
+                if (pinned) "browser.detach.pin.tooltip.off" else "browser.detach.pin.tooltip",
+            )
+        }
+    }
+
+    private fun pinIcon(pinned: Boolean): javax.swing.Icon =
+        // 置顶激活染 webview 圆环同款品牌青绿（#2bb3a3），深浅主题下都醒目
+        ThemedIcon(AllIcons.Actions.PinTab) { if (pinned) java.awt.Color(0x2B, 0xB3, 0xA3) else it.fg }
 
     /**
      * 图标主题染色包装：保留原图形状，整体染成生效主题的前景色；宿主组件禁用时降透明。
@@ -479,7 +512,11 @@ class ZCodeBrowserPanel(
      * HiDPI：按设备实际缩放倍数光栅化染色缓存（1x buffer 会被拉伸出马赛克毛刺），
      * 绘制时以逻辑尺寸落位。
      */
-    private inner class ThemedIcon(private val base: javax.swing.Icon) : javax.swing.Icon {
+    private inner class ThemedIcon(
+        private val base: javax.swing.Icon,
+        /** 染色选择（默认主题前景；置顶激活等状态色经此注入）*/
+        private val colorPicker: (PanelTheme) -> java.awt.Color = { it.fg },
+    ) : javax.swing.Icon {
         /** 染色缓存键：theme × scale%（HiDPI 各档分别光栅化）*/
         private val cache = HashMap<Pair<String, Int>, java.awt.image.BufferedImage>()
 
@@ -496,9 +533,9 @@ class ZCodeBrowserPanel(
             // 带缩放画原图：IntelliJ 图标（SVG 体系）按变换分辨率光栅化，避免 1x 拉伸
             ig.scale(scale, scale)
             base.paintIcon(null, ig, 0, 0)
-            // SrcIn：把已画形状的非透明像素替换为主题前景色
+            // SrcIn：把已画形状的非透明像素替换为选中染色
             ig.composite = java.awt.AlphaComposite.SrcIn
-            ig.color = t.fg
+            ig.color = colorPicker(t)
             ig.fillRect(0, 0, w + 2, h + 2)
             ig.dispose()
             cache[key] = img
