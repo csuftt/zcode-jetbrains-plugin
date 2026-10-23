@@ -2755,6 +2755,10 @@ export const useStore = create<StoreState>((set, get) => ({
     get().requeueScheduledQueuesFor(get().currentSessionId)
     set({
       currentSessionId: null,
+      // 切换会话置位的首拉标志必须在此解除：首拉快照回来会被 case 'messages' 的
+      // sessionId 守卫整包丢弃（currentSessionId 已是 null），applyMessagesSnapshot
+      // 永不执行，「加载消息中」永久卡死（缺陷FH：加载中点 + 覆盖当前标签 → 标签假死）
+      loadingMessages: false,
       // 用户主动进入待命态：放弃 boot 恢复，后续 listSessions 不得把旧绑定会话选回
       skipInitialSessionRestore: true,
       // 「新会话自动点亮文件上下文」偏好（默认关）应用点之一：新建会话按钮手势
@@ -4392,6 +4396,8 @@ export function handleResponse(
           currentSessionId: sid,
           currentWorkspacePath: ws,
           creatingSession: false,
+          // 新会话无历史：解除可能在途的首拉标志（触发路径刁钻但补清无害，缺陷FH 同族）
+          loadingMessages: false,
           pendingFirstMessage: null,
           pendingFirstAttachments: null,
           pendingFirstScheduledFireAt: null,
@@ -4534,6 +4540,9 @@ export function handleResponse(
         ...(deletedCurrent
           ? {
               currentSessionId: null,
+              // 进待命态必须解除首拉标志：在途快照将被 sessionId 守卫丢弃，
+              // 不补清则「加载消息中」永久卡死（缺陷FH 同族）
+              loadingMessages: false,
               // 用户主动删除：放弃 boot 恢复，防滞后/后台 listSessions 仍带该会话时被选回
               skipInitialSessionRestore: true,
               ...sessionResetBase(),
@@ -5135,6 +5144,8 @@ export function handleResponse(
       set({
         currentSessionId: msg.sessionId,
         ...sessionResetBase(), // 新会话无历史消息
+        // Java 自动切换后同样解除可能在途的首拉标志（缺陷FH 同族）
+        loadingMessages: false,
         thoughtLevel: null,
         currentMode: null,
         subagentReport: null,

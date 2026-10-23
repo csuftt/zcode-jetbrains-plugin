@@ -327,7 +327,9 @@ export default function App() {
         >
           <ChatView
             messages={messages}
-            loading={loadingMessages}
+            // 待命态（无会话）不渲染加载圈（缺陷FH 兜底）：loadingMessages 只应由
+            // selectSession 在有会话时置位，若再漏清也只冻结欢迎页不冻结整标签
+            loading={loadingMessages && !!currentSessionId}
             waiting={streaming}
             waitingSince={waitingSince ?? undefined}
             streamingMessageId={streamingMessageId}
