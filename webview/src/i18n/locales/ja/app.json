@@ -45,7 +45,10 @@
     "back": "前へ",
     "next": "次へ",
     "collapse": "折りたたむ",
-    "expand": "展開"
+    "expand": "展開",
+    "skip": "この質問をスキップ",
+    "skipTitle": "スキップすると AI が文脈から判断します",
+    "skippedHint": "スキップ済み — AI が判断します。選択し直すと解除されます"
   },
   "planApproval": {
     "title": "プラン承認",

@@ -46,7 +46,10 @@
     "back": "Back",
     "next": "Next",
     "collapse": "Collapse",
-    "expand": "Expand"
+    "expand": "Expand",
+    "skip": "Skip this question",
+    "skipTitle": "Skip and let the AI decide on its own",
+    "skippedHint": "Skipped — the AI will use its best judgment; select an option to restore"
   },
   "planApproval": {
     "title": "Plan Approval",

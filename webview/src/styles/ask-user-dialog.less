@@ -248,6 +248,37 @@
   border: 1px solid var(--border-color);
 }
 
+.ask-user-dialog__btn--skip {
+  /* 忽略本题（issue#45-4.2）：次级弱化（与上一题同层），hover 提亮可发现 */
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-color);
+
+  &:hover {
+    color: var(--text-secondary);
+  }
+}
+
+/* 本题已忽略提示条（实时弹窗）：选项区下方，重新选择即解除。
+   橙色警示调（--status-warning）——用户反馈灰调不显眼，忽略态是需要
+   注意到的人工决策标记，不能混同普通提示 */
+.ask-user-dialog__skipped-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--status-warning);
+  background: rgba(255, 152, 0, 0.12);
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  border-radius: 6px;
+
+  .codicon {
+    font-size: 12px;
+  }
+}
+
 /* ============ 回看弹窗（AskUserReviewDialog，只读） ============ */
 
 /* 头部关闭按钮：实时弹窗无此元素（提交/取消即关），回看需显式出口 */

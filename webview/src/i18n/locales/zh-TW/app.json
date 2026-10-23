@@ -45,7 +45,10 @@
     "back": "上一題",
     "next": "下一題",
     "collapse": "收起",
-    "expand": "展開"
+    "expand": "展開",
+    "skip": "忽略本題",
+    "skipTitle": "跳過此問題，AI 將自行判斷",
+    "skippedHint": "本題已忽略，AI 將自行判斷；重新選擇可恢復"
   },
   "planApproval": {
     "title": "計劃審批",

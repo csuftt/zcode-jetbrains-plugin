@@ -1362,10 +1362,14 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             // - 单问题：content.answer = 原始值（字符串 trim；数组服务端 join(", ") 后回填）。
             //   旧版把答案整体 JSON.stringify 成字符串塞 answer——多问题场景服务端匹配不到
             //   任何 key，answers 丢失（AI 认为用户没选）；数组也被当作字面量字符串
+            // - 显式空对象 {} 必须走 answers 分支原样透传：服务端语义 = "用户全部跳过，
+            //   AI 自行判断"（官方超时兜底同形，interaction-registry auto-resolution）。
+            //   不能落 answer=""——空串会被服务端 normalizeAnswerValue 丢弃，整个 answers
+            //   变 undefined → 工具报错 "requires user answers"（issue#45-4.2 忽略本题）
             buildJsonObject {
                 put("action", "accept")
                 put("content", buildJsonObject {
-                    if (answers != null && !answers.isEmpty()) {
+                    if (answers != null) {
                         put("answers", answers)
                     } else {
                         put("answer", normalizedAnswer ?: JsonPrimitive(""))

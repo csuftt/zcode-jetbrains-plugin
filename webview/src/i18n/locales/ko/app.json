@@ -45,7 +45,10 @@
     "back": "이전",
     "next": "다음",
     "collapse": "접기",
-    "expand": "펼치기"
+    "expand": "펼치기",
+    "skip": "이 질문 건너뛰기",
+    "skipTitle": "건너뛰면 AI가 맥락에 따라 판단합니다",
+    "skippedHint": "건너뛰었음 — AI가 판단합니다. 다시 선택하면 해제됩니다"
   },
   "planApproval": {
     "title": "계획 승인",

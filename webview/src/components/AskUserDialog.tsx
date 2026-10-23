@@ -47,6 +47,10 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({})
   /** 收起态（最小化）：只留 header 一行（进度/倒计时/展开按钮），不打扰消息区 */
   const [collapsed, setCollapsed] = useState(false)
+  /** 被忽略的问题文本集合（issue#45-4.2）：提交时这些题不写入 answers——服务端
+      语义 =「部分跳过，AI 对未答题自行判断」（官方 TUI s 键同款，缺 key 即跳过，
+      禁止空串占位：blank 会被服务端丢弃致整个 answers 缺失报工具错误） */
+  const [skipped, setSkipped] = useState<Set<string>>(new Set())
   /** 收起横条悬浮位（issue#45-4.3）：输入框上沿 y + 水平中心 x（视口坐标）。
       null=测量未就绪，横条回落 dock 贴底原位 */
   const [dockPos, setDockPos] = useState<{ x: number; top: number } | null>(null)
@@ -87,6 +91,13 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
 
   const handleToggle = (label: string) => {
     if (!q) return
+    // 重新选择即解除本题忽略
+    setSkipped((prev) => {
+      if (!prev.has(q.question)) return prev
+      const next = new Set(prev)
+      next.delete(q.question)
+      return next
+    })
     setAnswers((prev) => {
       const set = new Set(prev[q.question] ?? [])
       if (q.multiSelect) {
@@ -116,11 +127,19 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
 
   const handleBack = () => setCurrent(Math.max(0, idx - 1))
 
+  /** 忽略本题（issue#45-4.2）：记录后前进；末题忽略停在原地，由用户显式确认防误触 */
+  const handleSkip = () => {
+    if (!q) return
+    setSkipped((prev) => new Set(prev).add(q.question))
+    if (!isLast) setCurrent(idx + 1)
+  }
+
   /** 组装并回传全部答案 */
   const handleSubmitFinal = () => {
     if (!list.length) return
     const formatted: Record<string, string | string[]> = {}
     list.forEach((item) => {
+      if (skipped.has(item.question)) return
       const set = answers[item.question] ?? new Set<string>()
       const labels = Array.from(set).filter((l) => l !== OTHER_MARKER)
       const text = (customInputs[item.question] ?? '').trim()
@@ -138,8 +157,9 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
     if (list.length === 1) {
       const v = Object.values(formatted)[0]
       if (v !== undefined) sendMsg.answer = v
+      else sendMsg.answers = {} // 单问题被忽略：显式空 answers = 服务端「全部跳过」语义
     } else {
-      sendMsg.answers = formatted
+      sendMsg.answers = formatted // 可能为空对象 = 全部忽略（Kotlin 层透传 content.answers={}）
     }
     recordAskUserAnswered()
     sendToJava(sendMsg)
@@ -152,9 +172,11 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
     onClose()
   }
 
-  // 可继续条件：有常规选择，或「其他」已输入非空文本
+  // 可继续条件：有常规选择、「其他」已输入非空文本，或本题已忽略（issue#45-4.2）
   const hasRegular = Array.from(selected).some((l) => l !== OTHER_MARKER)
-  const canProceed = hasRegular || (isOtherSelected && customText.trim().length > 0)
+  const canProceed =
+    hasRegular || (isOtherSelected && customText.trim().length > 0) || (q ? skipped.has(q.question) : false)
+  const isSkipped = q ? skipped.has(q.question) : false
 
   if (!q) return null
 
@@ -256,6 +278,12 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
                   maxLength={MAX_CUSTOM_INPUT_LENGTH}
                 />
               )}
+              {isSkipped && (
+                <div className="ask-user-dialog__skipped-hint">
+                  <span className="codicon codicon-eye-closed" />
+                  {t('app.askUser.skippedHint')}
+                </div>
+              )}
             </div>
           </div>
 
@@ -263,6 +291,15 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
             <button className="ask-user-dialog__btn ask-user-dialog__btn--cancel" onClick={handleDecline}>
               {t('app.askUser.cancel')}
             </button>
+            {!isSkipped && (
+              <button
+                className="ask-user-dialog__btn ask-user-dialog__btn--skip"
+                onClick={handleSkip}
+                title={t('app.askUser.skipTitle')}
+              >
+                {t('app.askUser.skip')}
+              </button>
+            )}
             {idx > 0 && (
               <button className="ask-user-dialog__btn ask-user-dialog__btn--back" onClick={handleBack}>
                 {t('app.askUser.back')}

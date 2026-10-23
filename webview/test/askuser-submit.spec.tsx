@@ -125,3 +125,60 @@ describe('AskUserDialog 提交结构', () => {
     expect((screen.getByText('确认') as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('忽略本题（issue#45-4.2）', () => {
+  /** 点击「忽略本题」按钮 */
+  function skip(): void {
+    fireEvent.click(screen.getByText('忽略本题'))
+  }
+
+  it('多问题部分忽略 → answers 缺被忽略题的 key（服务端=部分跳过，AI 自行判断）', () => {
+    renderDialog([
+      { question: '部署环境?', options: [{ label: '生产' }, { label: '测试' }] },
+      { question: '使用哪些中间件?', multiSelect: true, options: [{ label: 'Redis' }, { label: 'Pulsar' }] },
+    ])
+    skip() // 第 1 题忽略，自动进第 2 题
+    clickOption('Redis')
+    submit()
+
+    expect(sent[0].action).toBe('accept')
+    expect(sent[0].answers).toEqual({ '使用哪些中间件?': ['Redis'] })
+    // 被忽略题不得以空串占位（服务端 blank 丢弃会致整个 answers 失效）
+    expect(sent[0].answers).not.toHaveProperty('部署环境?')
+  })
+
+  it('多问题全部忽略 → answers 为显式空对象（服务端=全部跳过继续，非 decline）', () => {
+    renderDialog([
+      { question: '部署环境?', options: [{ label: '生产' }, { label: '测试' }] },
+      { question: '数据库?', options: [{ label: 'MySQL' }, { label: 'PG' }] },
+    ])
+    skip() // 第 1 题 → 自动进第 2 题
+    skip() // 第 2 题（末题停留原地）
+    submit()
+
+    expect(sent[0].action).toBe('accept') // 不是 decline（那是整批取消语义）
+    expect(sent[0].answers).toEqual({})
+  })
+
+  it('单问题忽略 → answers 显式空对象，不带 answer（缺 content 会服务端报错）', () => {
+    renderDialog([{ question: '部署方式?', options: [{ label: 'Docker' }, { label: 'K8s' }] }])
+    skip() // 末题停留原地，确认按钮因已忽略解锁
+    submit()
+
+    expect(sent[0].action).toBe('accept')
+    expect(sent[0].answers).toEqual({})
+    expect(sent[0].answer).toBeUndefined()
+  })
+
+  it('忽略后重新选择即解除：提交恢复正常 answer', () => {
+    renderDialog([{ question: '部署方式?', options: [{ label: 'Docker' }, { label: 'K8s' }] }])
+    skip()
+    expect(document.querySelector('.ask-user-dialog__skipped-hint')).not.toBeNull()
+    clickOption('K8s') // 重新选择解除忽略，提示条消失
+    expect(document.querySelector('.ask-user-dialog__skipped-hint')).toBeNull()
+    submit()
+
+    expect(sent[0].answer).toBe('K8s')
+    expect(sent[0].answers).toBeUndefined()
+  })
+})
