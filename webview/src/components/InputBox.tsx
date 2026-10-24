@@ -227,6 +227,19 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     disabled,
   })
 
+  /**
+   * 兜底清理 tooltip：chip 宿主已脱离 DOM 时直接移除挂 body 的悬浮层。
+   * 程序改写编辑器 DOM（发送清空/历史回填/队列回填/切会话恢复）与 Backspace
+   * 整体删 chip 都不触发 mouseout，tooltip 不会自清，各汇点主动调用。
+   */
+  const hideTipIfChipGone = useCallback(() => {
+    const tip = document.getElementById(INLINE_CHIP_TIP_ID)
+    if (tip && tipChipRef.current && !tipChipRef.current.isConnected) {
+      tip.remove()
+      tipChipRef.current = null
+    }
+  }, [])
+
   // ============ 输入历史导航（cc-gui useInputHistory）============
   const getText = useCallback(() => editorRef.current?.innerText ?? '', [])
 
@@ -235,6 +248,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     const el = editorRef.current
     if (!el) return
     el.innerText = text
+    // innerText 赋值整体替换旧内容（含内联 chip），不触发 mouseout → 悬停中的
+    // tooltip 残留（↑↓ 导航时鼠标可同时悬在 chip 上，键盘鼠标并行）
+    hideTipIfChipGone()
     setHasText(!!text.trim())
     // 回填不算输入行为，直接关闭 @ / / 补全与幽灵建议（程序赋值不触发 onInput）
     setMentionQuery(null)
@@ -649,6 +665,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       editorRef.current.textContent = ''
       setHasText(false)
     }
+    // 清空整体移除内联 chip 且不触发 mouseout → 悬停中的 tooltip 残留
+    // （发送用键盘触发，鼠标可同时悬在 chip 上）
+    hideTipIfChipGone()
     // 编辑器 DOM 清空即含内联粘贴 chip，原文映射同步回收（含 Backspace 删 chip 的残留条目）
     pasteTextsRef.current.clear()
     // 内容已清（发送/goal 拦截/队列回填前重置），草稿 scope 一并清除——
@@ -673,6 +692,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     if (!el) return
     const existing = serializeEditor(el, { pasteText: pasteTextResolver }).replace(/\s+$/, '')
     el.textContent = existing ? `${existing}\n${text}` : text
+    // 整体重写移除旧内联 chip 不触发 mouseout → 悬停中的 tooltip 残留
+    hideTipIfChipGone()
     setHasText(!!el.textContent?.trim())
     // 附件只回填图片；currentFile 上下文描述不回填——重发时 doSend 按当时 chip
     // 显示值重新派生（队列里那份是入队时刻的快照，chip 可能已变）
@@ -953,18 +974,6 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       el.removeEventListener('mouseover', onOver)
       el.removeEventListener('mouseout', onOut)
       hideTip()
-    }
-  }, [])
-
-  /**
-   * 输入时兜底清理 tooltip：Backspace 整体删除 chip 同样不触发 mouseout，
-   * 若 tooltip 正在显示而其宿主 chip 已脱离 DOM，直接移除。
-   */
-  const hideTipIfChipGone = useCallback(() => {
-    const tip = document.getElementById(INLINE_CHIP_TIP_ID)
-    if (tip && tipChipRef.current && !tipChipRef.current.isConnected) {
-      tip.remove()
-      tipChipRef.current = null
     }
   }, [])
 
@@ -1538,6 +1547,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       setSkillRefs([])
       pasteTextsRef.current.clear()
     }
+    // 两个分支都整体重写编辑器 DOM（innerHTML/textContent 赋值），旧内联 chip
+    // 被移除且不触发 mouseout → 悬停中的 tooltip 残留
+    hideTipIfChipGone()
     // 程序赋值不算输入：补全弹层/幽灵建议一并复位（setTextFromHistory 同款）
     setMentionQuery(null)
     setMentionFiles([])
