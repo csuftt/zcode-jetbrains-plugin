@@ -3873,7 +3873,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         put("modelName", mid)
                         // 模型级开关（缺省启用；账号卡只读展示，不可在插件内切）
                         put("enabled", pr?.modelEnabled ?: true)
-                        // 管理页不带套餐徽标（2026-10-23 用户定稿：徽标只在输入框下拉）
+                        // 管理页模型行不带套餐徽标，plan 只在渠道级下发（2026-10-24 恢复）
                         ctx?.let { put("contextWindow", it) }
                         if (img) put("supportsImages", true)
                         if (vid) put("supportsVideo", true)
@@ -4016,7 +4016,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     put("providerId", e.providerId)
                     put("providerName", com.zcode.ideaplugin.protocol.AccountProviderBridge.brandOf(e.providerId, e.providerName))
                     put("enabled", true)
-                    // 管理页不带套餐徽标（2026-10-23 用户定稿：徽标只在输入框下拉）
+                    // 管理页渠道卡套餐徽标（2026-10-24 用户要求恢复：PAT 定稿时曾随管理页
+                    // 一起撤掉；前端 ModelListView 卡头本就渲染 PlanBadge）
+                    accountPlanOf(e.providerId, e.mode)?.let { put("plan", it) }
                     put("account", true)
                     put("models", JsonArray(mids.map { mid ->
                         val caps = com.zcode.ideaplugin.protocol.BuiltinModelCatalog.modelCaps(mid, zcodePath)
