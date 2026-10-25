@@ -8,6 +8,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.net.URI
 import java.net.http.HttpClient
@@ -76,6 +77,11 @@ object ProjectAccessTokenClient {
 
     private val cache = ConcurrentHashMap<String, Pat>()
 
+    /** 换发失败负缓存（cacheKey → 失败屏蔽截止时刻）：防 attempt 风暴打爆管理面 */
+    private val failedUntil = ConcurrentHashMap<String, Long>()
+
+    private const val NEGATIVE_CACHE_MS = 60_000L
+
     /**
      * 取 PAT（内存缓存优先，提前 120s 刷新）。任一步失败返回 null——调用方
      * headersApplied:false 快速失败，行为与材料缺失同型。
@@ -96,12 +102,23 @@ object ProjectAccessTokenClient {
             return null
         }
         val cacheKey = "${family}:${mode}:${ref.organizationId}:${ref.projectId}"
-        cache[cacheKey]?.let { if (System.currentTimeMillis() < it.expiresAtMs) return it.token }
-        val pat = issueAccessToken(ref, accessToken, clientVersion, send)
+        val now = System.currentTimeMillis()
+        cache[cacheKey]?.let { if (now < it.expiresAtMs) return it.token }
+        // 负缓存：换发刚失败过，60s 内不再打管理面（CLI 每次 attempt 都会来要材料，
+        // 无负缓存时失败即重试风暴，会加剧管理面限流）
+        failedUntil[cacheKey]?.let { if (now < it) return null }
+        // 失败重试 1 次（跨瞬时抖动；间隔 800ms）
+        var pat = issueAccessToken(ref, accessToken, clientVersion, send)
         if (pat == null) {
-            println("[PAT] issueAccessToken failed (list/create/issue step, see request above; org=${ref.organizationId}, project=${ref.projectId})")
+            Thread.sleep(800)
+            pat = issueAccessToken(ref, accessToken, clientVersion, send)
+        }
+        if (pat == null) {
+            println("[PAT] issue failed twice (org=${ref.organizationId}, project=${ref.projectId}), negative-cache ${NEGATIVE_CACHE_MS / 1000}s")
+            failedUntil[cacheKey] = now + NEGATIVE_CACHE_MS
             return null
         }
+        failedUntil.remove(cacheKey)
         cache[cacheKey] = pat
         return pat.token
     }
@@ -150,8 +167,17 @@ object ProjectAccessTokenClient {
         val wantName = if (ref.team) "zcode-team-api-key" else "zcode-api-key"
         // 列表响应 envelope：{total, data:[...], code, msg}，data 直接是条目数组
         // （envelope 已取 data；再包一层防御 data 内含 api_keys 键的形态）
-        val env = envelope(get(listBase, listHeaders, http)) ?: return null
-        val items = env["data"]?.jsonArray ?: env["api_keys"]?.jsonArray ?: return null
+        val listResp = get(listBase, listHeaders, http)
+        val env = envelope(listResp)
+        if (env == null) {
+            println("[PAT] list bad resp: ${describe(listResp)}")
+            return null
+        }
+        val items = env["data"]?.jsonArray ?: env["api_keys"]?.jsonArray
+        if (items == null) {
+            println("[PAT] list no items: ${describe(200 to (env.toString()))}")
+            return null
+        }
         // 条目主键实机为 apiKey 字段（无 id/apiKeyId，2026-10-23 探针实证）；
         // 匹配 name（team 加 keyType==2），usageScene 不作过滤（老条目可能 -1）
         var keyId: String? = null
@@ -169,9 +195,15 @@ object ProjectAccessTokenClient {
         }
         if (keyId == null) {
             // 没有同名 key 才创建（官方懒创建语义）
+            println("[PAT] $wantName not in list (items=${items.size}), creating")
             val createBody = if (ref.team) """{"name":"$wantName","keyType":2,"usageScene":1}"""
             else """{"name":"$wantName","usageScene":1}"""
-            val created = envelope(http.send("POST", listBase, listHeaders + mapOf("Content-Type" to "application/json"), createBody)) ?: return null
+            val createResp = http.send("POST", listBase, listHeaders + mapOf("Content-Type" to "application/json"), createBody)
+            val created = envelope(createResp)
+            if (created == null) {
+                println("[PAT] create bad resp: ${describe(createResp)}")
+                return null
+            }
             keyId = created["apiKey"]?.jsonPrimitive?.contentOrNull
                 ?: created["id"]?.jsonPrimitive?.contentOrNull
                 ?: created["apiKeyId"]?.jsonPrimitive?.contentOrNull
@@ -182,13 +214,36 @@ object ProjectAccessTokenClient {
             mapOf("Authorization" to "Bearer $accessToken", "Content-Type" to "application/json"),
             """{"clientType":"zcode","clientVersion":"$clientVersion"}""",
         )
-        val issueEnv = envelope(resp) ?: return null
-        val token = issueEnv["accessToken"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return null
-        val expiresInSec = issueEnv["expiresIn"]?.jsonPrimitive?.intOrNull ?: 300
-        val expiresAt = System.currentTimeMillis() + expiresInSec * 1000L - REFRESH_AHEAD_MS
-        if (expiresAt <= System.currentTimeMillis()) return null
+        val issueEnv = envelope(resp)
+        if (issueEnv == null) {
+            println("[PAT] issue bad resp (keyId tail=…${keyId.takeLast(6)}): ${describe(resp)}")
+            return null
+        }
+        val token = issueEnv["accessToken"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        if (token == null) {
+            println("[PAT] issue no accessToken: ${describe(200 to resp.second)}")
+            return null
+        }
+        val expiresInSec = issueEnv["expiresIn"]?.jsonPrimitive?.intOrNull ?: 18000
+        if (expiresInSec <= 0) return null
+        // 过期时刻以服务端返回的绝对锚点 expiresAt（epoch 秒）为准——实机实证该锚点对
+        // 同一 key 统一（多次签发 expiresIn 递减、expiresAt 不变）：PAT 锚点过期前
+        // 120 秒内重签发时 expiresIn 剩余不足 120，若按 now+expiresIn-120s 相对计算
+        // 会 <= now 而误拒有效 PAT——这正是「每 5 小时锚点前供给断约 40 秒+自愈」的
+        // 根因（2026-10-25 实机日志规律定案）。锚点边界窗口内签出的 PAT 依然有效，
+        // 缓存最短保活 30s 避免锚点前签发风暴；锚点过后服务端自然给出新锚点。
+        val serverAnchorMs = issueEnv["expiresAt"]?.jsonPrimitive?.longOrNull?.times(1000L)
+        val expiresAt = maxOf(
+            serverAnchorMs?.minus(REFRESH_AHEAD_MS)
+                ?: (System.currentTimeMillis() + expiresInSec * 1000L - REFRESH_AHEAD_MS),
+            System.currentTimeMillis() + 30_000L,
+        )
         return Pat(token, expiresAt)
     }
+
+    /** 响应摘要（脱敏截断，供失败日志） */
+    private fun describe(resp: Pair<Int, String>): String =
+        "status=${resp.first} body=" + resp.second.replace(Regex("[A-Za-z0-9._-]{24,}"), "<R>").take(220)
 
     private fun get(url: String, headers: Map<String, String>, http: Http) = http.send("GET", url, headers, null)
 
