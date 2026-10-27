@@ -89,6 +89,16 @@
     "copy": "复制代码",
     "copied": "已复制"
   },
+  "viz": {
+    "title": "内联可视化",
+    "loading": "可视化加载中…",
+    "loadFailed": "可视化加载失败",
+    "timeout": "可视化加载超时",
+    "copyImage": "复制图片",
+    "copied": "已复制",
+    "copyFailed": "复制失败",
+    "openInBrowser": "在浏览器打开"
+  },
   "preview": {
     "defaultMeta": "Markdown 预览",
     "close": "关闭"

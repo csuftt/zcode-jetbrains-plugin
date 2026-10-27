@@ -46,6 +46,8 @@ import com.zcode.ideaplugin.protocol.ProxyConfigStore
 import com.zcode.ideaplugin.protocol.ZCodeProtocolClient
 import com.zcode.ideaplugin.protocol.ZCodeProtocolException
 import com.zcode.ideaplugin.protocol.SessionStat
+import com.zcode.ideaplugin.viz.VizScreenCapture
+import com.zcode.ideaplugin.viz.VisualizeFileRegistry
 import com.zcode.ideaplugin.protocol.model.AttachmentInput
 import com.zcode.ideaplugin.protocol.model.SessionInfo
 import com.zcode.ideaplugin.protocol.model.V4AttachmentRef
@@ -1131,6 +1133,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "send" -> handleSend(msg)
                         "getClipboardImage" -> handleGetClipboardImage(msg)
                         "copyImage" -> handleCopyImage(msg)
+                        "copyVizImage" -> handleCopyVizImage(msg)
                         "messages" -> handleMessages(msg)
                         "subagents" -> handleSubagents(msg)
                         "subagentMessages" -> handleSubagentMessages(msg)
@@ -1188,6 +1191,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "mcpServerTools" -> handleMcpServerTools(msg)
                         "getMcpLogs" -> handleGetMcpLogs(msg)
                         "getModelTrajectory" -> handleGetModelTrajectory(msg)
+                        "vizOpen" -> handleVizOpen(msg)
                         "askUserResponse" -> handleAskUserResponse(msg)
                         "askUserPendingState" -> handleAskUserPendingState()
                         "deleteSession" -> handleDeleteSession(msg)
@@ -5783,6 +5787,33 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * 系统剪贴板写图片（须 EDT）。返回 null=成功，否则为错误消息。
+     * mermaid(copyImage) 与 ::visualize(copyVizImage) 共用。
+     */
+    private fun writeImageToClipboard(image: java.awt.image.BufferedImage): String? {
+        return try {
+            java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                object : java.awt.datatransfer.Transferable {
+                    override fun getTransferDataFlavors() =
+                        arrayOf(java.awt.datatransfer.DataFlavor.imageFlavor)
+                    override fun isDataFlavorSupported(flavor: java.awt.datatransfer.DataFlavor?) =
+                        flavor == java.awt.datatransfer.DataFlavor.imageFlavor
+                    override fun getTransferData(flavor: java.awt.datatransfer.DataFlavor?): Any {
+                        if (flavor != java.awt.datatransfer.DataFlavor.imageFlavor) {
+                            throw java.awt.datatransfer.UnsupportedFlavorException(flavor)
+                        }
+                        return image
+                    }
+                },
+                null,
+            )
+            null
+        } catch (e: Exception) {
+            e.message ?: e.javaClass.simpleName
+        }
+    }
+
+    /**
      * mermaid 复制图片降级通道（webview 的 navigator.clipboard.write 在 JCEF 写图片不可靠）：
      * PNG 纯 base64 → BufferedImage → AWT 系统剪贴板 imageFlavor，可粘贴到任意应用。
      * 剪贴板写入必须在 EDT（本 handler 跑 pooled 线程），PNG 解码留在 pooled 线程。
@@ -5802,25 +5833,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
         var clipErr: String? = null
         ApplicationManager.getApplication().invokeAndWait {
-            try {
-                java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
-                    object : java.awt.datatransfer.Transferable {
-                        override fun getTransferDataFlavors() =
-                            arrayOf(java.awt.datatransfer.DataFlavor.imageFlavor)
-                        override fun isDataFlavorSupported(flavor: java.awt.datatransfer.DataFlavor?) =
-                            flavor == java.awt.datatransfer.DataFlavor.imageFlavor
-                        override fun getTransferData(flavor: java.awt.datatransfer.DataFlavor?): Any {
-                            if (flavor != java.awt.datatransfer.DataFlavor.imageFlavor) {
-                                throw java.awt.datatransfer.UnsupportedFlavorException(flavor)
-                            }
-                            return image
-                        }
-                    },
-                    null,
-                )
-            } catch (e: Exception) {
-                clipErr = e.message
-            }
+            clipErr = writeImageToClipboard(image)
         }
         return if (clipErr == null) {
             log.info("copyImage: image written to system clipboard (${image.width}x${image.height})")
@@ -5829,6 +5842,54 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.warn("copyImage clipboard write failed: $clipErr")
             buildJsonObject { put("op", "imageCopied"); put("ok", false); put("error", clipErr) }
         }
+    }
+
+    /**
+     * op=copyVizImage — ::visualize 复制图片（iframe 沙箱拿不到内容，Java 侧 Robot 屏幕截取）。
+     * 前端上报 iframe 视口矩形（DOMRect + viewport 尺寸），比例法换算组件内矩形（免疫 CEF
+     * zoom 与系统 DPI），Robot 截屏用 AWT 逻辑坐标（JDK9+ HiDPI 下返回物理像素图）。
+     * 组件几何/Robot/剪贴板全链 EDT（pooled 线程 invokeAndWait）。
+     */
+    private fun handleCopyVizImage(msg: JsonObject): JsonObject {
+        fun num(key: String): Double =
+            msg[key]?.let { runCatching { it.jsonPrimitive.content.toDouble() }.getOrNull() } ?: -1.0
+        val x = num("x"); val y = num("y"); val w = num("w"); val h = num("h")
+        val vw = num("vw"); val vh = num("vh")
+        fun respond(ok: Boolean, error: String? = null): JsonObject = buildJsonObject {
+            put("op", "imageCopied")
+            put("ok", ok)
+            if (error != null) put("error", error)
+        }
+        var result: JsonObject? = null
+        ApplicationManager.getApplication().invokeAndWait {
+            try {
+                val comp = jbCefBrowser.component
+                if (!comp.isShowing) {
+                    result = respond(false, "webview not showing")
+                    return@invokeAndWait
+                }
+                val rect = VizScreenCapture.componentRect(comp.width, comp.height, vw, vh, x, y, w, h)
+                if (rect == null) {
+                    result = respond(false, "invalid rect")
+                    return@invokeAndWait
+                }
+                val image = VizScreenCapture.captureComponentRect(comp, rect)
+                result = if (image == null) {
+                    respond(false, "screen capture failed")
+                } else {
+                    val clipErr = writeImageToClipboard(image)
+                    if (clipErr == null) {
+                        log.info("copyVizImage: captured ${rect.width}x${rect.height} -> clipboard")
+                        respond(true)
+                    } else {
+                        respond(false, clipErr)
+                    }
+                }
+            } catch (e: Exception) {
+                result = respond(false, e.message ?: "capture error")
+            }
+        }
+        return result ?: respond(false, "capture interrupted")
     }
 
     /**
@@ -8328,6 +8389,42 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("sessionId", sessionId)
                 put("error", e.message ?: e.javaClass.simpleName)
             }
+        }
+    }
+
+    /**
+     * op=vizOpen — ::visualize 内联可视化打开（消息卡 → 本地 HTML 喂 iframe）
+     *
+     * 官方客户端在助手消息里输出 ::visualize{"path":...} 引用会话可视化目录里的
+     * HTML 片段。这里经 VisualizeFileRegistry 校验（白名单根/.html/2MB）后登记拿
+     * token，换内置 server 的 /viz/<token> URL 返回给 iframe 沙箱加载；内置 server
+     * 未启动（singlefile 降级）时读文件注入基线后直接回 html，前端 srcdoc 兜底。
+     */
+    private fun handleVizOpen(msg: JsonObject): JsonObject {
+        val path = msg["path"]?.let { runCatching { it.jsonPrimitive.content }.getOrNull() }.orEmpty()
+        val theme = msg["theme"]?.let { runCatching { it.jsonPrimitive.content }.getOrNull() } ?: "dark"
+        fun build(ok: Boolean, url: String? = null, html: String? = null, error: String? = null): JsonObject =
+            buildJsonObject {
+                put("op", "vizOpenResult")
+                put("path", path)
+                put("ok", ok)
+                if (url != null) put("url", url)
+                if (html != null) put("html", html)
+                if (error != null) put("error", error)
+            }
+        if (path.isBlank()) return build(ok = false, error = "path 为空")
+        val reg = VisualizeFileRegistry.register(path)
+        if (!reg.ok || reg.token == null) return build(ok = false, error = reg.error)
+        val url = ZCodeWebviewServer.vizUrl(reg.token, theme)
+        if (url != null) return build(ok = true, url = url)
+        // singlefile 降级：无多文件产物（内置 server 未启动），读文件注入基线后 srcdoc 直出
+        return try {
+            val f = VisualizeFileRegistry.resolve(reg.token)
+                ?: return build(ok = false, error = "可视化文件不存在")
+            build(ok = true, html = VisualizeFileRegistry.decorate(f.readText(), theme))
+        } catch (e: Exception) {
+            log.warn("vizOpen fallback read failed: ${e.message}")
+            build(ok = false, error = "读取可视化文件失败")
         }
     }
 

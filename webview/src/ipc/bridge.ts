@@ -1074,6 +1074,17 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
     case 'copyImage':
       // mock：模拟 Java 系统剪贴板写入成功
       return { op: 'imageCopied', ok: true }
+    case 'vizOpen':
+      // mock：回样例片段走 html 通道（同 singlefile 降级形态，srcdoc 渲染链路 dev 可验收）
+      return {
+        op: 'vizOpenResult',
+        path: req.path,
+        ok: true,
+        html: `<h3>（mock）内联可视化</h3><p class="text-muted">${String(req.path).replace(
+          /[&<>]/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] ?? c,
+        )}</p>`,
+      }
     case 'openExternal':
       // mock：生产走 Java BrowserUtil 调系统浏览器，dev 浏览器环境退化为新标签页打开
       window.open(req.url || GITHUB_REPO_URL, '_blank')

@@ -12,6 +12,8 @@
 import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BlockSection, splitMarkdownBlocks } from './BlockSection'
+import { VisualizeBlock } from './VisualizeBlock'
+import { splitVisualizeDirectives } from '@/utils/visualizeDirective'
 import { copyText } from '@/utils/clipboard'
 import { openExternalUrl } from '@/ipc/bridge'
 import { openFileLinkFromEvent } from '@/utils/fileLink'
@@ -29,7 +31,9 @@ const COPY_DONE_MS = 1500
 
 export function MarkdownBlock({ markdown, streaming = false }: Props) {
   const { t } = useTranslation()
-  const blocks = useMemo(() => splitMarkdownBlocks(markdown), [markdown])
+  // 先拦出 ::visualize 指令段（围栏感知），普通文本段再走常规切块渲染——
+  // DOMPurify 白名单无 iframe，可视化卡必须走 React 组件而非 HTML 注入
+  const pieces = useMemo(() => splitVisualizeDirectives(markdown), [markdown])
   // 工作区根：文件路径链接化解析相对路径用（currentWorkspacePath 优先——
   // worktree 场景以当前会话工作区为准）
   const workspaceRoot = useStore((s) => s.currentWorkspacePath || s.projectPath)
@@ -65,19 +69,29 @@ export function MarkdownBlock({ markdown, streaming = false }: Props) {
     if (href) openExternalUrl(href)
   }, [])
 
-  if (blocks.length === 0) return null
+  if (pieces.length === 0) return null
 
   return (
     <div className="markdown-body" onClick={handleCopy} onClickCapture={handleLink}>
-      {blocks.map((block, i) => (
-        <BlockSection
-          key={i}
-          markdown={block}
-          // 只有最后一个块可能是流式中（在增长），前面的块都是完整的
-          isStreaming={streaming && i === blocks.length - 1}
-          workspaceRoot={workspaceRoot}
-        />
-      ))}
+      {pieces.map((seg, i) => {
+        if (seg.type === 'viz') {
+          return <VisualizeBlock key={`viz-${i}`} directive={seg.directive} />
+        }
+        if (seg.type === 'viz-pending') {
+          // 流式中指令行未写完：先隐藏裸文本（防反斜杠路径闪现），写完的下一帧替换成组件
+          return <div key={`vizp-${i}`} className="viz-pending" aria-hidden="true" />
+        }
+        const blocks = splitMarkdownBlocks(seg.text)
+        return blocks.map((block, j) => (
+          <BlockSection
+            key={`${i}-${j}`}
+            markdown={block}
+            // 只有最后一段的最后一块可能是流式中（在增长），前面的块都是完整的
+            isStreaming={streaming && i === pieces.length - 1 && j === blocks.length - 1}
+            workspaceRoot={workspaceRoot}
+          />
+        ))
+      })}
       {streaming && <span className="markdown-body__cursor">▋</span>}
     </div>
   )

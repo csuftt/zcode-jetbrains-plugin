@@ -89,6 +89,16 @@
     "copy": "Copy code",
     "copied": "Copied"
   },
+  "viz": {
+    "title": "Inline visualization",
+    "loading": "Loading visualization…",
+    "loadFailed": "Failed to load visualization",
+    "timeout": "Visualization load timed out",
+    "copyImage": "Copy image",
+    "copied": "Copied",
+    "copyFailed": "Copy failed",
+    "openInBrowser": "Open in browser"
+  },
   "preview": {
     "defaultMeta": "Markdown preview",
     "close": "Close"

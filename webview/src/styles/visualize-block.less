@@ -1,0 +1,142 @@
+/**
+ * ::visualize 内联可视化块样式
+ *
+ * 卡片壳对齐官方客户端：细边框圆角容器 + 右下角工具栏（复制源码 | 放大）；
+ * iframe 由 Java serve 期注入主题基线（--background/--viz-series-* 等 token），
+ * 这里不再管内部配色。
+ */
+
+.viz-block {
+  position: relative;
+  margin: 8px 0;
+  border: 1px solid var(--border-primary);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: var(--border-hover);
+  }
+
+  iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: transparent;
+  }
+}
+
+.viz-block__body {
+  position: relative;
+  width: 100%;
+  overflow: auto;
+}
+
+.viz-block__loading {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--fs-body);
+  pointer-events: none;
+}
+
+.viz-block__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-primary);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: viz-spin 0.8s linear infinite;
+}
+
+@keyframes viz-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viz-block__spinner {
+    animation: none;
+  }
+}
+
+/* 工具栏：默认半隐，hover/聚焦浮出（辅助操作，不依赖 hover 也可达） */
+.viz-block__toolbar {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+}
+
+.viz-block:hover .viz-block__toolbar,
+.viz-block:focus-within .viz-block__toolbar {
+  opacity: 1;
+}
+
+.viz-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 14px;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.viz-copy-ok {
+  color: var(--status-success);
+}
+
+.viz-copy-fail {
+  color: var(--status-error);
+}
+
+/* 错误态：白名单外/文件缺失/超时 */
+.viz-block--error {
+  border-style: dashed;
+}
+
+.viz-block__error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 14px 16px;
+  color: var(--status-warning);
+  font-size: var(--fs-hint);
+
+  code {
+    color: var(--text-muted);
+    word-break: break-all;
+    font-size: var(--fs-hint);
+  }
+}
+
+/* 流式中未写完的指令行占位（不可见，写完的下一帧替换成组件） */
+.viz-pending {
+  height: 0;
+  overflow: hidden;
+}

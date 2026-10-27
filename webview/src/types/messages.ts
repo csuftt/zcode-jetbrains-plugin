@@ -642,6 +642,10 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'getMcpLogs' }
   /** 模型调用轨迹（CLI 落盘的 model-io jsonl，debug+rollout 双目录尾部）*/
   | { op: 'getModelTrajectory'; sessionId: string }
+  /** ::visualize 内联可视化打开：校验白名单路径换 /viz/<token> URL（singlefile 降级回 html 走 srcdoc）*/
+  | { op: 'vizOpen'; path: string; theme?: 'dark' | 'light' }
+  /** ::visualize 复制图片：上报 iframe 视口矩形，Java Robot 屏幕截取写系统剪贴板（沙箱拿不到 DOM 内容）*/
+  | { op: 'copyVizImage'; x: number; y: number; w: number; h: number; vw: number; vh: number }
   /**
    * AskUserQuestion 应答：单问题用 answer（原始值，多选为数组），
    * 多问题用 answers（问题文本 → 值）。zcode.cjs 端按此结构回填工具结果，
@@ -1340,6 +1344,8 @@ export type JavaResponse =
   | { op: 'archivedSessions'; sessions: SessionInfo[] }
   /** copyImage 回执：Java 系统剪贴板写入结果 */
   | { op: 'imageCopied'; ok: boolean; error?: string }
+  /** vizOpen 回执：url=内置 server 的 /viz/<token>（沙箱 iframe 加载）；html=singlefile 降级 srcdoc 直出 */
+  | { op: 'vizOpenResult'; path: string; ok: boolean; url?: string; html?: string; error?: string }
   // ============ 定时消息（Java 侧广播/定向推送）============
   /** 全量镜像（广播到全部标签；UI 按 currentSessionId 过滤）；fired=已发记录（徽标匹配用）。
    *  ts=Java 单调取号，webview 只应用更新的快照（多线程广播到达乱序防旧快照复活已移除项）*/

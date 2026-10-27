@@ -4,6 +4,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import com.zcode.ideaplugin.protocol.ImageArtifactMapper
+import com.zcode.ideaplugin.viz.VisualizeFileRegistry
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.URLDecoder
@@ -79,6 +80,12 @@ object ZCodeWebviewServer {
                 serveImageCache(exchange, decoded.removePrefix("/zcode-image/"))
                 return
             }
+            // ::visualize 内联可视化（token 间接引用，白名单校验在 VisualizeFileRegistry）：
+            // /viz/<token>?theme=dark|light
+            if (decoded.startsWith("/viz/")) {
+                serveViz(exchange, decoded.removePrefix("/viz/"))
+                return
+            }
             val rel = decoded.removePrefix("/").ifEmpty { "index.html" }
             val bytes = javaClass.getResourceAsStream("/webview/$rel")?.use { it.readBytes() }
             if (bytes == null) {
@@ -138,6 +145,47 @@ object ZCodeWebviewServer {
         }
         respond(exchange, 200, f.readBytes(), mimeOf(f.name))
     }
+
+    /**
+     * ::visualize 可视化的可渲染 URL（handleVizOpen 调用）：token 由 VisualizeFileRegistry
+     * 登记发放，URL 不含磁盘路径。server 起不来返回 null（调用方降级 srcdoc 直出）。
+     */
+    fun vizUrl(token: String, theme: String): String? {
+        if (!VisualizeFileRegistry.tokenPattern.matches(token)) return null
+        val base = baseUrl() ?: return null
+        return "$base/viz/$token?theme=${if (theme == "light") "light" else "dark"}"
+    }
+
+    private fun serveViz(exchange: HttpExchange, tokenSeg: String) {
+        val token = tokenSeg.trim('/').substringBefore('?')
+        val query = exchange.requestURI.rawQuery ?: ""
+        val theme = if (query.contains("theme=light")) "light" else "dark"
+        val file = VisualizeFileRegistry.resolve(token)
+        if (file == null) {
+            // token 非法/文件已被轮转删除：iframe 内展示主题化错误页（沙箱内可正常渲染）
+            respond(exchange, 404, vizErrorPage(theme, "可视化文件不存在或已被清理").toByteArray(), "text/html; charset=utf-8")
+            return
+        }
+        // raw=1：复制源码按钮取原始文件（不带注入的宿主基线）
+        if (query.contains("raw=1")) {
+            respond(exchange, 200, file.readBytes(), "text/html; charset=utf-8")
+            return
+        }
+        val html = try {
+            VisualizeFileRegistry.decorate(file.readText(), theme)
+        } catch (e: Exception) {
+            log.warn("viz read failed: ${e.message}")
+            respond(exchange, 500, vizErrorPage(theme, "读取可视化文件失败").toByteArray(), "text/html; charset=utf-8")
+            return
+        }
+        respond(exchange, 200, html.toByteArray(Charsets.UTF_8), "text/html; charset=utf-8")
+    }
+
+    private fun vizErrorPage(theme: String, message: String): String =
+        VisualizeFileRegistry.decorate(
+            "<div style=\"padding:24px;color:var(--muted-foreground);font-size:13px\">$message</div>",
+            theme,
+        )
 
     private fun respond(exchange: HttpExchange, code: Int, bytes: ByteArray, mime: String) {
         exchange.responseHeaders.add("Content-Type", mime)

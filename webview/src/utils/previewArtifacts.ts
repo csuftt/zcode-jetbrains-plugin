@@ -17,6 +17,8 @@
  *  - file://…html 引用不转网站卡（官方转 website 卡为走其浏览器面板；插件点开走 IDE 编辑器）
  */
 
+import { maskVisualizeDirectives } from '@/utils/visualizeDirective'
+
 export type PreviewFileKind =
   | 'markdown'
   | 'html'
@@ -230,6 +232,15 @@ const CITATION_ALLOWED_KINDS: ReadonlySet<PreviewFileKind> = new Set([
  * 返回按出现位置升序、同路径去重（保留最后出现）的引用列表。
  */
 export function extractPreviewFileReferences(
+  content: string,
+  workspacePath: string,
+): PreviewFileReference[] {
+  // ::visualize 指令行先等长掩码：指令 JSON 里的 html 路径会被裸路径源抽成候选、
+  // 与内嵌可视化卡双出（掩码保 offset，position 排序语义不变）
+  return extractPreviewFileReferencesMasked(maskVisualizeDirectives(content), workspacePath)
+}
+
+function extractPreviewFileReferencesMasked(
   content: string,
   workspacePath: string,
 ): PreviewFileReference[] {
