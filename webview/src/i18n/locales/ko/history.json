@@ -29,5 +29,18 @@
   "running": "실행 중",
   "forkedSession": "포크된 세션",
   "goalSession": "골 세션",
-  "pendingBadge": "응답 대기 {{count}}건"
+  "pendingBadge": "응답 대기 {{count}}건",
+  "wsChips": {
+    "workspace": "워크스페이스",
+    "project": "이 프로젝트",
+    "addTitle": "다른 디렉터리 연결… (세션 목록이 디렉터리별로 전환되며 새 세션과 메모리·AGENTS.md가 해당 디렉터리에 귀속됩니다)",
+    "remove": "연결 해제 (해당 디렉터리의 세션 데이터는 영향을 받지 않음)",
+    "currentDirBadge": "활성 디렉터리: {{path}} (새 세션이 여기에 생성됩니다)",
+    "resetToProject": "디렉터리 배지 제거 (새 세션은 이 프로젝트에 생성; 열린 세션은 영향 없음)",
+    "removeConfirmTitle": "연결 디렉터리 제거",
+    "removeConfirmMessage": "연결 디렉터리 \"{{name}}\"을(를) 제거할까요? 세션 데이터는 영향을 받지 않으며 언제든 다시 연결할 수 있습니다.",
+    "editTitle": "연결 디렉터리 관리 (제거 버튼 표시/숨기기)",
+    "newSession": "새 세션",
+    "badgePrefix": "디렉터리"
+  }
 }

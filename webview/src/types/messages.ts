@@ -485,6 +485,10 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: '__jsLog'; level: string; text: string }
   | { op: 'listSessions'; workspacePath?: string }
   | { op: 'createSession'; workspacePath?: string; thoughtLevel?: string }
+  /** 关联目录三件套（多目录会话·变体A）：拉列表 / 弹系统目录选择框添加 / 按路径移除 */
+  | { op: 'getLinkedWorkspaces' }
+  | { op: 'addLinkedWorkspace' }
+  | { op: 'removeLinkedWorkspace'; path: string }
   /** 前端进入无会话待命态（「新建会话」延迟创建）→ Java 清 TabState 绑定与标签 tooltip */
   | { op: 'clearTabSession' }
   | { op: 'deleteSession'; sessionId: string }
@@ -526,8 +530,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'setAutoArchiveConfig'; enabled: boolean; olderThanDays: number }
   /** 自动归档：拉取归档记录（仅 >0 轮次，Kotlin PropertiesComponent 存储）*/
   | { op: 'getAutoArchiveRecords' }
-  /** 自动归档：手动立即扫描一轮（不受开关限制）*/
-  | { op: 'runAutoArchiveNow' }
+  /** 自动归档：手动立即扫描一轮（受开关约束；多目录会话 workspacePath=历史页浏览目录，缺省项目根）*/
+  | { op: 'runAutoArchiveNow'; workspacePath?: string }
   /** 拉取已归档会话列表 */
   | { op: 'listArchivedSessions'; workspacePath?: string }
   /** reconcile=true：流式静默对账探测（看门狗只读快照，响应带 reconcile 标记） */
@@ -599,10 +603,10 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'openFileSystem'; filePath: string }
   | { op: 'showDiff'; filePath: string; oldContent: string; newContent: string; title?: string }
   | { op: 'refreshFile'; filePath: string }
-  | { op: 'listMemoryFiles' }
+  | { op: 'listMemoryFiles'; workspacePath?: string }
   /** 自动记忆目录全文检索（空格分词 AND；空 query 返回空表=退出搜索态）*/
-  | { op: 'searchMemoryFiles'; query: string }
-  | { op: 'createMemoryFile'; path: string }
+  | { op: 'searchMemoryFiles'; query: string; workspacePath?: string }
+  | { op: 'createMemoryFile'; path: string; workspacePath?: string }
   /** 在系统文件管理器中定位显示文件/目录（记忆目录排查入口）*/
   | { op: 'revealInFileManager'; path: string }
   /** 切换「工作区记忆」开关（写 ~/.zcode/v2/setting.json，与 ZCode 客户端共用）*/
@@ -619,8 +623,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'clearBrowserData'; mode: 'cache' | 'all' }
   /** 浏览器数据概览（清理条目旁「查看」按钮，只读）*/
   | { op: 'browserDataOverview' }
-  | { op: 'listSkills' }
-  | { op: 'toggleSkill'; path: string; enabled: boolean }
+  | { op: 'listSkills'; workspacePath?: string }
+  | { op: 'toggleSkill'; path: string; enabled: boolean; workspacePath?: string }
   /** 提示词润色（一次性 CLI headless 调用，零会话污染；模型跟随当前选择）。
    *  seq=润色代际（发起时自增），回包原样透传，前端据此丢弃关闭弹窗后的迟到回包 */
   | { op: 'enhancePrompt'; seq: number; text: string; workspacePath?: string; providerId?: string; modelId?: string }
@@ -652,7 +656,7 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
    * 整体 JSON 字符串会被服务端判定"无答案"（AI 认为用户没选）。
    */
   | { op: 'askUserResponse'; requestId: string; action: 'accept' | 'decline'; answer?: string | string[]; answers?: Record<string, string | string[]> }
-  | { op: 'createTab' }
+  | { op: 'createTab'; workspacePath?: string }
   /** 会话内嵌浏览器开关（展示/收起右侧分栏，聊天区宽度恒定）*/
   | { op: 'toggleBrowserPane' }
   | { op: 'setTabTitle'; title: string; sessionId?: string }
@@ -700,7 +704,7 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 真发上报：定时消息实际发出（sendMessage 真发点）后上报 Java 记入已发历史（持久徽标数据源）*/
   | { op: 'scheduledFired'; sessionId: string; text: string; fireAt: number }
   /** 任务列表跳转会话：Java 统一 openSessionTab——激活已有宿主标签，无则新建标签按 sessionId 恢复 */
-  | { op: 'gotoSession'; sessionId: string }
+  | { op: 'gotoSession'; sessionId: string; workspacePath?: string }
   /** 从历史消息分叉新会话（B2 一期）：保留到该消息（含），新会话由 sessionForked 应答承载 */
   | { op: 'forkSession'; sessionId: string; messageId: string }
   /**
@@ -1255,17 +1259,21 @@ export interface EnvStatus {
 /** 自动归档单条会话引用（记录详情用）*/
 export interface AutoArchivedSessionRef { sessionId: string; title: string }
 
-/** 自动归档轮次记录（仅归档数>0；mode: auto=定时轮 / manual=手动触发）*/
+/** 自动归档轮次记录（仅归档数>0；mode: auto=定时轮 / manual=手动触发；workspace=实际扫描目录，缺省视为项目根）*/
 export interface AutoArchiveRecord {
   ts: number
   mode: 'auto' | 'manual'
   days: number
   count: number
+  workspace?: string
   sessions: AutoArchivedSessionRef[]
 }
 
 export type JavaResponse =
-  | { op: 'listSessions'; sessions: SessionInfo[] }  | { op: 'createSession'; sessionId: string }
+  /** workspacePath=请求作用域回显：前端丢弃晚到的旧目录响应（快速连切防串台）*/
+  | { op: 'listSessions'; sessions: SessionInfo[]; workspacePath?: string }  | { op: 'createSession'; sessionId: string }
+  /** 关联目录全量快照（get/add/remove 三 op 共用应答形；added=本次新增并应由前端切换激活）*/
+  | { op: 'linkedWorkspaces'; workspaces: string[]; added?: string }
   | { op: 'tabSessionCleared' }
   /** forkSession 应答：新会话由前端 openSessionNewTab 承载（与历史打开编排一致）*/
   | { op: 'sessionForked'; forkedSessionId: string; parentSessionId?: string }
@@ -1341,7 +1349,9 @@ export type JavaResponse =
   | { op: 'autoArchiveConfigChanged'; enabled: boolean; olderThanDays: number }
   | { op: 'autoArchiveRecords'; records: AutoArchiveRecord[] }
   | { op: 'autoArchiveRan'; count: number; skipped?: 'disabled'; lastSweepAt: number; records: AutoArchiveRecord[] }
-  | { op: 'archivedSessions'; sessions: SessionInfo[] }
+  | { op: 'archivedSessions'; sessions: SessionInfo[]; workspacePath?: string }
+  /** 会话统计增量（切目录慢修复：列表立即回，stats 后台算完推送合并）*/
+  | { op: 'sessionStatsPatch'; workspacePath?: string; items: { sessionId: string; messageCount: number; sizeBytes: number }[] }
   /** copyImage 回执：Java 系统剪贴板写入结果 */
   | { op: 'imageCopied'; ok: boolean; error?: string }
   /** vizOpen 回执：url=内置 server 的 /viz/<token>（沙箱 iframe 加载）；html=singlefile 降级 srcdoc 直出 */
@@ -1486,7 +1496,7 @@ export type JavaResponse =
   | { op: 'fileOpened' }
   | { op: 'diffShown' }
   | { op: 'fileRefreshed' }
-  | { op: 'memoryFiles'; files: MemoryFileInfo[]; memoryEnabled: boolean; memorySettingPath: string; memoryDir?: MemoryDirInfo | null }
+  | { op: 'memoryFiles'; files: MemoryFileInfo[]; memoryEnabled: boolean; memorySettingPath: string; memoryDir?: MemoryDirInfo | null; workspacePath?: string }
   | { op: 'memoryEnabledChanged'; enabled: boolean }
   | { op: 'cuaEnabled'; enabled: boolean }
   | { op: 'cuaEnabledChanged'; enabled: boolean }
@@ -1495,14 +1505,14 @@ export type JavaResponse =
   | { op: 'memoryFileCreated'; path: string }
   | { op: 'revealedInFileManager' }
   /** op=searchMemoryFiles 的响应（query 回带：前端对齐丢弃乱序应答）*/
-  | { op: 'memorySearchResults'; query: string; results: MemorySearchHitInfo[] }
+  | { op: 'memorySearchResults'; query: string; results: MemorySearchHitInfo[]; workspacePath?: string }
   /** 浏览器设置快照（op=browserConfig 的响应）*/
   | { op: 'browserConfig'; browserControlEnabled: boolean; pluginInstalled: boolean }
   /** op=clearBrowserData 的响应（sites=已清站点数据明细；httpCache/cookies 全局项）*/
   | { op: 'browserDataCleared'; ok: boolean; all: boolean; httpCache: boolean; cookies?: boolean; sites: BrowserClearedSite[] }
   /** op=browserDataOverview 的响应（概览：磁盘占用 + Cookie 计数 + 已打开站点计数）*/
   | { op: 'browserDataOverview' } & BrowserDataOverview
-  | { op: 'skills'; skills: SkillInfo[] }
+  | { op: 'skills'; skills: SkillInfo[]; workspacePath?: string }
   | { op: 'skillToggled'; path: string; enabled: boolean }
   /** op=enhancePrompt 的响应（error 非 nil = 失败，弹窗错误态）；seq 透传发起代际，
    *  与活动代不符（弹窗已关/已被新请求取代）时前端直接丢弃 */

@@ -25,6 +25,37 @@
     gap: 8px;
   }
 
+  /* 浏览目录行（多目录会话）：文字标签+下拉（与技能页同款） */
+  &__ws-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+  }
+
+  &__ws-label {
+    color: var(--text-secondary);
+    font-size: var(--fs-body);
+    white-space: nowrap;
+  }
+
+  &__ws-select {
+    max-width: 220px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-secondary);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: var(--fs-body);
+    font-family: inherit;
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent, #4c8dff);
+    }
+  }
+
   &__section-head {
     display: flex;
     align-items: center;

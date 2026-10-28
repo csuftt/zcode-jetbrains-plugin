@@ -40,6 +40,7 @@ vi.mock('@/ipc/bridge', () => ({
   initBridge: () => {},
   isInJcef: () => false,
   getWorkspacePath: () => 'G:\\mock',
+  getTabWorkspacePath: () => '',
   getInitialSessionId: () => mockInitialSessionId,
   onMessage: (fn: (msg: unknown) => void) => {
     messageHandlers.add(fn)

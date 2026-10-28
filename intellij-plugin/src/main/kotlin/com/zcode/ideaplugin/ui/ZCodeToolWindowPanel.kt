@@ -106,6 +106,12 @@ class ZCodeToolWindowPanel(
      * （2026-08-15 白屏故障的触发条件：3 个渲染进程并发初始化全部失败）。
      */
     private val lazyStart: Boolean = false,
+    /**
+     * 标签初始目录（多目录会话）：绑定的初始会话所属 workspacePath，注入 webview 作
+     * activeWorkspacePath 初值——boot 首拉列表按它过滤，绑定会话才在列表里可被恢复。
+     * 缺省回退 projectPath（本项目标签，与旧版行为一致）。
+     */
+    private val initialWorkspace: String? = null,
 ) : JPanel(BorderLayout()), Disposable {
 
     private val log = Logger.getInstance("ZCodePlugin")
@@ -143,6 +149,15 @@ class ZCodeToolWindowPanel(
     // 当前选中的 sessionId（标签持久化 + 生成中状态归属判断）
     @Volatile
     private var currentSessionId: String? = null
+
+    /**
+     * 当前会话所属目录（多目录会话）：随 createSession/subscribe/messages 请求的
+     * workspacePath 演进（与 webview currentWorkspacePath 同源），persistTabs 写入
+     * TabState 供重启恢复——标签绑定会话在关联目录时，重启后 boot 首拉列表必须
+     * 按同目录过滤，绑定会话才在列表里可恢复。null = 尚未确定（回退 initialWorkspace/basePath）。
+     */
+    var lastSessionWorkspace: String? = null
+        private set
     // 已 subscribe 过的会话集合（每个会话只 subscribe 一次，不 unsubscribe）。
     // 多标签下事件按此集合过滤：本面板只推自己订阅会话的事件，与其他标签互不影响
     private val subscribedSessions = java.util.concurrent.CopyOnWriteArraySet<String>()
@@ -282,6 +297,14 @@ class ZCodeToolWindowPanel(
     internal companion object {
         const val KEY_BROWSER_EXPANDED = "zcode.browser.paneExpanded"
         const val KEY_CHAT_BASE_WIDTH = "zcode.browser.chatBaseWidth"
+
+        // 会话统计缓存（多目录会话·切目录慢修复）：全库级 getSessionStats 直读 3~4s，
+        // TTL 内复用（与目录无关，跨 panel 共享）。读写经 readStatsCache/putStatsCache。
+        // statsComputing：在途去重（连切多目录不重复起后台计算，真机二轮实测重复算 3 遍）
+        private const val STATS_TTL_MS = 30_000L
+        @Volatile private var cachedStats: Map<String, SessionStat>? = null
+        @Volatile private var cachedStatsAt = 0L
+        private val statsComputing = java.util.concurrent.atomic.AtomicBoolean(false)
 
         /** 标签「回合结束待查看」标记的 displayName 后缀（与 ● 生成中互斥、● 优先）。
          *  演变：✓(U+2713) → 实测期 ✓✅ 并排（Swing 不渲染 emoji 彩色，✅ 退化单色勾）→
@@ -1048,6 +1071,10 @@ class ZCodeToolWindowPanel(
         val theme = if (isDark) "dark" else "light"
         val workspace = (project.basePath ?: "").replace("\\", "\\\\").replace("'", "\\'")
         val initialSession = (initialSessionId ?: "").replace("\\", "\\\\").replace("'", "\\'")
+        // 标签初始目录（多目录会话）：绑定会话所属 workspace，boot 首拉列表按它过滤——
+        // 缺省回退本项目 basePath（与 __ZCODE_WORKSPACE__ 同值，旧标签行为不变）
+        val tabWorkspace = ((initialWorkspace ?: project.basePath) ?: "")
+            .replace("\\", "\\\\").replace("'", "\\'")
         // 外观配置：JSON 直接作为 JS 对象字面量注入（值为白名单校验过的数字/枚举/#hex 色，
         // 不含需要转义的字符）；无配置时置 null，前端回退 localStorage（dev mock 同）
         val appearance = readAppearanceJson() ?: "null"
@@ -1061,6 +1088,7 @@ class ZCodeToolWindowPanel(
 window.__ZCODE_CEF_QUERY__ = window['$funcName'];
 window.__INITIAL_IDE_THEME__ = '$theme';
 window.__ZCODE_WORKSPACE__ = '$workspace';
+window.__ZCODE_TAB_WORKSPACE__ = '$tabWorkspace';
 window.__ZCODE_INITIAL_SESSION__ = '$initialSession';
 window.__ZCODE_APPEARANCE__ = $appearance;
 window.__ZCODE_KVSTORE__ = $kvstore;
@@ -1204,7 +1232,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "getAutoArchiveConfig" -> handleGetAutoArchiveConfig()
                         "setAutoArchiveConfig" -> handleSetAutoArchiveConfig(msg)
                         "getAutoArchiveRecords" -> handleGetAutoArchiveRecords()
-                        "runAutoArchiveNow" -> handleRunAutoArchiveNow()
+                        "runAutoArchiveNow" -> handleRunAutoArchiveNow(msg)
                         "scheduledCreate" -> handleScheduledCreate(msg)
                         "scheduledCancel" -> handleScheduledOpSimple(msg, "cancel")
                         "scheduledReschedule" -> handleScheduledReschedule(msg)
@@ -1235,6 +1263,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "setMode" -> handleSetMode(msg)
                         "goalManage" -> handleGoalManage(msg)
                         "pickFiles" -> handlePickFiles(msg)
+                        "getLinkedWorkspaces" -> handleGetLinkedWorkspaces()
+                        "addLinkedWorkspace" -> handleAddLinkedWorkspace(msg)
+                        "removeLinkedWorkspace" -> handleRemoveLinkedWorkspace(msg)
                         "getUsage" -> handleGetUsage(msg)
                         "getSessionDebug" -> handleGetSessionDebug(msg)
                         "getQuota" -> handleGetQuota(msg)
@@ -1246,7 +1277,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "openFileSystem" -> handleOpenFileSystem(msg)
                         "showDiff" -> handleShowDiff(msg)
                         "refreshFile" -> handleRefreshFile(msg)
-                        "createTab" -> handleCreateTab()
+                        "createTab" -> handleCreateTab(msg)
                         "openExternal" -> handleOpenExternal(msg)
                         "toggleBrowserPane" -> handleToggleBrowserPane()
                         "setTabTitle" -> handleSetTabTitle(msg)
@@ -1323,6 +1354,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     /** 当前会话 id（重启恢复的绑定来源）*/
     fun getCurrentSessionIdForPersist(): String? = currentSessionId
+
+    /** 当前会话所属目录（重启恢复的 boot 首拉过滤依据；见 lastSessionWorkspace 注释）*/
+    fun getCurrentWorkspacePathForPersist(): String? =
+        lastSessionWorkspace ?: initialWorkspace
 
     /** 本面板是否订阅了指定会话（Service 层 askUser 弹窗路由用）*/
     fun isSubscribedTo(sessionId: String): Boolean = sessionId in subscribedSessions
@@ -2221,11 +2256,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     private fun handleListSessions(msg: JsonObject): JsonObject {
-        log.info("Fetching session list")
+        val t0 = System.currentTimeMillis()
         val service = project.zCodeService()
-        log.info("ZCodeService acquired: ${service.javaClass.name}")
         val client = service.getClient()
-        log.info("ZCodeProtocolClient acquired, isAlive=${client.isAlive()}")
 
         // workspace 过滤：只显示当前项目的会话（差异化优势，cc-gui 不做）
         // 前端传 workspacePath；空串/未传回退 project.basePath（重启初期前端注入值可能为空）
@@ -2237,7 +2270,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } else {
             client.listSessions(workspacePath)
         }
-        log.info("listSessions(workspace=$workspacePath) returned ${sessions.size} session(s)")
+        // list 段耗时（切目录体验监控；stats 段已异步化单独打点）
+        if (System.currentTimeMillis() - t0 > 500) {
+            log.warn("listSessions RPC slow: ${System.currentTimeMillis() - t0}ms, workspace=$workspacePath")
+        }
 
         // 子代理子会话不进历史列表：session/list 的 DB 查询（roots=true）排除
         // subagent_child，但内存活跃会话补列不排——子代理回合结束后仍驻留 app-server
@@ -2261,7 +2297,6 @@ if (!window.__ZCODE_LOG_HOOK__) {
             .map { it.taskId }
             .toSet()
         val visible = if (hiddenIds.isEmpty()) filtered else filtered.filter { it.sessionId !in hiddenIds }
-        log.info("workspace=$workspacePath filtered to ${filtered.size} session(s), ${filtered.size - visible.size} hidden by tasks-index")
 
         // 通知标题缓存顺手刷新（缺陷DZ）：轮末系统通知带「会话名」前缀，多会话先后
         // 完成时气泡可分辨；列表本身就是最廉价的批量标题源，标题实时增量另由
@@ -2270,14 +2305,72 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (s.title.isNotBlank()) project.zCodeService().sessionTitleCache[s.sessionId] = s.title
         }
 
-        // 会话统计（消息数/内容大小，直读 db.sqlite；失败内部已降级空 map，字段缺省前端不显示）
-        val stats: Map<String, SessionStat> = client.getSessionStats()
+        // 会话统计（消息数/内容大小，直读 db.sqlite）：**切目录慢的实锤大头**（2026-10-27
+        // 段级耗时日志实锤 stats=3.1~4.4s，list RPC 仅 ~100ms）。列表响应不再等它——
+        // 立即回不含统计的列表（字段缺省前端不显示），stats 后台算完经 sessionStatsPatch
+        // 增量推送合并；全库级缓存 30s 内跨目录/跨标签复用（stats 与目录无关）。
+        // 并发去重（真机二轮：连切 3 目录重复算 3 遍）：在途时不重复起线程，在途任务
+        // 完成后 push 全量条目（2819 条全库 Map 反正都算了，不过滤 visible），覆盖所有目录
+        val cached = readStatsCache()
+        if (cached != null) {
+            val sessionsJson = JsonArray(visible.map { buildSessionJson(it, cached) })
+            return buildJsonObject {
+                put("op", "listSessions")
+                put("workspacePath", workspacePath)
+                put("sessions", sessionsJson)
+            }
+        }
+        val launched = !statsComputing.getAndSet(true)
+        if (launched) {
+            val visibleSnapshot = visible
+            com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    if (project.isDisposed) return@executeOnPooledThread
+                    val t0 = System.currentTimeMillis()
+                    val computed = client.getSessionStats()
+                    putStatsCache(computed)
+                    log.info("getSessionStats computed in ${System.currentTimeMillis() - t0}ms, pushing patch (${computed.size} entries)")
+                    pushToWebview(buildJsonObject {
+                        put("op", "sessionStatsPatch")
+                        put("items", JsonArray(computed.map { (sid, st) ->
+                            buildJsonObject {
+                                put("sessionId", sid)
+                                put("messageCount", st.messageCount)
+                                put("sizeBytes", st.sizeBytes)
+                            }
+                        }))
+                    })
+                } catch (e: Exception) {
+                    log.warn("getSessionStats failed: ${e.message}")
+                } finally {
+                    statsComputing.set(false)
+                }
+            }
+        } else {
+            log.info("getSessionStats in flight, skipping duplicate launch (will be covered by full patch)")
+        }
 
-        val sessionsJson = JsonArray(visible.map { buildSessionJson(it, stats) })
+        val sessionsJson = JsonArray(visible.map { buildSessionJson(it, emptyMap()) })
         return buildJsonObject {
             put("op", "listSessions")
+            // 请求作用域回显：前端按它丢弃晚到的旧目录响应（快速连切目录防串台）
+            put("workspacePath", workspacePath)
             put("sessions", sessionsJson)
         }
+    }
+
+    // ============ 会话统计缓存（切目录慢修复，2026-10-27）============
+    // stats 是全库级直读（与目录无关），TTL 内跨目录/跨标签复用；字段挂已有 companion
+    // （每类仅允许一个 companion），跨 panel 实例共享
+
+    private fun readStatsCache(): Map<String, SessionStat>? {
+        val c = cachedStats ?: return null
+        return if (System.currentTimeMillis() - cachedStatsAt < STATS_TTL_MS) c else null
+    }
+
+    private fun putStatsCache(stats: Map<String, SessionStat>) {
+        cachedStats = stats
+        cachedStatsAt = System.currentTimeMillis()
     }
 
     /**
@@ -2313,6 +2406,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             thoughtLevel = thoughtLevel,
             mcpServers = cuaSpec
         )
+        lastSessionWorkspace = workspacePath
         return buildJsonObject {
             put("op", "createSession")
             put("sessionId", sid)
@@ -3239,6 +3333,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun handleGotoSession(msg: JsonObject): JsonObject {
         val sessionId = msg["sessionId"]?.jsonPrimitive?.content ?: return errorResponse("缺少 sessionId")
+        // 会话所属目录（多目录会话）：前端从 SessionInfo 带来——新标签 boot 首拉列表
+        // 按它过滤，绑定会话才在列表里可被恢复（缺省回退本项目，旧调用方行为不变）
+        val workspacePath = msg["workspacePath"]?.jsonPrimitive?.contentOrNull
         com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
             val fellBack = try {
                 ZCodeScheduledMessageService.getInstance(project).tryFallbackDeadSession(sessionId)
@@ -3250,7 +3347,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                 if (project.isDisposed) return@invokeLater
                 try {
-                    ZCodeToolWindowFactory.openSessionTab(project, sessionId)
+                    ZCodeToolWindowFactory.openSessionTab(project, sessionId, workspacePath)
                 } catch (e: Exception) {
                     log.warn("Open session tab for goto failed: ${e.message}")
                 }
@@ -3392,9 +3489,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 手动触发一轮扫描（与定时轮共用开关：未启用直接 skipped，不动库——用户定案）。
      * 同步执行（pooled thread），应答带全量记录省一往返。
      */
-    private fun handleRunAutoArchiveNow(): JsonObject {
+    private fun handleRunAutoArchiveNow(msg: JsonObject): JsonObject {
         val enabled = ZCodeClientSettingStore.readAutoArchiveConfig().enabled
-        val record = if (enabled) autoArchiveService().runSweep("manual") else null
+        // 手动「立即扫描」跟随历史页浏览目录（多目录会话），缺省项目根
+        val ws = msg["workspacePath"]?.jsonPrimitive?.content
+        val record = if (enabled) autoArchiveService().runSweep("manual", ws) else null
         return buildJsonObject {
             put("op", "autoArchiveRan")
             put("count", record?.count ?: 0)
@@ -3408,12 +3507,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun handleListArchivedSessions(msg: JsonObject): JsonObject {
         // effectiveWorkspacePath（空串回退 basePath）：冷启动桥注入竞态下前端 projectPath
         // 为空串，`?:` 不回退 → 空串落入 listArchivedSessions 的全库分支 → 跨项目归档混入
+        val t0 = System.currentTimeMillis()
         val workspacePath = effectiveWorkspacePath(msg)
         val client = project.zCodeService().getClient()
         val sessions = if (workspacePath.isEmpty()) {
             client.listArchivedSessions()
         } else {
             client.listArchivedSessions(workspacePath)
+        }
+        if (System.currentTimeMillis() - t0 > 500) {
+            log.warn("listArchivedSessions RPC slow: ${System.currentTimeMillis() - t0}ms, workspace=$workspacePath")
         }
         val filtered = if (workspacePath.isEmpty()) {
             sessions
@@ -3424,10 +3527,41 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 ws != null && normalizePath(ws) == normalized
             }
         }
-        val stats = client.getSessionStats()
+        // stats 异步化（同 handleListSessions，2026-10-28）：归档 tab 此前同步等全库统计
+        // （3~4s，切归档 tab 慢的实锤同因）。缓存命中直接带；miss 立即回空 stats +
+        // 后台计算推送 sessionStatsPatch（前端归档列表同款合并）；在途去重
+        val cached = readStatsCache()
+        if (cached == null && statsComputing.compareAndSet(false, true)) {
+            com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    if (project.isDisposed) return@executeOnPooledThread
+                    val ts = System.currentTimeMillis()
+                    val computed = client.getSessionStats()
+                    putStatsCache(computed)
+                    log.info("getSessionStats computed in ${System.currentTimeMillis() - ts}ms (archived trigger), pushing patch (${computed.size} entries)")
+                    pushToWebview(buildJsonObject {
+                        put("op", "sessionStatsPatch")
+                        put("items", JsonArray(computed.map { (sid, st) ->
+                            buildJsonObject {
+                                put("sessionId", sid)
+                                put("messageCount", st.messageCount)
+                                put("sizeBytes", st.sizeBytes)
+                            }
+                        }))
+                    })
+                } catch (e: Exception) {
+                    log.warn("getSessionStats failed: ${e.message}")
+                } finally {
+                    statsComputing.set(false)
+                }
+            }
+        }
+        val stats: Map<String, SessionStat> = cached ?: emptyMap()
         val sessionsJson = JsonArray(filtered.map { buildSessionJson(it, stats) })
         return buildJsonObject {
             put("op", "archivedSessions")
+            // 请求作用域回显：前端按它丢弃晚到的旧目录响应（快速连切目录防串台）
+            put("workspacePath", workspacePath)
             put("sessions", sessionsJson)
         }
     }
@@ -5429,6 +5563,87 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject { put("op", "filesPicked"); put("count", refs.size) }
     }
 
+    // ============ 关联目录（多目录会话，变体 A：历史页 chips 切换）============
+    // project 级持久化（PropertiesComponent + JSON 数组，形态同 ZCodeScheduledMessageService）。
+    // 存储/比较统一正斜杠形态（与 project.basePath 同源）；下游 createSession/listSessions
+    // 各自再归一原生分隔符，这里不做双重归一。
+
+    /** 关联目录列表的 project 级 kv key */
+    private val linkedWorkspacesKey = "zcode.linkedWorkspaces.v1"
+
+    /** 目录路径归一比较键：统一分隔符 + 去尾 + 大小写折叠（Windows 不敏感） */
+    private fun wsKey(path: String): String =
+        path.replace('\\', '/').trimEnd('/').lowercase()
+
+    private fun readLinkedWorkspaces(): List<String> {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance(project).getValue(linkedWorkspacesKey) ?: return emptyList()
+        return try {
+            Json.parseToJsonElement(raw).jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
+        } catch (_: Exception) {
+            emptyList() // 损坏降级空表（同 ZCodeScheduledMessageService.loadFromStorage 口径）
+        }
+    }
+
+    private fun persistLinkedWorkspaces(list: List<String>) {
+        com.intellij.ide.util.PropertiesComponent.getInstance(project)
+            .setValue(linkedWorkspacesKey, JsonArray(list.map { JsonPrimitive(it) }).toString())
+    }
+
+    private fun handleGetLinkedWorkspaces(): JsonObject = buildJsonObject {
+        put("op", "linkedWorkspaces")
+        put("workspaces", JsonArray(readLinkedWorkspaces().map { JsonPrimitive(it) }))
+    }
+
+    /**
+     * 添加关联目录：EDT 弹目录选择框（单选）。取消不报错（added 省略）。
+     * 与 basePath 重复或已关联的目录静默幂等（仍回 added，前端切过去即可）。
+     */
+    private fun handleAddLinkedWorkspace(msg: JsonObject): JsonObject {
+        var pickedPath: String? = null
+        ApplicationManager.getApplication().invokeAndWait {
+            // 只选目录（chooseFolders=true），单选
+            val descriptor = FileChooserDescriptor(false, true, false, false, false, false)
+                .withTitle("关联其他目录")
+            val picked = FileChooser.chooseFiles(descriptor, project, null).toList()
+            pickedPath = picked.firstOrNull()?.path
+        }
+        var list = readLinkedWorkspaces()
+        val path = pickedPath
+        if (!path.isNullOrBlank()) {
+            val basePath = project.basePath
+            if (basePath == null || wsKey(path) != wsKey(basePath)) {
+                if (list.none { wsKey(it) == wsKey(path) }) {
+                    list = list + path
+                    persistLinkedWorkspaces(list)
+                    log.info("linked workspace added: $path")
+                }
+            }
+        }
+        return buildJsonObject {
+            put("op", "linkedWorkspaces")
+            put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
+            if (path != null) put("added", path)
+        }
+    }
+
+    private fun handleRemoveLinkedWorkspace(msg: JsonObject): JsonObject {
+        val target = msg["path"]?.jsonPrimitive?.contentOrNull
+        var list = readLinkedWorkspaces()
+        if (!target.isNullOrBlank()) {
+            val before = list.size
+            list = list.filter { wsKey(it) != wsKey(target) }
+            if (list.size != before) {
+                persistLinkedWorkspaces(list)
+                log.info("linked workspace removed: $target")
+            }
+        }
+        return buildJsonObject {
+            put("op", "linkedWorkspaces")
+            put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
+        }
+    }
+
+
     /**
      * 当前会话实际模型引用 (providerId, modelId)：v2 上下文总量覆盖的取值依据。
      * 来源：webview kv（zcode.currentModel，用户在输入框显式切换时写入，跨重启持久）。
@@ -5911,6 +6126,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return errorResponse("缺少 sessionId")
         // JS 传过来的会话原始 workspace（来自 session/list 的 workspace 字段）
         val workspacePath = effectiveWorkspacePath(msg)
+        // 会话所属目录随切换演进（persistTabs 恢复依据，见 lastSessionWorkspace 注释）
+        lastSessionWorkspace = workspacePath
 
         val messages = resumeAndReadMessages(sessionId, workspacePath)
         // 前端流式静默对账探测（看门狗只读快照判定回合是否已在服务端结束）：
@@ -6916,8 +7133,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (sessionId != null) put("sessionId", sessionId)
     }
 
-    /** 新建标签页（前端「新标签页」按钮）：切 EDT 创建新 Content 并选中 */
-    private fun handleCreateTab(): JsonObject {
+    /** 新建标签页（前端「新标签页」按钮/多目录会话「新建会话」）：切 EDT 创建新 Content 并选中；
+     *  workspacePath 可选——新标签的初始落位目录（缺省本项目），不覆盖发起方的现有标签 */
+    private fun handleCreateTab(msg: JsonObject): JsonObject {
+        val ws = msg["workspacePath"]?.jsonPrimitive?.content
         SwingUtilities.invokeLater {
             try {
                 val toolWindow = ZCodeToolWindowFactory.getToolWindow(project)
@@ -6925,8 +7144,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     log.warn("createTab failed: ZCode ToolWindow not found")
                     return@invokeLater
                 }
-                ZCodeToolWindowFactory.createNewTab(project, toolWindow)
-                log.info("createTab succeeded")
+                ZCodeToolWindowFactory.createNewTab(project, toolWindow, ws)
+                log.info("createTab succeeded (ws=$ws)")
             } catch (e: Exception) {
                 log.error("createTab failed", e)
             }
@@ -7105,16 +7324,19 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 缺失项也返回（前端提供创建入口）；另含 ZCode 自动记忆
      * （~/.zcode/cli/memories/projects/<key>/memory/，只读展示）。
      * 附带 memoryEnabled（~/.zcode/v2/setting.json 的「工作区记忆」开关，与客户端共用）。
+     * workspacePath 可选（多目录会话）：查看关联目录的记忆，缺省本项目。
      */
     private fun handleListMemoryFiles(msg: JsonObject): JsonObject {
-        val files = MemoryFileScanner.list(project.basePath)
+        val ws = msg["workspacePath"]?.jsonPrimitive?.content ?: project.basePath
+        val files = MemoryFileScanner.list(ws)
         return buildJsonObject {
             put("op", "memoryFiles")
+            put("workspacePath", ws)
             put("memoryEnabled", ZCodeClientSettingStore.readRuntimePrefs().memoryEnabled)
             put("memorySettingPath", ZCodeClientSettingStore.settingPath().absolutePath)
             // 自动记忆目录定位（设置页展示路径 + 排查「有记忆但读取不到」：哈希后缀匹配，
             // 未命中时前端展示期望路径供与记忆根目录实际内容对比）
-            MemoryFileScanner.locate(project.basePath)?.let { d ->
+            MemoryFileScanner.locate(ws)?.let { d ->
                 put("memoryDir", buildJsonObject {
                     put("projectsRoot", d.projectsRoot)
                     put("expectedDir", d.expectedDir)
@@ -7147,7 +7369,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun handleCreateMemoryFile(msg: JsonObject): JsonObject {
         val path = msg["path"]?.jsonPrimitive?.content
             ?: return errorResponse("缺少 path")
-        val target = MemoryFileScanner.list(project.basePath)
+        // 白名单按目标目录推导（多目录会话：在关联目录建 AGENTS.md 时按该目录校验）
+        val ws = msg["workspacePath"]?.jsonPrimitive?.content ?: project.basePath
+        val target = MemoryFileScanner.list(ws)
             .firstOrNull { it.path == path }
             ?: return errorResponse("path 不在记忆文件清单内")
         if (!MemoryFileScanner.createWithTemplate(target)) {
@@ -7173,10 +7397,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun handleSearchMemoryFiles(msg: JsonObject): JsonObject {
         val query = msg["query"]?.jsonPrimitive?.content ?: ""
-        val hits = MemoryFileScanner.search(project.basePath, query)
+        val ws = msg["workspacePath"]?.jsonPrimitive?.content ?: project.basePath
+        val hits = MemoryFileScanner.search(ws, query)
         return buildJsonObject {
             put("op", "memorySearchResults")
             put("query", query)
+            put("workspacePath", ws)
             put("results", JsonArray(hits.map { h ->
                 buildJsonObject {
                     put("path", h.path)
@@ -7374,12 +7600,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
      *
      * SkillScanner 扫描全局/项目/插件三来源（junction 真实路径去重），
      * enabled 判定自 ~/.zcode/cli/config.json 的 skill 节点（CLI 同源机制）。
+     * workspacePath 可选（多目录会话）：查看关联目录的项目技能，缺省本项目。
      */
     private fun handleListSkills(msg: JsonObject): JsonObject {
-        val skills = SkillScanner.scan(project.basePath)
+        val ws = msg["workspacePath"]?.jsonPrimitive?.content ?: project.basePath
+        val skills = SkillScanner.scan(ws)
         log.info("Skill scan completed, ${skills.size} item(s)")
         return buildJsonObject {
             put("op", "skills")
+            put("workspacePath", ws)
             put("skills", JsonArray(skills.map { s ->
                 buildJsonObject {
                     put("name", s.name)
@@ -7408,7 +7637,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?: return errorResponse("缺少 path")
         val enabled = msg["enabled"]?.jsonPrimitive?.boolean
             ?: return errorResponse("缺少 enabled")
-        val known = SkillScanner.scan(project.basePath).any { it.path == path }
+        // 白名单按目标目录扫描（多目录会话：禁用关联目录的项目技能时按该目录校验）
+        val ws = msg["workspacePath"]?.jsonPrimitive?.content ?: project.basePath
+        val known = SkillScanner.scan(ws).any { it.path == path }
         if (!known) return errorResponse("path 不在技能清单内")
         if (!SkillScanner.setSkillEnabled(path, enabled)) {
             return errorResponse("写入 config 失败: $path")

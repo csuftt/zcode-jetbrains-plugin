@@ -43,6 +43,8 @@ declare global {
     __ZCODE_WORKSPACE__?: string
     /** Java 注入的多标签初始会话 id（标签恢复绑定；空串表示新标签自动建会话） */
     __ZCODE_INITIAL_SESSION__?: string
+    /** Java 注入的标签初始目录（多目录会话：绑定会话所属 workspacePath；空串=本项目标签） */
+    __ZCODE_TAB_WORKSPACE__?: string
     /** Java 推送环境状态变化的回调（envSave 保存后 IDE 广播多标签同步）*/
     onEnvStatusChanged?: (status: EnvStatus) => void
     /** Java 推送模型 provider 启用/禁用变更的回调（modelToggleProvider 写回后广播多标签同步）*/
@@ -286,6 +288,12 @@ export function getWorkspacePath(): string {
 /** 多标签恢复绑定的初始会话 id（Java 注入；空串/未注入表示走常规恢复逻辑） */
 export function getInitialSessionId(): string {
   return window.__ZCODE_INITIAL_SESSION__ ?? ''
+}
+
+/** 标签初始目录（多目录会话·Java 注入）：绑定会话所属 workspacePath，boot 首拉列表按它过滤。
+ *  空串/未注入 = 本项目标签（回退 getWorkspacePath()，旧标签行为不变） */
+export function getTabWorkspacePath(): string {
+  return window.__ZCODE_TAB_WORKSPACE__ ?? ''
 }
 
 // ============ Mock（纯前端开发用）============
@@ -989,6 +997,14 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
   switch (req.op) {
     case 'listSessions':
       return { op: 'listSessions', sessions: mockSessions }
+    case 'getLinkedWorkspaces':
+      // mock：预置一条关联目录（chips 行 dev 可见可切）
+      return { op: 'linkedWorkspaces', workspaces: ['G:/mock-linked/other-project'] }
+    case 'addLinkedWorkspace':
+      // mock：模拟 FileChooser 选中目录并直接切过去
+      return { op: 'linkedWorkspaces', workspaces: ['G:/mock-linked/other-project', 'E:/mock-linked/lab-sdk'], added: 'E:/mock-linked/lab-sdk' }
+    case 'removeLinkedWorkspace':
+      return { op: 'linkedWorkspaces', workspaces: [] }
     case 'scheduledList':
       // mock：空定时列表（形状对齐 Java buildListMessage；此前缺分支会在 dev/mock 态
       // 弹「mock 不支持 op」误报——init 的桥就绪分支每次都发它）

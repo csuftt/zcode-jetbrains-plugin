@@ -169,6 +169,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const setCurrentFileEnabled = useStore((s) => s.setCurrentFileEnabled)
   /** 工作区路径（CurrentFileChip tooltip 显示相对路径用）*/
   const projectPath = useStore((s) => s.projectPath)
+  // 多目录会话·变体A：目录标识已迁移至 ChatHeader 标题下方（用户定稿 2026-10-28），
+  // 输入框底部不再展示
 
   // @ 补全状态
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)

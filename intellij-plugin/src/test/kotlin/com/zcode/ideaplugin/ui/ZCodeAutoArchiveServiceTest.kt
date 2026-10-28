@@ -57,4 +57,23 @@ class ZCodeAutoArchiveServiceTest {
         assertEquals(7, ok[0].ts)
         assertEquals("标题", ok[0].sessions.single().title)
     }
+
+    @Test
+    fun `workspace field round-trips and stays absent for legacy records`() {
+        // 新记录带 workspace → JSON 往返保留
+        val withWs = ZCodeAutoArchiveService.ArchiveRecord(
+            ts = 9, mode = "manual", days = 7, count = 1,
+            sessions = listOf(ZCodeAutoArchiveService.ArchivedSessionRef("a", "甲")),
+            workspace = "E:/work/other-project",
+        )
+        val roundTrip = ZCodeAutoArchiveService.parseRecords(
+            ZCodeAutoArchiveService.recordsToJson(listOf(withWs)).toString(),
+        )
+        assertEquals("E:/work/other-project", roundTrip.single().workspace)
+        // 旧版本记录（无 workspace 字段）→ 解析为 null 不炸（视为项目根，前端不显徽标）
+        val legacy = ZCodeAutoArchiveService.parseRecords(
+            """[{"ts":7,"mode":"auto","days":7,"count":1,"sessions":[{"sessionId":"a","title":"标题"}]}]""",
+        )
+        assertEquals(null, legacy.single().workspace)
+    }
 }

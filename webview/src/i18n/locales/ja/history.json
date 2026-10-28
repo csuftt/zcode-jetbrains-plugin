@@ -29,5 +29,18 @@
   "running": "実行中",
   "forkedSession": "フォークされたセッション",
   "goalSession": "ゴールセッション",
-  "pendingBadge": "保留中 {{count}} 件"
+  "pendingBadge": "保留中 {{count}} 件",
+  "wsChips": {
+    "workspace": "ワークスペース",
+    "project": "このプロジェクト",
+    "addTitle": "他のディレクトリを関連付け…（セッション一覧はディレクトリ単位で切替、新規セッションとメモリ・AGENTS.md はそのディレクトリに帰属）",
+    "remove": "関連付けを解除（そのディレクトリのセッションデータには影響しません）",
+    "currentDirBadge": "アクティブディレクトリ：{{path}}（新規セッションはここに作成されます）",
+    "resetToProject": "ディレクトリバッジを削除（新規セッションはこのプロジェクトに作成；開いているセッションは影響なし）",
+    "removeConfirmTitle": "関連ディレクトリを解除",
+    "removeConfirmMessage": "関連ディレクトリ「{{name}}」を解除しますか？セッションデータには影響しません。いつでも再関連付けできます。",
+    "editTitle": "関連ディレクトリを管理（削除ボタンの表示/非表示）",
+    "newSession": "新規セッション",
+    "badgePrefix": "ディレクトリ"
+  }
 }

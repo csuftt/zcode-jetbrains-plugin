@@ -16,6 +16,7 @@ vi.mock('@/ipc/bridge', () => ({
   isInJcef: () => false,
   onMessage: () => () => {},
   getWorkspacePath: () => 'G:\\mock',
+  getTabWorkspacePath: () => '',
   openExternalUrl: () => {},
 }))
 
@@ -45,6 +46,7 @@ beforeEach(() => {
   cleanup()
   vi.clearAllMocks()
   useStore.setState({
+    projectPath: 'G:\\mock', // 多目录会话：手动扫描请求携带的缺省目录
     autoArchiveConfigLoaded: true,
     autoArchiveEnabled: true,
     autoArchiveDays: 7,
@@ -69,6 +71,22 @@ describe('自动归档面板', () => {
     expect(screen.getAllByText(/归档 \d+ 个/).length).toBe(2)
   })
 
+  it('记录行工作区徽标：扫关联目录的轮次显示目录名，旧记录（无字段）不显示', () => {
+    useStore.setState({
+      autoArchiveRecords: [
+        { ts: 1700000000000, mode: 'manual', days: 7, count: 1, workspace: 'E:/work/other-project', sessions: [] },
+        { ts: 1699990000000, mode: 'auto', days: 7, count: 1, sessions: [] },
+      ] as never,
+    })
+    render(<AutoArchivePanel />)
+    const ws = document.querySelector('.auto-archive-panel__record-ws') as HTMLElement
+    expect(ws).not.toBeNull()
+    expect(ws.textContent).toBe('other-project')
+    expect(ws.title).toBe('E:/work/other-project')
+    // 仅一条带徽标（无 workspace 的旧记录不渲染）
+    expect(document.querySelectorAll('.auto-archive-panel__record-ws')).toHaveLength(1)
+  })
+
   it('点击记录行展开会话明细', () => {
     render(<AutoArchivePanel />)
     expect(screen.queryByText('手动轮会话甲')).toBeNull()
@@ -81,7 +99,7 @@ describe('自动归档面板', () => {
   it('立即扫描：置 running 并发 op；结果文案按 count 分支', () => {
     render(<AutoArchivePanel />)
     fireEvent.click(screen.getByText('立即扫描'))
-    expect(mockedSend).toHaveBeenCalledWith({ op: 'runAutoArchiveNow' })
+    expect(mockedSend).toHaveBeenCalledWith({ op: 'runAutoArchiveNow', workspacePath: 'G:\\mock' })
     expect(useStore.getState().autoArchiveRunning).toBe(true)
     expect(screen.getByText('扫描中…')).not.toBeNull()
   })
@@ -102,7 +120,7 @@ describe('自动归档面板', () => {
     const btn = screen.getByText('立即扫描').closest('button') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     fireEvent.click(btn)
-    expect(mockedSend).not.toHaveBeenCalledWith({ op: 'runAutoArchiveNow' })
+    expect(mockedSend).not.toHaveBeenCalledWith({ op: 'runAutoArchiveNow', workspacePath: 'G:\\mock' })
     expect(useStore.getState().autoArchiveRunning).toBe(false)
     expect(screen.getByText('开启上方「自动归档旧任务」开关后可手动触发扫描')).not.toBeNull()
   })

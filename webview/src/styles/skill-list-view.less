@@ -28,6 +28,30 @@
     flex-wrap: wrap;
   }
 
+  /* 浏览目录标签+下拉（多目录会话）：置于 scope 过滤 Tab 前，风格同设置页基础下拉 */
+  &__ws-label {
+    color: var(--text-secondary);
+    font-size: var(--fs-body);
+    white-space: nowrap;
+  }
+
+  &__ws-select {
+    max-width: 200px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-secondary);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: var(--fs-body);
+    font-family: inherit;
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent, #4c8dff);
+    }
+  }
+
   &__tabs {
     display: inline-flex;
     border: 1px solid var(--border-primary);

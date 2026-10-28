@@ -49,6 +49,8 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
         val days: Int,
         val count: Int,
         val sessions: List<ArchivedSessionRef>,
+        /** 实际扫描的工作区（多目录会话：手动扫关联目录时区分；null=旧版本记录，视为项目根）*/
+        val workspace: String? = null,
     )
 
     companion object {
@@ -90,13 +92,14 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
 
         /** PropertiesComponent 存储形状：记录数组 → JSON（手写组装，模块无 serialization 编译插件） */
         fun recordsToJson(list: List<ArchiveRecord>): JsonArray = buildJsonArray {
-            list.forEach { r ->
-                add(buildJsonObject {
-                    put("ts", r.ts)
-                    put("mode", r.mode)
-                    put("days", r.days)
-                    put("count", r.count)
-                    put("sessions", buildJsonArray {
+        list.forEach { r ->
+            add(buildJsonObject {
+                put("ts", r.ts)
+                put("mode", r.mode)
+                put("days", r.days)
+                put("count", r.count)
+                r.workspace?.let { put("workspace", it) }
+                put("sessions", buildJsonArray {
                         r.sessions.forEach { s ->
                             add(buildJsonObject {
                                 put("sessionId", s.sessionId)
@@ -116,12 +119,13 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
                     val o = el as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
                     val ts = o["ts"]?.jsonPrimitive?.longOrNull ?: return@mapNotNull null
                     val count = o["count"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
-                    ArchiveRecord(
-                        ts = ts,
-                        mode = o["mode"]?.jsonPrimitive?.contentOrNull ?: "auto",
-                        days = o["days"]?.jsonPrimitive?.intOrNull ?: 7,
-                        count = count,
-                        sessions = (o["sessions"] as? JsonArray ?: JsonArray(emptyList())).mapNotNull { s ->
+                ArchiveRecord(
+                    ts = ts,
+                    mode = o["mode"]?.jsonPrimitive?.contentOrNull ?: "auto",
+                    days = o["days"]?.jsonPrimitive?.intOrNull ?: 7,
+                    count = count,
+                    workspace = o["workspace"]?.jsonPrimitive?.contentOrNull,
+                    sessions = (o["sessions"] as? JsonArray ?: JsonArray(emptyList())).mapNotNull { s ->
                             val so = s as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
                             val sid = so["sessionId"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                             ArchivedSessionRef(sid, so["title"]?.jsonPrimitive?.contentOrNull ?: "")
@@ -168,12 +172,14 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
      * 单轮扫描（mode: auto=定时 / manual=手动触发）。
      * **两种模式都受共享开关约束**（用户定案 2026-09-08：未启用时手动扫描也不生效——
      * 「自动归档」tab 的立即扫描是提前触发定时轮，不是独立归档器）。
+     * workspacePath 可选（多目录会话）：手动「立即扫描」跟随历史页浏览目录，缺省项目根；
+     * 定时轮不传恒扫项目根（chips 选择是浏览态不是配置）。
      * 返回本轮记录；未启用/客户端未起/无可归档/环境不可用/扫描失败返回 null（不落记录）。
      */
-    fun runSweep(mode: String): ArchiveRecord? {
+    fun runSweep(mode: String, workspacePath: String? = null): ArchiveRecord? {
         val cfg = ZCodeClientSettingStore.readAutoArchiveConfig()
         if (!cfg.enabled) return null
-        val basePath = project.basePath?.takeIf { it.isNotBlank() } ?: return null
+        val basePath = (workspacePath ?: project.basePath)?.takeIf { it.isNotBlank() } ?: return null
         // 客户端未起不扫（缺陷BH 语义定案：不为 7 天粒度的归档在闲置项目拉起 node 进程，
         // 调度器只「搭便车」于已运行的 app-server；客户端就绪场景由 sweepAfterClientReady 兜住）
         val svc = project.zCodeService()
@@ -198,6 +204,7 @@ class ZCodeAutoArchiveService(private val project: Project) : Disposable {
             days = cfg.olderThanDays,
             count = archived.size,
             sessions = archived.map { ArchivedSessionRef(it.id, it.title) },
+            workspace = basePath,
         )
         persistRecord(record)
         // 归档会话连带丢弃待发定时消息（对齐手动归档语义）；已发记录保留（历史徽标无害）

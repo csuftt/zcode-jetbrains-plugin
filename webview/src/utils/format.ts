@@ -125,3 +125,8 @@ export function formatXLabelFull(t: string, granularity?: string): string {
   // hourly 原始形态 'yyyy-MM-dd HH:mm'（16+ 字符）→ MM-dd HH:mm；无日期部分则原样
   return t.length >= 16 ? t.slice(5) : t
 }
+
+/** 目录路径取末段作显示名（多目录会话：chips/下拉的目录项；路径太长放不下）*/
+export function wsBasename(path: string): string {
+  return path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path
+}

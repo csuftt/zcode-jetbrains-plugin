@@ -19,14 +19,68 @@
 .header-left {
     display: flex;
     align-items: center;
+    flex-wrap: wrap; /* 目录徽标（flex-basis:100%）换行到标题下方，header 仅增高徽标行 */
     flex: 1;
     min-width: 0; /* Allow flex items to shrink below their minimum content size */
-    overflow: hidden;
+    /* 无 overflow:hidden：目录徽标的 data-tooltip 悬浮气泡伸出本容器，裁剪=只露一条边
+       （真机 2026-10-28）。溢出防护由内部元素自理（标题/徽标各自 ellipsis） */
     .flex-gap-horizontal(12px);
 
     > * {
         color: var(--color-chat-bars-text, var(--text-secondary));
         font-weight: 500;
+    }
+}
+
+/* 目录徽标（多目录会话·变体A·方案A，2026-10-28 用户定稿）：标题下方紧凑徽标。
+   row 占满一行触发 header-left 换行（本身无背景），徽标本体自适应内容宽度
+   （背景只包住文字，不拉满整行）；header 增高约 17px；
+   两态语义（会话归属/待命落位）由 App 算好，本项目不显示（wsBadgeDir=null）。
+   左对齐 = 标题首字（.session-title 有 padding-left:8px，row 同步 8px）；
+   悬浮全路径 = data-tooltip + tooltip-bottom-center（JCEF 下原生 title 不可靠）*/
+.ws-header-badge-row {
+    flex-basis: 100%;
+    display: flex;
+    margin: 2px 0 0;
+    padding-left: 8px;
+    min-width: 0;
+}
+
+.ws-header-badge {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    line-height: 15px;
+    font-weight: 400;
+    cursor: default;
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+    color: color-mix(in srgb, var(--accent-primary) 80%, var(--text-primary));
+    max-width: 100%;
+    min-width: 0;
+    .tooltip-bottom-center(22px);
+
+    /* tooltip 左对齐展开（覆盖 mixin 的居中定位）：徽标贴面板左缘，居中的长路径
+       tooltip 会伸出工具窗左缘被裁（真机 2026-10-28）；箭头对齐徽标左部 */
+    &::after {
+        left: 0;
+        transform: none;
+        max-width: 100vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    &::before {
+        left: 14px;
+    }
+
+    &__name {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
 

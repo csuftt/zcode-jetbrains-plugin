@@ -17,7 +17,7 @@ import type { TFunction } from 'i18next'
 import { useStore } from '@/store/useStore'
 import { sendToJava } from '@/ipc/bridge'
 import type { MemoryFileInfo, MemorySearchHitInfo } from '@/types/messages'
-import { fmtResetTime } from '@/utils/format'
+import { fmtResetTime, wsBasename } from '@/utils/format'
 import '../styles/memory-view.less'
 
 /** 条件 className 拼接 */
@@ -263,6 +263,10 @@ export function MemoryView() {
   const memorySearchResults = useStore((s) => s.memorySearchResults)
   const memorySearchActiveQuery = useStore((s) => s.memorySearchActiveQuery)
   const memorySearching = useStore((s) => s.memorySearching)
+  // 多目录会话：浏览目录下拉（''=本项目；关联目录时才显示）
+  const linkedWorkspaces = useStore((s) => s.linkedWorkspaces)
+  const projectPath = useStore((s) => s.projectPath)
+  const memoryWorkspace = useStore((s) => s.memoryWorkspace)
 
   useEffect(() => {
     loadMemoryFiles()
@@ -278,6 +282,26 @@ export function MemoryView() {
 
   return (
     <div className="memory-view">
+      {/* 浏览目录下拉（多目录会话）：切目录重拉清单；同时退出搜索态防旧命中残留 */}
+      {linkedWorkspaces.length > 0 && (
+        <div className="memory-view__ws-row">
+          <span className="memory-view__ws-label">{t('history.wsChips.workspace')}</span>
+          <select
+            className="memory-view__ws-select"
+            value={memoryWorkspace || projectPath}
+            onChange={(e) => {
+              const v = e.target.value
+              loadMemoryFiles(v === projectPath ? '' : v)
+              searchMemoryFiles('')
+            }}
+          >
+            <option value={projectPath} title={projectPath}>{t('history.wsChips.project')}</option>
+            {linkedWorkspaces.map((w) => (
+              <option key={w} value={w} title={w}>{wsBasename(w)}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <section className="memory-view__section">
         <div className="memory-view__section-head">
           <h3 className="memory-view__section-title">{t('memory.global.title')}</h3>

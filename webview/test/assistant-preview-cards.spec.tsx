@@ -16,6 +16,7 @@ vi.mock('@/ipc/bridge', () => ({
   initBridge: () => {},
   isInJcef: () => false,
   getWorkspacePath: () => 'G:\\demo',
+  getTabWorkspacePath: () => '',
   getInitialSessionId: () => '',
   // 组件会注册多个监听（门控查询 + stat 配对），必须多播（真实桥为事件发射器）
   onMessage: (fn: (msg: unknown) => void) => {

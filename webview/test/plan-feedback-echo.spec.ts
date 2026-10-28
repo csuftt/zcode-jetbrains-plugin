@@ -29,6 +29,7 @@ vi.mock('@/ipc/bridge', () => ({
   initBridge: () => {},
   isInJcef: () => false,
   getWorkspacePath: () => 'G:\\mock',
+  getTabWorkspacePath: () => '',
   getInitialSessionId: () => '',
   onMessage: () => {},
   onStreamEvent: (fn: (sid: string, event: unknown) => void) => { streamEventHandler = fn },

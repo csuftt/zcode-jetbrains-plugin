@@ -206,6 +206,20 @@
     flex-shrink: 0;
   }
 
+  /* 轮次扫描的工作区徽标（仅扫关联目录的轮次显示；title 挂全路径） */
+  &__record-ws {
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--bg-tertiary, rgba(128, 128, 128, 0.18));
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 110px;
+    flex-shrink: 0;
+  }
+
   &__record-count {
     margin-left: auto;
     color: var(--text-secondary);

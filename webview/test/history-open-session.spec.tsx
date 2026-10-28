@@ -110,7 +110,7 @@ describe('历史会话打开方式编排', () => {
     clickTarget()
     await screen.findByText('打开会话')
     fireEvent.click(screen.getByText('新标签页打开'))
-    await waitFor(() => expect(props.onOpenNewTab).toHaveBeenCalledWith('sess_target'))
+    await waitFor(() => expect(props.onOpenNewTab).toHaveBeenCalledWith('sess_target', 'G:\\mock'))
     expect(props.onSelect).not.toHaveBeenCalled()
     // 本标签切回聊天视图（保留自己的会话），目标会话在新标签恢复
     expect(props.onBack).toHaveBeenCalledTimes(1)

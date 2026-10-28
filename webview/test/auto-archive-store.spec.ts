@@ -14,6 +14,7 @@ vi.mock('@/ipc/bridge', () => ({
   initBridge: () => {},
   isInJcef: () => false,
   getWorkspacePath: () => 'G:\\mock',
+  getTabWorkspacePath: () => '',
   getInitialSessionId: () => '',
   onMessage: (fn: (msg: unknown) => void) => { messageHandler = fn },
   onStreamEvent: () => {},
@@ -116,5 +117,15 @@ describe('autoArchiveRan skipped', () => {
     useStore.getState().runAutoArchiveNow()
     expect(sentRequests.some((r) => r.op === 'runAutoArchiveNow')).toBe(false)
     expect(useStore.getState().autoArchiveRunning).toBe(false)
+  })
+
+  it('runAutoArchiveNow 请求携带历史页浏览目录（多目录会话：手动扫描跟随 chips 选择）', () => {
+    useStore.setState({ activeWorkspacePath: 'E:/work/other-project' })
+    useStore.getState().runAutoArchiveNow()
+    expect(sentRequests.at(-1)).toMatchObject({ op: 'runAutoArchiveNow', workspacePath: 'E:/work/other-project' })
+    // 浏览目录为空（未切过）→ 落项目根
+    useStore.setState({ activeWorkspacePath: '', autoArchiveRunning: false })
+    useStore.getState().runAutoArchiveNow()
+    expect(sentRequests.at(-1)).toMatchObject({ op: 'runAutoArchiveNow', workspacePath: 'G:\\mock' })
   })
 })

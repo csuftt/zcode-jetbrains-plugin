@@ -53,6 +53,9 @@ interface Props {
   canRegenerateTitle: boolean
   /** 标题生成进行中（按钮转圈，全局单飞）*/
   regeneratingTitle: boolean
+  /** 目录徽标（多目录会话·变体A，2026-10-28 方案A 定稿）：标题下方紧凑徽标。
+   *  语义两态由 App 算好传入：有会话=会话归属目录；待命=落位目录；本项目（或空）=null 不显示 */
+  wsBadgeDir?: string | null
 }
 
 export function ChatHeader({
@@ -72,6 +75,7 @@ export function ChatHeader({
   onRegenerateTitle,
   canRegenerateTitle,
   regeneratingTitle,
+  wsBadgeDir = null,
 }: Props) {
   const { t } = useTranslation()
   // settings 视图不渲染（SettingsView 自带关闭入口）
@@ -92,6 +96,22 @@ export function ChatHeader({
             canRegenerate={canRegenerateTitle}
             regenerating={regeneratingTitle}
           />
+        )}
+        {/* 目录徽标（多目录会话·变体A·方案A 定稿 2026-10-28）：紧凑徽标挂标题下方，
+            header 仅增高 ~17px。两态语义（会话归属/待命落位）由 App 算好传入，
+            本项目不显示；悬浮 title 完整路径。
+            外层 row 占满一行触发换行（无背景），徽标本体自适应内容宽度（背景不拉满） */}
+        {wsBadgeDir && currentView === 'chat' && (
+          <span className="ws-header-badge-row">
+            <span
+              className="ws-header-badge"
+              data-tooltip={wsBadgeDir}
+            >
+              <span className="ws-header-badge__name">
+                {wsBadgeDir.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop()}
+              </span>
+            </span>
+          </span>
         )}
       </div>
       <div className="header-right">

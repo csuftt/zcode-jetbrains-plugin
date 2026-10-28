@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useStore } from '@/store/useStore'
+import { useStore, peekSessionTitle } from '@/store/useStore'
 import { useTheme } from '@/hooks/useTheme'
 import { ChatHeader } from '@/components/ChatHeader'
 import { TrajectoryDialog } from '@/components/TrajectoryDialog'
@@ -51,6 +51,8 @@ export default function App() {
   // 会死循环白屏）。整仓 useStore() 会让任意 store 字段变化（skillsLoading、
   // quotaPollTimer 等无关字段）都重渲染 App 根组件，流式期间放大整树 diff
   const sessions = useStore((s) => s.sessions)
+  // 切目录加载态（多目录会话：清空旧列表 + 加载动画）
+  const sessionsLoading = useStore((s) => s.sessionsLoading)
   const currentSessionId = useStore((s) => s.currentSessionId)
   const messages = useStore((s) => s.messages)
   const loadingMessages = useStore((s) => s.loadingMessages)
@@ -70,6 +72,14 @@ export default function App() {
   // action 引用稳定，单独取不触发重渲染
   const init = useStore((s) => s.init)
   const loadSessions = useStore((s) => s.loadSessions)
+  // 多目录会话·变体A：关联目录 chips（历史页）
+  const linkedWorkspaces = useStore((s) => s.linkedWorkspaces)
+  const linkedActiveWorkspacePath = useStore((s) => s.activeWorkspacePath)
+  const currentWorkspacePath = useStore((s) => s.currentWorkspacePath)
+  const projectPath = useStore((s) => s.projectPath)
+  const switchWorkspace = useStore((s) => s.setActiveWorkspace)
+  const addLinkedWorkspace = useStore((s) => s.addLinkedWorkspace)
+  const removeLinkedWorkspace = useStore((s) => s.removeLinkedWorkspace)
   const selectSession = useStore((s) => s.selectSession)
   const resetToNewSession = useStore((s) => s.resetToNewSession)
   const stopStreaming = useStore((s) => s.stopStreaming)
@@ -253,8 +263,29 @@ export default function App() {
   }
 
   // 标题：列表里的标题（CLI 会随对话更新）→ 会话 id 前缀（列表尚未刷新时）→ 空
+  // 标题 fallback 链：列表内标题 > 手动改名持久化 > 最后已知标题缓存（跨目录浏览，
+  // 多目录会话切目录后当前会话不在列表里）> sessionId 前缀。
+  // 后两层兜"切目录浏览"场景（多目录会话）：sessions 随激活目录全量替换后当前会话
+  // 不在新目录列表里，没有兜底层标题会闪回 sess_ 前缀（真机 2026-10-27 实测）
   const sessionTitle =
-    currentSession?.title ?? (currentSessionId ? currentSessionId.slice(0, 12) : '')
+    currentSession?.title ??
+    (currentSessionId ? getPersisted(`zcode.sessionTitle.${currentSessionId}`) : null) ??
+    (currentSessionId ? peekSessionTitle(currentSessionId) : null) ??
+    (currentSessionId ? currentSessionId.slice(0, 12) : '')
+
+  // 目录徽标（多目录会话·变体A·方案A）：语义两态——有会话=会话归属目录（不随 chips
+  // 漂移），待命=落位目录（随 chips 切换）；=本项目（或空）不显示
+  const wsBadgeDir = useMemo(() => {
+    const dir = currentSessionId ? currentWorkspacePath : linkedActiveWorkspacePath
+    if (!dir) return null
+    if (
+      dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() ===
+      projectPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    ) {
+      return null
+    }
+    return dir
+  }, [currentSessionId, currentWorkspacePath, linkedActiveWorkspacePath, projectPath])
 
   // AI 重新生成标题：有真实用户消息才可生成；失败提示 6s 自动消失
   const canRegenerateTitle = useMemo(() => extractTitleExcerpt(messages) !== null, [messages])
@@ -287,6 +318,7 @@ export default function App() {
       <ChatHeader
         currentView={currentView}
         sessionTitle={sessionTitle}
+        wsBadgeDir={wsBadgeDir}
         onBack={() => setCurrentView('chat')}
         newSessionDisabled={currentSessionEmpty}
         onNewSession={handleNewSession}
@@ -363,6 +395,7 @@ export default function App() {
         {currentView === 'history' && (
           <HistoryView
             sessions={sessions}
+            sessionsLoading={sessionsLoading}
             archivedSessions={archivedSessions}
             archivedLoading={archivedLoading}
             currentSessionId={currentSessionId}
@@ -379,6 +412,22 @@ export default function App() {
             unreadSessionIds={unreadSessionIds}
             onRefresh={loadSessions}
             onLoadArchived={loadArchivedSessions}
+            linkedWorkspaces={linkedWorkspaces}
+            activeWorkspacePath={linkedActiveWorkspacePath}
+            projectWorkspacePath={projectPath}
+            onSwitchWorkspace={switchWorkspace}
+            onAddWorkspace={addLinkedWorkspace}
+            onRemoveWorkspace={removeLinkedWorkspace}
+            onNewSession={() => {
+              if (currentSessionId) {
+                // 当前标签有会话：开新标签落位到浏览目录，不覆盖现有会话
+                sendToJava({ op: 'createTab', workspacePath: linkedActiveWorkspacePath || projectPath })
+              } else {
+                // 当前标签已在待命态：就地进待命（落位=浏览目录），首条消息懒创建
+                resetToNewSession()
+                setCurrentView('chat')
+              }
+            }}
           />
         )}
 

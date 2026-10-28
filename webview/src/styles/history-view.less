@@ -22,6 +22,165 @@
   background: var(--bg-secondary);
 }
 
+/* ============ 关联目录 chips 行（多目录会话·变体A）============ */
+.history-ws-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap; /* 目录多/名字长时换行（隐藏式横滚不可发现，用户实测反馈）*/
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-secondary);
+  background: var(--bg-secondary);
+}
+
+.history-ws-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  flex: none;
+  /* 长目录名截断（换行行内自适应，悬浮 title 显示全路径）*/
+  max-width: 220px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  &--active {
+    border-color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-primary));
+
+    .history-ws-chip__name {
+      color: var(--text-secondary);
+    }
+  }
+
+  &__icon {
+    display: none; /* 图标已去（用户定稿 2026-10-27）：chips 纯文字更紧凑 */
+  }
+
+  &__name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 本项目 chip：文字即身份（显示「本项目」三字，title 悬浮完整路径）*/
+  &--project &__name {
+    color: var(--accent-primary);
+  }
+
+  &__remove {
+    /* 显隐由编辑态类驱动（.history-ws-chips--editing），不走 hover——hover 显隐让
+       chip 宽度变化挤出换行（真机反馈 2026-10-28）。!important 钉死排除环境覆盖 */
+    display: none !important;
+    margin-right: -3px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+
+    &:hover {
+      color: var(--color-danger, #f14c4c);
+    }
+  }
+
+  /* 编辑模式下 × 常显 */
+  .history-ws-chips--editing &__remove {
+    display: inline-flex !important;
+  }
+
+  /* ⊕ 添加：圆形虚线，视觉上与目录 chip 区分 */
+  &--add {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+    border-style: dashed;
+    border-color: var(--border-secondary);
+    color: var(--text-tertiary);
+    background: transparent;
+
+    &:hover {
+      color: var(--accent-primary);
+      border-color: var(--accent-primary);
+      background: transparent;
+    }
+  }
+
+  /* 管理开关（编辑态切换）：同 ⊕ 的小圆钮形，激活时主题色实底提示“正在编辑”*/
+  &--edit {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+    border-color: var(--border-secondary);
+    color: var(--text-tertiary);
+    background: transparent;
+
+    .codicon {
+      font-size: 12px;
+    }
+
+    &:hover {
+      color: var(--accent-primary);
+      border-color: var(--accent-primary);
+      background: transparent;
+    }
+  }
+
+  &--edit-active {
+    border-color: var(--accent-primary);
+    color: #fff;
+    background: var(--accent-primary);
+
+    &:hover {
+      color: #fff;
+      border-color: var(--accent-primary);
+      background: var(--accent-primary);
+    }
+  }
+
+  /* 新建会话：文字按钮（与目录 chip 同族但主题色描边强调，落位=当前浏览目录）*/
+  &--new {
+    gap: 4px;
+    color: var(--accent-primary);
+    border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+    background: transparent;
+
+    .codicon {
+      font-size: 12px;
+    }
+
+    &:hover {
+      border-color: var(--accent-primary);
+      background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+    }
+  }
+}
+
+/* 信息条里的激活目录路径（切到关联目录时显示，等宽小字）*/
+.history-info__ws {
+  display: block;
+  margin-top: 2px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, Consolas, monospace);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  opacity: 0.8;
+}
+
 /* tab 切换：会话 / 已归档 */
 .history-tabs {
   display: flex;
@@ -174,6 +333,18 @@
   text-align: center;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* 切目录加载中（多目录会话）：转圈 + 文案横排居中 */
+.history-empty.history-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  .codicon {
+    color: var(--accent-primary);
+  }
 }
 
 /* 滚动条 */

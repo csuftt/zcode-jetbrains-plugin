@@ -40,9 +40,11 @@
     "daysLabel": "Retention period",
     "daysValue": "After {{count}} days",
     "sharedHint": "The switch and retention period are shared with the ZCode desktop client; changes on either side take effect on both",
+    "scanScopeHint": "Scheduled sweep covers the project workspace; \"Scan now\" follows the workspace currently browsed above the history list",
     "lastSweep": "Last scan: {{time}}",
     "runTitle": "Manual scan",
     "runNow": "Scan now",
+    "runNowScopeTitle": "Will scan: {{ws}}",
     "running": "Scanning…",
     "runDisabledHint": "Enable “Auto-archive old tasks” above to run a manual scan",
     "skippedDisabled": "Auto-archive is disabled; this scan was skipped",
@@ -70,5 +72,18 @@
   "running": "Running",
   "forkedSession": "Forked session",
   "goalSession": "Goal session",
-  "pendingBadge": "{{count}} pending"
+  "pendingBadge": "{{count}} pending",
+  "wsChips": {
+    "workspace": "Workspace",
+    "project": "This project",
+    "addTitle": "Link another directory… (session list switches by directory; new sessions, memory & AGENTS.md belong to it)",
+    "remove": "Remove link (session data in that directory is untouched)",
+    "currentDirBadge": "Active directory: {{path}} (new sessions will be created here)",
+    "resetToProject": "Remove directory badge (new sessions back to this project; open sessions unaffected)",
+    "removeConfirmTitle": "Remove linked directory",
+    "removeConfirmMessage": "Remove linked directory \"{{name}}\"? Sessions in it are unaffected; you can re-link anytime.",
+    "editTitle": "Manage linked directories (show/hide remove buttons)",
+    "newSession": "New session",
+    "badgePrefix": "Dir"
+  }
 }

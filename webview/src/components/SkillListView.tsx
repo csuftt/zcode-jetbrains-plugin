@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { sendToJava } from '@/ipc/bridge'
 import type { SkillInfo } from '@/types/messages'
+import { wsBasename } from '@/utils/format'
 import '../styles/skill-list-view.less'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
@@ -108,6 +109,10 @@ export function SkillListView() {
   const skillsLoading = useStore((s) => s.skillsLoading)
   const skillsError = useStore((s) => s.skillsError)
   const loadSkills = useStore((s) => s.loadSkills)
+  // 多目录会话：浏览目录下拉（''=本项目；关联目录时才显示）
+  const linkedWorkspaces = useStore((s) => s.linkedWorkspaces)
+  const projectPath = useStore((s) => s.projectPath)
+  const skillsWorkspace = useStore((s) => s.skillsWorkspace)
 
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all')
   const [query, setQuery] = useState('')
@@ -154,6 +159,25 @@ export function SkillListView() {
   return (
     <div className="skill-list-view">
       <div className="skill-list-view__toolbar">
+        {/* 浏览目录下拉（多目录会话）：切目录重扫清单，project scope 计数随目录变化 */}
+        {linkedWorkspaces.length > 0 && (
+          <span className="skill-list-view__ws-label">{t('history.wsChips.workspace')}</span>
+        )}
+        {linkedWorkspaces.length > 0 && (
+          <select
+            className="skill-list-view__ws-select"
+            value={skillsWorkspace || projectPath}
+            onChange={(e) => {
+              const v = e.target.value
+              loadSkills(v === projectPath ? '' : v)
+            }}
+          >
+            <option value={projectPath} title={projectPath}>{t('history.wsChips.project')}</option>
+            {linkedWorkspaces.map((w) => (
+              <option key={w} value={w} title={w}>{wsBasename(w)}</option>
+            ))}
+          </select>
+        )}
         <div className="skill-list-view__tabs">
           {filters.map((f) => (
             <button

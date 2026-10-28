@@ -22,11 +22,19 @@ class ZCodeTabState : PersistentStateComponent<ZCodeTabState.State> {
         var name: String = ""
         var sessionId: String? = null
 
+        /**
+         * 标签当前会话所属目录（多目录会话，2026-10-27）：重启恢复时随标签注入 webview
+         * 作 activeWorkspacePath 初值——boot 首拉列表按它过滤，关联目录的绑定会话才能恢复。
+         * 旧版 XML 无此字段 → null = 本项目（回退 projectPath，行为与旧版一致）。
+         */
+        var workspacePath: String? = null
+
         constructor()
 
-        constructor(name: String, sessionId: String?) {
+        constructor(name: String, sessionId: String?, workspacePath: String? = null) {
             this.name = name
             this.sessionId = sessionId
+            this.workspacePath = workspacePath
         }
     }
 

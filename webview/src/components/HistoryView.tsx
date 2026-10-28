@@ -25,10 +25,13 @@ import { SessionItem } from './SessionItem'
 import { ConfirmDialog } from './ConfirmDialog'
 import { AutoArchivePanel } from './AutoArchivePanel'
 import { sortSessionsByPin } from '@/utils/sessionPinSort'
+import { wsBasename } from '@/utils/format'
 import '../styles/history-view.less'
 
 interface Props {
   sessions: SessionInfo[]
+  /** 切目录加载中（多目录会话：清空旧列表 + 动画，防旧目录残留误导）*/
+  sessionsLoading?: boolean
   archivedSessions: SessionInfo[]
   archivedLoading: boolean
   currentSessionId: string | null
@@ -39,8 +42,9 @@ interface Props {
   onLocate: (sessionId: string) => Promise<boolean>
   /** 当前各标签已绑定的会话快照（行标「会话N」+ 点击已开项先确认再跳；瞬态查询不入 state）*/
   onLoadOpenTabs: () => Promise<OpenTabInfo[]>
-  /** 「新标签页打开」选择：Java gotoSession 统一路径（定位已确认无宿主 → 必然新建标签）*/
-  onOpenNewTab: (sessionId: string) => void
+  /** 「新标签页打开」选择：Java gotoSession 统一路径（定位已确认无宿主 → 必然新建标签）。
+   *  workspacePath（多目录会话）：会话所属目录随标签注入，新标签按它拉列表才能恢复 */
+  onOpenNewTab: (sessionId: string, workspacePath?: string) => void
   onSelect: (session: SessionInfo) => void
   /** 切回 chat 视图 */
   onBack: () => void
@@ -59,6 +63,20 @@ interface Props {
   onRefresh: () => void
   /** 进入已归档 tab 时拉取列表 */
   onLoadArchived: () => void
+  /** 关联目录列表（多目录会话·变体A：chips 渲染；project 级 kv 持久化）*/
+  linkedWorkspaces: string[]
+  /** 激活目录（chips 高亮 + 列表/新建会话落位；空=本项目）*/
+  activeWorkspacePath: string
+  /** 本项目根（常驻第一个 chip，带徽标不可移除）*/
+  projectWorkspacePath: string
+  /** 切换激活目录（chips 点击）*/
+  onSwitchWorkspace: (path: string) => void
+  /** 添加关联目录（⊕：Java 弹系统目录选择框，应答带 added 自动切换）*/
+  onAddWorkspace: () => void
+  /** 移除关联目录（chip hover ×；若移除的是激活目录由 store 回退本项目）*/
+  onRemoveWorkspace: (path: string) => void
+  /** 新建会话（chips 行按钮）：进待命态并切回聊天视图，落位=当前浏览目录 */
+  onNewSession: () => void
 }
 
 /** 待确认的批量操作（归档/恢复/删除共用 modal 确认；删除为 danger 样式）*/
@@ -74,14 +92,21 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return (
     <>
       {text.slice(0, idx)}
-      <mark style={{ backgroundColor: '#ffd700', color: '#000' }}>{text.slice(idx, idx + q.length)}</mark>
-      {text.slice(idx + q.length)}
+      <mark style={{ backgroundColor: '#ffd700', color: '#000' }}>{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
     </>
   )
 }
 
+/** 目录归一比较（与 store normalizeWsPath 同口径；此处独立小函数避免跨模块测试依赖）*/
+function wsSame(a: string, b: string): boolean {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  return norm(a) === norm(b)
+}
+
 export function HistoryView({
   sessions,
+  sessionsLoading = false,
   archivedSessions,
   archivedLoading,
   currentSessionId,
@@ -98,6 +123,13 @@ export function HistoryView({
   unreadSessionIds,
   onRefresh,
   onLoadArchived,
+  linkedWorkspaces = [],
+  activeWorkspacePath = '',
+  projectWorkspacePath = '',
+  onSwitchWorkspace = () => {},
+  onAddWorkspace = () => {},
+  onRemoveWorkspace = () => {},
+  onNewSession = () => {},
 }: Props) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<'active' | 'archived' | 'auto'>('active')
@@ -110,6 +142,11 @@ export function HistoryView({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   // 批量操作确认 modal（null = 不显示）
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
+  // 待二次确认移除的关联目录（点 × 先弹确认，防误触——用户定稿 2026-10-28）
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null)
+  // 关联目录编辑模式（用户定稿 2026-10-28）：× 随 hover 显示会让 chip 宽度变化导致
+  // 换行抖动，删除又是低频操作——加独立管理开关，编辑态下 × 才常显
+  const [wsEditing, setWsEditing] = useState(false)
   // 切换确认 modal（当前标签有会话时的打开方式选择，null = 不显示）
   const [switchTarget, setSwitchTarget] = useState<SessionInfo | null>(null)
   // 跳转确认 modal（点击已在其他标签打开的会话：先确认再跳，防标题相似误点）
@@ -132,10 +169,13 @@ export function HistoryView({
     onLoadOpenTabs().then((tabs) => setOpenTabMap(new Map(tabs.map((x) => [x.sessionId, x.tabName]))))
   }
 
-  // 切到已归档 tab 时拉取列表（每次切换都刷新，保证归档项新鲜）
+  // 切到已归档 tab 时拉取列表（每次切换都刷新，保证归档项新鲜）；
+  // activeWorkspacePath 入依赖：归档 tab 内切目录也要跟随刷新（store 切目录只清空
+  // archivedSessions 并重拉普通列表，归档靠这里补拉。切目录同步置 sessionsWorkspace，
+  // 归档响应的乱序守卫即时认新目录，不会被误丢——真机 2026-10-28：归档列表停在旧目录）
   useEffect(() => {
     if (tab === 'archived') onLoadArchived()
-  }, [tab, onLoadArchived])
+  }, [tab, onLoadArchived, activeWorkspacePath])
 
   // 搜索防抖 300ms
   useEffect(() => {
@@ -305,6 +345,70 @@ export function HistoryView({
 
   return (
     <div className="history-view">
+      {/* 关联目录 chips 行（多目录会话·变体A）：本项目常驻 + 关联目录 + ⊕。
+          常驻渲染（含空态）——⊕ 是添加第一个关联目录的唯一入口，空态藏行=功能不可达
+          （首版真机踩坑：只在有关联目录时渲染，用户看不到任何入口）*/}
+      <div className={`history-ws-chips ${wsEditing ? 'history-ws-chips--editing' : ''}`}>
+        <button
+          type="button"
+          className={`history-ws-chip history-ws-chip--project ${wsSame(activeWorkspacePath || projectWorkspacePath, projectWorkspacePath) ? 'history-ws-chip--active' : ''}`}
+          title={projectWorkspacePath}
+          onClick={() => onSwitchWorkspace(projectWorkspacePath)}
+        >
+          <span className="history-ws-chip__name">{t('history.wsChips.project')}</span>
+        </button>
+        {linkedWorkspaces.map((ws) => {
+          const active = wsSame(activeWorkspacePath || projectWorkspacePath, ws)
+          return (
+            <button
+              type="button"
+              key={ws}
+              className={`history-ws-chip ${active ? 'history-ws-chip--active' : ''}`}
+              title={ws}
+              onClick={() => onSwitchWorkspace(ws)}
+            >
+              <span className="history-ws-chip__name">{wsBasename(ws)}</span>
+              <span
+                className="history-ws-chip__remove codicon codicon-close"
+                title={t('history.wsChips.remove')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setRemoveTarget(ws)
+                }}
+              />
+            </button>
+          )
+        })}
+        <button
+          type="button"
+          className="history-ws-chip history-ws-chip--add"
+          title={t('history.wsChips.addTitle')}
+          onClick={onAddWorkspace}
+        >
+          <span className="codicon codicon-plus" />
+        </button>
+        {/* 管理开关（用户定稿 2026-10-28）：× 随 hover 显隐会让 chip 宽度变化挤出换行；
+            编辑态下各关联目录 chip 的 × 才常显，删除仍走二次确认 */}
+        <button
+          type="button"
+          className={`history-ws-chip history-ws-chip--edit ${wsEditing ? 'history-ws-chip--edit-active' : ''}`}
+          title={t('history.wsChips.editTitle')}
+          onClick={() => setWsEditing((v) => !v)}
+        >
+          <span className="codicon codicon-edit" />
+        </button>
+        {/* 新建会话（多目录会话）：快速在当前浏览目录开新会话——进待命态落位即 chips 选择，
+            首条消息才真实建会话（避免空会话垃圾） */}
+        <button
+          type="button"
+          className="history-ws-chip history-ws-chip--new"
+          title={t('history.wsChips.newSession')}
+          onClick={onNewSession}
+        >
+          <span className="codicon codicon-comment-draft" />
+          <span className="history-ws-chip__name">{t('history.wsChips.newSession')}</span>
+        </button>
+      </div>
       <div className="history-header">
         {/* tab 切换：会话 / 已归档 */}
         <div className="history-tabs">
@@ -339,6 +443,10 @@ export function HistoryView({
               {tab === 'archived'
                 ? t('history.archivedTotal', { count: archivedSessions.length })
                 : t('history.totalSessions', { count: sessions.length })}
+              {/* 浏览目录全路径（本项目也显示，风格一致；悬浮同值）*/}
+              <span className="history-info__ws" title={activeWorkspacePath || projectWorkspacePath}>
+                {activeWorkspacePath || projectWorkspacePath}
+              </span>
             </div>
           )}
 
@@ -440,7 +548,15 @@ export function HistoryView({
 
       {tab === 'auto' ? <AutoArchivePanel /> : (
       <div className="history-list">
-        {tab === 'archived' && archivedLoading && archivedSessions.length === 0 ? (
+        {tab === 'active' && sessionsLoading ? (
+          /* 切目录加载中（用户定稿：切换即清空旧列表 + 加载动画，防旧目录列表误导）*/
+          <div className="history-empty history-loading">
+            <span className="codicon codicon-loading codicon-modifier-spin" />
+            {t('history.loading')}
+          </div>
+        ) : tab === 'archived' && (archivedLoading || sessionsLoading) && archivedSessions.length === 0 ? (
+          /* sessionsLoading 并入：切目录瞬间归档请求还没发出（effect 在渲染后跑），
+             借切目录加载态占位，防「回收站为空」闪一帧再跳加载动画 */
           <div className="history-empty">{t('history.loading')}</div>
         ) : filtered.length === 0 ? (
           <div className="history-empty">
@@ -492,6 +608,21 @@ export function HistoryView({
         />
       )}
 
+      {/* 移除关联目录二次确认（× hover 显示 + 误触防护，用户定稿 2026-10-28）*/}
+      {removeTarget && (
+        <ConfirmDialog
+          title={t('history.wsChips.removeConfirmTitle')}
+          message={t('history.wsChips.removeConfirmMessage', { name: wsBasename(removeTarget) })}
+          confirmText={t('history.wsChips.remove')}
+          onConfirm={() => {
+            const target = removeTarget
+            setRemoveTarget(null)
+            onRemoveWorkspace(target)
+          }}
+          onCancel={() => setRemoveTarget(null)}
+        />
+      )}
+
       {/* 打开方式选择 modal（当前标签已有会话：覆盖当前标签页 / 新标签页打开）*/}
       {switchTarget && (
         <ConfirmDialog
@@ -506,9 +637,10 @@ export function HistoryView({
             onBack()
           }}
           onExtra={() => {
-            const sid = switchTarget.sessionId
+            const target = switchTarget
             setSwitchTarget(null)
-            onOpenNewTab(sid)
+            // 会话自身目录随标签传递（多目录会话）：新标签 boot 首拉按它过滤才能恢复
+            onOpenNewTab(target.sessionId, target.workspacePath)
             onBack()
           }}
           onCancel={() => setSwitchTarget(null)}

@@ -15,10 +15,14 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SettingToggle } from './SettingToggle'
 import { useStore } from '@/store/useStore'
+import { wsBasename } from '@/utils/format'
 import '../styles/agent-select.less'
 import '../styles/auto-archive-panel.less'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
+
+/** 目录归一比较（与 store normalizeWsPath 同口径） */
+const normWs = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 
 /** 保留天数选项（客户端 schema：正整数 max 365；这里给常用档位，非档位值原样显示） */
 const DAY_OPTIONS = [1, 3, 7, 14, 30]
@@ -42,6 +46,9 @@ export function AutoArchivePanel() {
   const loadAutoArchiveData = useStore((s) => s.loadAutoArchiveData)
   const setAutoArchiveConfig = useStore((s) => s.setAutoArchiveConfig)
   const runAutoArchiveNow = useStore((s) => s.runAutoArchiveNow)
+  // 手动扫描的作用域展示（多目录会话：跟随历史页浏览目录）
+  const activeWorkspacePath = useStore((s) => s.activeWorkspacePath)
+  const projectPath = useStore((s) => s.projectPath)
 
   // 进面板拉配置+记录（每次挂载都拉，保证记录新鲜）
   useEffect(() => {
@@ -122,12 +129,20 @@ export function AutoArchivePanel() {
           type="button"
           className="auto-archive-panel__run-btn"
           disabled={running || !enabled}
-          title={!enabled && configLoaded ? t('history.autoArchive.runDisabledHint') : undefined}
+          title={
+            !enabled && configLoaded
+              ? t('history.autoArchive.runDisabledHint')
+              : t('history.autoArchive.runNowScopeTitle', { ws: activeWorkspacePath || projectPath })
+          }
           onClick={runAutoArchiveNow}
         >
           <span className={cx('codicon', running ? 'codicon-loading spin' : 'codicon-sync')} />
           <span>{running ? t('history.autoArchive.running') : t('history.autoArchive.runNow')}</span>
         </button>
+        <small className="auto-archive-panel__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('history.autoArchive.scanScopeHint')}</span>
+        </small>
         {!enabled && configLoaded && (
           <small className="auto-archive-panel__hint">
             <span className="codicon codicon-info" />
@@ -190,6 +205,12 @@ export function AutoArchivePanel() {
                     <span className="auto-archive-panel__record-days">
                       {t('history.autoArchive.daysValueShort', { count: r.days })}
                     </span>
+                    {/* 工作区徽标：仅扫的不是项目根时显示（旧记录/项目根轮次不占位）*/}
+                    {r.workspace && normWs(r.workspace) !== normWs(projectPath) && (
+                      <span className="auto-archive-panel__record-ws" title={r.workspace}>
+                        {wsBasename(r.workspace)}
+                      </span>
+                    )}
                     <span className="auto-archive-panel__record-count">
                       {t('history.autoArchive.recordCount', { count: r.count })}
                     </span>

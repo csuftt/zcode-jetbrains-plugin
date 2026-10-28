@@ -46,11 +46,12 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
         fun getToolWindow(project: Project): ToolWindow? =
             ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
 
-        /** 新建一个标签页（须在 EDT 调用；新标签 = 新会话，不继承旧会话）*/
-        fun createNewTab(project: Project, toolWindow: ToolWindow): Content? {
+        /** 新建一个标签页（须在 EDT 调用；新标签 = 新会话，不继承旧会话）。
+         *  initialWorkspace：标签初始落位目录（多目录会话，缺省本项目）*/
+        fun createNewTab(project: Project, toolWindow: ToolWindow, initialWorkspace: String? = null): Content? {
             val cm = toolWindow.contentManager
             val tabName = getNextTabName(cm)
-            val content = addTabContent(project, toolWindow, null, tabName)
+            val content = addTabContent(project, toolWindow, null, tabName, initialWorkspace = initialWorkspace)
             toolWindow.show(null)
             return content
         }
@@ -81,12 +82,14 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
          * 打开绑定指定会话的标签并激活（须在 EDT 调用）——定时消息后台补发后恢复实时交互：
          * 已有绑定该会话的标签则选中（含懒加载标签激活）；没有则新建标签按该会话恢复
          * （前端 boot 按 initialSessionId selectSession + subscribe，与重启恢复同路径）。
+         * workspacePath（多目录会话）：会话所属目录，随标签注入——新标签 boot 首拉列表
+         * 按它过滤，跨目录会话才能被恢复；null = 本项目（旧调用方缺省）。
          */
-        fun openSessionTab(project: Project, sessionId: String) {
+        fun openSessionTab(project: Project, sessionId: String, workspacePath: String? = null) {
             if (sessionId.isBlank()) return
             val toolWindow = getToolWindow(project) ?: return
             if (activateSessionTab(project, sessionId)) return
-            addTabContent(project, toolWindow, sessionId, getNextTabName(toolWindow.contentManager))
+            addTabContent(project, toolWindow, sessionId, getNextTabName(toolWindow.contentManager), initialWorkspace = workspacePath)
             toolWindow.show(null)
         }
 
@@ -127,9 +130,11 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             initialSessionId: String?,
             tabName: String,
             lazy: Boolean = false,
+            /** 标签初始目录（多目录会话）：与 initialSessionId 配对，随 bridge 注入（见 panel 注释）*/
+            initialWorkspace: String? = null,
         ): Content {
             val panel: JComponent = try {
-                ZCodeToolWindowPanel(project, initialSessionId, lazyStart = lazy)
+                ZCodeToolWindowPanel(project, initialSessionId, lazyStart = lazy, initialWorkspace = initialWorkspace)
             } catch (t: Throwable) {
                 // 工具窗创建的最后一道兜底：面板构造异常炸穿=Cannot init toolwindow，
                 // 整个工具窗死透+标签恢复断链（2026-10-19 JCEF 基础设施死亡、2026-09-17 缺陷BT
@@ -167,7 +172,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             return label
         }
 
-        /** 把当前标签布局全量写入 TabState（名字 + sessionId + activeIndex）*/
+        /** 把当前标签布局全量写入 TabState（名字 + sessionId + workspacePath + activeIndex）*/
         fun persistTabs(project: Project, cm: ContentManager) {
             val state = ZCodeTabState.getInstance(project).state
             state.tabs = cm.contents.mapNotNull { c ->
@@ -175,6 +180,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 ZCodeTabState.TabInfo(
                     name = panel.getBaseTabTitle().ifBlank { c.displayName ?: "" },
                     sessionId = panel.getCurrentSessionIdForPersist(),
+                    workspacePath = panel.getCurrentWorkspacePathForPersist(),
                 )
             }.toMutableList()
             val selected = cm.selectedContent
@@ -232,6 +238,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 addTabContent(
                     project, toolWindow, sid, info.name.ifBlank { message("tab.name.untitled") },
                     lazy = i != activeIdx,
+                    initialWorkspace = info.workspacePath,
                 )
             }
             // 恢复激活索引

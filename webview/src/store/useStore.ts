@@ -13,7 +13,7 @@
  */
 
 import { create } from 'zustand'
-import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId } from '@/ipc/bridge'
+import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId, getTabWorkspacePath } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
 import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary } from '@/types/messages'
@@ -1084,6 +1084,24 @@ interface StoreState {
   lastError: string | null
   projectPath: string
 
+  /** 关联目录列表（多目录会话·变体A：project 级 kv 持久化，Java getLinkedWorkspaces 应答）*/
+  linkedWorkspaces: string[]
+  /** 激活目录（会话列表/新建会话落位的 workspace；空 = 未初始化，视同 projectPath）*/
+  activeWorkspacePath: string
+  /** 标签初始目录（多目录会话，Java 注入一次性值）：仅 boot 首拉列表使用（绑定会话
+   *  恢复依赖），消费后即清——落位/chips 不随"标签打开了别的目录的旧会话"漂移 */
+  bootWorkspace: string
+  /** boot 首拉在途（多目录会话）：首拉响应处理完（恢复或未命中）即把列表作用域静默
+   *  切回落位目录并重拉——chips 高亮（=落位）与列表一致（真机 2026-10-28：重启后
+   *  高亮本项目但列表停在关联目录） */
+  bootRestorePending: boolean
+  /** 当前 sessions 列表所属目录（最近一次 loadSessions 请求的 workspace；跨目录切
+   *  换后 staleLocal 补插与 boot 恢复都按它过滤，防旧目录条目残留/误恢复）*/
+  sessionsWorkspace: string
+  /** 会话列表加载中（切目录即置位+清空旧列表：用户拍板"切换应清空现有+加载动画"，
+   *  旧目录列表残留展示比空白更误导）；响应到达或被乱序丢弃时清 */
+  sessionsLoading: boolean
+
   /** 驻留水位提醒（缺陷BA）：Java 账本预计打开会话后越过服务端驻留阈值时由 subscribed 应答置位 */
   residentPoolNotice: string | null
 
@@ -1413,6 +1431,8 @@ interface StoreState {
 
   // 记忆文件（设置视图「记忆」条目，Kotlin 端固定清单扫描）
   memoryFiles: MemoryFileInfo[] | null
+  /** 记忆页浏览目录（多目录会话：''=本项目；切目录重拉清单）*/
+  memoryWorkspace: string
   /** 自动记忆目录定位（null=未加载/无打开项目；排查「有记忆但读取不到」）*/
   memoryDir: MemoryDirInfo | null
   /** 自动记忆全文搜索：null=非搜索态；activeQuery 用于对齐丢弃乱序应答 */
@@ -1463,6 +1483,8 @@ interface StoreState {
   // 技能清单（设置视图「技能」条目，SkillScanner 三来源扫描）
   skills: SkillInfo[] | null
   skillsLoading: boolean
+  /** 技能页浏览目录（多目录会话：''=本项目；切目录重扫清单）*/
+  skillsWorkspace: string
   /** 正在切换启用状态的技能路径（卡片开关 loading + 防重复点击）*/
   skillTogglingPath: string | null
   skillsError: string | null
@@ -1618,6 +1640,12 @@ interface StoreState {
   // actions
   init: () => void
   loadSessions: () => void
+  /** 切换激活目录（历史页 chips）：清两列表 + 重拉（loadSessions/loadArchived 由视图按需）*/
+  setActiveWorkspace: (path: string) => void
+  /** 弹系统目录选择框添加关联目录（Java 应答带 added 时自动切过去）*/
+  addLinkedWorkspace: () => void
+  /** 移除关联目录（若移除的是激活目录自动回退本项目）*/
+  removeLinkedWorkspace: (path: string) => void
   /** 拉取当前打开文件 ref（webview mount/重连时触发；Kotlin 同步回包，case 'currentFile' 落 state）*/
   requestCurrentFile: () => void
   /** 文件上下文 chip 勾选开关（用户点击 chip / doSend 发完即关 / resetToNewSession 按设置初始化）*/
@@ -1682,8 +1710,9 @@ interface StoreState {
   locateSessionTab: (sessionId: string) => Promise<boolean>
   /** 当前各标签已绑定的会话快照（历史列表标注「已在会话N打开」用，瞬态查询不入 state）*/
   listOpenTabs: () => Promise<OpenTabInfo[]>
-  /** 历史列表「新标签页打开」：走 Java gotoSession 统一路径（定位已确认无宿主 → 必然新建标签）*/
-  openSessionNewTab: (sessionId: string) => void
+  /** 历史列表「新标签页打开」：走 Java gotoSession 统一路径（定位已确认无宿主 → 必然新建标签）。
+   *  workspacePath（多目录会话）：会话所属目录随标签注入，新标签 boot 首拉按它过滤才能恢复 */
+  openSessionNewTab: (sessionId: string, workspacePath?: string) => void
   stopStreaming: () => void
   /** 重命名会话（CLI 协议无 rename op，仅前端 persist 持久化）*/
   renameSession: (sessionId: string, title: string) => void
@@ -1732,8 +1761,8 @@ interface StoreState {
   dismissQuotaBanner: (key: string) => void
   /** 清除额度横幅错误触发源（窗口恢复/新回合开始时由 useQuotaBanner 调用）*/
   clearQuotaBannerError: () => void
-  /** 拉取记忆文件清单（设置视图「记忆」条目）*/
-  loadMemoryFiles: () => void
+  /** 拉取记忆文件清单（设置视图「记忆」条目；带 path 切浏览目录，缺省延续当前作用域）*/
+  loadMemoryFiles: (path?: string) => void
   /** 自动记忆全文搜索（调用方防抖；空 query 退出搜索态）*/
   searchMemoryFiles: (query: string) => void
   /** 创建缺失的记忆文件（写默认模板，Kotlin 侧自动用编辑器打开）*/
@@ -1759,7 +1788,7 @@ interface StoreState {
   /** 关闭浏览器设置的错误提示 */
   clearBrowserError: () => void
   /** 拉取技能清单（设置视图「技能」条目）*/
-  loadSkills: () => void
+  loadSkills: (path?: string) => void
   /** 启用/禁用技能（写 config skill 节点，CLI 下次发现生效）*/
   toggleSkill: (path: string, enabled: boolean) => void
 
@@ -1961,6 +1990,12 @@ export const useStore = create<StoreState>((set, get) => ({
   titleRegeneratingSessionId: null,
   sessionTitleRegenError: null,
   projectPath: '',
+  linkedWorkspaces: [],
+  activeWorkspacePath: '',
+  bootWorkspace: '',
+  bootRestorePending: false,
+  sessionsWorkspace: '',
+  sessionsLoading: false,
   envStatus: null,
   envSaving: false,
   pendingSettingsSection: null,
@@ -2077,6 +2112,7 @@ export const useStore = create<StoreState>((set, get) => ({
   quotaFetchedAt: 0,
   usageProvider: null,
   memoryFiles: null,
+  memoryWorkspace: '',
   memoryDir: null,
   memorySearchResults: null,
   memorySearchActiveQuery: '',
@@ -2108,6 +2144,7 @@ export const useStore = create<StoreState>((set, get) => ({
   selectedAgent: null,
   agentSavedSignal: null,
   skillsLoading: false,
+  skillsWorkspace: '',
   skillTogglingPath: null,
   skillsError: null,
   slashCommands: null,
@@ -2234,6 +2271,12 @@ export const useStore = create<StoreState>((set, get) => ({
      */
     const ws = getWorkspacePath()
     set({ projectPath: ws })
+    // 标签初始目录（多目录会话）：Java 按标签绑定会话的 workspacePath 注入，只服务
+    // boot 首拉（一次性消费，见 loadSessions）——绑定会话在关联目录时列表里才有它可恢复。
+    // 不写 activeWorkspacePath：新标签落位恒本项目（用户定稿 2026-10-27），chips 高亮/
+    // 新会话落位不随"打开了别的目录的旧会话"漂移；要切目录去历史页 chips 主动切
+    const tabWs = getTabWorkspacePath()
+    if (tabWs && tabWs !== ws) set({ bootWorkspace: tabWs, bootRestorePending: true })
 
     // 桥就绪统一动作（热启动/冷启动轮询就绪/mock 态迟到恢复三处共用）：
     // 拉反向请求挂起状态 + 定时消息列表（页面刷新/重载会错过 Java 广播）+ 环境检查 +
@@ -2243,6 +2286,8 @@ export const useStore = create<StoreState>((set, get) => ({
       console.log(`[store] 桥就绪（${how}），workspace=${ws || '(空)'}`)
       sendToJava({ op: 'askUserPendingState' })
       sendToJava({ op: 'scheduledList' })
+      // 关联目录列表（多目录会话·变体A：历史页 chips 渲染）
+      sendToJava({ op: 'getLinkedWorkspaces' })
       // 拉取当前打开文件 ref（Kotlin 同步回包，case 'currentFile' 落 state）；
       // 后续变化由 EditorContextTracker 200ms 防抖主动推送覆盖
       get().requestCurrentFile()
@@ -2305,12 +2350,65 @@ export const useStore = create<StoreState>((set, get) => ({
   loadSessions: () => {
     // 记录请求发出时刻：响应合并时比对 titleUpdatedAt，早于它的快照标题不采用（防回退守卫）
     listSessionsSentAt = Date.now()
-    sendToJava({ op: 'listSessions', workspacePath: get().projectPath })
+    // 标签初始目录一次性消费（多目录会话）：仅 boot 首拉用它（绑定会话恢复依赖）。
+    // 目录取值链：boot > 落位(activeWorkspacePath) > **延续当前列表作用域(sessionsWorkspace)**
+    // > 本项目——第三级是 boot 消费后、用户尚未点过 chips 的窗口期：例行刷新（手动刷新/
+    // 归档拉取）必须延续标签初始目录，否则列表会闪切回本项目（真机 2026-10-28 同根）
+    const boot = get().bootWorkspace
+    const ws = boot || get().activeWorkspacePath || get().sessionsWorkspace || get().projectPath
+    if (boot) set({ bootWorkspace: '' })
+    // sessionsWorkspace 随请求同步——响应侧 staleLocal 补插/boot 恢复按它过滤跨目录条目
+    set({ sessionsWorkspace: ws })
+    // 加载态兜底（切目录清空列表后 loading 永挂防线）：15s 无响应自动解除。
+    // 正常路径由响应归约清除；乱序丢弃不清（新请求在途）
+    if (get().sessionsLoading) {
+      if (sessionsLoadingTimer) clearTimeout(sessionsLoadingTimer)
+      sessionsLoadingTimer = setTimeout(() => {
+        if (get().sessionsLoading) set({ sessionsLoading: false })
+      }, 15_000)
+    }
+    sendToJava({ op: 'listSessions', workspacePath: ws })
     // 顺带对账置顶集（tasks-index 指纹缓存命中时零 node 进程；顺带吸收官方桌面端
     // 在库里的 pin 变化——广播只覆盖本进程写，跨进程写靠这条对账）
     sendToJava({ op: 'listPinnedSessions' })
     // 顺带对账未读集（同一条 tasks-index 读缓存；吸收官方桌面端/手机端置的未读位）
     sendToJava({ op: 'listUnreadSessions' })
+  },
+
+  setActiveWorkspace: (path) => {
+    const target = path || get().projectPath
+    // 幂等早退基准 = 当前列表实际作用域（sessionsWorkspace），不是落位 activeWorkspacePath：
+    // boot 首拉窗口期（标签初始目录=关联目录、落位仍空=本项目）二者脱节——此时点"本项目"
+    // 必须真正重拉把列表切回来（真机 bug 2026-10-28：高亮本项目但列表停在 suiteng）。
+    // sessionsWorkspace 为空（未初始化）不参与比较（否则 fallback target 恒早退）
+    const currentScope = get().sessionsWorkspace
+    if (currentScope && normalizeWsPath(target) === normalizeWsPath(currentScope)) {
+      // 列表已在该目录：仅对齐落位（boot 消费后 activeWorkspacePath 可能仍空）
+      if (normalizeWsPath(get().activeWorkspacePath || get().projectPath) !== normalizeWsPath(target)) {
+        console.log(`[store] 列表已在该目录，仅对齐落位: ${target}`)
+        set({ activeWorkspacePath: target })
+      }
+      return
+    }
+    console.log(`[store] 切换激活目录: ${target}`)
+    // 切换即清空+进加载态（用户定稿）：旧目录列表残留展示比空白更误导（用户实测
+    // "一直显示其他目录的"）。归档缓存同步清（拉取式）；sessions 由响应全量替换，
+    // 乱序晚到的旧响应按归约守卫丢弃（Kotlin 应答回显 workspacePath）
+    set({
+      activeWorkspacePath: target,
+      sessions: [],
+      archivedSessions: [],
+      sessionsLoading: true,
+    })
+    get().loadSessions()
+  },
+
+  addLinkedWorkspace: () => {
+    sendToJava({ op: 'addLinkedWorkspace' })
+  },
+
+  removeLinkedWorkspace: (path) => {
+    sendToJava({ op: 'removeLinkedWorkspace', path })
   },
 
   toggleSessionPin: (sessionId, pinned) => {
@@ -2723,7 +2821,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const tl = get().thoughtLevel
     sendToJava({
       op: 'createSession',
-      workspacePath: get().projectPath,
+      // 新会话落在激活目录（多目录会话·变体A：历史页 chips 切换；Java 侧归一原生分隔符）
+      workspacePath: get().activeWorkspacePath || get().projectPath,
       ...(tl?.enabled && tl.current ? { thoughtLevel: tl.current } : {}),
     })
   },
@@ -2797,7 +2896,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   loadArchivedSessions: () => {
     set({ archivedLoading: true })
-    sendToJava({ op: 'listArchivedSessions', workspacePath: get().projectPath })
+    sendToJava({ op: 'listArchivedSessions', workspacePath: get().activeWorkspacePath || get().projectPath })
   },
 
   archiveSession: (sessionId) => {
@@ -2827,7 +2926,8 @@ export const useStore = create<StoreState>((set, get) => ({
     // 开关未启用不发起扫描（面板按钮同步禁用；Kotlin 侧还有终门禁言）
     if (get().autoArchiveRunning || !get().autoArchiveEnabled) return
     set({ autoArchiveRunning: true, autoArchiveLastRunSkipped: false, autoArchiveLastRunCount: null })
-    sendToJava({ op: 'runAutoArchiveNow' })
+    // 扫描跟随历史页浏览目录（多目录会话：切到关联目录=扫该目录的过期会话），缺省项目根
+    sendToJava({ op: 'runAutoArchiveNow', workspacePath: get().activeWorkspacePath || get().projectPath })
   },
 
   locateSessionTab: (sessionId) =>
@@ -2845,8 +2945,8 @@ export const useStore = create<StoreState>((set, get) => ({
       sendToJava({ op: 'listOpenSessions' })
     }),
 
-  openSessionNewTab: (sessionId) => {
-    sendToJava({ op: 'gotoSession', sessionId })
+  openSessionNewTab: (sessionId, workspacePath) => {
+    sendToJava({ op: 'gotoSession', sessionId, ...(workspacePath ? { workspacePath } : {}) })
   },
 
   stopStreaming: () => {
@@ -3321,9 +3421,11 @@ export const useStore = create<StoreState>((set, get) => ({
 
   clearQuotaBannerError: () => set({ quotaBannerError: null }),
 
-  loadMemoryFiles: () => {
-    set({ memoryLoading: true, memoryError: null })
-    sendToJava({ op: 'listMemoryFiles' })
+  loadMemoryFiles: (path) => {
+    // 浏览目录：显式传参=切换；无参=延续当前作用域（设置页切走再回重挂时不清选择）
+    const ws = path ?? get().memoryWorkspace
+    set({ memoryLoading: true, memoryError: null, memoryWorkspace: ws })
+    sendToJava({ op: 'listMemoryFiles', workspacePath: ws || get().projectPath })
   },
 
   searchMemoryFiles: (query) => {
@@ -3334,12 +3436,14 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     set({ memorySearching: true, memorySearchActiveQuery: q })
-    sendToJava({ op: 'searchMemoryFiles', query: q })
+    // 搜索跟随当前浏览目录（应答按 query 对齐丢弃；切目录由组件清空搜索态）
+    sendToJava({ op: 'searchMemoryFiles', query: q, workspacePath: get().memoryWorkspace || get().projectPath })
   },
 
   createMemoryFile: (path) => {
     set({ memoryCreatingPath: path, memoryError: null })
-    sendToJava({ op: 'createMemoryFile', path })
+    // Kotlin 白名单校验按目标目录（多目录会话：在浏览的关联目录建 AGENTS.md）
+    sendToJava({ op: 'createMemoryFile', path, workspacePath: get().memoryWorkspace || get().projectPath })
   },
 
   setMemoryEnabled: (enabled) => {
@@ -3440,9 +3544,11 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ browserError: null })
   },
 
-  loadSkills: () => {
-    set({ skillsLoading: true, skillsError: null })
-    sendToJava({ op: 'listSkills' })
+  loadSkills: (path) => {
+    // 浏览目录：显式传参=切换；无参=延续当前作用域（同 loadMemoryFiles）
+    const ws = path ?? get().skillsWorkspace
+    set({ skillsLoading: true, skillsError: null, skillsWorkspace: ws })
+    sendToJava({ op: 'listSkills', workspacePath: ws || get().projectPath })
   },
 
   // 确保斜杠命令清单已拉取（消息气泡 /name chip 化的数据源；一次性，回包走 commands case）
@@ -3542,7 +3648,8 @@ export const useStore = create<StoreState>((set, get) => ({
     // 防重复点击：上一次切换还在途中就忽略
     if (get().skillTogglingPath) return
     set({ skillTogglingPath: path, skillsError: null })
-    sendToJava({ op: 'toggleSkill', path, enabled })
+    // Kotlin 白名单校验按浏览目录（多目录会话：禁用关联目录的项目技能）
+    sendToJava({ op: 'toggleSkill', path, enabled, workspacePath: get().skillsWorkspace || get().projectPath })
   },
 
   loadMcpServers: (mode = 'status') => {
@@ -3858,6 +3965,24 @@ function rangeToTimes(
  *  此守卫：快照早于本地最后权威更新 → 该会话标题保留本地值。 */
 const titleUpdatedAt: Record<string, number> = {}
 let listSessionsSentAt = 0
+
+/** 会话最后已知标题缓存（模块级，跨目录浏览不丢）：sessions 随激活目录全量替换后，
+ *  当前打开的外目录会话不在列表里——header 标题 fallback 链的中层取这里（真机
+ *  2026-10-27 实测丢标题闪回 sess_ 前缀）。手动改名（persist）仍优先于此缓存 */
+const lastKnownTitles = new Map<string, string>()
+
+/** 读会话最后已知标题（App header fallback 用；无记录 null）*/
+export function peekSessionTitle(sessionId: string): string | null {
+  return lastKnownTitles.get(sessionId) ?? null
+}
+
+/** 切目录加载态的 15s 兜底定时器（loadSessions 置位时挂，响应/超时双路解除）*/
+let sessionsLoadingTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 目录路径归一比较键（多目录会话）：统一分隔符 + 去尾 + 大小写折叠（与 Java wsKey 同口径）*/
+function normalizeWsPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
 
 
 /**
@@ -4249,7 +4374,35 @@ export function handleResponse(
   get: () => StoreState,
 ) {
   switch (msg.op) {
+    case 'linkedWorkspaces': {
+      // 关联目录全量快照（get/add/remove 三 op 共用应答）
+      set({ linkedWorkspaces: msg.workspaces })
+      // 添加即切换：用户点 ⊕ 选目录的目的就是去看它（取消选择时无 added 字段）
+      if (msg.added) {
+        get().setActiveWorkspace(msg.added)
+      } else if (
+        // 移除的是激活目录 → 回退本项目（关联目录列表已不含它）
+        get().activeWorkspacePath &&
+        normalizeWsPath(get().activeWorkspacePath) !== normalizeWsPath(get().projectPath) &&
+        !msg.workspaces.some((w) => normalizeWsPath(w) === normalizeWsPath(get().activeWorkspacePath))
+      ) {
+        get().setActiveWorkspace(get().projectPath)
+      }
+      break
+    }
     case 'listSessions': {
+      // 乱序丢弃守卫（多目录快速连切）：响应带请求时的目录回显，与当前列表作用域
+      // 不符 = 晚到的旧目录响应，直接丢（否则旧列表覆盖新目录——真机"一直显示其他
+      // 目录的"。缺省回显（旧 Java 包）不丢弃，向后兼容）
+      if (
+        msg.workspacePath &&
+        get().sessionsWorkspace &&
+        normalizeWsPath(msg.workspacePath) !== normalizeWsPath(get().sessionsWorkspace)
+      ) {
+        console.log(`[store] 丢弃乱序 listSessions 响应: ${msg.workspacePath} (当前=${get().sessionsWorkspace})`)
+        break
+      }
+      set({ sessionsLoading: false })
       // 标题合并优先级：手动重命名（persist）> 服务端正式标题（顺带清临时标题）
       // > 本地临时标题（乐观占位，见 sendMessage）> 上一帧完整标题（防服务端空值
       // 覆盖，见下）> 服务端占位（空/会话 id）
@@ -4313,13 +4466,25 @@ export function handleResponse(
       const serverIds = new Set(merged.map((s) => s.sessionId))
       const currentId = get().currentSessionId
       const RECENT_WINDOW_MS = 5 * 60_000
+      // 列表作用域（多目录会话）：补插仅限当前列表所属目录的条目——切到关联目录后，
+      // 本项目"当前打开/刚活跃"的会话不得经 staleLocal 残留进别的目录列表
+      const scopeWs = get().sessionsWorkspace
+      const inScope = (s: SessionInfo) =>
+        !scopeWs || !s.workspacePath || normalizeWsPath(s.workspacePath) === normalizeWsPath(scopeWs)
       const staleLocal = get().sessions.filter(
         (s) =>
+          inScope(s) &&
           !serverIds.has(s.sessionId) &&
           !s.sessionId.startsWith('sess_subagent') &&
           (s.sessionId === currentId || Date.now() - (s.updatedAt ?? 0) < RECENT_WINDOW_MS),
       )
       if (staleLocal.length) merged.push(...staleLocal)
+      // 标题缓存喂入（跨目录浏览丢标题的兜底层，见 lastKnownTitles 注释）
+      for (const s of merged) {
+        if (s.title && !isDefaultSessionTitle(s.title, s.sessionId)) {
+          lastKnownTitles.set(s.sessionId, s.title)
+        }
+      }
       // 时间倒序统一收口：服务端快照整体有序，但本地的补插项（staleLocal 追加在尾、
       // 乐观新建插在头）会破坏全局顺序 → 按更新时间倒序重排（稳定排序，同时间戳保持原序）
       merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
@@ -4337,8 +4502,13 @@ export function handleResponse(
       // 懒创建：新标签（无注入）/ 注入会话已删 → 保持无会话待命态，发首条消息时再建
       //（见 sendMessage），避免误点多开标签堆积空会话。注意：不走 localStorage（多标签
       // webview 同 origin 共享存储，lastSessionId 会互相覆盖导致新标签串到别的标签的会话）；
-      // 恢复职责由 Java 侧 TabState 承担
-      if (get().currentSessionId === null) {
+      // 恢复职责由 Java 侧 TabState 承担。
+      // 多目录会话：boot 恢复的作用域基准 = 标签初始目录（__ZCODE_TAB_WORKSPACE__，缺省
+      // 本项目）——标签绑定会话必属该目录；用户切到其他目录浏览后的例行刷新不得把绑定
+      // 会话从别的目录列表里"恢复"出来（新标签打开关联目录会话按注入目录恢复，同依赖）
+      const tabWs = getTabWorkspacePath() || get().projectPath
+      const bootScopeOk = !scopeWs || normalizeWsPath(scopeWs) === normalizeWsPath(tabWs)
+      if (get().currentSessionId === null && bootScopeOk) {
         const initialId = getInitialSessionId()
         const initial = initialId ? merged.find((s) => s.sessionId === initialId) : undefined
         if (initial) {
@@ -4355,6 +4525,22 @@ export function handleResponse(
           // 只点不灭：配置关时不动，防抹掉 listSessions 往返窗口内用户的手动勾选
           if (readCurrentFileConfig().autoOnNewSession) get().setCurrentFileEnabled(true)
           if (initialId) console.log('[store] 标签绑定的会话已不存在，保持无会话待命态')
+        }
+      }
+
+      // boot 恢复收尾（多目录会话，真机 2026-10-28）：boot 首拉（标签初始目录）响应已
+      // 处理完（恢复或未命中），列表作用域静默切回落位目录并重拉——否则 chips 高亮
+      // （=落位，本项目）与列表（=标签初始目录）脱节，用户看到"选中本项目但列表是
+      // 别的目录的会话"。当前会话照常打开（消息已拉），暂不在本项目列表里（标题
+      // fallback 链已兜）。切回动作再发一次 listSessions（~百毫秒；bootRestorePending
+      // 此处已消费，不会循环）
+      if (get().bootRestorePending) {
+        const fallbackWs = get().activeWorkspacePath || get().projectPath
+        set({ bootRestorePending: false })
+        if (normalizeWsPath(scopeWs) !== normalizeWsPath(fallbackWs)) {
+          console.log(`[store] boot 恢复完成，列表作用域切回落位目录: ${fallbackWs}`)
+          set({ sessions: [], sessionsWorkspace: fallbackWs, sessionsLoading: true })
+          get().loadSessions()
         }
       }
       break
@@ -4382,7 +4568,8 @@ export function handleResponse(
         sendToJava({
           op: 'scheduledCreate',
           sessionId: sid,
-          workspacePath: get().projectPath,
+          // 与会话创建目录一致（多目录会话：新会话可能落在激活目录而非本项目）
+          workspacePath: get().activeWorkspacePath || get().projectPath,
           text: pendingSchedule.text,
           fireAt: pendingSchedule.fireAt,
           ...(pendingSchedule.modelId ? { providerId: pendingSchedule.providerId, modelId: pendingSchedule.modelId } : {}),
@@ -4391,7 +4578,8 @@ export function handleResponse(
         break
       }
       if (sid) {
-        const ws = get().projectPath
+        // 会话落位目录 = 创建请求实际携带的 workspace（多目录会话：可能是激活的关联目录）
+        const ws = get().activeWorkspacePath || get().projectPath
         set({
           currentSessionId: sid,
           currentWorkspacePath: ws,
@@ -4697,7 +4885,8 @@ export function handleResponse(
           .sessions.find((s) => s.sessionId === (msg.parentSessionId ?? get().currentSessionId))
           ?.title?.trim()
         get().renameSession(msg.forkedSessionId, parentTitle ? `Fork of ${parentTitle}` : 'Fork')
-        get().openSessionNewTab(msg.forkedSessionId)
+        // fork 会话目录 = 发起标签的激活目录（多目录会话：v4 forkAssistant 轮级语义，父子同库行）
+        get().openSessionNewTab(msg.forkedSessionId, get().activeWorkspacePath || get().projectPath)
         get().loadSessions()
       }
       break
@@ -4910,7 +5099,32 @@ export function handleResponse(
       break
     }
 
+    case 'sessionStatsPatch': {
+      // 会话统计增量（多目录会话·切目录慢修复）：列表响应不再等 stats（全库直读 3~4s），
+      // 后台算完按 sessionId 合并；不在当前列表的条目自然跳过（跨目录切换后）。
+      // 归档列表同款合并（归档 tab 的 stats 异步化，2026-10-28）
+      const patch = new Map(msg.items.map((it) => [it.sessionId, it]))
+      const mergeStats = <T extends { sessionId: string }>(list: T[]) =>
+        list.map((s) => {
+          const st = patch.get(s.sessionId)
+          return st ? { ...s, messageCount: st.messageCount, sizeBytes: st.sizeBytes } : s
+        })
+      set({
+        sessions: mergeStats(get().sessions) as SessionInfo[],
+        archivedSessions: mergeStats(get().archivedSessions) as SessionInfo[],
+      })
+      break
+    }
+
     case 'archivedSessions': {
+      // 乱序丢弃守卫（同 listSessions）：晚到的旧目录归档响应不覆盖当前目录列表
+      if (
+        msg.workspacePath &&
+        get().sessionsWorkspace &&
+        normalizeWsPath(msg.workspacePath) !== normalizeWsPath(get().sessionsWorkspace)
+      ) {
+        break
+      }
       // 标题合并（persist 手动重命名优先，同 listSessions 逻辑简化版）
       const merged = msg.sessions.map((s) => {
         const stored = getPersisted(`zcode.sessionTitle.${s.sessionId}`)
@@ -5877,9 +6091,17 @@ export function handleResponse(
       }
       break
 
-    case 'memoryFiles':
+    case 'memoryFiles': {
+      // 乱序丢弃守卫（同 listSessions）：切目录后晚到的旧目录清单不覆盖当前浏览
+      if (
+        msg.workspacePath &&
+        normalizeWsPath(msg.workspacePath) !== normalizeWsPath(get().memoryWorkspace || get().projectPath)
+      ) {
+        break
+      }
       set({ memoryFiles: msg.files, memoryDir: msg.memoryDir ?? null, memoryEnabled: msg.memoryEnabled, memoryLoading: false, memoryError: null })
       break
+    }
 
     case 'memorySearchResults':
       // 对齐丢弃乱序应答：只接受与当前发起 query 一致的响应
@@ -5939,6 +6161,13 @@ export function handleResponse(
     }
 
     case 'skills':
+      // 乱序丢弃守卫：切目录后晚到的旧目录扫描不覆盖当前浏览
+      if (
+        msg.workspacePath &&
+        normalizeWsPath(msg.workspacePath) !== normalizeWsPath(get().skillsWorkspace || get().projectPath)
+      ) {
+        break
+      }
       set({ skills: msg.skills, skillsLoading: false, skillsError: null })
       break
 
