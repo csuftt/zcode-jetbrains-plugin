@@ -2,6 +2,8 @@
  * 历史视图样式（cc-gui history.less 简化版）
  */
 
+@import './mixins.less';
+
 .history-view {
   display: flex;
   flex-direction: column;
@@ -22,15 +24,32 @@
   background: var(--bg-secondary);
 }
 
-/* ============ 关联目录 chips 行（多目录会话·变体A）============ */
+/* ============ 关联目录 chips 行（多目录会话·方案B定稿 2026-10-28）============ */
 .history-ws-chips {
   display: flex;
   align-items: center;
-  flex-wrap: wrap; /* 目录多/名字长时换行（隐藏式横滚不可发现，用户实测反馈）*/
   gap: 6px;
   padding: 7px 12px;
   border-bottom: 1px solid var(--border-secondary);
   background: var(--bg-secondary);
+
+  /* 左：目录 chips 换行区（占满剩余空间，目录多时独立换行）*/
+  &__flow {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* 右：动作区固定第一行最右（不参与换行，位置稳定不随目录数量漂移）*/
+  &__actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
 }
 
 .history-ws-chip {
@@ -40,8 +59,23 @@
   height: 24px;
   padding: 0 8px;
   flex: none;
-  /* 长目录名截断（换行行内自适应，悬浮 title 显示全路径）*/
+  /* 长目录名截断（换行行内自适应，悬浮全路径改 data-tooltip 自绘气泡——
+     JCEF 原生 title 渲染错位遮挡（真机 2026-10-28），与聊天页徽标同修法）*/
   max-width: 220px;
+  .tooltip-bottom-center(28px);
+
+  /* tooltip 左对齐展开（覆盖 mixin 居中定位）：chips 贴面板左缘，居中的长路径
+     气泡会伸出工具窗左缘被裁（同聊天页徽标）；箭头对齐 chip 左部 */
+  &::after {
+    left: 0;
+    transform: none;
+    max-width: 100vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  &::before {
+    left: 14px;
+  }
   border: 1px solid var(--border-secondary);
   border-radius: 6px;
   background: var(--bg-primary);
@@ -96,17 +130,20 @@
     display: inline-flex !important;
   }
 
-  /* ⊕ 添加：圆形虚线，视觉上与目录 chip 区分 */
+  /* 添加目录：图标圆钮（folder+ 消加号歧义，去文字定稿 2026-10-28），与编辑钮同形 */
   &--add {
     width: 24px;
     height: 24px;
     padding: 0;
     justify-content: center;
     border-radius: 50%;
-    border-style: dashed;
     border-color: var(--border-secondary);
     color: var(--text-tertiary);
     background: transparent;
+
+    .codicon {
+      font-size: 13px;
+    }
 
     &:hover {
       color: var(--accent-primary);
@@ -148,26 +185,9 @@
       background: var(--accent-primary);
     }
   }
-
-  /* 新建会话：文字按钮（与目录 chip 同族但主题色描边强调，落位=当前浏览目录）*/
-  &--new {
-    gap: 4px;
-    color: var(--accent-primary);
-    border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
-    background: transparent;
-
-    .codicon {
-      font-size: 12px;
-    }
-
-    &:hover {
-      border-color: var(--accent-primary);
-      background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
-    }
-  }
 }
 
-/* 信息条里的激活目录路径（切到关联目录时显示，等宽小字）*/
+/* 信息条里的激活目录路径（本项目/关联目录都显示，等宽小字；悬浮全路径自绘气泡）*/
 .history-info__ws {
   display: block;
   margin-top: 2px;
@@ -179,13 +199,56 @@
   font-size: 10.5px;
   color: var(--text-tertiary);
   opacity: 0.8;
+  position: relative;
+  .tooltip-bottom-center(20px);
+
+  &::after {
+    left: 0;
+    transform: none;
+    max-width: 100vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  &::before {
+    left: 14px;
+  }
 }
 
-/* tab 切换：会话 / 已归档 */
+/* tab 切换：会话 / 已归档 / 自动归档；右端「新建会话」主钮（方案B定稿） */
 .history-tabs {
   display: flex;
+  align-items: center;
   gap: 4px;
   margin-bottom: 8px;
+
+  &__sp {
+    flex: 1;
+  }
+
+  /* 实底主钮：与 tab 同族高度，主题色实底为动作区视觉锚点 */
+  &__new {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    background: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    .codicon {
+      font-size: 12px;
+    }
+
+    &:hover {
+      background: color-mix(in srgb, var(--accent-primary) 85%, #000);
+      border-color: color-mix(in srgb, var(--accent-primary) 85%, #000);
+    }
+  }
 }
 
 .history-tab {

@@ -2271,12 +2271,18 @@ export const useStore = create<StoreState>((set, get) => ({
      */
     const ws = getWorkspacePath()
     set({ projectPath: ws })
-    // 标签初始目录（多目录会话）：Java 按标签绑定会话的 workspacePath 注入，只服务
-    // boot 首拉（一次性消费，见 loadSessions）——绑定会话在关联目录时列表里才有它可恢复。
-    // 不写 activeWorkspacePath：新标签落位恒本项目（用户定稿 2026-10-27），chips 高亮/
-    // 新会话落位不随"打开了别的目录的旧会话"漂移；要切目录去历史页 chips 主动切
+    // 标签初始目录（多目录会话）：按标签类型分叉——
+    //   会话标签（gotoSession「新标签页打开」/重启恢复，initialSessionId 非空）：
+    //     只落 bootWorkspace 服务绑定会话恢复，落位恒本项目（用户定稿 2026-10-27），
+    //     chips 高亮/新会话落位不随"打开了别的目录的旧会话"漂移；
+    //   「新建会话」开的空标签（无绑定会话，用户点按钮即表达"在此目录新建"）：
+    //     落位即标签目录——徽标/chips 高亮/列表作用域/createSession 全按它走
+    //     （真机 2026-10-28：新标签没带工作区徽标），无恢复需求不进 boot 链
     const tabWs = getTabWorkspacePath()
-    if (tabWs && tabWs !== ws) set({ bootWorkspace: tabWs, bootRestorePending: true })
+    if (tabWs && tabWs !== ws) {
+      if (getInitialSessionId()) set({ bootWorkspace: tabWs, bootRestorePending: true })
+      else set({ activeWorkspacePath: tabWs })
+    }
 
     // 桥就绪统一动作（热启动/冷启动轮询就绪/mock 态迟到恢复三处共用）：
     // 拉反向请求挂起状态 + 定时消息列表（页面刷新/重载会错过 Java 广播）+ 环境检查 +

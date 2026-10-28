@@ -345,72 +345,68 @@ export function HistoryView({
 
   return (
     <div className="history-view">
-      {/* 关联目录 chips 行（多目录会话·变体A）：本项目常驻 + 关联目录 + ⊕。
-          常驻渲染（含空态）——⊕ 是添加第一个关联目录的唯一入口，空态藏行=功能不可达
-          （首版真机踩坑：只在有关联目录时渲染，用户看不到任何入口）*/}
+      {/* 关联目录 chips 行（多目录会话·方案B定稿 2026-10-28）：左侧目录 chips 独立换行
+          （__flow flex:1），右侧动作区固定第一行最右（__actions 不换行）——添加/编辑/
+          新建三钮位置稳定不随目录数量漂移。常驻渲染（含空态）——添加目录是关联第一个
+          目录的唯一入口，空态藏行=功能不可达（首版真机踩坑）*/}
       <div className={`history-ws-chips ${wsEditing ? 'history-ws-chips--editing' : ''}`}>
-        <button
-          type="button"
-          className={`history-ws-chip history-ws-chip--project ${wsSame(activeWorkspacePath || projectWorkspacePath, projectWorkspacePath) ? 'history-ws-chip--active' : ''}`}
-          title={projectWorkspacePath}
-          onClick={() => onSwitchWorkspace(projectWorkspacePath)}
-        >
-          <span className="history-ws-chip__name">{t('history.wsChips.project')}</span>
-        </button>
-        {linkedWorkspaces.map((ws) => {
-          const active = wsSame(activeWorkspacePath || projectWorkspacePath, ws)
-          return (
-            <button
-              type="button"
-              key={ws}
-              className={`history-ws-chip ${active ? 'history-ws-chip--active' : ''}`}
-              title={ws}
-              onClick={() => onSwitchWorkspace(ws)}
-            >
-              <span className="history-ws-chip__name">{wsBasename(ws)}</span>
-              <span
-                className="history-ws-chip__remove codicon codicon-close"
-                title={t('history.wsChips.remove')}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setRemoveTarget(ws)
-                }}
-              />
-            </button>
-          )
-        })}
-        <button
-          type="button"
-          className="history-ws-chip history-ws-chip--add"
-          title={t('history.wsChips.addTitle')}
-          onClick={onAddWorkspace}
-        >
-          <span className="codicon codicon-plus" />
-        </button>
-        {/* 管理开关（用户定稿 2026-10-28）：× 随 hover 显隐会让 chip 宽度变化挤出换行；
-            编辑态下各关联目录 chip 的 × 才常显，删除仍走二次确认 */}
-        <button
-          type="button"
-          className={`history-ws-chip history-ws-chip--edit ${wsEditing ? 'history-ws-chip--edit-active' : ''}`}
-          title={t('history.wsChips.editTitle')}
-          onClick={() => setWsEditing((v) => !v)}
-        >
-          <span className="codicon codicon-edit" />
-        </button>
-        {/* 新建会话（多目录会话）：快速在当前浏览目录开新会话——进待命态落位即 chips 选择，
-            首条消息才真实建会话（避免空会话垃圾） */}
-        <button
-          type="button"
-          className="history-ws-chip history-ws-chip--new"
-          title={t('history.wsChips.newSession')}
-          onClick={onNewSession}
-        >
-          <span className="codicon codicon-comment-draft" />
-          <span className="history-ws-chip__name">{t('history.wsChips.newSession')}</span>
-        </button>
+        <div className="history-ws-chips__flow">
+          <button
+            type="button"
+            className={`history-ws-chip history-ws-chip--project ${wsSame(activeWorkspacePath || projectWorkspacePath, projectWorkspacePath) ? 'history-ws-chip--active' : ''}`}
+            data-tooltip={projectWorkspacePath}
+            onClick={() => onSwitchWorkspace(projectWorkspacePath)}
+          >
+            <span className="history-ws-chip__name">{t('history.wsChips.project')}</span>
+          </button>
+          {linkedWorkspaces.map((ws) => {
+            const active = wsSame(activeWorkspacePath || projectWorkspacePath, ws)
+            return (
+              <button
+                type="button"
+                key={ws}
+                className={`history-ws-chip ${active ? 'history-ws-chip--active' : ''}`}
+                data-tooltip={ws}
+                onClick={() => onSwitchWorkspace(ws)}
+              >
+                <span className="history-ws-chip__name">{wsBasename(ws)}</span>
+                <span
+                  className="history-ws-chip__remove codicon codicon-close"
+                  title={t('history.wsChips.remove')}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setRemoveTarget(ws)
+                  }}
+                />
+              </button>
+            )
+          })}
+        </div>
+        <div className="history-ws-chips__actions">
+          {/* 管理开关（用户定稿 2026-10-28）：× 随 hover 显隐会让 chip 宽度变化挤出换行；
+              编辑态下各关联目录 chip 的 × 才常显，删除仍走二次确认 */}
+          <button
+            type="button"
+            className={`history-ws-chip history-ws-chip--edit ${wsEditing ? 'history-ws-chip--edit-active' : ''}`}
+            data-tooltip={t('history.wsChips.editTitle')}
+            onClick={() => setWsEditing((v) => !v)}
+          >
+            <span className="codicon codicon-edit" />
+          </button>
+          {/* 添加关联目录：图标钮（folder+ 消加号歧义），悬浮 data-tooltip 说明（定稿 2026-10-28：去文字只留图标）*/}
+          <button
+            type="button"
+            className="history-ws-chip history-ws-chip--add"
+            data-tooltip={t('history.wsChips.addTitle')}
+            onClick={onAddWorkspace}
+          >
+            <span className="codicon codicon-new-folder" />
+          </button>
+        </div>
       </div>
       <div className="history-header">
-        {/* tab 切换：会话 / 已归档 */}
+        {/* tab 切换：会话 / 已归档；右端「新建会话」实底主钮（方案B定稿：与列表同视野，
+            建的就是当前浏览目录的会话；自动归档 tab 无列表不显示，多选模式让位批量操作） */}
         <div className="history-tabs">
           <button
             className={`history-tab ${tab === 'active' ? 'history-tab--active' : ''}`}
@@ -430,6 +426,20 @@ export function HistoryView({
           >
             {t('history.tabAutoArchive')}
           </button>
+          {tab !== 'auto' && !selectionMode && (
+            <>
+              <span className="history-tabs__sp" />
+              <button
+                type="button"
+                className="history-tabs__new"
+                data-tooltip={t('history.wsChips.newSession')}
+                onClick={onNewSession}
+              >
+                <span className="codicon codicon-plus" />
+                <span>{t('history.wsChips.newSession')}</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* 自动归档 tab：不显示列表工具栏/搜索（面板自成一体，挂在 header 外的主体区） */}
@@ -444,7 +454,7 @@ export function HistoryView({
                 ? t('history.archivedTotal', { count: archivedSessions.length })
                 : t('history.totalSessions', { count: sessions.length })}
               {/* 浏览目录全路径（本项目也显示，风格一致；悬浮同值）*/}
-              <span className="history-info__ws" title={activeWorkspacePath || projectWorkspacePath}>
+              <span className="history-info__ws" data-tooltip={activeWorkspacePath || projectWorkspacePath}>
                 {activeWorkspacePath || projectWorkspacePath}
               </span>
             </div>

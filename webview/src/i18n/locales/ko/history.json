@@ -32,7 +32,7 @@
   "pendingBadge": "응답 대기 {{count}}건",
   "wsChips": {
     "workspace": "워크스페이스",
-    "project": "이 프로젝트",
+    "project": "현재 프로젝트",
     "addTitle": "다른 디렉터리 연결… (세션 목록이 디렉터리별로 전환되며 새 세션과 메모리·AGENTS.md가 해당 디렉터리에 귀속됩니다)",
     "remove": "연결 해제 (해당 디렉터리의 세션 데이터는 영향을 받지 않음)",
     "currentDirBadge": "활성 디렉터리: {{path}} (새 세션이 여기에 생성됩니다)",

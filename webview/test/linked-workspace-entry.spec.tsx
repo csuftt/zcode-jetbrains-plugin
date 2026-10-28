@@ -47,19 +47,12 @@ describe('chips 行空态入口', () => {
     expect(document.querySelector('.history-ws-chip--add')).not.toBeNull()
   })
 
-  it('新建会话按钮：点击触发 onNewSession（待命态+落位由 App 组合）', () => {
-    const onNewSession = vi.fn()
-    renderHistory({ onNewSession })
-    fireEvent.click(document.querySelector('.history-ws-chip--new')!)
-    expect(onNewSession).toHaveBeenCalledTimes(1)
-  })
-
   it('信息条显示浏览目录全路径（本项目也显示，悬浮同值）', () => {
     renderHistory()
     const ws = document.querySelector('.history-info__ws') as HTMLElement
     expect(ws).not.toBeNull()
     expect(ws.textContent).toBe('G:/mock-project')
-    expect(ws.title).toBe('G:/mock-project')
+    expect(ws.getAttribute('data-tooltip')).toBe('G:/mock-project')
   })
 
   it('点 ⊕ 触发添加关联目录（系统目录选择框入口）', () => {
@@ -76,9 +69,35 @@ describe('chips 行空态入口', () => {
       onSwitchWorkspace,
     })
     const chips = Array.from(document.querySelectorAll('.history-ws-chip'))
-    expect(chips).toHaveLength(5) // 本项目 + other + ⊕ + 编辑开关 + 新建会话
+    expect(chips).toHaveLength(4) // 本项目 + other + 编辑 + 添加目录
     fireEvent.click(screen.getByText('other'))
     expect(onSwitchWorkspace).toHaveBeenCalledWith('E:/work/other')
+  })
+
+  it('方案B两段式布局：chips 在换行区，编辑/添加固定动作区；新建会话在 tab 行右端', () => {
+    renderHistory({ linkedWorkspaces: ['E:/work/other'] })
+    const flow = document.querySelector('.history-ws-chips__flow')
+    const actions = document.querySelector('.history-ws-chips__actions')
+    expect(flow).not.toBeNull()
+    expect(actions).not.toBeNull()
+    // 换行区只装目录 chips（本项目+关联）
+    expect(flow!.querySelectorAll('.history-ws-chip')).toHaveLength(2)
+    expect(flow!.querySelector('.history-ws-chip--project')).not.toBeNull()
+    // 动作区两钮：编辑/添加目录（新建会话不在 chips 行）
+    expect(actions!.querySelector('.history-ws-chip--edit')).not.toBeNull()
+    expect(actions!.querySelector('.history-ws-chip--add')).not.toBeNull()
+    expect(actions!.querySelector('.history-ws-chip--new')).toBeNull()
+    // 新建会话实底主钮在 tab 行右端
+    expect(document.querySelector('.history-tabs__new')).not.toBeNull()
+    fireEvent.click(document.querySelector('.history-tabs__new')!)
+    // onClick 走 onNewSession（renderHistory 默认 mock，断言不抛错即可——调用断言见专门用例）
+  })
+
+  it('新建会话按钮：点击触发 onNewSession（待命态+落位由 App 组合）', () => {
+    const onNewSession = vi.fn()
+    renderHistory({ onNewSession })
+    fireEvent.click(document.querySelector('.history-tabs__new')!)
+    expect(onNewSession).toHaveBeenCalledTimes(1)
   })
 
   it('编辑模式开关：默认非编辑态，点编辑按钮进入（容器带编辑类），再点退出', () => {

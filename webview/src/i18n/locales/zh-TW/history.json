@@ -32,7 +32,7 @@
   "pendingBadge": "待應答 {{count}} 條",
   "wsChips": {
     "workspace": "工作區",
-    "project": "本專案",
+    "project": "當前專案",
     "addTitle": "關聯其他目錄…（會話列表按目錄切換，新會話與記憶/AGENTS.md 自動歸屬該目錄）",
     "remove": "移除關聯（不影響該目錄下的會話資料）",
     "currentDirBadge": "目前啟用目錄：{{path}}（「新會話」將建立在此目錄）",

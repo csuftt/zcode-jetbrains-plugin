@@ -17,12 +17,15 @@ const sentRequests: Array<Record<string, unknown>> = []
 /** 模拟 Java 注入的标签初始目录（跨目录会话新标签打开/重启恢复路径）*/
 let tabWorkspaceInjected = ''
 
+/** 模拟标签绑定的初始会话（非空=会话标签走 boot 恢复链；空=「新建会话」空标签）*/
+let tabInitialSessionId = ''
+
 vi.mock('@/ipc/bridge', () => ({
   initBridge: () => {},
   isInJcef: () => false,
   getWorkspacePath: () => 'G:/mock-project',
   getTabWorkspacePath: () => tabWorkspaceInjected,
-  getInitialSessionId: () => '',
+  getInitialSessionId: () => tabInitialSessionId,
   onMessage: () => {},
   onStreamEvent: () => {},
   onStreamBatch: () => {},
@@ -42,6 +45,7 @@ function sess(id: string, ws: string, updatedAt = Date.now()) {
 beforeEach(() => {
   sentRequests.length = 0
   tabWorkspaceInjected = ''
+  tabInitialSessionId = ''
   useStore.setState({
     projectPath: WS_PROJECT,
     linkedWorkspaces: [],
@@ -132,8 +136,9 @@ describe('跨目录会话新标签打开（标签初始目录注入）', () => {
     expect(req?.workspacePath).toBe(WS_OTHER)
   })
 
-  it('init 只落标签初始目录到 bootWorkspace（首拉用它恢复绑定会话），activeWorkspacePath 不被污染（落位恒本项目）', () => {
+  it('会话标签 init 只落标签初始目录到 bootWorkspace（首拉恢复绑定会话），activeWorkspacePath 不被污染（落位恒本项目）', () => {
     tabWorkspaceInjected = WS_OTHER
+    tabInitialSessionId = 'sess_bound' // 有绑定会话=会话标签，走 boot 链
     useStore.setState({ activeWorkspacePath: '' })
     void useStore.getState().init()
     // 首拉按注入目录（绑定会话在列表里可恢复）；init 同步链内即消费（bootWorkspace 清空）
@@ -143,8 +148,9 @@ describe('跨目录会话新标签打开（标签初始目录注入）', () => {
     expect(useStore.getState().bootWorkspace).toBe('') // 一次性已消费
   })
 
-  it('bootWorkspace 一次性：消费后再次 loadSessions 回落激活目录（本项目）', () => {
+  it('bootWorkspace 一次性（会话标签）：消费后再次 loadSessions 回落激活目录（本项目）', () => {
     tabWorkspaceInjected = WS_OTHER
+    tabInitialSessionId = 'sess_bound'
     useStore.setState({ activeWorkspacePath: '' })
     void useStore.getState().init()
     sentRequests.length = 0
@@ -152,6 +158,20 @@ describe('跨目录会话新标签打开（标签初始目录注入）', () => {
     const req = sentRequests.find((r) => r.op === 'listSessions')
     expect(req?.workspacePath).toBe(WS_PROJECT)
     expect(useStore.getState().bootWorkspace).toBe('')
+  })
+
+  it('「新建会话」空标签 init：落位=标签目录（徽标/chips/列表全按它走），不进 boot 恢复链', async () => {
+    // init 有 bridgeInitialized 一次性守卫（前面用例已消费）——重置模块拿全新实例
+    vi.resetModules()
+    const { useStore: freshStore } = await import('@/store/useStore')
+    tabWorkspaceInjected = WS_OTHER
+    tabInitialSessionId = '' // 无绑定会话=「新建会话」入口
+    freshStore.setState({ projectPath: WS_PROJECT, activeWorkspacePath: '', bootWorkspace: '', bootRestorePending: false, sessionsWorkspace: '' })
+    void freshStore.getState().init()
+    const s = freshStore.getState()
+    expect(s.activeWorkspacePath).toBe(WS_OTHER) // 落位即标签目录（待命态徽标由此显示）
+    expect(s.bootWorkspace).toBe('')
+    expect(s.bootRestorePending).toBe(false) // 无恢复需求，收尾不触发不二次重拉
   })
 })
 

@@ -35,7 +35,7 @@
   "tabAutoArchive": "自动归档",
   "wsChips": {
     "workspace": "工作区",
-    "project": "本项目",
+    "project": "当前项目",
     "addTitle": "关联其他目录…（会话列表按目录切换，新会话与记忆/AGENTS.md 自动归属该目录）",
     "remove": "移除关联（不影响该目录下的会话数据）",
     "currentDirBadge": "当前激活目录：{{path}}（「新会话」将创建在此目录）",
