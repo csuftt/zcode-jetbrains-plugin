@@ -3412,6 +3412,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   loadQuota: () => {
+    quotaRequestedAt = Date.now()
     set({ quotaLoading: true })
     sendToJava({ op: 'getQuota' })
   },
@@ -8314,12 +8315,38 @@ useStore.subscribe((s, prev) => {
 // currentModel 就绪前跳过，首屏显示仍由悬浮栏 hover 的懒加载兜底（quota 为空即拉）。
 let quotaPollTimer: ReturnType<typeof setInterval> | null = null
 
+// ===== 在途判定有界化（缺陷FM，2026-10-28）=====
+// quotaLoading 只有 case 'quota' 应答到达才复位，此前轮询/懒加载守卫直接读它：
+// 一次应答丢失（系统待机打断在途请求 / CEF 查询丢弃，真机实证卡死 4h52m）即永久
+// 卡 true，轮询从此每分钟静默跳过。改为「quotaLoading 且发起未超 QUOTA_INFLIGHT_
+// TIMEOUT_MS」才算在途，超时视为应答丢失放行重发——额度查询是幂等读，迟到应答
+// 覆盖无竞态危害（后到的回包本就整包落地）。quotaRequestedAt 由 loadQuota 更新。
+const QUOTA_INFLIGHT_TIMEOUT_MS = 90_000
+let quotaRequestedAt = 0
+/** 卡死告警每次卡死期只发一条（应答恢复到达、quotaLoading 观察为 false 时复位） */
+let quotaInFlightWarned = false
+
+/** getQuota 是否真在途：quotaLoading 且距发起未超时。悬浮栏 hover 懒加载同用此判定 */
+export function isQuotaInFlight(): boolean {
+  const st = useStore.getState()
+  if (!st.quotaLoading) {
+    quotaInFlightWarned = false
+    return false
+  }
+  if (Date.now() - quotaRequestedAt < QUOTA_INFLIGHT_TIMEOUT_MS) return true
+  if (!quotaInFlightWarned) {
+    quotaInFlightWarned = true
+    console.warn(`[store] getQuota 发起后 ${QUOTA_INFLIGHT_TIMEOUT_MS / 1000}s 无应答（疑似丢失），放行重发`)
+  }
+  return false
+}
+
 function startQuotaPolling(): void {
   if (quotaPollTimer) return
   quotaPollTimer = setInterval(() => {
     const st = useStore.getState()
     if (!isBigmodelProvider(st.currentModel?.providerId)) return
-    if (st.quotaLoading) return // 上一次还在途（HTTP 最长 ~35s），跳过本轮
+    if (isQuotaInFlight()) return // 上一次还在途（HTTP 最长 ~35s；超 90s 视为应答丢失放行重发）
     st.loadQuota()
   }, QUOTA_POLL_INTERVAL)
 }

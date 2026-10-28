@@ -101,8 +101,31 @@ describe('GLM 额度 60s 定时刷新', () => {
     expect(sentRequests.filter((r) => r.op === 'getQuota')).toHaveLength(1)
 
     vi.advanceTimersByTime(60_000)
-    // 上一轮 quotaLoading 仍为 true（无响应回来）→ 本轮防重入跳过
+    // 上一轮仍在 90s 在途窗内（无响应回来）→ 本轮防重入跳过
     expect(sentRequests.filter((r) => r.op === 'getQuota')).toHaveLength(1)
+  })
+
+  it('缺陷FM：应答丢失超 90s → 在途判定过期放行重发，轮询不再永久卡死', () => {
+    useStore.setState({ currentModel: GLM_MODEL })
+    vi.advanceTimersByTime(60_000) // 第 1 发
+    expect(sentRequests.filter((r) => r.op === 'getQuota')).toHaveLength(1)
+
+    vi.advanceTimersByTime(60_000) // t=120s，距发起 60s < 90s，防重入仍跳过
+    expect(sentRequests.filter((r) => r.op === 'getQuota')).toHaveLength(1)
+
+    vi.advanceTimersByTime(60_000) // t=180s，距发起 120s > 90s，超时放行
+    expect(sentRequests.filter((r) => r.op === 'getQuota')).toHaveLength(2)
+
+    // 迟到的旧应答无破坏性：正常落地清 loading、刷新时间戳
+    messageHandler!({ op: 'quota', data: { level: 'Max', limits: [] } })
+    expect(useStore.getState().quotaLoading).toBe(false)
+    expect(useStore.getState().quotaFetchedAt).toBeGreaterThan(0)
+
+    // 应答恢复后，下一轮在途窗内照常防重入（回归正常节奏）
+    vi.advanceTimersByTime(60_000)
+    expect(sentRequests.filter((r) => r.op === 'getQuota')).toHaveLength(3)
+    vi.advanceTimersByTime(30_000)
+    expect(sentRequests.filter((r) => r.op === 'getQuota')).toHaveLength(3)
   })
 
   it('上一轮响应到达后（quotaLoading 复位）下一轮继续拉', () => {

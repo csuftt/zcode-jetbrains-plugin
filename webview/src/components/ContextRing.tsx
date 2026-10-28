@@ -16,7 +16,7 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { useStore, isBigmodelProvider } from '@/store/useStore'
+import { useStore, isBigmodelProvider, isQuotaInFlight } from '@/store/useStore'
 import { fmtTokens, limitTitle, fmtResetTimeCompact, fmtTime } from '@/utils/format'
 import { quotaWindowRows, remainingPercent, formatRemainPct, WINDOW_LABEL_I18N } from '@/utils/quotaWindows'
 import type { QuotaWindowKey } from '@/utils/quotaWindows'
@@ -138,9 +138,10 @@ export function ContextRing() {
     // hover 触发量可忽略）；streaming 期间 WaitingIndicator 的 2s 轮询会让本区跟着活
     loadSessionDebug()
     // 额度懒加载：仅 GLM 套餐模型才拉取；无数据或超过 5 分钟则拉取
+    // （在途判定用 isQuotaInFlight 而非裸 quotaLoading：应答丢失时超时放行，缺陷FM）
     if (isGlmPlan) {
       const stale = !quota || Date.now() - quotaFetchedAt > 5 * 60 * 1000
-      if (stale && !quotaLoading) loadQuota()
+      if (stale && !isQuotaInFlight()) loadQuota()
     }
     const rect = ringRef.current?.getBoundingClientRect()
     if (rect) {
