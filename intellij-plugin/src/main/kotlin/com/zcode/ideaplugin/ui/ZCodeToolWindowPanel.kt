@@ -1264,6 +1264,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "goalManage" -> handleGoalManage(msg)
                         "pickFiles" -> handlePickFiles(msg)
                         "getLinkedWorkspaces" -> handleGetLinkedWorkspaces()
+                        "getProjectPath" -> handleGetProjectPath()
                         "addLinkedWorkspace" -> handleAddLinkedWorkspace(msg)
                         "removeLinkedWorkspace" -> handleRemoveLinkedWorkspace(msg)
                         "getUsage" -> handleGetUsage(msg)
@@ -5565,33 +5566,37 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     // ============ 关联目录（多目录会话，变体 A：历史页 chips 切换）============
     // project 级持久化（PropertiesComponent + JSON 数组，形态同 ZCodeScheduledMessageService）。
-    // 存储/比较统一正斜杠形态（与 project.basePath 同源）；下游 createSession/listSessions
-    // 各自再归一原生分隔符，这里不做双重归一。
-
-    /** 关联目录列表的 project 级 kv key */
-    private val linkedWorkspacesKey = "zcode.linkedWorkspaces.v1"
+    // kv 权威实现上移 ZCodeLinkedWorkspaces（ZCodeWorkspaceMounter.kt）：启动 reconcile 与
+    // Project View 挂载投影都要读同一份，收口一处。存储/比较统一正斜杠形态（与
+    // project.basePath 同源）；下游 createSession/listSessions 各自再归一原生分隔符。
 
     /** 目录路径归一比较键：统一分隔符 + 去尾 + 大小写折叠（Windows 不敏感） */
-    private fun wsKey(path: String): String =
-        path.replace('\\', '/').trimEnd('/').lowercase()
+    private fun wsKey(path: String): String = ZCodeLinkedWorkspaces.wsKey(path)
 
-    private fun readLinkedWorkspaces(): List<String> {
-        val raw = com.intellij.ide.util.PropertiesComponent.getInstance(project).getValue(linkedWorkspacesKey) ?: return emptyList()
-        return try {
-            Json.parseToJsonElement(raw).jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
-        } catch (_: Exception) {
-            emptyList() // 损坏降级空表（同 ZCodeScheduledMessageService.loadFromStorage 口径）
-        }
-    }
+    private fun readLinkedWorkspaces(): List<String> = ZCodeLinkedWorkspaces.read(project)
 
-    private fun persistLinkedWorkspaces(list: List<String>) {
-        com.intellij.ide.util.PropertiesComponent.getInstance(project)
-            .setValue(linkedWorkspacesKey, JsonArray(list.map { JsonPrimitive(it) }).toString())
-    }
+    private fun persistLinkedWorkspaces(list: List<String>) = ZCodeLinkedWorkspaces.persist(project, list)
 
     private fun handleGetLinkedWorkspaces(): JsonObject = buildJsonObject {
+        // 第四触发点：chips 每次加载顺带幂等 reconcile。覆盖 kv 被外部静默改写的形态
+        // （同项目双 IDE 实例互写 workspace.xml / 手工改文件）——这类变更不经过
+        // add/remove handler，投影靠用户看见 chips 的这次读取自愈（2026-10-29 真机）
         put("op", "linkedWorkspaces")
-        put("workspaces", JsonArray(readLinkedWorkspaces().map { JsonPrimitive(it) }))
+        put("workspaces", JsonArray(readLinkedWorkspaces().also {
+            ZCodeWorkspaceMounter.reconcileAsync(project, it)
+        }.map { JsonPrimitive(it) }))
+    }
+
+    /**
+     * 前端 projectPath 空串兜底：IDE 重启初期面板先于 project.basePath 就绪时，
+     * buildBridgeJs 注入的 __ZCODE_WORKSPACE__ 是空串（本类注释同款已知场景），而前端
+     * store 只在 init 读一次注入值——空串固化后，徽标「本项目不显示」判等失真
+     * （2026-10-29 双窗口重启真机：本项目会话恒显示目录徽标）。口径同
+     * effectiveWorkspacePath：basePath 未就绪回退 user.dir。
+     */
+    private fun handleGetProjectPath(): JsonObject = buildJsonObject {
+        put("op", "projectPath")
+        put("workspacePath", effectiveWorkspacePath(buildJsonObject { }))
     }
 
     /**
@@ -5619,6 +5624,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 }
             }
         }
+        // 投影到 Project View（专属模块内容根，幂等 reconcile；失败只落日志不影响 chips 链路）。
+        // 无条件调用：重复添加同目录也顺手把被破坏的投影修回来。
+        ZCodeWorkspaceMounter.reconcileAsync(project, list)
         return buildJsonObject {
             put("op", "linkedWorkspaces")
             put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
@@ -5637,6 +5645,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 log.info("linked workspace removed: $target")
             }
         }
+        // 摘除 Project View 投影（幂等 reconcile，同添加口径）
+        ZCodeWorkspaceMounter.reconcileAsync(project, list)
         return buildJsonObject {
             put("op", "linkedWorkspaces")
             put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))

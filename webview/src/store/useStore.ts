@@ -1642,6 +1642,8 @@ interface StoreState {
   loadSessions: () => void
   /** 切换激活目录（历史页 chips）：清两列表 + 重拉（loadSessions/loadArchived 由视图按需）*/
   setActiveWorkspace: (path: string) => void
+  /** projectPath 空串兜底：注入失败（重启初期 basePath 未就绪）时向 Java 拉生效路径 */
+  ensureProjectPath: () => void
   /** 弹系统目录选择框添加关联目录（Java 应答带 added 时自动切过去）*/
   addLinkedWorkspace: () => void
   /** 移除关联目录（若移除的是激活目录自动回退本项目）*/
@@ -2294,6 +2296,8 @@ export const useStore = create<StoreState>((set, get) => ({
       sendToJava({ op: 'scheduledList' })
       // 关联目录列表（多目录会话·变体A：历史页 chips 渲染）
       sendToJava({ op: 'getLinkedWorkspaces' })
+      // 注入空串兜底（详见 ensureProjectPath 注释）
+      get().ensureProjectPath()
       // 拉取当前打开文件 ref（Kotlin 同步回包，case 'currentFile' 落 state）；
       // 后续变化由 EditorContextTracker 200ms 防抖主动推送覆盖
       get().requestCurrentFile()
@@ -2407,6 +2411,15 @@ export const useStore = create<StoreState>((set, get) => ({
       sessionsLoading: true,
     })
     get().loadSessions()
+  },
+
+  // projectPath 兜底拉取：__ZCODE_WORKSPACE__ 注入空串（IDE 重启初期面板先于 basePath
+  // 就绪，Kotlin buildBridgeJs 注释同款场景）时 store 只在 init 读一次注入值、空串固化，
+  // 徽标「本项目不显示」判等失真（真机 2026-10-29 双窗口重启实测：本项目会话恒显示
+  // 目录徽标）。桥就绪后为空则拉一次，Java 按生效口径（basePath→user.dir）回
+  ensureProjectPath: () => {
+    if (get().projectPath) return
+    sendToJava({ op: 'getProjectPath' })
   },
 
   addLinkedWorkspace: () => {
@@ -4381,6 +4394,10 @@ export function handleResponse(
   get: () => StoreState,
 ) {
   switch (msg.op) {
+    case 'projectPath':
+      // 启动兜底应答：写回注入失败的 projectPath（该字段仅 init 与此处两处写入）
+      if (msg.workspacePath) set({ projectPath: msg.workspacePath })
+      break
     case 'linkedWorkspaces': {
       // 关联目录全量快照（get/add/remove 三 op 共用应答）
       set({ linkedWorkspaces: msg.workspaces })

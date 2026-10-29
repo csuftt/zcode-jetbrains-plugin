@@ -1000,6 +1000,10 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
     case 'getLinkedWorkspaces':
       // mock：预置一条关联目录（chips 行 dev 可见可切）
       return { op: 'linkedWorkspaces', workspaces: ['G:/mock-linked/other-project'] }
+    case 'getProjectPath':
+      // mock：对齐 mockSessions 的 workspacePath——mock 态无 Java 注入（__ZCODE_WORKSPACE__
+      // 恒空），不回这条则 projectPath 空串固化、徽标「本项目不显示」判等失真
+      return { op: 'projectPath', workspacePath: 'G:\\mock' }
     case 'addLinkedWorkspace':
       // mock：模拟 FileChooser 选中目录并直接切过去
       return { op: 'linkedWorkspaces', workspaces: ['G:/mock-linked/other-project', 'E:/mock-linked/lab-sdk'], added: 'E:/mock-linked/lab-sdk' }

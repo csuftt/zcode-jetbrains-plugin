@@ -89,6 +89,8 @@ export function BehaviorSettings() {
     writeNewSessionConfig(next)
   }
 
+
+
   // 悬浮弹窗时长输入（秒）本地态：允许编辑中间态（空串），合法整数才落配置，失焦回显
   const [popupDurationInput, setPopupDurationInput] = useState(() => String(readNotifyConfig().popupDurationSec))
 

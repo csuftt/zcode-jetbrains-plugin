@@ -487,6 +487,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'createSession'; workspacePath?: string; thoughtLevel?: string }
   /** 关联目录三件套（多目录会话·变体A）：拉列表 / 弹系统目录选择框添加 / 按路径移除 */
   | { op: 'getLinkedWorkspaces' }
+  /** 启动兜底：__ZCODE_WORKSPACE__ 注入空串（重启初期面板先于 basePath 就绪）时拉生效项目路径 */
+  | { op: 'getProjectPath' }
   | { op: 'addLinkedWorkspace' }
   | { op: 'removeLinkedWorkspace'; path: string }
   /** 前端进入无会话待命态（「新建会话」延迟创建）→ Java 清 TabState 绑定与标签 tooltip */
@@ -1274,6 +1276,8 @@ export type JavaResponse =
   | { op: 'listSessions'; sessions: SessionInfo[]; workspacePath?: string }  | { op: 'createSession'; sessionId: string }
   /** 关联目录全量快照（get/add/remove 三 op 共用应答形；added=本次新增并应由前端切换激活）*/
   | { op: 'linkedWorkspaces'; workspaces: string[]; added?: string }
+  /** getProjectPath 应答：生效项目路径（口径同 Java effectiveWorkspacePath，basePath 未就绪回退 user.dir）*/
+  | { op: 'projectPath'; workspacePath: string }
   | { op: 'tabSessionCleared' }
   /** forkSession 应答：新会话由前端 openSessionNewTab 承载（与历史打开编排一致）*/
   | { op: 'sessionForked'; forkedSessionId: string; parentSessionId?: string }

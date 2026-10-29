@@ -97,6 +97,34 @@ describe('关联目录应答与激活目录切换', () => {
   })
 })
 
+describe('projectPath 注入空串兜底（重启初期 basePath 未就绪）', () => {
+  it('ensureProjectPath：projectPath 空串时发 getProjectPath，非空时不发', () => {
+    useStore.setState({ projectPath: '' })
+    useStore.getState().ensureProjectPath()
+    expect(sentRequests.some((r) => r.op === 'getProjectPath')).toBe(true)
+
+    sentRequests.length = 0
+    useStore.setState({ projectPath: WS_PROJECT })
+    useStore.getState().ensureProjectPath()
+    expect(sentRequests.some((r) => r.op === 'getProjectPath')).toBe(false)
+  })
+
+  it('projectPath 应答：写回 store（空串应答不落，防覆盖已注入的正确值）', () => {
+    useStore.setState({ projectPath: '' })
+    handleResponse(
+      { op: 'projectPath', workspacePath: 'G:/real-project' } as never,
+      useStore.setState, useStore.getState,
+    )
+    expect(useStore.getState().projectPath).toBe('G:/real-project')
+
+    handleResponse(
+      { op: 'projectPath', workspacePath: '' } as never,
+      useStore.setState, useStore.getState,
+    )
+    expect(useStore.getState().projectPath).toBe('G:/real-project')
+  })
+})
+
 describe('listSessions 应答合并的目录作用域', () => {
   it('激活目录=关联目录时，本项目的活跃会话不补插残留', () => {
     // 切到关联目录后收到关联目录列表：本项目刚活跃的 S_A 不得经 staleLocal 混入

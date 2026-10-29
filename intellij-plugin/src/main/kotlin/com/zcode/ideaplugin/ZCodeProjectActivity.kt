@@ -26,6 +26,18 @@ class ZCodeProjectActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         ZCodeAutoArchiveService.getInstance(project)
         withContext(Dispatchers.IO) { migrateV1BuiltinsOnce(project) }
+        // 关联目录 → Project View 挂载（2026-10-28）：kv 为唯一权威的幂等投影，
+        // 重启自愈（被构建同步/手动摘除的根补回、盘上失效的根清理）；无关联目录零足迹。
+        // 内部跳 EDT 做模型变更，此处仅 IO 读 kv + 盘存在性过滤。
+        // 3s 后补跑一次：赢 Git 子系统初始化竞态——上次快速开关后立即退出时，EDT 策略
+        // 任务可能没跑完就落了带旧映射的 vcs.xml，Git 启动早期按它建好仓库对象；首轮
+        // reconcile 即便摘了映射，分支弹窗也可能已按旧态渲染，补跑兜底。
+        withContext(Dispatchers.IO) {
+            val linked = com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.read(project)
+            com.zcode.ideaplugin.ui.ZCodeWorkspaceMounter.reconcileAsync(project, linked)
+            kotlinx.coroutines.delay(3000)
+            com.zcode.ideaplugin.ui.ZCodeWorkspaceMounter.reconcileAsync(project, linked)
+        }
         // 手机远程重启恢复（2026-09-24 用户需求）：上次退出时开着 → 自动重连。
         // 服务内部自判开关+凭据、后台线程执行；多项目打开幂等（connect 已运行守卫短路）
         com.zcode.ideaplugin.remote.ZCodeRemoteService.getInstance().restoreIfEnabled()
