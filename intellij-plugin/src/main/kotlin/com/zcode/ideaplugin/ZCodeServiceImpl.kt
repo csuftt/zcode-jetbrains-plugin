@@ -404,6 +404,22 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             // 「消息发不通」时先查这行——有 proxy= 说明注入生效（问题在网络/代理本身），
             // <no proxy, direct> 说明走直连（问题在配置没保存/没重启）
             log.info("[proxy] app-server ${newClient.proxyConfig?.logSummary ?: ProxyConfig().logSummary}")
+            // stdin 写阻塞判死 → 自动重建（app-server-silent-hang 三/四例根治）：kill 已由
+            // client 自己完成，这里延迟 1.5s 等 readLoop EOF 收尾后走 getClient 换代——
+            // 正常路径会做 handler 重挂/账本重置全套。失败仅记日志：2s 轮询或下一次用户
+            // 操作的 getClient 兜底重建（即旧行为）。不在判死线程里同步重建：spawn 冷启动
+            // 数秒，会拖住判死现场
+            newClient.onProtocolDead = { evidence ->
+                log.warn("[protocol-dead] app-server 写阻塞判死，调度自动重建: $evidence")
+                com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule({
+                    try {
+                        log.warn("[protocol-dead] auto rebuild starting after stdin-dead kill")
+                        getClient()
+                    } catch (e: Exception) {
+                        log.warn("[protocol-dead] auto rebuild failed (will retry on next getClient): ${e.message}")
+                    }
+                }, 1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
             // requestRuntimePreferences 应答：memoryEnabled / nativeSearchEnhancementsEnabled
             // 与 ZCode 客户端共用 ~/.zcode/v2/setting.json（设置页「工作区记忆」开关写的也是
             // 这份）。每次应答即时读文件——切换开关后新建会话立即生效，无需重启 app-server；

@@ -50,6 +50,8 @@ class ZCodeProtocolClient private constructor(
     val generation: ProtocolGeneration = ProtocolGeneration.OLD,
     /** spawn 前 `--version` 探测结果（null=探测失败；协议参数版本门控用，见 supportsIncludeArchivedParam） */
     val appVersion: String? = null,
+    /** stdin 写阻塞判死时限（毫秒）：写入被对端挂死对端卡住的封顶等待，见 StdinWriteGate */
+    private val stdinWriteTimeoutMs: Long = 30_000L,
 ) : AutoCloseable {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -326,6 +328,38 @@ class ZCodeProtocolClient private constructor(
     @Volatile
     private var closed = false
 
+    /**
+     * stdin 写入门禁（app-server-silent-hang 三/四例根治）：阻塞写封顶 30s，
+     * 到期判死 → kill 进程树 → readLoop EOF 集中 fail 在途请求 → Service 层
+     * onProtocolDead 钩子懒重建。取代原「synchronized(sendLock) + 无超时阻塞写」
+     * ——挂死后首个卡进 println 的调用持锁永不释放，全部 stdio 通信（含用户点
+     * 停止）排队卡死无痕，唯一解曾是用户手动杀进程。
+     */
+    private val writeGate = StdinWriteGate(stdinWriteTimeoutMs) { evidence -> declareProtocolDead(evidence) }
+
+    /**
+     * stdin 写阻塞判死后的通知钩子（ZCodeServiceImpl 挂）：延迟片刻走 getClient()
+     * 正常换代重建（handler 重挂/账本重置全套）。null 时退化为旧行为——靠下一次
+     * getClient 调用（2s 轮询/用户操作）兜底重建。
+     */
+    var onProtocolDead: ((evidence: String) -> Unit)? = null
+
+    /** 判死收尾：kill 进程树（异步，不占调用线程）+ 通知重建钩子。gate 保证恰好一次 */
+    private fun declareProtocolDead(evidence: String) {
+        System.err.println(
+            "[ZCodeProtocolClient] stdin 写阻塞判死 app-server 挂死（$evidence, pid=$pid）——kill 进程树，等待懒重建"
+        )
+        Thread({ destroyProcessTree() }, "zcode-protocol-dead-kill").apply { isDaemon = true }.start()
+        onProtocolDead?.let { hook ->
+            Thread({
+                try {
+                    hook(evidence)
+                } catch (_: Exception) {
+                }
+            }, "zcode-protocol-dead-notify").apply { isDaemon = true }.start()
+        }
+    }
+
     // ============ 启动方式 ============
 
     companion object {
@@ -340,12 +374,16 @@ class ZCodeProtocolClient private constructor(
          *   冷启动（12MB bundle 解析 + 杀软首扫）实测可达 10s+，30s 是"慢而活"与
          *   "快而死"的分界余量；探测超时即杀进程抛人话异常（issue #11 崩溃循环，
          *   此前首个业务请求独自撞 20s 超时还会被前端误套"恢复中"指引）
+         * @param stdinWriteTimeoutMs stdin 写阻塞判死时限（毫秒）：对端挂死不再消费
+         *   stdin 时写入会永久阻塞，此参数封顶阻塞等待，到期 kill 进程树触发重建
+         *   （app-server-silent-hang 三/四例；仅测试传小值）
          */
         fun start(
             zcodePath: Path = ZCodeLocator.detect(),
             credentials: ZCodeCredentials? = Credentials.loadOrNull(),
             nodePath: String = findNode(),
-            readyTimeoutMs: Long = 30_000
+            readyTimeoutMs: Long = 30_000,
+            stdinWriteTimeoutMs: Long = 30_000
         ): ZCodeProtocolClient {
             val env = (System.getenv() + (credentials?.toEnvMap() ?: emptyMap())).toMutableMap()
             // 模型请求 UA 版本号对齐官方客户端：zcode.cjs 请求头构造读 env.ZCODE_APP_VERSION
@@ -390,7 +428,7 @@ class ZCodeProtocolClient private constructor(
 
             // 代际已提前判定（spawn 侧同款判据）：进程已在跑，文件即权威
             println("[ZCodeProtocolClient] CLI generation = $generation (zcode.cjs=${zcodePath.fileName})")
-            val client = ZCodeProtocolClient(process, stdin, stdout, zcodePath, nodePath, credentials, proxyConfig, generation, appVersion)
+            val client = ZCodeProtocolClient(process, stdin, stdout, zcodePath, nodePath, credentials, proxyConfig, generation, appVersion, stdinWriteTimeoutMs)
             // 排障主线索（issue #12 用户实测三态：坏地址失败/清空直连/好地址成功——
             // 没有这行日志时分不清「代理坏了」还是「没注入」）：代理地址 userinfo 脱敏
             println("[ZCodeProxy] app-server spawn ${proxyConfig?.logSummary ?: "<no proxy, direct>"}")
@@ -1537,17 +1575,26 @@ class ZCodeProtocolClient private constructor(
         send(msg)
     }
 
-    /** 原始发送（线程安全）*/
-    private val sendLock = Any()
+    /**
+     * 原始发送（经 StdinWriteGate 串行 + 限时）：写入顺序由门禁单执行器 FIFO 保证
+     * （等价原 sendLock 串行语义）；写失败/阻塞超时的异常语义——
+     * BROKEN_PIPE/WRITE_ERROR = 进程死/断管（旧行为文案）；TIMEOUT/DEAD = 写入
+     * 阻塞判死，进程已被 kill 等待重建（app-server-silent-hang 三/四例）。
+     */
     private fun send(msg: JsonObject) {
-        synchronized(sendLock) {
+        val method = msg["method"]?.jsonPrimitive?.jsonStringOrNull
+        when (writeGate.submit(method) {
             stdin.println(msg.toString())
             stdin.flush()
             // PrintWriter 吞底层 IO 异常：app-server 进程死后写入静默失败，请求只会
-            // 表现为超时——checkError 显式检出并抛出，让调用方立即感知连接已断
-            if (stdin.checkError()) {
-                throw IOException("app-server stdin 写入失败（进程可能已退出），method=${msg["method"]?.jsonPrimitive?.jsonStringOrNull}")
-            }
+            // 表现为超时——checkError 显式检出写失败，让调用方立即感知连接已断
+            !stdin.checkError()
+        }) {
+            WriteOutcome.OK -> return
+            WriteOutcome.BROKEN_PIPE, WriteOutcome.WRITE_ERROR ->
+                throw IOException("app-server stdin 写入失败（进程可能已退出），method=$method")
+            WriteOutcome.TIMEOUT, WriteOutcome.DEAD ->
+                throw IOException("app-server stdin 写入阻塞超时，已判定进程挂死并终止（等待自动重建），method=$method")
         }
     }
 
@@ -4078,6 +4125,8 @@ class ZCodeProtocolClient private constructor(
         rawBackendErrorHandler = null
         // 唤醒所有等待的 future
         pendingResponses.values.forEach { it.completeExceptionally(IOException("client closed")) }
+        // 停收新写入任务（在途/卡住的写入线程随下方 kill 的管道断裂自然解锁）
+        writeGate.close()
         destroyProcessTree()
     }
 
