@@ -12,7 +12,7 @@
 
 1. **收尾改动**（在 feature/x.y.z 分支）：
    - 升版本号三处同步：`intellij-plugin/build.gradle.kts` 的 `version`、`webview/package.json`、`McpToolsClient.kt` 的 `CLIENT_VERSION`（webview 的 `APP_VERSION` 自 0.2.3 起由 `npm prebuild` 从 build.gradle.kts 自动生成 `src/version/version.ts`，同时生成版本更新弹窗数据 `src/version/changelog.ts`——后者提交仓库，前者 gitignore）。
-   - `CHANGELOG.md` 顶部加 `[x.y.z] - 日期` 块（patchPluginXml 提取为 change-notes；只写用户可感知的改动，README/工作流调整类杂务不放）。
+   - `CHANGELOG.md` 顶部加 `[x.y.z] - 日期` 块（patchPluginXml 提取为 change-notes；只写用户可感知的改动，README/工作流调整类杂务不放）。**文案从版本大线审视**：本版本周期内引入的能力连同其过程收敛写成「新增/适配」，不得写成「修复旧问题」；官方侧变更、插件做兼容的归「适配」节（0.4.2 实踩：内置渠道凭证续期本质是官方凭证机制变更的兼容，非插件新增能力；渠道名按用户口径，勿擅自加定位注记）。**changelog 块写完必须先发用户审核（只发中文段），审核通过后才进入第 2 步构建签名**（0.4.2 起纪律）。
    - 测试全过：`./gradlew test` + `cd webview && npm test`（tsc 在 build 时跑）。
 2. **构建签名**（必须照 jetbrains-marketplace-publish skill 坑 1b，否则会静默产出未签名包）：
    ```bash

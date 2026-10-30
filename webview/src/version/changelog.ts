@@ -23,6 +23,70 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    "version": "0.4.2",
+    "date": "2026-10-29",
+    "zh": {
+      "sections": [
+        {
+          "title": "适配",
+          "items": [
+            "**内置渠道凭证变更**：官方内置渠道的登录凭证机制调整，插件已做兼容——凭证支持自动换发续期，内置渠道长期使用不再掉线。"
+          ]
+        },
+        {
+          "title": "新增",
+          "items": [
+            "**多工作区**：同一窗口内可打开并切换其他目录的项目——关联目录挂载到 IDEA 项目树（Project View 顶级节点可直接浏览）；会话列表、记忆、技能、归档按目录切换，会话与消息按激活目录落位。",
+            "**内联可视化卡片**：兼容官方 `::visualize` 指令，AI 生成的可视化内容以卡片内联呈现在消息中，支持复制图片、在浏览器打开。",
+            "**浏览器独立窗口置顶**：内嵌浏览器弹出独立窗口后，可设置为窗口置顶。"
+          ]
+        },
+        {
+          "title": "修复",
+          "items": [
+            "修复 ZCode 后台进程异常挂死导致插件整体无响应（会话不更新、消息发不出）的问题，现可自动检测并恢复。",
+            "修复交互弹窗（询问 / 权限审批 / 计划审批）挂起超过约 5 分钟后提交，会导致插件整体无响应的问题。",
+            "修复额度信息偶发加载失败后一直卡在加载中的问题。",
+            "修复发送 / 回填 / 切换会话后内联文件 chip 的悬浮提示残留在界面上的问题。",
+            "修复「新建会话覆盖当前标签页」在加载中点击导致标签页假死的问题。",
+            "修复批量命令卡收起某行后整卡下移一截的问题。",
+            "若干界面反馈优化（#45）：文件更改条与产物预览卡跟随消息区通栏展示、点击消息区空白聚焦输入框、ask 弹窗占满消息区宽度、收起横条悬浮顶部；ask 弹窗支持忽略单个问题；浏览器通道降级时不再弹横幅（收敛到设置页提示）。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "title": "Compatibility",
+          "items": [
+            "**Adapted to built-in channel credential changes**: the official built-in channel changed its login-credential mechanism; the plugin now stays compatible — credentials renew automatically, so the built-in channel no longer drops after long-term use."
+          ]
+        },
+        {
+          "title": "Added",
+          "items": [
+            "**Multi-workspace**: open and switch projects from other directories within the same window — associated directories are mounted into the IDEA Project View (top-level nodes are directly browsable); the session list, memories, skills and archives switch per directory, and sessions and messages are placed under the active directory.",
+            "**Inline visualization cards**: compatible with the official `::visualize` directive — AI-generated visualizations now render as inline cards in the conversation, with copy-as-image and open-in-browser support.",
+            "**Always-on-top browser window**: the detached browser window can now be set to stay on top."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "Fixed the plugin becoming entirely unresponsive (sessions not updating, messages not sending) when the ZCode background process hung; it is now detected automatically and recovered.",
+            "Fixed the plugin becoming entirely unresponsive when submitting an interactive dialog (question / permission / plan approval) that had been left open for more than ~5 minutes.",
+            "Fixed quota info getting stuck in a loading state forever after an occasional failed poll.",
+            "Fixed lingering hover tooltips of inline file chips after sending / refilling / switching sessions.",
+            "Fixed the tab freezing when \"new session overwrites the current tab\" was clicked while loading.",
+            "Fixed the whole batch-command card shifting down after collapsing a command row.",
+            "UI feedback improvements (#45): file-change bars and artifact preview cards now span the full message width, clicking empty message areas focuses the input box, the ask dialog fills the message width, the collapsed bar floats on top; the ask dialog supports ignoring a single question; browser-channel degradation no longer pops a banner (moved to a hint on the settings page)."
+          ]
+        }
+      ]
+    }
+  },
+  {
     "version": "0.4.1",
     "date": "2026-10-20",
     "zh": {
