@@ -471,6 +471,10 @@ class ZCodeRemoteService : Disposable {
         if (impl.isStarted()) impl.getClient() else null
     }.getOrNull()
 
+    /** bridge-open 登记的 workspaceKey（手机进工作区时上报）：v4 订阅链在
+     *  project 解析不到（挂载目录）、H5 不带 workspacePath 时的兜底工作区来源 */
+    fun bridgeWorkspaceKey(bridgeSessionId: String): String? = router.bridge.workspaceKeyOf(bridgeSessionId)
+
     private fun handleKnownChannel(
         project: com.intellij.openapi.project.Project?,
         bridgeSessionId: String,
@@ -603,73 +607,79 @@ class ZCodeRemoteService : Disposable {
         for (impl in com.zcode.ideaplugin.ZCodeServiceImpl.activeProjectServices()) {
             if (!impl.isStarted()) continue
             val c = runCatching { impl.getClient() }.getOrNull() ?: continue
-            val ws = impl.ownerProject.basePath ?: continue
+            val base = impl.ownerProject.basePath ?: continue
             // 归档/软删过滤（IDE 历史列表同源口径）：session/list 只认 db.sqlite 旧
             // time_archived 列，插件归档写在 tasks-index.sqlite——不过滤则几百条归档
             // 任务泄漏给 H5 首页（503 vs 真实五十几，2026-09-23 用户实测定案）
             val hidden = runCatching { c.hiddenSessionIds() }.getOrDefault(emptySet())
-            for (s in runCatching { c.listSessions(ws) }.getOrDefault(emptyList())) {
-                if (s.sessionId in hidden) continue
-                // 运行中覆写：session/list 快照滞后且 status 恒 idle（缺陷 DD 实证不可作
-                // 权威）。四重判据=相位集合（事件喂源）+ 查询复核确认（queryBackedRunning，
-                // 缺陷EB兜底）+ mapper 活跃投影（桌面 v4 订阅会话的兜底）
-                val turnActive = s.sessionId in runningSessionIds ||
-                    queryBackedRunning.containsKey(s.sessionId) ||
-                    runCatching { c.isSessionTurnActive(s.sessionId) }.getOrDefault(false)
-                val status = if (turnActive || s.status == "running") "running" else "completed"
-                // 复核候选收集：事件/查询两源都说非 running，但 updatedAt 距今很新——
-                // 回合大概率在跑而 turn.started 事件丢了（计划批准续跑回合实测不发 legacy
-                // started，2026-09-29 真机日志实锤）。异步 probe 捞回，快照照常先推
-                if (status == "completed" &&
-                    now - s.updatedAt < PROBE_RECHECK_WINDOW_MS &&
-                    probeCandidates.size < PROBE_MAX_PER_ROUND &&
-                    (lastProbeAt[s.sessionId] ?: 0) < now - PROBE_MIN_INTERVAL_MS
-                ) {
-                    probeCandidates.add(c to s.sessionId)
+            // 挂载目录会话同列（与 RemoteChannelRouter.ideTasks 同口径）：只按项目
+            // basePath 查询，挂载目录下的会话在手机首页任务列表不可见
+            val workspaces = listOf(base) +
+                com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.readActive(impl.ownerProject)
+            for (ws in workspaces) {
+                for (s in runCatching { c.listSessions(ws) }.getOrDefault(emptyList())) {
+                    if (s.sessionId in hidden) continue
+                    // 运行中覆写：session/list 快照滞后且 status 恒 idle（缺陷 DD 实证不可作
+                    // 权威）。四重判据=相位集合（事件喂源）+ 查询复核确认（queryBackedRunning，
+                    // 缺陷EB兜底）+ mapper 活跃投影（桌面 v4 订阅会话的兜底）
+                    val turnActive = s.sessionId in runningSessionIds ||
+                        queryBackedRunning.containsKey(s.sessionId) ||
+                        runCatching { c.isSessionTurnActive(s.sessionId) }.getOrDefault(false)
+                    val status = if (turnActive || s.status == "running") "running" else "completed"
+                    // 复核候选收集：事件/查询两源都说非 running，但 updatedAt 距今很新——
+                    // 回合大概率在跑而 turn.started 事件丢了（计划批准续跑回合实测不发 legacy
+                    // started，2026-09-29 真机日志实锤）。异步 probe 捞回，快照照常先推
+                    if (status == "completed" &&
+                        now - s.updatedAt < PROBE_RECHECK_WINDOW_MS &&
+                        probeCandidates.size < PROBE_MAX_PER_ROUND &&
+                        (lastProbeAt[s.sessionId] ?: 0) < now - PROBE_MIN_INTERVAL_MS
+                    ) {
+                        probeCandidates.add(c to s.sessionId)
+                    }
+                    // 纠偏候选收集：事件集合说 running 且条目超时无相位刷新——回合大概率已结束
+                    // 而终态事件丢了（缺陷EH 四路断法），异步 probe 纠偏，快照照常先推
+                    if (status == "running" && runningSessionIds.containsKey(s.sessionId) &&
+                        now - (runningSessionIds[s.sessionId] ?: 0L) > STALE_RUNNING_RECHECK_MS &&
+                        staleRunningCandidates.size < PROBE_MAX_PER_ROUND &&
+                        (lastProbeAt[s.sessionId] ?: 0) < now - PROBE_MIN_INTERVAL_MS
+                    ) {
+                        staleRunningCandidates.add(c to s.sessionId)
+                    }
+                    // workspacePath 统一正斜杠：app-server 返回反斜杠，而 H5 按当前工作区
+                    //（basePath 正斜杠）对 address.workspacePath 严格字符串匹配（kFe），
+                    // 斜杠不一致=150 任务全被滤掉列表显示 0（2026-08-25 装机 HAR 定案）
+                    val wsFwd = (s.workspace?.workspacePath ?: ws).replace('\\', '/')
+                    taskItems.add(buildJsonObject {
+                        put("address", buildJsonObject {
+                            put("workspacePath", wsFwd)
+                            put("taskId", s.sessionId)
+                        })
+                        put("meta", buildJsonObject {
+                            put("taskId", s.sessionId)
+                            put("traceId", s.traceId ?: s.sessionId)
+                            put("title", s.title.ifBlank { "session" })
+                            put("titleOverridden", s.titleSource == "user")
+                            put("workspacePath", wsFwd)
+                            put("createdAt", s.createdAt)
+                            put("updatedAt", s.updatedAt)
+                            put("mode", s.mode)
+                            put("provider", "glm")
+                            put("status", status)
+                        })
+                        put("membership", buildJsonObject {
+                            put("pinned", false)
+                            put("archived", s.archivedAt != null)
+                            put("active", false)
+                        })
+                        put("sourceAvailability", "online")
+                        put("liveStatus", status)
+                        put("activity", buildJsonObject {
+                            put("phase", if (status == "completed") "completedSuccess" else "running")
+                            put("lastActivityAt", s.updatedAt)
+                            put("hasBackgroundWork", false)
+                        })
+                    })
                 }
-                // 纠偏候选收集：事件集合说 running 且条目超时无相位刷新——回合大概率已结束
-                // 而终态事件丢了（缺陷EH 四路断法），异步 probe 纠偏，快照照常先推
-                if (status == "running" && runningSessionIds.containsKey(s.sessionId) &&
-                    now - (runningSessionIds[s.sessionId] ?: 0L) > STALE_RUNNING_RECHECK_MS &&
-                    staleRunningCandidates.size < PROBE_MAX_PER_ROUND &&
-                    (lastProbeAt[s.sessionId] ?: 0) < now - PROBE_MIN_INTERVAL_MS
-                ) {
-                    staleRunningCandidates.add(c to s.sessionId)
-                }
-                // workspacePath 统一正斜杠：app-server 返回反斜杠，而 H5 按当前工作区
-                //（basePath 正斜杠）对 address.workspacePath 严格字符串匹配（kFe），
-                // 斜杠不一致=150 任务全被滤掉列表显示 0（2026-08-25 装机 HAR 定案）
-                val wsFwd = (s.workspace?.workspacePath ?: ws).replace('\\', '/')
-                taskItems.add(buildJsonObject {
-                    put("address", buildJsonObject {
-                        put("workspacePath", wsFwd)
-                        put("taskId", s.sessionId)
-                    })
-                    put("meta", buildJsonObject {
-                        put("taskId", s.sessionId)
-                        put("traceId", s.traceId ?: s.sessionId)
-                        put("title", s.title.ifBlank { "session" })
-                        put("titleOverridden", s.titleSource == "user")
-                        put("workspacePath", wsFwd)
-                        put("createdAt", s.createdAt)
-                        put("updatedAt", s.updatedAt)
-                        put("mode", s.mode)
-                        put("provider", "glm")
-                        put("status", status)
-                    })
-                    put("membership", buildJsonObject {
-                        put("pinned", false)
-                        put("archived", s.archivedAt != null)
-                        put("active", false)
-                    })
-                    put("sourceAvailability", "online")
-                    put("liveStatus", status)
-                    put("activity", buildJsonObject {
-                        put("phase", if (status == "completed") "completedSuccess" else "running")
-                        put("lastActivityAt", s.updatedAt)
-                        put("hasBackgroundWork", false)
-                    })
-                })
             }
         }
         // 会话库大会员（500+ 任务）全量下发打爆 H5：手机端首页渲染/内存压力 → 页面崩溃
@@ -695,7 +705,11 @@ class ZCodeRemoteService : Disposable {
             } else {
                 put("workspaces", kotlinx.serialization.json.JsonArray(
                     com.zcode.ideaplugin.ZCodeServiceImpl.activeProjectServices()
-                        .mapNotNull { it.ownerProject.basePath }
+                        .flatMap { impl ->
+                            listOfNotNull(impl.ownerProject.basePath) +
+                                com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.readActive(impl.ownerProject)
+                        }
+                        .distinct()
                         .map { path ->
                             buildJsonObject {
                                 put("workspacePath", path)

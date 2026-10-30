@@ -82,6 +82,11 @@ class RelayBridge(
                     val workspaceKey = payload["workspaceKey"]?.jsonPrimitive?.content ?: ""
                     val generation = payload["bridgeGeneration"]?.jsonPrimitive?.content?.toLongOrNull()
                     val recoveryId = payload["recoveryId"]?.jsonPrimitive?.content
+                    // 首页点任务进的桥会带 taskId：必须回显为 bridge.initialTaskId——H5 桥开启
+                    // 后按 i.bridge.initialTaskId 续接任务导航（bundle P 函数定案），缺失=回落
+                    // 工作区默认 draft 视图=「点会话恒进新会话页」（缺陷FS 六轮，真机 HAR 实锤：
+                    // 前两次点击 bridge-open 带 taskId 但 ready 未回显，任务打开 RPC 零发出）
+                    val taskId = payload["taskId"]?.jsonPrimitive?.content
                     bridges[bridgeId] = Bridge(bridgeId, workspaceKey, generation, recoveryId)
                     sender.send(buildJsonObject {
                         requestId?.let { put("requestId", it) }
@@ -96,6 +101,7 @@ class RelayBridge(
                             recoveryId?.let { put("recoveryId", it) }
                             put("workspaceKey", workspaceKey)
                             put("workspacePath", workspaceKey)
+                            taskId?.let { put("initialTaskId", it) }
                         })
                     })
                     return true

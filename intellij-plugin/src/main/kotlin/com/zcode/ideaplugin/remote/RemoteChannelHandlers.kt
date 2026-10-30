@@ -14,6 +14,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -25,6 +26,35 @@ import kotlinx.serialization.json.put
  * 最近消息至预算耗尽，并带 truncated 标记（供桥侧诊断）。
  */
 private const val READ_SESSION_BUDGET_BYTES = 512 * 1024
+
+/**
+ * rowsRange 响应体积预算（字节）：手机侧 relay 连接（弱网/蜂窝）转发 ~1MB 物理帧即断连
+ * ——真机 HAR 实锤 14/14 多分片消息只到 frag0 连接即死（缺陷FS 七轮），readSession 512KB
+ * 预算同款病因同款药方。超预算从旧端（尾部）裁行，hasMore 保持 true 由 H5 按需翻页；
+ * 单行超预算无条件保留最新一行（H5 至少能渲染最近内容）。
+ */
+private const val ROWSRANGE_BUDGET_BYTES = 384 * 1024
+
+/** [trimRowsRangeResult] 纯函数：行数组按累计 JSON 字节数从新端保留（rows 新→旧排序），
+ *  超预算从尾部（更旧）丢弃并强制 hasMore=true；单行超预算无条件保留。 */
+internal fun trimRowsRangeResult(result: JsonObject, budgetBytes: Int = ROWSRANGE_BUDGET_BYTES): JsonObject {
+    val rows = result["rows"] as? kotlinx.serialization.json.JsonArray ?: return result
+    var used = 0
+    val keptRev = mutableListOf<kotlinx.serialization.json.JsonElement>()
+    for (i in rows.size - 1 downTo 0) {
+        val el = rows[i]
+        val sz = el.toString().length
+        if (keptRev.isNotEmpty() && used + sz > budgetBytes) break
+        keptRev.add(el)
+        used += sz
+    }
+    if (keptRev.size == rows.size) return result
+    keptRev.reverse()
+    val out = result.toMutableMap()
+    out["rows"] = kotlinx.serialization.json.JsonArray(keptRev)
+    out["hasMore"] = kotlinx.serialization.json.JsonPrimitive(true)
+    return kotlinx.serialization.json.JsonObject(out)
+}
 
 /** 僵尸桥判定（后台兜底）：超过该时长无任何 channel 活动的桥视为已关闭 */
 private const val STALE_BRIDGE_MS = 10 * 60_000L
@@ -178,7 +208,7 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
         val subscriptions = java.util.concurrent.ConcurrentHashMap<String, V4Subscription>()
     }
 
-    class V4Subscription(val topic: String, val subscriptionId: String, val listenerIds: MutableSet<Long>)
+    class V4Subscription(val topic: String, var subscriptionId: String, val listenerIds: MutableSet<Long>)
 
     private val bridgeContexts = java.util.concurrent.ConcurrentHashMap<String, BridgeV4Context>()
 
@@ -918,25 +948,52 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
                     ?: return responder.error("fault.connection.helloRequired")
                 val client = service.appServer(project)
                     ?: return responder.error("app-server unavailable")
+                // 订阅 workspace 解析链：project → H5 显式传参 → bridge-open 登记的
+                // workspaceKey。第三级是挂载目录工作区的唯一正确来源：conversation 订阅
+                // H5 不带 workspacePath、projectForBridge 对挂载 key 解析不到项目，缺了它
+                // v4 水合 loadPersistedEvents 报 Session not found（2026-10-30 手机首进
+                // 挂载目录会话恒「新会话页」实锤；坏订阅在网关留半活会话，重试跳过水合
+                // =「返回再点就好」假象）
+                val wsResolved = resolveSubscribeWorkspace(project, args, bridgeSessionId)
                 val sessionId = args["sessionId"]?.jsonPrimitive?.content
                 val topic = when {
                     sessionId != null -> "conversation/$sessionId"
                     method.endsWith("SessionsIndexV4") -> {
-                        val ws = args["workspacePath"]?.jsonPrimitive?.content
-                            ?: project?.basePath ?: return responder.error("workspacePath required")
-                        "sessions-index/$ws"
+                        wsResolved ?: return responder.error("workspacePath required")
+                        "sessions-index/$wsResolved"
                     }
                     else -> return responder.error("sessionId required")
                 }
+                // 先占坑再订阅：app-server 的 initial 快照帧与订阅 RPC 应答在 stdout 上
+                // 竞速，live draft 零水合耗、快照恒抢先——帧泵按 ctx.subscriptions[topic]
+                // 判空转发，等订阅应答返回才注册必丢首帧（缺陷FS：H5 等 1s 无快照退订，
+                // 工作区首进导航被打断恒落新会话页；持久化会话水合慢（读库）侥幸掩盖竞态）
+                val sub = ctx.subscriptions.getOrPut(topic) {
+                    V4Subscription(topic, "", java.util.concurrent.ConcurrentHashMap.newKeySet())
+                }
                 try {
-                    val ack = client.v4ConversationSubscribe(topic, ctx.connectionId, workspacePath = project?.basePath ?: args["workspacePath"]?.jsonPrimitive?.content)
-                    val subId = ack["ack"]?.jsonObject?.get("subscriptionId")?.jsonPrimitive?.content ?: ""
-                    ctx.subscriptions.getOrPut(topic) { V4Subscription(topic, subId, java.util.concurrent.ConcurrentHashMap.newKeySet()) }
+                    val ack = client.v4ConversationSubscribe(topic, ctx.connectionId, workspacePath = wsResolved)
+                    ack["ack"]?.jsonObject?.get("subscriptionId")?.jsonPrimitive?.content?.let { sub.subscriptionId = it }
                     // 应答形状对齐桌面（{ack} 包装）；EventFire 监听由 listen 侧登记
                     responder.success(ChValue.Obj(buildJsonObject { put("ack", ack["ack"] ?: buildJsonObject {}) }))
+                    log.info("remote v4 subscribe ok: topic=$topic ws=${wsResolved ?: "<none>"} bridge=$bridgeSessionId")
                     // 订阅成功即有 initial 快照帧——由事件泵从 app-server 通知转推，此处无需处理
                 } catch (e: Exception) {
-                    responder.error("subscribe failed: ${e.message?.take(120)}")
+                    val msg = e.message.orEmpty()
+                    // 换进程后的 draft（既不活跃也未持久化）订阅硬失败。官方宿主对该形态按
+                    // 空会话继续（水合软失败语义），合成 ack 让 H5 落空会话页而不是打断
+                    // 导航；真会话的订阅失败仍原样回错并拆登记
+                    if (msg.contains("not active and not persisted") || msg.contains("fault.subscribe.sessionNotFound")) {
+                        sub.subscriptionId = "zcsyn-${java.util.UUID.randomUUID().toString().take(13)}"
+                        responder.success(ChValue.Obj(buildJsonObject {
+                            put("ack", buildJsonObject { put("subscriptionId", sub.subscriptionId) })
+                        }))
+                        log.info("remote v4 subscribe rescued (unpersisted session): topic=$topic bridge=$bridgeSessionId")
+                    } else {
+                        ctx.subscriptions.remove(topic)
+                        log.warn("remote v4 subscribe failed: topic=$topic ws=${wsResolved ?: "<none>"}: ${e.message?.take(150)}")
+                        responder.error("subscribe failed: ${e.message?.take(120)}")
+                    }
                 }
             }
             // H5 索引恢复重同步：ack.subscriptionId 必须回请求值（H5 校验不等即
@@ -948,12 +1005,13 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
                     ?: return responder.error("fault.connection.helloRequired")
                 val subId = args["subscriptionId"]?.jsonPrimitive?.content
                     ?: return responder.error("subscriptionId required")
-                val ws = args["workspacePath"]?.jsonPrimitive?.content ?: project?.basePath
+                // workspace 解析链与 subscribe 同（挂载目录靠 bridge-open workspaceKey 兜底）
+                val ws = resolveSubscribeWorkspace(project, args, bridgeSessionId)
                     ?: return responder.error("workspacePath required")
                 val client = service.appServer(project)
                     ?: return responder.error("app-server unavailable")
                 val result = runCatching {
-                    client.v4ConversationResync("sessions-index/$ws", subId, ctx.connectionId, workspacePath = project?.basePath ?: ws)
+                    client.v4ConversationResync("sessions-index/$ws", subId, ctx.connectionId, workspacePath = ws)
                 }.getOrElse { e ->
                     return responder.error("resync failed: ${e.message?.take(120)}")
                 }
@@ -970,11 +1028,104 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
                 val client = service.appServer(project)
                     ?: return responder.error("app-server unavailable")
                 val result = runCatching {
-                    client.v4ConversationResync("conversation/$sessionId", subId, ctx.connectionId, workspacePath = project?.basePath)
+                    client.v4ConversationResync(
+                        "conversation/$sessionId", subId, ctx.connectionId,
+                        workspacePath = resolveSubscribeWorkspace(project, args, bridgeSessionId),
+                    )
                 }.getOrElse { e ->
+                    // 未持久化会话（live draft 换进程后）resync 同样硬失败；H5 校验
+                    // ack.subscriptionId 必须等于请求值，原样回填让恢复链落地空会话
+                    if (e.message.orEmpty().contains("not active and not persisted") ||
+                        e.message.orEmpty().contains("fault.subscribe.sessionNotFound")
+                    ) {
+                        responder.success(ChValue.Obj(buildJsonObject {
+                            put("ack", buildJsonObject { put("subscriptionId", subId) })
+                        }))
+                        return
+                    }
                     return responder.error("resync failed: ${e.message?.take(120)}")
                 }
                 responder.success(ChValue.Obj(buildJsonObject { put("ack", result["ack"] ?: result) }))
+            }
+            // H5 会话历史行分页：v4 行模型的渲染数据源（官方 service 直透
+            // v4/conversation/rowsRange，readSession 只承载最近消息基线）——缺它 H5 拿不到
+            // 历史行，超尾部窗口（60 行）的会话页面恒空=「新会话页」（缺陷FS 三轮实锤：
+            // 12:50 真机点击持久化会话走完整 open 链后调本方法，此前 Method not found）
+            "conversationRowsRangeV4" -> {
+                val client = service.appServer(project)
+                    ?: return responder.error("app-server unavailable")
+                val sid = args["sessionId"]?.jsonPrimitive?.content
+                    ?: return responder.error("sessionId required")
+                val limit = args["limit"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.coerceIn(1, 200) ?: 200
+                val beforeRowId = args["beforeRowId"]?.jsonPrimitive?.longOrNull
+                try {
+                    // 体积预算：弱网手机 relay 连接扛不住 ~1MB 物理帧（断连→recover 循环），
+                    // 裁到单分片内（384KB 预算≈512KB base64 帧），旧内容由 H5 翻页拉取
+                    responder.success(ChValue.Obj(trimRowsRangeResult(client.v4RowsRangePage(sid, beforeRowId, limit))))
+                } catch (e: Exception) {
+                    responder.error("rowsRange failed: ${e.message?.take(120)}")
+                }
+            }
+            // 计划目录：空合法（此前一直 Method not found 也不阻塞 H5 渲染）
+            "conversationPlansV4" -> responder.success(ChValue.Obj(buildJsonObject {
+                put("plans", kotlinx.serialization.json.JsonArray(emptyList()))
+                put("atSeq", 0)
+                put("atLogEpoch", "zcodeidea")
+            }))
+            // 附件内容分块读（zcode-artifact://<sid>/<name> ref → artifacts 落盘文件）：
+            // H5 渲染带图片附件的用户消息必调，Method not found=渲染崩→错误边界黑屏
+            //（缺陷FS 八轮）。文件内容为 data URL（IDE 端附件管线落盘形态），按二进制
+            // 分块回 {totalBytes, mediaType, dataBase64, nextOffset}。块收敛单片预算内
+            //（384KB，多分片 ~1MB 帧手机断连——七轮教训）
+            "attachmentReadV4" -> {
+                val prefix = "zcode-artifact://"
+                val ref = args["ref"]?.jsonPrimitive?.contentOrNull
+                    ?: return responder.error("ref required")
+                if (!ref.startsWith(prefix)) return responder.error("unsupported ref: ${ref.take(40)}")
+                val rel = ref.removePrefix(prefix)
+                val slash = rel.indexOf('/')
+                if (slash <= 0) return responder.error("malformed ref")
+                val refSid = rel.substring(0, slash)
+                val refName = rel.substring(slash + 1)
+                // 防路径穿越：段内不允许分隔符与 ..
+                if (refName.contains('/') || refName.contains("\\") || refName.contains("..")) {
+                    return responder.error("malformed ref name")
+                }
+                val offset = args["offset"]?.jsonPrimitive?.longOrNull ?: 0L
+                val requested = args["limit"]?.jsonPrimitive?.longOrNull ?: ROWSRANGE_BUDGET_BYTES.toLong()
+                val limit = requested.coerceIn(1L, ROWSRANGE_BUDGET_BYTES.toLong())
+                try {
+                    val dir = java.nio.file.Path.of(
+                        System.getProperty("user.home"), ".zcode", "cli", "artifacts", refSid)
+                    val exact = dir.resolve(refName)
+                    val file = when {
+                        java.nio.file.Files.isRegularFile(exact) -> exact
+                        else -> runCatching {
+                            java.nio.file.Files.list(dir).use { stream ->
+                                stream.filter { p -> p.fileName.toString().endsWith(refName) }
+                                    .findFirst().orElse(null)
+                            }
+                        }.getOrNull()
+                    } ?: return responder.error("artifact not found: ${refName.take(60)}")
+                    val text = java.nio.file.Files.readString(file)
+                    // 落盘形态 data:<mime>;base64,<载荷>
+                    val comma = text.indexOf(",") + 1
+                    val mime = Regex("^data:([^;,]+)").find(text)?.groupValues?.get(1) ?: "application/octet-stream"
+                    val bin = java.util.Base64.getDecoder().decode(text.substring(comma))
+                    val total = bin.size
+                    val from = offset.coerceIn(0L, total.toLong()).toInt()
+                    val to = minOf(total, from + limit.toInt())
+                    val chunk = bin.copyOfRange(from, to)
+                    val next = if (to >= total) null else to
+                    responder.success(ChValue.Obj(buildJsonObject {
+                        put("totalBytes", total)
+                        put("mediaType", mime)
+                        put("dataBase64", java.util.Base64.getEncoder().encodeToString(chunk))
+                        if (next != null) put("nextOffset", next) else put("nextOffset", kotlinx.serialization.json.JsonNull)
+                    }))
+                } catch (e: Exception) {
+                    responder.error("attachmentRead failed: ${e.message?.take(120)}")
+                }
             }
             "unsubscribeConversationV4" -> {
                 val ctx = bridgeContexts[bridgeSessionId] ?: return responder.success(ChValue.Undefined)
@@ -1038,6 +1189,15 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
             ))
         }
     }
+
+    /** v4 订阅族 workspace 解析链：project → H5 传参 → bridge-open workspaceKey（空白串视为缺席）。
+     *  第三级是挂载目录场景的唯一正确来源，缺了它 v4 水合报 Session not found（见调用处长注） */
+    private fun resolveSubscribeWorkspace(
+        project: Project?, args: JsonObject, bridgeSessionId: String,
+    ): String? =
+        project?.basePath
+            ?: args["workspacePath"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: service.bridgeWorkspaceKey(bridgeSessionId)?.takeIf { it.isNotBlank() }
 
     // ---- zcode-task：会话操作（经典通道直通） ----
 
@@ -1209,6 +1369,19 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
                         put("slashCommands", state["slashCommands"]
                             ?: kotlinx.serialization.json.JsonArray(emptyList()))
                     }))
+                }
+                // workspace 呈现直透（{workspace, mode, slashCommands}）：H5 每次进工作区
+                // 必调，此前 Method not found 靠容错活着
+                "readWorkspacePresentation" -> {
+                    val wsPath = args["workspacePath"]?.jsonPrimitive?.contentOrNull
+                        ?: args["workspace"]?.jsonObject?.get("workspacePath")?.jsonPrimitive?.contentOrNull
+                        ?: project?.basePath
+                        ?: return responder.error("workspacePath required")
+                    try {
+                        responder.success(ChValue.Obj(client.workspaceReadPresentation(Workspace(wsPath))))
+                    } catch (e: Exception) {
+                        responder.error("readPresentation failed: ${e.message?.take(100)}")
+                    }
                 }
                 // H5 发送前设默认模型（model:{providerId, modelId…}）；app-server 无
                 // workspace 级 setModel RPC，桥回成功打通发送链（会话实际模型由

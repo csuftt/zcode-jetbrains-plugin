@@ -74,9 +74,20 @@ class RemoteChannelRouter {
     }
 
     private fun ideWorkspaces(): List<RelayBridge.RelayWorkspace> {
-        val projects = ProjectManager.getInstance().openProjects
-        val list = projects.mapNotNull { p ->
-            p.basePath?.let { RelayBridge.RelayWorkspace(path = it, label = p.name) }
+        val list = ArrayList<RelayBridge.RelayWorkspace>()
+        val seen = HashSet<String>()
+        for (p in ProjectManager.getInstance().openProjects) {
+            val base = p.basePath ?: continue
+            list.add(RelayBridge.RelayWorkspace(path = base, label = p.name))
+            seen.add(com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.wsKey(base))
+            // 挂载的关联目录同列（kv 权威）：channel 全链路按 per-request workspacePath
+            // 参数化（appServer null→任一活跃实例，task/订阅走 args.workspacePath），手机
+            // 进挂载工作区建会话/列会话与 IDE 面板切目录同通道；跨项目重复关联由 seen 去重
+            for (ws in com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.readActive(p)) {
+                if (seen.add(com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.wsKey(ws))) {
+                    list.add(RelayBridge.RelayWorkspace(path = ws, label = ws.substringAfterLast('/')))
+                }
+            }
         }
         if (list.isEmpty()) {
             // IDE 无打开项目（理论少见）：占位防 H5 空列表异常
@@ -91,30 +102,49 @@ class RemoteChannelRouter {
      *  H5 由 controller/tasks-index 订阅帧补齐（对齐官方多源合并） */
     private fun ideTasks(): List<JsonObject> {
         val items = ArrayList<JsonObject>()
+        val seenIds = HashSet<String>()
         for (impl in com.zcode.ideaplugin.ZCodeServiceImpl.activeProjectServices()) {
             if (!impl.isStarted()) continue
             val c = runCatching { impl.getClient() }.getOrNull() ?: continue
-            val ws = impl.ownerProject.basePath ?: continue
             // 归档/软删过滤（IDE 历史列表同口径）：session/list 不认 tasks-index 归档
             val hidden = runCatching { c.hiddenSessionIds() }.getOrDefault(emptySet())
-            for (s in runCatching { c.listSessions(ws) }.getOrDefault(emptyList())) {
-                if (s.sessionId in hidden) continue
-                items.add(buildJsonObject {
-                    put("archived", s.archivedAt != null)
-                    put("createdAt", s.createdAt)
-                    put("displayStatus", if (s.status == "running" || isSessionRunning?.invoke(s.sessionId) == true) "running" else "completed")
-                    put("provider", "glm")
-                    put("taskId", s.sessionId)
-                    put("title", s.title.ifBlank { "session" })
-                    put("updatedAt", s.updatedAt)
-                    put("workspaceKind", "local")
-                    put("workspaceLabel", impl.ownerProject.name)
-                    // 正斜杠统一（app-server 返回反斜杠；H5 端工作区匹配为严格字符串比较）
-                    put("workspacePath", (s.workspace?.workspacePath ?: ws).replace('\\', '/'))
-                })
+            val base = impl.ownerProject.basePath ?: continue
+            appendTaskRows(items, c, base, impl.ownerProject.name, hidden, seenIds)
+            // 挂载目录的会话同列：只查 basePath 的话挂载目录会话在手机首页不可见
+            //（要等进该工作区触发 sessions-index 订阅才补）
+            for (ws in com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.readActive(impl.ownerProject)) {
+                appendTaskRows(items, c, ws, ws.substringAfterLast('/'), hidden, seenIds)
             }
         }
         return items
+    }
+
+    /** 单工作区 session/list → 任务行追加（行形状见上方 HAR 定案注释）。
+     *  [seenIds] 跨工作区判重：同目录被多个打开项目关联时不双行 */
+    private fun appendTaskRows(
+        items: ArrayList<JsonObject>,
+        c: com.zcode.ideaplugin.protocol.ZCodeProtocolClient,
+        ws: String,
+        label: String,
+        hidden: Set<String>,
+        seenIds: HashSet<String>,
+    ) {
+        for (s in runCatching { c.listSessions(ws) }.getOrDefault(emptyList())) {
+            if (s.sessionId in hidden || !seenIds.add(s.sessionId)) continue
+            items.add(buildJsonObject {
+                put("archived", s.archivedAt != null)
+                put("createdAt", s.createdAt)
+                put("displayStatus", if (s.status == "running" || isSessionRunning?.invoke(s.sessionId) == true) "running" else "completed")
+                put("provider", "glm")
+                put("taskId", s.sessionId)
+                put("title", s.title.ifBlank { "session" })
+                put("updatedAt", s.updatedAt)
+                put("workspaceKind", "local")
+                put("workspaceLabel", label)
+                // 正斜杠统一（app-server 返回反斜杠；H5 端工作区匹配为严格字符串比较）
+                put("workspacePath", (s.workspace?.workspacePath ?: ws).replace('\\', '/'))
+            })
+        }
     }
 
     companion object {

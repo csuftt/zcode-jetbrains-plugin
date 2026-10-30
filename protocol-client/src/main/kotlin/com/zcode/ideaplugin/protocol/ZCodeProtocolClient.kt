@@ -1208,6 +1208,42 @@ class ZCodeProtocolClient private constructor(
         )
 
     /**
+     * 会话行分页读取·翻页形态（手机桥 conversationRowsRangeV4 直通）：与 [v4RowsRange]
+     * 同 RPC，但走 topic 参数形态并支持 beforeRowId 向旧翻页——参数形状以 fork 翻页的
+     * 真会话取证为准（topic + sessionId + limit + beforeRowId）。H5 的会话视图按 v4 行
+     * 模型渲染，订阅快照只带尾部窗口（60 行），更早历史全靠本方法分页拉取。
+     */
+    fun v4RowsRangePage(
+        sessionId: String,
+        beforeRowId: Long? = null,
+        limit: Int = 200,
+        timeoutMs: Long = 15000,
+    ): JsonObject {
+        val params = buildJsonObject {
+            put("sessionId", sessionId)
+            put("topic", "conversation/$sessionId")
+            put("limit", limit)
+            beforeRowId?.let { put("beforeRowId", it) }
+        }
+        val r = request("v4/conversation/rowsRange", params, timeoutMs)
+        r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /** workspace/readPresentation（workspace 呈现：{workspace, mode, slashCommands}） */
+    fun workspaceReadPresentation(workspace: Workspace, timeoutMs: Long = 10000): JsonObject {
+        val params = buildJsonObject {
+            put("workspace", buildJsonObject {
+                put("workspacePath", workspace.workspacePath)
+                put("workspaceKey", workspace.workspaceKey)
+            })
+        }
+        val r = request("workspace/readPresentation", params, timeoutMs)
+        r["error"]?.let { throw ZCodeProtocolException.fromError(it) }
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * 同订阅恢复重同步（官方 zcodeAgentService.resyncConversationV4 同款语义）：
      * subscriptionId 精确命中现有订阅、**不新建 id**——重订阅会产生新 id，H5 按帧内
      * id 与已注册值严格匹配，失配即静默丢弃重推的快照（2026-09-22 对照开源定案）。

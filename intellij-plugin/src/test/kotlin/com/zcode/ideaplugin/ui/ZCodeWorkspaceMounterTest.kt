@@ -76,4 +76,44 @@ class ZCodeWorkspaceMounterTest {
         assertEquals(ZCodeLinkedWorkspaces.wsKey("G:\\AI\\Ws\\"), ZCodeLinkedWorkspaces.wsKey("g:/ai/ws"))
         assertTrue(ZCodeLinkedWorkspaces.wsKey("G:/ai/ws/").endsWith("/ws"), "内部路径前缀判定依赖去尾")
     }
+
+    // ---- normalizeActive（readActive 纯函数核，手机远程工作区外露口径）----
+
+    private val onDisk = setOf("G:/proj", "G:/ws-a", "G:/ws-b", "G:/proj/sub-ws")
+
+    private fun normalize(raw: List<String>, basePath: String?) =
+        ZCodeLinkedWorkspaces.normalizeActive(raw, basePath) { it in onDisk }
+
+    @Test
+    fun `normalizeActive keeps existing linked dirs in forward slash form`() {
+        assertEquals(
+            listOf("G:/ws-a", "G:/ws-b"),
+            normalize(listOf("G:\\ws-a", "G:/ws-b/"), "G:/proj"),
+            "正斜杠统一 + 失效目录过滤",
+        )
+    }
+
+    @Test
+    fun `normalizeActive drops missing dirs and duplicates`() {
+        assertEquals(
+            listOf("G:/ws-a"),
+            normalize(listOf("G:/gone", "G:/ws-a", "G:\\WS-A"), "G:/proj"),
+            "盘上已删目录不外露；同目录多形态只出一行",
+        )
+    }
+
+    @Test
+    fun `normalizeActive excludes exact project root but keeps subdirs`() {
+        assertEquals(
+            listOf("G:/proj/sub-ws"),
+            normalize(listOf("G:/proj", "G:/proj/sub-ws"), "G:/proj"),
+            "项目根自身不重复外露；子目录是合法独立工作区（chips 同语义）",
+        )
+    }
+
+    @Test
+    fun `normalizeActive returns empty without base path or raw list`() {
+        assertTrue(normalize(listOf("G:/ws-a"), null).isEmpty(), "无项目根无法承载")
+        assertTrue(normalize(emptyList(), "G:/proj").isEmpty(), "未挂载=零外露")
+    }
 }

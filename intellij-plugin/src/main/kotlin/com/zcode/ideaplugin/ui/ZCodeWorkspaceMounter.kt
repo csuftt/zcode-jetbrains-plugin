@@ -50,6 +50,33 @@ object ZCodeLinkedWorkspaces {
         PropertiesComponent.getInstance(project)
             .setValue(KEY, JsonArray(list.map { JsonPrimitive(it) }).toString())
     }
+
+    /**
+     * 归一读取（外露场景用：手机远程工作区列表/任务聚合）：正斜杠统一 + 与项目根及
+     * 彼此按 wsKey 去重 + 盘上失效目录过滤（kv 残留已删目录是既有形态，chips 淡显引导
+     * 移除，不该外露成可用工作区）。项目子目录不排除——它是合法独立工作区（chips 同
+     * 语义），只是不挂 Project View。[exists] 参数为纯函数测试锚点（同 computeDiff 先例）。
+     */
+    fun readActive(project: Project): List<String> =
+        normalizeActive(read(project), project.basePath)
+
+    /** [readActive] 的纯函数核：kv 原始列表 + 项目根 → 外露目录清单（正斜杠、去重、存在） */
+    fun normalizeActive(
+        raw: List<String>,
+        basePath: String?,
+        exists: (String) -> Boolean = { p -> runCatching { Files.isDirectory(Path.of(p)) }.getOrDefault(false) },
+    ): List<String> {
+        if (basePath == null) return emptyList()
+        val seen = mutableSetOf(wsKey(basePath))
+        val out = ArrayList<String>()
+        for (item in raw) {
+            val path = item.replace('\\', '/').trimEnd('/')
+            if (!seen.add(wsKey(path))) continue
+            if (!exists(path)) continue
+            out.add(path)
+        }
+        return out
+    }
 }
 
 /**
