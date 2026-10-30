@@ -182,6 +182,14 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         const val USER_INPUT_TIMEOUT_MS = 5 * 60 * 1000L
 
         /**
+         * 弹窗挂起期重发心跳静默判死阈值（缺陷FQ）：服务端重发间隔实测 10s，
+         * 45s=4.5 个周期余量（网络抖动/服务端 GC 不至于静默 45s）；探活确认
+         * 超时 10s。见 checkRetryHeartbeat
+         */
+        const val RETRY_HEARTBEAT_SILENT_MS = 45_000L
+        const val PROBE_ALIVE_TIMEOUT_MS = 10_000L
+
+        /**
          * 回合终止废弃哨兵：abortPendingUserInputs complete 到 future 的标记值，
          * handler 透传给协议层后转 JSON-RPC error 应答（请求失败语义，非用户拒绝，
          * 不污染服务端权限状态机）。协议层与服务层约定字段名
@@ -287,6 +295,13 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
          *  防迟到的旧回合终止事件误杀同会话新回合刚弹出的审批窗。null=服务端未带
          *  （异常形态），匹配时保守按会话处理 */
         val turnId: String? = null,
+        /**
+         * 最近一次收到服务端重发的时刻（缺陷FQ 心跳判死）：弹窗挂起期服务端每
+         * 10s 重发一次同内容请求——重发本身是进程活着的心跳，挂死进程不再重发。
+         * 「心跳静默 + 探活超时」双重证据触发外部判死（stdin 缓冲未满时写不阻塞，
+         * FO 写超时防线探不到这种形态）。更新走 map 整条替换。
+         */
+        val lastRetryAt: Long = System.currentTimeMillis(),
     )
 
     /** 族应答缓存条目：permission 请求已给服务端的最终应答（用户选择/超时 deny）*/
@@ -411,6 +426,17 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             // 数秒，会拖住判死现场
             newClient.onProtocolDead = { evidence ->
                 log.warn("[protocol-dead] app-server 写阻塞判死，调度自动重建: $evidence")
+                // 判死即时收尾（缺陷FQ）：旧链路只重建进程不通知 UI——挂着的回合等
+                // 60s 流看门狗慢慢兜底（中间还可能撞 -32004 对账拖延），用户体感
+                // 「卡住没恢复」。判死瞬间：废弃全部挂起弹窗（哨兵应答→askUserAck 关窗）
+                // + 广播 protocolDead 让 webview 立即失败收尾并提示「已自动重启」
+                try {
+                    abortPendingUserInputs(null, null)
+                    val deadMsg = buildJsonObject { put("op", "protocolDead") }
+                    panels.forEach { it.pushToWebview(deadMsg) }
+                } catch (e: Exception) {
+                    log.warn("[protocol-dead] UI 收尾通知失败（不影响重建）: ${e.message}")
+                }
                 com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule({
                     try {
                         log.warn("[protocol-dead] auto rebuild starting after stdin-dead kill")
@@ -473,22 +499,29 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
      */
     private fun registerProtocolHandlersLocked(c: ZCodeProtocolClient) {
         try {
+            // 反向请求 handler 一律按实例无条件重挂（lambda 仅引用 Service 自身方法，
+            // 重复赋值幂等；browserExecutor 构造轻量，换代重建无害）。在位与否以
+            // 「client 实例」为准，Service 级一次性守卫在任何换实例路径上都会把新
+            // client 漏成裸协议——缺陷FP：缺陷FO 挂死自动重建（懒重建）换 client 后
+            // 守卫短路，首个 AskUserQuestion 被协议层 auto-declining（真机 8.4s 自动
+            // 取消即此因），browser-use/automation 同瘫；shutdown()/killAppServerByPid
+            // 有标志重置簿记所以幸免，判死自动重建路径漏簿记即暴露
             if (!userInputHandlerRegistered) {
-                c.userInputRequestHandler = { serverRequestId, params ->
-                    handleUserInputRequest(serverRequestId, params)
-                }
-                userInputHandlerRegistered = true
                 log.info("[askUser] userInputRequestHandler registered at Service level (shared across tabs)")
+            } else {
+                log.info("[askUser] userInputRequestHandler re-bound to rebuilt client")
             }
-            // 工具权限审批（interaction/requestPermission）：default 模式写文件/命令前
-            // 的批准请求。与 userInputRequestHandler 同为单例、同在 getClient 成功后幂等注册
+            c.userInputRequestHandler = { serverRequestId, params ->
+                handleUserInputRequest(serverRequestId, params)
+            }
+            userInputHandlerRegistered = true
             if (!permissionHandlerRegistered) {
-                c.permissionRequestHandler = { serverRequestId, params ->
-                    handlePermissionRequest(serverRequestId, params)
-                }
-                permissionHandlerRegistered = true
                 log.info("[permission] interaction/requestPermission handler registered at Service level")
             }
+            c.permissionRequestHandler = { serverRequestId, params ->
+                handlePermissionRequest(serverRequestId, params)
+            }
+            permissionHandlerRegistered = true
             // 回合终止联动废弃待应答弹窗：挂起的反向请求随回合而生，回合死了弹窗即死
             // （服务端对未应答权限请求重试到头会自行放弃并 failed 收尾，插件此前无感知，
             // 死弹窗留到 5 分钟超时批量 decline——迟到应答风暴即 P3/P4 污染源）。
@@ -535,25 +568,21 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                     notifyTurnEndIfWanted(event)
                 }
             }
-            if (!browserHandlerRegistered) {
-                val executor = com.zcode.ideaplugin.ui.ZCodeBrowserExecutor(project)
-                browserExecutor = executor
-                c.browserListHandler = { executor.listBrowsers() }
-                c.browserExecuteHandler = { params -> executor.execute(params) }
-                browserHandlerRegistered = true
-                log.info("[browser-use] host handlers registered (interaction/browserList + browserExecute)")
-            }
+            val executor = com.zcode.ideaplugin.ui.ZCodeBrowserExecutor(project)
+            browserExecutor = executor
+            c.browserListHandler = { executor.listBrowsers() }
+            c.browserExecuteHandler = { params -> executor.execute(params) }
+            browserHandlerRegistered = true
+            log.info("[browser-use] host handlers bound (interaction/browserList + browserExecute)")
             // automation/* 宿主化：模型的 Cron* 工具经 app-server 反向请求落到插件，
             // 任务存储/调度由 ZCodeScheduledMessageService 承载（与官方客户端的
             // tasks-index.sqlite 互不共写，双端并行不会双重执行）
-            if (!automationHandlerRegistered) {
-                val scheduled = com.zcode.ideaplugin.ui.ZCodeScheduledMessageService.getInstance(project)
-                c.automationRequestHandler = { method, params ->
-                    scheduled.handleAutomationRequest(method, params)
-                }
-                automationHandlerRegistered = true
-                log.info("[automation] host handler registered (automation/create|update|list|delete|checkTaskBinding)")
+            val scheduled = com.zcode.ideaplugin.ui.ZCodeScheduledMessageService.getInstance(project)
+            c.automationRequestHandler = { method, params ->
+                scheduled.handleAutomationRequest(method, params)
             }
+            automationHandlerRegistered = true
+            log.info("[automation] host handler bound (automation/create|update|list|delete|checkTaskBinding)")
         } catch (e: Exception) {
             log.warn("Protocol handler registration failed (will retry on next getClient): ${e.message}")
         }
@@ -827,6 +856,8 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
 
     override fun shutdown() {
         lock.withLock {
+            retryHeartbeatFuture?.cancel(false)
+            retryHeartbeatFuture = null
             client?.close()
             client = null
             enhanceClient?.close()
@@ -1152,7 +1183,9 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         val future: CompletableFuture<JsonObject>
         if (existing != null) {
             // 服务端重试同一请求：共享旧 future（各 handler 线程向自己的 id 应答），
-            // 不重复弹窗——重复推送会重建弹窗、重置用户已选状态
+            // 不重复弹窗——重复推送会重建弹窗、重置用户已选状态。
+            // 重发即进程心跳（缺陷FQ）：lastRetryAt 随每次重发刷新，心跳检查器据此
+            // 判「挂起期进程死亡」（静默 + 探活双重证据）
             pendingUserInputs[serverRequestId] =
                 PendingUserInput(contentKey, existing.future, existing.targetPanel, existing.sessionId, turnId = existing.turnId)
             future = existing.future
@@ -1359,7 +1392,9 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         if (pending.options != null) {
             val permResult = buildPermissionResult(pending.options, action, answer)
             pending.familyId?.let { rememberFamilyAnswer(it, permResult) }
-            future.complete(permResult)
+            // 重发堆积应答收敛（缺陷FR）：只由最新 id 发送，其余 id 静默跳过
+            val permOut = withRespondOnly(permResult, latestPendingIdFor(future, requestId))
+            future.complete(permOut)
             cleanupPendingFor(future)
             log.info("[permission] User answered, responding to server: decision=${permResult["decision"]}")
             return buildJsonObject { put("op", "askUserAck"); put("requestId", requestId) }
@@ -1400,7 +1435,10 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             }
         }
 
-        future.complete(result)
+        // 重发堆积应答收敛（缺陷FR）：同 future 的全部在途 id 里只由最新一个发送应答，
+        // 其余 id 的 handler 线程醒来后按标记静默跳过（服务端收到首个应答即清全部 key）
+        val resultOut = withRespondOnly(result, latestPendingIdFor(future, requestId))
+        future.complete(resultOut)
         // 服务端重试的其他 id 共享此 future，一并清理
         cleanupPendingFor(future)
         // 应答是用户自由文本（意见/审批反馈），只记形态不记内容——秘钥类可走 LogRedactor
@@ -1425,13 +1463,78 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
         if (pendingUserInputs.isEmpty()) broadcastAskUserPending(false)
     }
 
+    /**
+     * 重发堆积应答收敛（缺陷FR）：同 future 全部在途 id（含刚被 remove 的当前 id）
+     * 里数字最大的 server id。服务端 id 形如 server-<n> 严格递增，最新 id = 服务端
+     * 当前正等待的应答目标。3.16.3 reannounce 改固定 10s 后挂起 5min+ 堆积 30+ id，
+     * 全量应答风暴实测触发服务端挂死——应答只发最新一个。
+     */
+    private fun latestPendingIdFor(future: CompletableFuture<JsonObject>, currentId: String): String? {
+        val ids = pendingUserInputs.entries.filter { it.value.future === future }.map { it.key } + currentId
+        return ids.maxByOrNull { it.substringAfterLast('-').toIntOrNull() ?: 0 }
+    }
+
+    /** 应答对象附加收敛标记（null 时不包装原样返回）*/
+    private fun withRespondOnly(result: JsonObject, latestId: String?): JsonObject =
+        if (latestId == null) result
+        else JsonObject(result.toMutableMap().apply { put("__zcodeRespondOnly", JsonPrimitive(latestId)) })
+
     /** 向所有面板广播反向请求挂起标志（看门狗豁免用，多标签同会话时无弹窗的面板也需感知）*/
     private fun broadcastAskUserPending(active: Boolean) {
+        if (active) ensureRetryHeartbeatChecker()
         val msg = buildJsonObject {
             put("op", "askUserPending")
             put("active", active)
         }
         panels.forEach { it.pushToWebview(msg) }
+    }
+
+    /**
+     * 弹窗挂起期重发心跳检查器（缺陷FQ）：服务端对未应答的 requestUserInput /
+     * requestPermission 每 10s 重发一次（实测无上限，挂 6 分钟+仍在重发）——重发
+     * 即进程心跳。挂死进程停止重发但 stdin 缓冲未满时写不阻塞，FO 写超时防线
+     * 探不到（用户不点应答就永远卡在死弹窗上）。判据 = 全部挂起请求的最近一次
+     * 重发/新建距今静默 >45s（4.5 个周期余量），再以探活 RPC 双重确认防「服务端
+     * 重发策略变更」误杀。判死后走 declareProtocolDead 同一条收尾链（kill +
+     * 懒重建 + UI 广播）。15s 周期常驻，首个弹窗挂起时懒启动。
+     */
+    @Volatile
+    private var retryHeartbeatFuture: java.util.concurrent.ScheduledFuture<*>? = null
+
+    private fun ensureRetryHeartbeatChecker() {
+        if (retryHeartbeatFuture != null) return
+        synchronized(this) {
+            if (retryHeartbeatFuture != null) return
+            retryHeartbeatFuture =
+                com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService()
+                    .scheduleWithFixedDelay({
+                        try {
+                            checkRetryHeartbeat()
+                        } catch (_: Exception) {
+                        }
+                    }, 15, 15, java.util.concurrent.TimeUnit.SECONDS)
+            log.info("[protocol-dead] 重发心跳检查器已启动（15s 周期，静默阈值 ${RETRY_HEARTBEAT_SILENT_MS}ms）")
+        }
+    }
+
+    private fun checkRetryHeartbeat() {
+        val pend = pendingUserInputs
+        if (pend.isEmpty()) return
+        val lastBeat = pend.values.maxOf { it.lastRetryAt }
+        val silentMs = System.currentTimeMillis() - lastBeat
+        if (silentMs < RETRY_HEARTBEAT_SILENT_MS) return
+        val c = client ?: return
+        if (!c.isAlive()) return
+        log.warn("[protocol-dead] 弹窗挂起期重发心跳静默 ${silentMs}ms，探活确认中（挂起 ${pend.size} 条）...")
+        val alive = c.probeAlive(PROBE_ALIVE_TIMEOUT_MS)
+        if (!alive) {
+            log.warn("[protocol-dead] 探活无应答——判死挂死进程（弹窗随判死废弃，进程自动重建）")
+            c.declareDeadExternally("requestUserInput retry heartbeat silent ${silentMs}ms + probe(${PROBE_ALIVE_TIMEOUT_MS}ms) timeout")
+        } else {
+            // 探活应答正常：进程活着，只是服务端不再重发（策略变化/新版行为）——
+            // 不判死，等流看门狗与用户操作自然收尾
+            log.info("[protocol-dead] 心跳静默 ${silentMs}ms 但探活正常，不判死")
+        }
     }
 
     override fun pushAskUserPendingState(panel: ZCodeToolWindowPanel) {
@@ -1462,7 +1565,10 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             // error（与本次废弃同语义），不复活弹窗。此前废弃路径不记缓存，是
             // 「已废弃族重发复活弹窗」缺陷面的残留入口；askUser/ExitPlanMode 无族概念
             it.value.familyId?.let { fid -> familyAnswers[fid] = FamilyAnswer(sentinel, System.currentTimeMillis()) }
-            it.value.future.complete(sentinel)
+            // 哨兵收敛（缺陷FR）：废弃风暴与应答风暴同形（重发堆积的全部 id 同时醒），
+            // 只由最新 id 发 error，其余静默跳过
+            val s = withRespondOnly(sentinel, latestPendingIdFor(it.value.future, it.key))
+            it.value.future.complete(s)
         }
         // ack 逐 victim 带 requestId（前端精确匹配关窗）：无差别单条 ack 会误关
         // 面板上其他回合/请求仍挂着的弹窗

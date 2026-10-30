@@ -1404,6 +1404,8 @@ export type JavaResponse =
       deadlineMs?: number
     }
   | { op: 'askUserPending'; active: boolean }
+  /** app-server 进程判死并自动重启（缺陷FQ）：webview 立即失败收尾活跃回合并提示 */
+  | { op: 'protocolDead' }
   | { op: 'askUserStateAck' }
   /** 服务端同族重发换新 id：保活权限弹窗的 requestId（点击命中服务端当前在等的 id）*/
   | { op: 'permissionRequestRefresh'; requestId: string }

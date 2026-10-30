@@ -360,6 +360,25 @@ class ZCodeProtocolClient private constructor(
         }
     }
 
+    /**
+     * 外部主动判死（Service 层心跳/探活确认后调用，缺陷FQ）：与 stdin 写阻塞判死
+     * 同一条收尾链（kill + onProtocolDead 钩子），gate 防重复。挂死进程 stdin 缓冲
+     * 未满时写不阻塞——写超时防线探不到这种形态，只能靠上层「重发心跳静默 +
+     * 探活超时」双重证据从外面判。
+     */
+    fun declareDeadExternally(evidence: String) = declareProtocolDead(evidence)
+
+    /**
+     * 轻量探活：probe RPC 带独立短超时。false = 无应答（进程死/挂死不消费）。
+     * 写入走 writeGate（挂死形态写通常成功——缓冲未满，只是没人应答）。
+     */
+    fun probeAlive(timeoutMs: Long): Boolean = try {
+        request("session/list", buildJsonObject { put("limit", 1) }, timeoutMs)
+        true
+    } catch (_: Exception) {
+        false
+    }
+
     // ============ 启动方式 ============
 
     companion object {
@@ -833,9 +852,22 @@ class ZCodeProtocolClient private constructor(
      */
     private fun respondInteractiveAnswer(id: String, result: JsonObject) {
         if (result.containsKey("__zcodeDiscard")) {
+            // 哨兵也收敛（缺陷FR）：只有标记的 id 发 error，其余重发 id 静默丢弃
+            val onlyDiscard = result["__zcodeRespondOnly"]?.jsonPrimitive?.contentOrNull
+            if (onlyDiscard != null && onlyDiscard != id) return
             respondToServer(id, error = ProtocolError(ErrorCodes.INTERNAL_ERROR, "request discarded: turn ended"))
         } else {
-            respondToServer(id, result)
+            // 重发堆积应答收敛（缺陷FR）：服务端 interaction pending 的任意一个 id 收到
+            // 应答即 cleanup 全部 key（源码 cleanupClientRequest），旧 id 应答本就被忽略。
+            // 3.16.3 起 reannounce 从指数退避改固定 10s，挂起 5min+ 堆积 30+ 在途 id，
+            // 全量应答的风暴实测触发服务端挂死（应答处理后零事件死寂）——只由标记的
+            // 最新 id 发送，其余静默跳过
+            val only = result["__zcodeRespondOnly"]?.jsonPrimitive?.contentOrNull
+            if (only != null && only != id) {
+                ProtocolLog.info("[interaction] duplicate id skipped (respondOnly=$only, id=$id)")
+                return
+            }
+            respondToServer(id, if (only != null) JsonObject(result.filterKeys { it != "__zcodeRespondOnly" }) else result)
         }
     }
 

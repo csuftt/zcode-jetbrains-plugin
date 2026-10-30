@@ -5582,6 +5582,23 @@ export function handleResponse(
       break
     }
 
+    case 'protocolDead': {
+      // app-server 进程判死并自动重启（缺陷FQ 广播）：判死瞬间立即失败收尾活跃
+      // 回合，不等 60s 流看门狗慢兜底（期间 -32004 对账还会拖长无提示期）。
+      // 挂起弹窗由 Java 侧 abortPendingUserInputs 的 askUserAck 逐请求关闭
+      if (get().streaming) {
+        set({
+          streaming: false,
+          streamingMessageId: null,
+          waitingSince: null,
+          compacting: false,
+          backgroundTasks: {},
+        })
+      }
+      set({ lastError: i18n.t('app.protocolDead') })
+      break
+    }
+
     case 'askUserPending':
       // Java 广播的反向请求挂起标志（多标签同会话：无弹窗的面板靠它豁免看门狗）。
       // 只维护标志，不动弹窗状态（弹窗由 askUserAck / 组件 onClose 关闭）
