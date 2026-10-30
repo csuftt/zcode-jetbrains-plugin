@@ -22,7 +22,7 @@
  * AskUserQuestion 的 answer 只要求非空，两者不能复用同一应答值。
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
@@ -50,7 +50,34 @@ export function PlanApprovalDialog({ requestId, plan, deadlineMs, askedAt, onClo
   const [feedback, setFeedback] = useState('')
   /** 收起态（最小化）：只留 header 一行（徽章/标题/正计时/展开按钮），不打扰消息区 */
   const [collapsed, setCollapsed] = useState(false)
+  /** 收起横条悬浮位（对齐询问弹窗 issue#45-4.3）：输入框上沿 y + 水平中心 x（视口坐标）。
+      null=测量未就绪，横条回落 dock 贴底原位 */
+  const [dockPos, setDockPos] = useState<{ x: number; top: number } | null>(null)
   const feedbackRef = useRef<HTMLTextAreaElement>(null)
+
+  // 收起横条悬浮到输入框顶部中间（对齐询问弹窗 #45-4.3）：fixed 定位需输入框实时
+  // 位置——拖拽调高、排队卡增减行都会改变上沿，ResizeObserver + window resize 双跟随
+  useEffect(() => {
+    if (!collapsed) {
+      setDockPos(null)
+      return
+    }
+    const box = document.querySelector('.chat-input-box')
+    if (!box || typeof ResizeObserver === 'undefined') return
+    const update = () => {
+      const r = box.getBoundingClientRect()
+      setDockPos({ x: r.left + r.width / 2, top: r.top })
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(box)
+    window.addEventListener('resize', update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [collapsed])
+
   // 长计划 → 摘要限高渐隐 + 悬浮全文按钮（对齐 zcode 客户端）；短计划完整显示
   const isLongPlan = plan.split('\n').length > PLAN_SUMMARY_LINE_LIMIT || plan.length > PLAN_SUMMARY_CHAR_LIMIT
 
@@ -113,7 +140,21 @@ export function PlanApprovalDialog({ requestId, plan, deadlineMs, askedAt, onClo
     // 用户可边回看边决定（issue #17，对齐询问弹窗底部形态）
     <div className="plan-approval-overlay plan-approval-overlay--dock">
       {/* 遮罩不响应点击：裸拒绝只走显式「拒绝」按钮（见文件头注释） */}
-      <div className={`plan-approval-dialog ${collapsed ? 'plan-approval-dialog--collapsed' : ''}`}>
+      <div
+        className={`plan-approval-dialog ${collapsed ? 'plan-approval-dialog--collapsed' : ''}`}
+        style={
+          collapsed && dockPos
+            ? {
+                position: 'fixed',
+                left: dockPos.x,
+                top: dockPos.top - 8,
+                transform: 'translate(-50%, -100%)',
+                // 横条只有 header 一行，全宽太压消息区，适度收窄居中悬浮（对齐询问弹窗）
+                width: 'min(calc(100vw - 24px), 640px)',
+              }
+            : undefined
+        }
+      >
         <div
           className="plan-approval-dialog__header"
           onClick={collapsed ? () => setCollapsed(false) : undefined}

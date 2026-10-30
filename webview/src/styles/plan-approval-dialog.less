@@ -21,12 +21,14 @@
    用户可边回看消息流里的计划全文（ExitPlanMode 工具卡 📖 弹窗）边审批 */
 .plan-approval-overlay--dock {
   align-items: flex-end;
-  padding-bottom: 12px;
+  padding: 0 12px 12px;
   background: transparent;
   pointer-events: none;
 
   .plan-approval-dialog {
     pointer-events: auto;
+    /* 铺满主界面宽度（对齐 ask 弹窗 issue#45-4.1 手法）：overlay 左右 12px 边距内 100% 撑满 */
+    width: 100%;
     animation: plan-approval-slide-up 0.18s ease-out;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
   }
@@ -44,7 +46,9 @@
 }
 
 .plan-approval-dialog {
-  width: 520px;
+  /* 基类宽度对齐 ask-user-dialog（issue#45-4.1 同款）：非 dock 形态 calc 留 24px 边距；
+     dock 态由 overlay--dock 覆写为 100% 撑满（原 520px 定宽在宽面板下两侧大片空白） */
+  width: calc(100vw - 48px);
   max-width: calc(100vw - 24px);
   background: var(--bg-elevated);
   border: 1px solid var(--border-primary);
