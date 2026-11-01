@@ -241,6 +241,22 @@
     opacity: 0.6;
   }
 
+  /* 统计未就绪的 * 占位（列表先渲染、后台 stats 算完前）：轻脉冲提示「加载中」，
+     占位行与真值行同高，防统计到达时布局跳动 */
+  &__meta-placeholder {
+    animation: session-meta-placeholder-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes session-meta-placeholder-pulse {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 0.9;
+    }
+  }
+
   /* 会话大小超 1MB 警示（上下文已很大，cc-gui history-filesize-large 同款）*/
   &__size-large {
     color: #ff9500;

@@ -82,6 +82,7 @@
   "restoreConfirm": "确定要恢复所选 {{count}} 个会话吗？",
   "deleteConfirm": "确定要删除所选 {{count}} 个已归档会话吗？仅从列表移除，数据仍保留在本地。",
   "messageCount": "{{count}} 条消息",
+  "statsPlaceholder": "* 条消息 · * MB",
   "running": "运行中",
   "forkedSession": "分叉会话",
   "goalSession": "目标模式会话",

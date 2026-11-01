@@ -69,6 +69,7 @@
   "restoreConfirm": "Restore {{count}} selected sessions?",
   "deleteConfirm": "Delete {{count}} selected archived session(s)? They will be removed from all lists; the data stays on disk.",
   "messageCount": "{{count}} messages",
+  "statsPlaceholder": "* messages · * MB",
   "running": "Running",
   "forkedSession": "Forked session",
   "goalSession": "Goal session",

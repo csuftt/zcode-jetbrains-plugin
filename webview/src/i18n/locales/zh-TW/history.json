@@ -26,6 +26,7 @@
   "confirmDeleteAgain": "再次點選確認刪除",
   "deleteSession": "刪除會話",
   "messageCount": "{{count}} 條訊息",
+  "statsPlaceholder": "* 條訊息 · * MB",
   "running": "執行中",
   "forkedSession": "分叉會話",
   "goalSession": "目標模式會話",

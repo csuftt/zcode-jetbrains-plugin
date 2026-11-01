@@ -1101,6 +1101,10 @@ interface StoreState {
   /** 会话列表加载中（切目录即置位+清空旧列表：用户拍板"切换应清空现有+加载动画"，
    *  旧目录列表残留展示比空白更误导）；响应到达或被乱序丢弃时清 */
   sessionsLoading: boolean
+  /** 当前列表的统计（消息数/大小）是否已就绪：列表响应不等 stats（后台 3~4s），未就绪
+   *  期间条目 meta 行渲染 * 占位（防布局跳动）；sessionStatsPatch 合并或响应自带统计即就绪，
+   *  再次收到无统计的列表响应（stats 缓存 TTL 过期后的例行刷新）则回到未就绪 */
+  sessionStatsReady: boolean
 
   /** 驻留水位提醒（缺陷BA）：Java 账本预计打开会话后越过服务端驻留阈值时由 subscribed 应答置位 */
   residentPoolNotice: string | null
@@ -1998,6 +2002,7 @@ export const useStore = create<StoreState>((set, get) => ({
   bootRestorePending: false,
   sessionsWorkspace: '',
   sessionsLoading: false,
+  sessionStatsReady: false,
   envStatus: null,
   envSaving: false,
   pendingSettingsSection: null,
@@ -4515,11 +4520,15 @@ export function handleResponse(
       // 回合运行中的行强制 running：快照是「请求发出时刻」的服务端值，可能早于回合
       // 开始（或存量行本就回 idle）——直接透传会把运行中会话闪回已完成，相位广播为准
       const runningIds = Object.keys(get().remoteRunningTurns)
+      // 统计就绪判定（meta 行 * 占位开关）：响应自带统计 = Java 侧 30s 缓存命中；不带 =
+      // 缓存 miss（后台算完经 sessionStatsPatch 补），期间 meta 行渲染占位而非整行消失
+      const respHasStats = msg.sessions.some((s) => s.messageCount != null)
       set({
         sessions: runningIds.length
           ? merged.map((s) => (runningIds.includes(s.sessionId) ? { ...s, status: 'running' } : s))
           : merged,
         provisionalTitles: nextProvisionals,
+        sessionStatsReady: respHasStats,
       })
 
       // 会话恢复（仅多标签体系）：仅当标签有注入的初始会话（重启恢复）且会话仍存在时选中它。
@@ -5136,6 +5145,7 @@ export function handleResponse(
       set({
         sessions: mergeStats(get().sessions) as SessionInfo[],
         archivedSessions: mergeStats(get().archivedSessions) as SessionInfo[],
+        sessionStatsReady: true,
       })
       break
     }
@@ -5154,7 +5164,12 @@ export function handleResponse(
         const stored = getPersisted(`zcode.sessionTitle.${s.sessionId}`)
         return stored ? { ...s, title: stored } : s
       })
-      set({ archivedSessions: merged, archivedLoading: false })
+      set({
+        archivedSessions: merged,
+        archivedLoading: false,
+        // 统计就绪判定同 listSessions：归档响应缓存 miss 时占位，patch 到达即就绪
+        sessionStatsReady: msg.sessions.some((s) => s.messageCount != null),
+      })
       break
     }
 

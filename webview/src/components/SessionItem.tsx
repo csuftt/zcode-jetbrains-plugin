@@ -3,7 +3,7 @@
  *
  *   ┌──────────────────────────────────────────┐
  *   │ 会话标题（active 蓝点）        时间 [📦]  │  ← 归档/还原按钮 hover 显现
- *   │ 12 条消息 · 45.2 KB · 运行中              │  ← meta 行（统计缺省时整行隐藏）
+ *   │ 12 条消息 · 45.2 KB · 运行中              │  ← meta 行（统计未就绪 * 占位；就绪后仍缺省且非 running 时整行隐藏）
  *   └──────────────────────────────────────────┘
  * - hover：浅高亮
  * - active：标题前蓝点 ●，背景 accent 10%
@@ -66,6 +66,9 @@ function SessionItemInner({
   // 待交互数（审批/提问挂起）：红点角标。本地方案数据源（协议客户端反向请求计数，
   // pendingInteractions 推送）；0/无键不渲染
   const pendingCount = useStore((s) => s.pendingInteractionCounts[session.sessionId]) ?? 0
+  // 列表统计（消息数/大小）就绪标志：未就绪（列表先渲染、后台 stats 算完经 patch 合并前）
+  // meta 行以 * 占位，防止统计到达时整行从无到有引发布局跳动
+  const statsReady = useStore((s) => s.sessionStatsReady)
 
   // 卸载时清理确认定时器
   useEffect(() => () => {
@@ -217,9 +220,20 @@ function SessionItemInner({
           </div>
         )}
       </div>
-      {/* meta 行：消息数 · 大小 · 运行中（统计缺省且非 running 时整行隐藏）*/}
+      {/* meta 行：消息数 · 大小 · 运行中（统计未就绪渲染 * 占位防布局跳动；统计缺省
+          （就绪后仍无，如乐观新建会话）且非 running 时整行隐藏）*/}
       {(() => {
         const metaParts: ReactNode[] = []
+        const statsPending =
+          !statsReady && session.messageCount == null && session.sizeBytes == null
+        if (statsPending) {
+          // 统计未就绪（列表响应不等后台 stats 计算）：数字以 * 占位，patch 合并后换真值
+          metaParts.push(
+            <span key="placeholder" className="session-item__meta-placeholder">
+              {t('history.statsPlaceholder')}
+            </span>,
+          )
+        }
         if (session.messageCount != null) {
           metaParts.push(<span key="cnt">{t('history.messageCount', { count: session.messageCount })}</span>)
         }
