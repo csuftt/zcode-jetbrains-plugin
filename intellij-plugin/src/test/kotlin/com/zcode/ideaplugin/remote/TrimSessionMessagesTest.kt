@@ -87,4 +87,16 @@ class TrimSessionMessagesTest {
         // 保留的是最近消息
         assertEquals("m${texts.size - 1}", kept.last().jsonObject["messageId"]!!.jsonPrimitive.content)
     }
+
+    @Test
+    fun `中文按UTF8字节计预算而非字符数`() {
+        // 中文 3B/字：按字符数计两行 ~2030≤3000 会全保留；按 UTF-8 字节计单行已 ~3055
+        // 超预算——只留最新一条（字符数计预算会低估 CJK 体积 ~3 倍）
+        val s = state("中".repeat(1000), "中".repeat(1000))
+        val out = trimSessionMessages(s, 3_000)
+        val kept = out["messages"]!!.jsonArray
+        assertEquals(1, kept.size, "CJK 按 UTF-8 字节计超预算应裁剪")
+        assertEquals("m1", kept[0].jsonObject["messageId"]!!.jsonPrimitive.content, "保留最新一条")
+        assertTrue(out["truncated"]!!.jsonPrimitive.content.toBoolean())
+    }
 }

@@ -10,9 +10,10 @@ import com.zcode.ideaplugin.ui.ZCodeToolWindowFactory
 import com.zcode.ideaplugin.ui.ZCodeToolWindowPanel
 
 /**
- * 批量关闭无会话空标签（标签名挂「（空）」后缀的那批）：一次清掉「新开了没发消息」/
- * 「新建会话后闲置」/「绑定会话已删」的标签。判据单一来源 = panel.isStandbyUnbound()，
- * 与标签名后缀、关闭免确认共用（见 companion 注释的场景矩阵）。
+ * 批量关闭无会话空标签（displayName 挂「°」前置度号标识的那批）：一次清掉「新开了
+ * 没发消息」/「新建会话后闲置」/「绑定会话已删」的标签。判据单一来源 =
+ * panel.isStandbyUnbound()，与 ° 前缀标识、关闭免确认共用（见 companion 注释的场景矩阵）。
+ * （「（空）」文字后缀撑长标签被否，定版 ° 空心小圆=「● 生成中」的空态对偶）
  *
  * 挂载：工具窗标题栏按钮（setTitleActions，与 RenameTabAction 并列随 selectionChanged 切换）
  * + content.setActions（部分 LaF 兼容——2026-11-02 真机实锤新 UI 下 Content 右键菜单

@@ -30,20 +30,24 @@ private const val READ_SESSION_BUDGET_BYTES = 512 * 1024
 /**
  * rowsRange 响应体积预算（字节）：手机侧 relay 连接（弱网/蜂窝）转发 ~1MB 物理帧即断连
  * ——真机 HAR 实锤 14/14 多分片消息只到 frag0 连接即死（缺陷FS 七轮），readSession 512KB
- * 预算同款病因同款药方。超预算从旧端（尾部）裁行，hasMore 保持 true 由 H5 按需翻页；
+ * 预算同款病因同款药方。超预算从旧端（头部）裁行，hasMore 保持 true 由 H5 按需翻页；
  * 单行超预算无条件保留最新一行（H5 至少能渲染最近内容）。
  */
 private const val ROWSRANGE_BUDGET_BYTES = 384 * 1024
 
-/** [trimRowsRangeResult] 纯函数：行数组按累计 JSON 字节数从新端保留（rows 新→旧排序），
- *  超预算从尾部（更旧）丢弃并强制 hasMore=true；单行超预算无条件保留。 */
+/** JSON 元素序列化后的 UTF-8 字节数：中文 3B/字，按字符数计预算会低估 ~3 倍放行超重帧 */
+private fun jsonByteSize(el: kotlinx.serialization.json.JsonElement): Int =
+    el.toString().toByteArray(Charsets.UTF_8).size
+
+/** [trimRowsRangeResult] 纯函数：行数组升序旧→新，按累计 JSON 字节数保留尾部最新行，
+ *  超预算从头部（更旧）丢弃并强制 hasMore=true；单行超预算无条件保留（最新尾行必在）。 */
 internal fun trimRowsRangeResult(result: JsonObject, budgetBytes: Int = ROWSRANGE_BUDGET_BYTES): JsonObject {
     val rows = result["rows"] as? kotlinx.serialization.json.JsonArray ?: return result
     var used = 0
     val keptRev = mutableListOf<kotlinx.serialization.json.JsonElement>()
     for (i in rows.size - 1 downTo 0) {
         val el = rows[i]
-        val sz = el.toString().length
+        val sz = jsonByteSize(el)
         if (keptRev.isNotEmpty() && used + sz > budgetBytes) break
         keptRev.add(el)
         used += sz
@@ -67,7 +71,7 @@ internal fun trimSessionMessages(state: JsonObject, budgetBytes: Int = READ_SESS
     val kept = mutableListOf<kotlinx.serialization.json.JsonElement>()
     for (i in messages.size - 1 downTo 0) {
         val el = messages[i]
-        val sz = el.toString().length
+        val sz = jsonByteSize(el)
         if (kept.isNotEmpty() && used + sz > budgetBytes) break
         kept.add(el)
         used += sz

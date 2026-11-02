@@ -54,4 +54,19 @@ class RowsRangeTrimTest {
         val trimmed = trimRowsRangeResult(p, budgetBytes = 1024 * 1024)
         assertFalse(trimmed["hasMore"]!!.jsonPrimitive.content.toBoolean(), "未裁剪不翻页")
     }
+
+    @Test
+    fun `cjk rows budgeted as utf8 bytes not char count`() {
+        // 中文 3B/字：按字符数计两行 ~2030≤3000 会全保留；按 UTF-8 字节计单行已 ~3050
+        // 超预算——只留最新尾行（按字符计曾放行 ~3 倍体积，击穿 ~1MB 帧断连防线）
+        fun row(id: Int) = """{"rowId":$id,"kind":"assistantText","text":"${"中".repeat(1000)}"}"""
+        val p = Json.parseToJsonElement(
+            """{"rows":[${row(1)},${row(2)}],"atSeq":1,"atLogEpoch":"e","hasMore":false}"""
+        ).jsonObject
+        val trimmed = trimRowsRangeResult(p, budgetBytes = 3000)
+        val rows = trimmed["rows"]!!.jsonArray
+        assertEquals(1, rows.size, "CJK 按 UTF-8 字节计应裁掉旧行")
+        assertEquals("2", rows[0].jsonObject["rowId"]!!.jsonPrimitive.content, "保留最新尾行")
+        assertEquals("true", trimmed["hasMore"]!!.jsonPrimitive.content, "裁剪强制 hasMore=true")
+    }
 }

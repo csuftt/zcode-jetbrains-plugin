@@ -604,6 +604,9 @@ class ZCodeRemoteService : Disposable {
         // 纠偏候选（缺陷EH兜底）：事件集合判 running 但条目时刻陈旧——终态丢失场景
         // （帧泵挂载窗口/legacy 终态哑火/stop 合成不过全局）残留，query 复核 idle 则清出
         val staleRunningCandidates = ArrayList<Pair<com.zcode.ideaplugin.protocol.ZCodeProtocolClient, String>>()
+        // 跨工作区/跨项目判重（与 RemoteChannelRouter.ideTasks 同口径）：同目录被多个
+        // 打开项目关联时每项目都会查到同一会话，不判重则快照任务行双份
+        val seenIds = HashSet<String>()
         for (impl in com.zcode.ideaplugin.ZCodeServiceImpl.activeProjectServices()) {
             if (!impl.isStarted()) continue
             val c = runCatching { impl.getClient() }.getOrNull() ?: continue
@@ -618,7 +621,7 @@ class ZCodeRemoteService : Disposable {
                 com.zcode.ideaplugin.ui.ZCodeLinkedWorkspaces.readActive(impl.ownerProject)
             for (ws in workspaces) {
                 for (s in runCatching { c.listSessions(ws) }.getOrDefault(emptyList())) {
-                    if (s.sessionId in hidden) continue
+                    if (s.sessionId in hidden || !seenIds.add(s.sessionId)) continue
                     // 运行中覆写：session/list 快照滞后且 status 恒 idle（缺陷 DD 实证不可作
                     // 权威）。四重判据=相位集合（事件喂源）+ 查询复核确认（queryBackedRunning，
                     // 缺陷EB兜底）+ mapper 活跃投影（桌面 v4 订阅会话的兜底）
