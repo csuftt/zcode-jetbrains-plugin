@@ -158,6 +158,11 @@ class ZCodeToolWindowPanel(
      */
     var lastSessionWorkspace: String? = null
         private set
+    // 最近一次历史列表浏览目录（待命态落位随 chips 切换演进，handleListSessions 时点记录；
+    // 会话标签不受影响——lastSessionWorkspace 优先于它）
+    @Volatile
+    var lastListedWorkspace: String? = null
+        private set
     // 已 subscribe 过的会话集合（每个会话只 subscribe 一次，不 unsubscribe）。
     // 多标签下事件按此集合过滤：本面板只推自己订阅会话的事件，与其他标签互不影响
     private val subscribedSessions = java.util.concurrent.CopyOnWriteArraySet<String>()
@@ -697,6 +702,10 @@ class ZCodeToolWindowPanel(
                     if (op != "__jsLog") {
                         frontendReady = true
                         log.info("Frontend ready: first JS message arrived (op=$op, ${System.currentTimeMillis() - panelCreatedAt}ms after panel creation)")
+                        // 右键待投递引用冲刷：首条非 __jsLog 消息必然发自 React 挂载后的
+                        // store init（InputBox 的监听注册先于 App init effect），此刻推送必达
+                        val pending = drainPendingInputRefs()
+                        if (pending.isNotEmpty()) pushFilesToInput(pending)
                     }
                 }
                 log.info("JS message received: ${LogRedactor.redact(request.take(600)).take(200)}")
@@ -1359,6 +1368,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /** 当前会话所属目录（重启恢复的 boot 首拉过滤依据；见 lastSessionWorkspace 注释）*/
     fun getCurrentWorkspacePathForPersist(): String? =
         lastSessionWorkspace ?: initialWorkspace
+
+    /**
+     * 右键多工作区的「本标签当前工作区」判定：会话所属目录（会话标签的身份轴）优先，
+     * 其次最近浏览目录（待命态落位随 chips 切换），再次标签初始目录，最后项目根。
+     * 与 [getCurrentWorkspacePathForPersist] 的差别在待命态 lastListedWorkspace 一层
+     * （浏览态不落盘，重启后自然回退 initialWorkspace/basePath，无需持久化）。
+     */
+    fun getTargetingWorkspacePath(): String =
+        lastSessionWorkspace ?: lastListedWorkspace ?: initialWorkspace ?: project.basePath ?: ""
 
     /** 本面板是否订阅了指定会话（Service 层 askUser 弹窗路由用）*/
     fun isSubscribedTo(sessionId: String): Boolean = sessionId in subscribedSessions
@@ -2224,6 +2242,45 @@ if (!window.__ZCODE_LOG_HOOK__) {
         sendToJs(msg)
     }
 
+    // ============ 右键待投递文件引用（新标签/懒加载标签的 React 未就绪窗口期）============
+    // createNewTab/懒加载激活返回时 React 尚未挂载（zcodeBridge 不存在），sendToJs 直推
+    // 会被页面脚本 try/catch 静默吞掉且全链无重放队列。引用先落此队列，首条非 __jsLog
+    // 的 JS 消息（= React 已挂载、InputBox 监听已注册）到达时冲刷；已就绪则直接推。
+
+    private val pendingInputLock = Any()
+
+    @Volatile
+    private var pendingInputRefs: List<String> = emptyList()
+
+    /** 右键「发送到工作区标签」的引用投递入口（见上方块注释） */
+    fun offerPendingInputRefs(refs: List<String>) {
+        if (refs.isEmpty()) return
+        synchronized(pendingInputLock) {
+            if (frontendReady) {
+                pushFilesToInput(refs)
+                return
+            }
+            pendingInputRefs = pendingInputRefs + refs
+        }
+    }
+
+    private fun drainPendingInputRefs(): List<String> = synchronized(pendingInputLock) {
+        val out = pendingInputRefs
+        pendingInputRefs = emptyList()
+        out
+    }
+
+    private fun pushFilesToInput(refs: List<String>) {
+        pushToWebview(
+            buildJsonObject {
+                put("op", "filesToInput")
+                put("refs", JsonArray(refs.map { JsonPrimitive(it) }))
+                // 与右键菜单推送同 source：前端一律内联到光标处
+                put("source", "menu")
+            }
+        )
+    }
+
     /** Java → JS：把消息推给前端 */
     private fun sendToJs(msg: JsonObject) {
         // 懒加载标签未激活（JCEF 未创建）：丢弃推送，激活后前端 subscribe 拉全量恢复
@@ -2264,6 +2321,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // workspace 过滤：只显示当前项目的会话（差异化优势，cc-gui 不做）
         // 前端传 workspacePath；空串/未传回退 project.basePath（重启初期前端注入值可能为空）
         val workspacePath = effectiveWorkspacePath(msg)
+        // 记录浏览目录（右键多工作区「本标签当前工作区」的待命态判据；每次切换/首拉都会经过这里）
+        if (workspacePath.isNotBlank()) lastListedWorkspace = workspacePath
         // 服务端过滤（按项目 + 大 limit），避免 app-server 默认"全库最新 50 条"截断；
         // 客户端 normalizePath 过滤保留作兜底
         val sessions = if (workspacePath.isEmpty()) {

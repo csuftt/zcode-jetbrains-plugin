@@ -29,7 +29,13 @@ class SendSelectionToInputAction : AnAction(
 
     override fun update(e: AnActionEvent) {
         val editor = e.getData(CommonDataKeys.EDITOR)
-        e.presentation.isEnabledAndVisible = editor?.selectionModel?.hasSelection() == true
+        val hasSelection = editor?.selectionModel?.hasSelection() == true
+        // 多工作区收口：可投递目标>1 时由收口组以同文案子菜单取代本项（单一入口，
+        // 组的当前项点击=本动作原行为）；快捷键 Ctrl+Alt+K 不受菜单显隐影响
+        val files = resolveMenuVirtualFiles(e)
+        val targets = e.project?.let { computeWorkspaceSendTargets(it, files) } ?: emptyList()
+        val supersededByGroup = targets.firstOrNull { it.isCurrent } != null && targets.size > 1
+        e.presentation.isEnabledAndVisible = hasSelection && !supersededByGroup
     }
 
     override fun actionPerformed(e: AnActionEvent) {

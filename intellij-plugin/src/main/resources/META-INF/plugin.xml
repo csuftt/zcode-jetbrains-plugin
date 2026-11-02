@@ -71,6 +71,17 @@
             <!-- 编辑器右键发整文件（issue #15 用户诉求：打开的页面右键也想要） -->
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendSelectionToInput"/>
         </action>
+        <!-- 多工作区收口组（与 SendFileToInput 互斥显示，单一入口）：可投递目标>1 时
+             以同名子菜单取代平铺项，子项按目录名区分、当前标签置顶标「（当前）」；
+             文案在类构造器经 ZCodeBundle 取值（同上，不走 XML %key%） -->
+        <group id="ZCode.SendToWorkspaceGroup"
+               popup="true"
+               class="com.zcode.ideaplugin.action.SendFileToWorkspaceGroupAction"
+               icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
+            <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendFileToInput"/>
+        </group>
         <!-- 控制台右键：选中日志文本发送到输入框（发纯文本正文，行号引用是编辑器场景专属） -->
         <action id="ZCode.SendConsoleTextToInput"
                 class="com.zcode.ideaplugin.action.SendConsoleTextToInputAction"

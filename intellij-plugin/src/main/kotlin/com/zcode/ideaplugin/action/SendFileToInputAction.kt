@@ -4,7 +4,6 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.ZCodeIcons
@@ -37,24 +36,20 @@ class SendFileToInputAction : AnAction(
         // 两项同时显示徒增选择成本）；项目树/编辑器 Tab 右键无编辑器选区概念，不受影响
         val editor = e.getData(CommonDataKeys.EDITOR)
         val hasSelection = editor?.selectionModel?.hasSelection() == true
-        e.presentation.isEnabledAndVisible = !hasSelection && resolveFiles(e).isNotEmpty()
+        val files = resolveMenuVirtualFiles(e)
+        // 多工作区收口：可投递目标>1 时由同名子菜单取代本项（SendFileToWorkspaceGroupAction
+        // 互斥显示，单一入口；无激活面板时 targets 空=保持平铺现状）
+        val targets = e.project?.let { computeWorkspaceSendTargets(it, files) } ?: emptyList()
+        val supersededByGroup = targets.firstOrNull { it.isCurrent } != null && targets.size > 1
+        e.presentation.isEnabledAndVisible = !hasSelection && files.isNotEmpty() && !supersededByGroup
     }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val files = resolveFiles(e)
+        val files = resolveMenuVirtualFiles(e)
         if (files.isEmpty()) return
 
         pushRefs(project, FileRefs.toRefs(files))
-    }
-
-    /**
-     * 部分菜单语境（缺陷BR：issue #15 用户环境的编辑器 Tab 右键）只供给单数
-     * VIRTUAL_FILE、无数组——只判数组会把自己藏掉（用户"菜单不见了"），补单数兜底。
-     */
-    private fun resolveFiles(e: AnActionEvent): List<VirtualFile> {
-        e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY)?.let { return it.toList() }
-        return e.getData(CommonDataKeys.VIRTUAL_FILE)?.let { listOf(it) } ?: emptyList()
     }
 }
 

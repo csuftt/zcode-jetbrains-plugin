@@ -14,6 +14,7 @@ import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
 import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.action.RenameTabAction
+import com.zcode.ideaplugin.action.pushRefs
 import com.zcode.ideaplugin.zCodeService
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -91,6 +92,23 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             if (activateSessionTab(project, sessionId)) return
             addTabContent(project, toolWindow, sessionId, getNextTabName(toolWindow.contentManager), initialWorkspace = workspacePath)
             toolWindow.show(null)
+        }
+
+        /**
+         * 右键「发送到工作区标签」投递入口（须在 EDT 调用）：**恒新开标签**（待命态落位
+         * 该目录；用户裁定撤出复用路径——子项文案「新开标签（目录名）」即行为承诺）。
+         * 引用走 panel 待投递通道（[ZCodeToolWindowPanel.offerPendingInputRefs]）：
+         * 已就绪直推，未就绪（新标签页面加载窗口）等首条消息后补投。
+         * ToolWindow 不存在 → 退化既有 [pushRefs]（推激活面板）。
+         */
+        fun sendToWorkspaceTab(project: Project, workspacePath: String, refs: List<String>) {
+            val toolWindow = getToolWindow(project)
+            if (toolWindow == null) {
+                pushRefs(project, refs)
+                return
+            }
+            val content = createNewTab(project, toolWindow, workspacePath)
+            (content?.component as? ZCodeToolWindowPanel)?.offerPendingInputRefs(refs)
         }
 
         /**
