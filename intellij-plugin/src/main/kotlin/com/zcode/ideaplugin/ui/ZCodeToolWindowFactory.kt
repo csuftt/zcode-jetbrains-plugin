@@ -13,12 +13,14 @@ import com.intellij.ui.content.ContentManager
 import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
 import com.zcode.ideaplugin.ZCodeBundle.message
+import com.zcode.ideaplugin.action.CloseEmptyTabsAction
 import com.zcode.ideaplugin.action.RenameTabAction
 import com.zcode.ideaplugin.action.pushRefs
 import com.zcode.ideaplugin.zCodeService
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 
 /**
  * ZCode ToolWindow 工厂（多标签页，对齐 cc-gui ContentManager 方案）
@@ -46,6 +48,31 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
 
         fun getToolWindow(project: Project): ToolWindow? =
             ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
+
+        /**
+         * 强制刷新工具窗标题栏（「关闭全部空标签」按钮的显隐依赖它）。
+         * action update 只由 IDE 事件驱动：重启恢复后无事件时按钮冻结在初始 presentation，
+         * 出现「存在空标签但按钮不显示，点一下标签才恢复」的体感（2026-11-02 真机）。
+         *
+         * 刷新通道三连实证（真机三连教训）：updateActionsImmediately 靠 Swing 树找 toolbar
+         * 全部落空——新 UI 的标题栏 header 画在 ToolWindowPane 层，不在 toolWindow.component
+         * 子树内，找到的只是无关 toolbar。真机唯一实证有效的通道是 selectionChanged 里的
+         * **setTitleActions(全新实例)**：header 拿新实例重建按钮并重跑 update（铅笔按钮随
+         * 标签切换换实例就是这条链）。故此处复刻该通道：按当前选中标签重设 title actions。
+         * 空标签集合的变化点（标签出生/会话落位/清空待命/懒加载 boot 完成）都调它。
+         * EDT 安全：invokeLater；项目关闭即停。
+         */
+        fun refreshTitleToolbar(project: Project) {
+            val toolWindow = getToolWindow(project) ?: return
+            SwingUtilities.invokeLater {
+                if (project.isDisposed || toolWindow.isDisposed) return@invokeLater
+                val cm = toolWindow.contentManager
+                val panel = cm.selectedContent?.component as? ZCodeToolWindowPanel ?: return@invokeLater
+                // 全新实例重设：旧实例 presentation 已被上轮 update 污染（visible=false 冻结），
+                // 新实例默认 visible，header 重建按钮后立即重跑 update 按实时状态收敛
+                toolWindow.setTitleActions(listOf(RenameTabAction(panel), CloseEmptyTabsAction(project)))
+            }
+        }
 
         /** 新建一个标签页（须在 EDT 调用；新标签 = 新会话，不继承旧会话）。
          *  initialWorkspace：标签初始落位目录（多目录会话，缺省本项目）*/
@@ -165,8 +192,10 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             content.isCloseable = true
             if (panel is ZCodeToolWindowPanel) {
                 // 标签右键菜单：重命名标签（issue #18/#21；改名与持久化封装在 panel.renameTab）
+                // + 批量关闭无会话空标签（判据 panel.isStandbyUnbound；新 UI 下此菜单不渲染，
+                // 可靠入口是上面 setTitleActions 的标题栏按钮——同 RenameTabAction 双入口原因）
                 content.setActions(
-                    DefaultActionGroup(RenameTabAction(panel)),
+                    DefaultActionGroup(RenameTabAction(panel), CloseEmptyTabsAction(project)),
                     ActionPlaces.TOOLWINDOW_CONTENT,
                     panel,
                 )
@@ -267,6 +296,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             override fun contentAdded(event: ContentManagerEvent) {
                 updateCloseable(cm)
                 persistTabs(project, cm)
+                refreshTitleToolbar(project) // 空标签数量变化（新标签/恢复标签入列），标题栏按钮显隐重算
             }
 
             override fun selectionChanged(event: ContentManagerEvent) {
@@ -277,8 +307,11 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                     toolWindow.setTitleActions(emptyList())
                     return
                 }
-                // 标题栏按钮随选中标签切换实例（Run 面板 Stop 同机制；右键菜单无插件扩展点，见 #18/#21）
-                toolWindow.setTitleActions(listOf(RenameTabAction(panel)))
+                // 标题栏按钮随选中标签切换实例（Run 面板 Stop 同机制；右键菜单无插件扩展点，见 #18/#21）。
+                // 两动作保持独立按钮（曾试合并单「⋮」popup：平台标题栏本就有 ⋮，重复不适合，真机否决）；
+                // 平台标题栏按钮尺寸不受插件 icon 控制（12px 缩图标真机无效），大小随平台默认。
+                // 批量关闭空标签不随标签切换（全局动作，持 project 遍历全部标签）
+                toolWindow.setTitleActions(listOf(RenameTabAction(panel), CloseEmptyTabsAction(project)))
                 panel.ensureJcefCreated() // 懒加载标签激活（已激活时为 no-op）
                 panel.clearTabTurnFinished() // 点进标签即清「回合结束待查看」标记
                 project.zCodeService().setActivePanel(panel)
@@ -288,11 +321,13 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 persistTabs(project, cm)
             }
 
-            /** 关闭二次确认：移除前弹确认框，取消则拦截关闭（event.consume）；浏览器标签直接关 */
+            /** 关闭二次确认：移除前弹确认框，取消则拦截关闭（event.consume）；浏览器标签直接关；
+             *  无会话空标签（待命态）也无东西可丢，直接关（CloseEmptyTabsAction 批量关闭同依赖此豁免） */
             override fun contentRemoveQuery(event: ContentManagerEvent) {
                 val content = event.content
                 if (content.component is ZCodeBrowserPanel) return
                 val panel = content.component as? ZCodeToolWindowPanel
+                if (panel?.isStandbyUnbound() == true) return
                 val tabName = content.displayName ?: message("tab.fallbackName")
                 val streaming = panel?.isTabStreaming() == true
                 val dialogMessage = if (streaming) {
@@ -321,6 +356,7 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                     return
                 }
                 persistTabs(project, cm)
+                refreshTitleToolbar(project) // 空标签数量变化（关标签后可能不再值得批量关），标题栏按钮显隐重算
                 // panel 的 JCEF 资源由 content.setDisposer(panel) 释放
             }
         })
@@ -334,7 +370,17 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             // 标题栏重命名按钮初始挂载（后续随 selectionChanged 切换）
             toolWindow.setTitleActions(listOf(RenameTabAction(it)))
         }
+
+        // 恢复完成后延时补刷一次标题栏：header 懒构建时序不可控（真机三连——恢复期的
+        // contentAdded/selectionChanged 触发的刷新可能早于 header 构建），等 UI 首帧落位后
+        // 重设 title actions，确保重启恢复后「关闭全部空标签」按钮显隐即正确
+        javax.swing.Timer(TITLE_TOOLBAR_LATE_REFRESH_MS, {
+            if (!project.isDisposed && !toolWindow.isDisposed) refreshTitleToolbar(project)
+        }).apply { isRepeats = false; start() }
     }
+
+    /** 恢复完成后标题栏补刷的延时（ms）：等首帧渲染与 header 构建落位 */
+    private val TITLE_TOOLBAR_LATE_REFRESH_MS = 1500
 
     /**
      * 仅剩 1 个聊天标签时禁用其关闭按钮（浏览器标签始终可关：无会话状态可丢，

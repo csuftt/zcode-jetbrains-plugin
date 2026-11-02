@@ -318,6 +318,26 @@ class ZCodeToolWindowPanel(
          *  Segoe UI Symbol 兜底渲染为单色粗勾，与 ● 同级风险），2026-10-09 */
         const val TAB_TURN_FINISHED_MARK = "✔"
 
+        /**
+         * 标签「无会话空标签」标记的 displayName 前缀：°(U+00B0 Degree Sign) 极小正圆。
+         * 字形演进：「（空）」文字撑长标签被否 → 灰色图标作废（Content.icon 平台默认不渲染，
+         * 需 SHOW_CONTENT_ICON userData）→ ○(U+25CB) 被 Inter 画扁（geometric shapes 区字形
+         * 不保证正圆）→ ◦(U+25E6) → 真机比对定版 °（所有字体必有的唯一极小正圆，零豆腐风险，
+         * 几乎不占宽）。与 ● 生成中呼应：● 实心=在跑、° 空心小圆=空标签。
+         */
+        const val TAB_STANDBY_MARK = "°"
+
+        /**
+         * 本标签是否为「无会话空标签」（标签名挂「（空）」后缀 + 批量关闭的判据）：
+         * currentSessionId 是绑定权威（subscribe 落位 / clearTabSession 清空），再借两个既有
+         * 字段消除懒加载误报——懒加载标签（重启恢复的非激活标签，TabState 里 sessionId 非空）
+         * 在 JCEF 建、webview boot 前恒为无绑定，不能标；initialSessionId==null（出生即待命）
+         * 立即可标，否则等 frontendReady（boot 后仍无绑定 = 恢复失败或已被清空）才标。
+         * 纯函数放 companion 供单测（ZCodeStandbyTabTest）。
+         */
+        fun isStandbyUnbound(sessionId: String?, initialSessionId: String?, frontendReady: Boolean): Boolean =
+            sessionId == null && (initialSessionId == null || frontendReady)
+
         /** 浏览器缩放基准（Chromium zoom level 1.0 = 原生 120%）：webview 观感按此档
          *  调校，原生 100% 在 HiDPI 下过小（真机 2026-10-08 反馈「120% 才正常，
          *  100% 看不清」）。启动与重置（Ctrl+0/点胶囊）都落此档，前端百分比相对基准显示 */
@@ -701,6 +721,10 @@ class ZCodeToolWindowPanel(
                     // __jsLog 只是诊断回传（可能是崩溃报告），不算前端就绪
                     if (op != "__jsLog") {
                         frontendReady = true
+                        // 懒加载标签此刻才算「表态完毕」：boot 后仍无绑定（恢复失败/待命）
+                        // 才该挂「°」标，boot 前不标（TabState 里可能有会话，等恢复）
+                        applyTabDisplayName()
+                        ZCodeToolWindowFactory.refreshTitleToolbar(project) // 空标签数量变化，标题栏按钮显隐重算
                         log.info("Frontend ready: first JS message arrived (op=$op, ${System.currentTimeMillis() - panelCreatedAt}ms after panel creation)")
                         // 右键待投递引用冲刷：首条非 __jsLog 消息必然发自 React 挂载后的
                         // store init（InputBox 的监听注册先于 App init effect），此刻推送必达
@@ -1345,6 +1369,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
     fun attachContent(content: Content) {
         attachedContent = content
         if (baseTabTitle.isBlank()) baseTabTitle = content.displayName ?: ""
+        // 出生即刷一次 displayName：新标签/待命恢复标签此刻挂上「°」前缀
+        // （标题栏按钮显隐的刷新不在此处——本标签尚未 addContent 进 cm，时机由 Factory 的
+        //   contentAdded 接管）
+        applyTabDisplayName()
     }
 
     /** 标签基础标题（不含生成中后缀），持久化用 */
@@ -1408,15 +1436,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun handleClearTabSession(): JsonObject {
         currentSessionId = null
+        applyTabDisplayName() // 进入待命态：° 前缀 + 「无会话」提示 tooltip（下面两个复位可能 early-return 不刷新）
+        ZCodeToolWindowFactory.refreshTitleToolbar(project) // 空标签数量变化，标题栏按钮显隐重算
         setTabStreaming(false)
         clearTabTurnFinished()
         persistSelfTabState()
-        val content = attachedContent
-        if (content != null) {
-            SwingUtilities.invokeLater {
-                if (!disposed) content.description = null
-            }
-        }
         return buildJsonObject { put("op", "tabSessionCleared") }
     }
 
@@ -1790,18 +1814,41 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 更新标签 displayName：baseTitle + 状态后缀（生成中 ● 优先于回合完成标记；EDT）*/
+    /**
+     * 更新标签视觉（displayName + 待命标识）。待命空标签 = 基础名前缀「°」+ 悬停提示文案
+     * （真机定版：符号前置更醒目，tooltip 提醒「无会话」）。与 ● 生成中呼应：● 实心=在跑、
+     * ° 空心=空标签，待命态不可能流式天然互斥。tooltip 只在待命↔落位迁移瞬间清/设，
+     * 平时不覆盖 handleSetTabTitle 的会话标题。EDT。
+     */
     private fun applyTabDisplayName() {
         val content = attachedContent ?: return
+        val standby = isStandbyUnbound()
+        val wasStandby = lastAppliedStandby
+        lastAppliedStandby = standby
         val display = when {
+            standby -> "$TAB_STANDBY_MARK $baseTabTitle"
             tabStreaming -> "$baseTabTitle ●"
             tabTurnFinished -> "$baseTabTitle $TAB_TURN_FINISHED_MARK"
             else -> baseTabTitle
         }
         SwingUtilities.invokeLater {
-            if (!disposed) content.displayName = display
+            if (disposed) return@invokeLater
+            content.displayName = display
+            if (standby) {
+                content.description = ZCodeBundle.message("tab.standby.tooltip")
+            } else if (wasStandby) {
+                content.description = null
+            }
         }
     }
+
+    /** 上次 applyTabDisplayName 应用时的待命态（tooltip 只在待命↔落位迁移时清/设）*/
+    @Volatile
+    private var lastAppliedStandby = false
+
+    /** 本标签当前是否为无会话空标签（° 标记 + 批量关闭 + 关闭免确认共用判据）*/
+    fun isStandbyUnbound(): Boolean =
+        isStandbyUnbound(currentSessionId, initialSessionId, frontendReady)
 
     /** 本标签生成中状态变化（turn.started/completed/failed 驱动）*/
     private fun setTabStreaming(active: Boolean) {
@@ -6416,6 +6463,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
         // 记录当前会话（标签持久化 + 生成中状态归属判断）+ 同步 TabState
         currentSessionId = sessionId
+        applyTabDisplayName() // 会话落位：标签名「°」前缀消失
+        ZCodeToolWindowFactory.refreshTitleToolbar(project) // 空标签数量变化，标题栏按钮显隐重算
         persistSelfTabState()
 
         // 打开会话即视为已读（tasks-index unread_at 清位 + 全标签广播；官方桌面端同语义）。
