@@ -661,7 +661,9 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'createTab'; workspacePath?: string }
   /** 会话内嵌浏览器开关（展示/收起右侧分栏，聊天区宽度恒定）*/
   | { op: 'toggleBrowserPane' }
-  | { op: 'setTabTitle'; title: string; sessionId?: string }
+  /** workspacePath=会话归属目录：Java 侧据此算标签色块颜色（2026-11-02 统一配色）；
+   *  letter=会话名首字符：单工作区时作色块文字（目录字符无区分度），多工作区不传 */
+  | { op: 'setTabTitle'; title: string; sessionId?: string; workspacePath?: string; letter?: string }
   /** 外观配置全量回存 IDE（权威源，重启经 __ZCODE_APPEARANCE__ 注入回前端）*/
   | { op: 'appearanceSave'; config: AppearanceConfig }
   /** 通用 kv 增量回存 IDE（entries=改动 key 的 upsert，deletes=要删的 key；权威源重启经 __ZCODE_KVSTORE__ 注入）*/
@@ -1274,8 +1276,9 @@ export interface AutoArchiveRecord {
 export type JavaResponse =
   /** workspacePath=请求作用域回显：前端丢弃晚到的旧目录响应（快速连切防串台）*/
   | { op: 'listSessions'; sessions: SessionInfo[]; workspacePath?: string }  | { op: 'createSession'; sessionId: string }
-  /** 关联目录全量快照（get/add/remove 三 op 共用应答形；added=本次新增并应由前端切换激活）*/
-  | { op: 'linkedWorkspaces'; workspaces: string[]; added?: string }
+  /** 关联目录全量快照（get/add/remove 三 op 共用应答形；added=本次新增并应由前端切换激活；
+   *  colors=目录→色板序号映射（键=wsKey 归一形态，2026-11-02 统一配色：徽标/chips/标签块三处同源）*/
+  | { op: 'linkedWorkspaces'; workspaces: string[]; added?: string; colors?: Record<string, number> }
   /** getProjectPath 应答：生效项目路径（口径同 Java effectiveWorkspacePath，basePath 未就绪回退 user.dir）*/
   | { op: 'projectPath'; workspacePath: string }
   | { op: 'tabSessionCleared' }

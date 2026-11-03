@@ -1086,6 +1086,9 @@ interface StoreState {
 
   /** 关联目录列表（多目录会话·变体A：project 级 kv 持久化，Java getLinkedWorkspaces 应答）*/
   linkedWorkspaces: string[]
+  /** 目录→色板序号映射（键=wsKey 归一形态，Java colorsJson 随 linkedWorkspaces 推送）：
+   *  徽标/chips 统一配色取色用（2026-11-02），Java 轮询分配跨重启稳定 */
+  wsColors: Record<string, number>
   /** 激活目录（会话列表/新建会话落位的 workspace；空 = 未初始化，视同 projectPath）*/
   activeWorkspacePath: string
   /** 标签初始目录（多目录会话，Java 注入一次性值）：仅 boot 首拉列表使用（绑定会话
@@ -1997,6 +2000,7 @@ export const useStore = create<StoreState>((set, get) => ({
   sessionTitleRegenError: null,
   projectPath: '',
   linkedWorkspaces: [],
+  wsColors: {},
   activeWorkspacePath: '',
   bootWorkspace: '',
   bootRestorePending: false,
@@ -4405,7 +4409,7 @@ export function handleResponse(
       break
     case 'linkedWorkspaces': {
       // 关联目录全量快照（get/add/remove 三 op 共用应答）
-      set({ linkedWorkspaces: msg.workspaces })
+      set({ linkedWorkspaces: msg.workspaces, wsColors: msg.colors ?? get().wsColors })
       // 添加即切换：用户点 ⊕ 选目录的目的就是去看它（取消选择时无 added 字段）
       if (msg.added) {
         get().setActiveWorkspace(msg.added)

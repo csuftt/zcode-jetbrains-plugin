@@ -22,7 +22,10 @@ import com.intellij.diff.contents.DiffContent
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.DiffContentFactory
 import com.intellij.ui.JBColor
+import com.intellij.ui.ColorUtil
 import com.intellij.ui.content.Content
+import com.intellij.openapi.wm.ToolWindow
+import com.intellij.openapi.wm.impl.content.ToolWindowContentUi
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
@@ -163,6 +166,14 @@ class ZCodeToolWindowPanel(
     @Volatile
     var lastListedWorkspace: String? = null
         private set
+    // webview 最近推送的色块字母（会话名首字符，单工作区用）+ 其推送会话 id。
+    // setTabTitle 推送是字母权威但只在标题变化时发一次，refreshTabColorIcon 的兜底重挂
+    // 必须沿用（resolvePushedLetter 配对失效自动回目录字符），否则回合中/轮末 messages
+    // 重拉把字母冲回目录首字符且永不再自愈（单工作区竞态，真机 2026-11-03）
+    @Volatile
+    private var pushedLetter: String? = null
+    @Volatile
+    private var pushedLetterSession: String? = null
     // 已 subscribe 过的会话集合（每个会话只 subscribe 一次，不 unsubscribe）。
     // 多标签下事件按此集合过滤：本面板只推自己订阅会话的事件，与其他标签互不影响
     private val subscribedSessions = java.util.concurrent.CopyOnWriteArraySet<String>()
@@ -319,16 +330,7 @@ class ZCodeToolWindowPanel(
         const val TAB_TURN_FINISHED_MARK = "✔"
 
         /**
-         * 标签「无会话空标签」标记的 displayName 前缀：°(U+00B0 Degree Sign) 极小正圆。
-         * 字形演进：「（空）」文字撑长标签被否 → 灰色图标作废（Content.icon 平台默认不渲染，
-         * 需 SHOW_CONTENT_ICON userData）→ ○(U+25CB) 被 Inter 画扁（geometric shapes 区字形
-         * 不保证正圆）→ ◦(U+25E6) → 真机比对定版 °（所有字体必有的唯一极小正圆，零豆腐风险，
-         * 几乎不占宽）。与 ● 生成中呼应：● 实心=在跑、° 空心小圆=空标签。
-         */
-        const val TAB_STANDBY_MARK = "°"
-
-        /**
-         * 本标签是否为「无会话空标签」（标签名挂「（空）」后缀 + 批量关闭的判据）：
+         * 本标签是否为「无会话空标签」（批量关闭 + 关闭免确认的判据）：
          * currentSessionId 是绑定权威（subscribe 落位 / clearTabSession 清空），再借两个既有
          * 字段消除懒加载误报——懒加载标签（重启恢复的非激活标签，TabState 里 sessionId 非空）
          * 在 JCEF 建、webview boot 前恒为无绑定，不能标；initialSessionId==null（出生即待命）
@@ -462,6 +464,34 @@ class ZCodeToolWindowPanel(
         /** 是否任一已开标签正在看该会话（未读豁免判据：用户亲历完成不标未读） */
         fun isSessionBeingWatched(sessionId: String): Boolean =
             activePanels.any { it.getCurrentSessionIdForPersist() == sessionId }
+
+        /**
+         * 关联目录快照广播（add/remove 后 → 所有已开标签，2026-11-03）：目录增删是
+         * project 级变更但应答只回操作方标签，其余已开标签的 chips/色板不重拉即恒旧
+         * （真机：他标签移除的目录在本标签仍显示）。无 added 字段=不触发其他标签的
+         * 「添加即切换」；他标签激活目录恰被移除时由前端回退本项目逻辑兜住。
+         */
+        fun broadcastLinkedWorkspaces(project: Project) {
+            val list = ZCodeLinkedWorkspaces.read(project)
+            val payload = buildJsonObject {
+                put("op", "linkedWorkspaces")
+                put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
+                put("colors", buildJsonObject {
+                    list.forEach { path ->
+                        put(ZCodeLinkedWorkspaces.wsKey(path), JsonPrimitive(ZCodeLinkedWorkspaces.colorIndexFor(project, path)))
+                    }
+                })
+            }
+            SwingUtilities.invokeLater {
+                activePanels.forEach { panel ->
+                    try {
+                        panel.pushToWebview(payload)
+                    } catch (_: Exception) {
+                        // 未初始化/销毁中的标签跳过
+                    }
+                }
+            }
+        }
 
         /**
          * 会话索引推送（ZCodeServiceImpl sessions-index 订阅 → 所有已开标签）：
@@ -1373,6 +1403,44 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // （标题栏按钮显隐的刷新不在此处——本标签尚未 addContent 进 cm，时机由 Factory 的
         //   contentAdded 接管）
         applyTabDisplayName()
+        // 出生即挂目录色块：不依赖 webview 引导（懒加载标签的重启恢复要到点击才建
+        // JCEF，等 setTabTitle 推送会缺块——真机 2026-11-02），Java 侧按标签初始目录直接挂
+        refreshTabColorIcon()
+    }
+
+    /**
+     * 目录色块重挂（Java 侧权威兜底）：取色轴按会话绑定位分叉——会话标签=会话归属目录
+     * （lastSessionWorkspace ?: initialWorkspace），待命标签=落位目录（lastListedWorkspace
+     * ?: initialWorkspace ?: 项目根，随 chips 切换经 handleListSessions 演进）。
+     * 与 webview setTabTitle 推送双通道：推送是 webview 存活时的权威实时源，本方法是
+     * 启动/懒加载/清位等 webview 未及场景的兜底，两端口径一致互不冲突。
+     */
+    private fun refreshTabColorIcon() {
+        val content = attachedContent ?: return
+        val path = if (currentSessionId != null) {
+            lastSessionWorkspace ?: initialWorkspace ?: project.basePath
+        } else {
+            lastListedWorkspace ?: initialWorkspace ?: project.basePath
+        } ?: return
+        SwingUtilities.invokeLater {
+            if (disposed) return@invokeLater
+            // 待命态 EDT 内现算（排队期间可能已变）：空心块=空标签标识（° 退役后 2026-11-02）；
+            // 字母也 EDT 内现读——刷新先入队、字母推送后到达时，执行到已能取到新值
+            applyColorIcon(
+                content, path, isStandbyUnbound(),
+                WsTabColors.resolvePushedLetter(pushedLetter, pushedLetterSession, currentSessionId),
+            )
+        }
+    }
+
+    /** 目录色块挂载：SHOW_CONTENT_ICON 必须按 content 置位（BaseLabel 读 userData 门控）；
+     *  NOT_SELECTED_TAB_ICON_TRANSPARENT=false 豁免平台对未选中标签图标的 50% 透明压暗。
+     *  [hollow]=待命空标签形态（空心描边+彩字），实心=有会话（彩底白字）；
+     *  [letterOverride]=会话名首字符，仅单工作区时被 iconFor 采用 */
+    private fun applyColorIcon(content: Content, wsPath: String, hollow: Boolean, letterOverride: String? = null) {
+        content.putUserData(ToolWindow.SHOW_CONTENT_ICON, true)
+        content.putUserData(ToolWindowContentUi.NOT_SELECTED_TAB_ICON_TRANSPARENT, false)
+        content.icon = WsTabColors.iconFor(project, wsPath, hollow, letterOverride)
     }
 
     /** 标签基础标题（不含生成中后缀），持久化用 */
@@ -1437,6 +1505,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun handleClearTabSession(): JsonObject {
         currentSessionId = null
         applyTabDisplayName() // 进入待命态：° 前缀 + 「无会话」提示 tooltip（下面两个复位可能 early-return 不刷新）
+        refreshTabColorIcon() // 待命落位色块：取色轴切到落位目录（lastListedWorkspace/初始目录链）
         ZCodeToolWindowFactory.refreshTitleToolbar(project) // 空标签数量变化，标题栏按钮显隐重算
         setTabStreaming(false)
         clearTabTurnFinished()
@@ -1445,15 +1514,44 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * 前端推送会话标题 → 更新标签 tooltip（悬停显示会话名）。
+     * 前端推送会话标题 → 更新标签 tooltip（悬停显示【目录名】会话名）+ 目录色块图标。
      * 标签名保持固定的「会话N」（cc-gui 编号风格，避免长标题撑爆标签栏）。
+     * 色块（2026-11-02 统一配色）：按消息携带的目录着色——有会话=会话归属目录实心块；
+     * **空标题=待命落位推送**（新标签/清位后的落位目录），只挂图标（空心块）不动
+     * tooltip（待命 tooltip 由 applyTabDisplayName 管）。
      */
     private fun handleSetTabTitle(msg: JsonObject): JsonObject {
-        val title = msg["title"]?.jsonPrimitive?.content?.trim()?.take(200)
+        val title = msg["title"]?.jsonPrimitive?.content?.trim()
+        val wsPath = msg["workspacePath"]?.jsonPrimitive?.contentOrNull
+        val letter = msg["letter"]?.jsonPrimitive?.contentOrNull
+        // 记录推送字母（配对推送会话，待命空标题推送两者皆 null 自然清位）：
+        // refreshTabColorIcon 兜底重挂沿用，防回合中/轮末 messages 重拉把会话首字符
+        // 冲回目录首字符（单工作区竞态，真机 2026-11-03）
+        pushedLetter = letter?.takeIf { it.isNotBlank() }
+        pushedLetterSession = msg["sessionId"]?.jsonPrimitive?.contentOrNull
         val content = attachedContent
-        if (!title.isNullOrBlank() && content != null) {
+        if (content != null && (!title.isNullOrBlank() || !wsPath.isNullOrBlank())) {
             SwingUtilities.invokeLater {
-                if (!disposed) content.description = title
+                if (disposed) return@invokeLater
+                if (!title.isNullOrBlank()) {
+                    content.description =
+                        if (!wsPath.isNullOrBlank() && ZCodeLinkedWorkspaces.read(project).isNotEmpty()) {
+                            // 多工作区：目录按徽标同配比（色底14%+彩字75%）chip 呈现（HTML tooltip，
+                            // 用户定稿 2026-11-03 对齐会话名下徽标观感，【】文字前缀废弃）；
+                            // 单工作区纯会话名无 chip
+                            WsTabColors.tooltipHtml(
+                                WsTabColors.dirBasename(wsPath),
+                                WsTabColors.resolve(project, wsPath),
+                                com.intellij.util.ui.UIUtil.getToolTipBackground(),
+                                com.intellij.util.ui.UIUtil.getLabelForeground(),
+                                title,
+                            )
+                        } else {
+                            WsTabColors.escapeHtml(title)
+                        }.let { it.take(600) }
+                }
+                // 空心判据用推送自身语义（空标题=待命推送）：比 isStandbyUnbound 免掉 frontendReady 懒加载时序扰动
+                if (!wsPath.isNullOrBlank()) applyColorIcon(content, wsPath, title.isNullOrBlank(), letter)
             }
         }
         return buildJsonObject { put("op", "tabTitleSet") }
@@ -1815,10 +1913,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * 更新标签视觉（displayName + 待命标识）。待命空标签 = 基础名前缀「°」+ 悬停提示文案
-     * （真机定版：符号前置更醒目，tooltip 提醒「无会话」）。与 ● 生成中呼应：● 实心=在跑、
-     * ° 空心=空标签，待命态不可能流式天然互斥。tooltip 只在待命↔落位迁移瞬间清/设，
-     * 平时不覆盖 handleSetTabTitle 的会话标题。EDT。
+     * 更新标签视觉（displayName + 待命 tooltip）。待命空标签的名字不再带「°」前缀
+     * （2026-11-02 用户退役：色块已承担空标签标识——空心描边块=无会话，见
+     * refreshTabColorIcon/applyColorIcon），悬停提示文案保留。与 ● 生成中呼应：
+     * ● 实心=在跑、空心块=空标签，待命态不可能流式天然互斥。tooltip 只在
+     * 待命↔落位迁移瞬间清/设，平时不覆盖 handleSetTabTitle 的会话标题。EDT。
      */
     private fun applyTabDisplayName() {
         val content = attachedContent ?: return
@@ -1826,7 +1925,6 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val wasStandby = lastAppliedStandby
         lastAppliedStandby = standby
         val display = when {
-            standby -> "$TAB_STANDBY_MARK $baseTabTitle"
             tabStreaming -> "$baseTabTitle ●"
             tabTurnFinished -> "$baseTabTitle $TAB_TURN_FINISHED_MARK"
             else -> baseTabTitle
@@ -1836,8 +1934,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
             content.displayName = display
             if (standby) {
                 content.description = ZCodeBundle.message("tab.standby.tooltip")
+                // 色块不清且切空心形态：待命标签同样显示落位目录色块（2026-11-02 用户要求），
+                // 落位值由 webview 空标题推送 + refreshTabColorIcon 双通道维护
+                refreshTabColorIcon()
             } else if (wasStandby) {
                 content.description = null
+                refreshTabColorIcon() // 待命→有会话：空心块切回实心
             }
         }
     }
@@ -2369,7 +2471,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 前端传 workspacePath；空串/未传回退 project.basePath（重启初期前端注入值可能为空）
         val workspacePath = effectiveWorkspacePath(msg)
         // 记录浏览目录（右键多工作区「本标签当前工作区」的待命态判据；每次切换/首拉都会经过这里）
-        if (workspacePath.isNotBlank()) lastListedWorkspace = workspacePath
+        if (workspacePath.isNotBlank()) {
+            lastListedWorkspace = workspacePath
+            // 待命落位演进 → 色块跟随（会话标签走 lastSessionWorkspace 轴不受影响）
+            refreshTabColorIcon()
+        }
         // 服务端过滤（按项目 + 大 limit），避免 app-server 默认"全库最新 50 条"截断；
         // 客户端 normalizePath 过滤保留作兜底
         val sessions = if (workspacePath.isEmpty()) {
@@ -2514,6 +2620,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             mcpServers = cuaSpec
         )
         lastSessionWorkspace = workspacePath
+        refreshTabColorIcon() // 会话归属目录确定 → 色块跟随（createSession 落位目录）
         return buildJsonObject {
             put("op", "createSession")
             put("sessionId", sid)
@@ -5683,14 +5790,21 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     private fun persistLinkedWorkspaces(list: List<String>) = ZCodeLinkedWorkspaces.persist(project, list)
 
-    private fun handleGetLinkedWorkspaces(): JsonObject = buildJsonObject {
+    private fun handleGetLinkedWorkspaces(): JsonObject {
         // 第四触发点：chips 每次加载顺带幂等 reconcile。覆盖 kv 被外部静默改写的形态
         // （同项目双 IDE 实例互写 workspace.xml / 手工改文件）——这类变更不经过
         // add/remove handler，投影靠用户看见 chips 的这次读取自愈（2026-10-29 真机）
-        put("op", "linkedWorkspaces")
-        put("workspaces", JsonArray(readLinkedWorkspaces().also {
-            ZCodeWorkspaceMounter.reconcileAsync(project, it)
-        }.map { JsonPrimitive(it) }))
+        val list = readLinkedWorkspaces().also { ZCodeWorkspaceMounter.reconcileAsync(project, it) }
+        return buildJsonObject {
+            put("op", "linkedWorkspaces")
+            put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
+            put("colors", colorsJson(list))
+        }
+    }
+
+    /** 目录→色板序号映射（键=wsKey 归一形态；顺带按需分配，新目录当轮即有色） */
+    private fun colorsJson(list: List<String>): JsonObject = buildJsonObject {
+        list.forEach { path -> put(ZCodeLinkedWorkspaces.wsKey(path), JsonPrimitive(ZCodeLinkedWorkspaces.colorIndexFor(project, path))) }
     }
 
     /**
@@ -5733,9 +5847,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 投影到 Project View（专属模块内容根，幂等 reconcile；失败只落日志不影响 chips 链路）。
         // 无条件调用：重复添加同目录也顺手把被破坏的投影修回来。
         ZCodeWorkspaceMounter.reconcileAsync(project, list)
+        broadcastLinkedWorkspaces(project) // 全标签同步 chips/色板（他标签不重拉即恒旧，真机 2026-11-03）
         return buildJsonObject {
             put("op", "linkedWorkspaces")
             put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
+            put("colors", colorsJson(list))
             if (path != null) put("added", path)
         }
     }
@@ -5753,9 +5869,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
         // 摘除 Project View 投影（幂等 reconcile，同添加口径）
         ZCodeWorkspaceMounter.reconcileAsync(project, list)
+        broadcastLinkedWorkspaces(project) // 全标签同步：他标签移除的目录本标签也要消失（真机 2026-11-03）
         return buildJsonObject {
             put("op", "linkedWorkspaces")
             put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
+            put("colors", colorsJson(list))
         }
     }
 
@@ -6244,6 +6362,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val workspacePath = effectiveWorkspacePath(msg)
         // 会话所属目录随切换演进（persistTabs 恢复依据，见 lastSessionWorkspace 注释）
         lastSessionWorkspace = workspacePath
+        refreshTabColorIcon() // 跨目录切会话 → 色块跟随归属目录
 
         val messages = resumeAndReadMessages(sessionId, workspacePath)
         // 前端流式静默对账探测（看门狗只读快照判定回合是否已在服务端结束）：

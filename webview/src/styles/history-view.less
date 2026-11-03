@@ -89,12 +89,9 @@
   }
 
   &--active {
+    /* 底色交给配色变体（下方 --project/--dirN 着色），active 只出边框高亮——
+       若这里再铺 accent 底会把目录色相盖掉（2026-11-02 统一配色定稿）*/
     border-color: var(--accent-primary);
-    background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-primary));
-
-    .history-ws-chip__name {
-      color: var(--text-secondary);
-    }
   }
 
   &__icon {
@@ -107,9 +104,32 @@
     text-overflow: ellipsis;
   }
 
-  /* 本项目 chip：文字即身份（显示「本项目」三字，title 悬浮完整路径）*/
-  &--project &__name {
-    color: var(--accent-primary);
+  /* 目录色点（方案A，ui-proto-ws-chip-styles.html 选型定稿 2026-11-03）：文字统一主色
+     不彩染、无彩底，目录色收进左侧 8px 圆点——chips 顺序=色板顺序的识读锚点，
+     本项目=金黄点。花哨感来源（彩底+彩字双重）就此摘除 */
+  &--project {
+    --ws-chip-color: var(--ws-badge-gold);
+  }
+  &--dir1 { --ws-chip-color: var(--ws-dir-1); }
+  &--dir2 { --ws-chip-color: var(--ws-dir-2); }
+  &--dir3 { --ws-chip-color: var(--ws-dir-3); }
+  &--dir4 { --ws-chip-color: var(--ws-dir-4); }
+  &--dir5 { --ws-chip-color: var(--ws-dir-5); }
+  &--dir6 { --ws-chip-color: var(--ws-dir-6); }
+  &--dir7 { --ws-chip-color: var(--ws-dir-7); }
+  &--dir8 { --ws-chip-color: var(--ws-dir-8); }
+  &--dir9 { --ws-chip-color: var(--ws-dir-9); }
+
+  &--project, &--dir1, &--dir2, &--dir3, &--dir4, &--dir5, &--dir6, &--dir7, &--dir8, &--dir9 {
+    /* 真实 DOM 元素非 ::before——chip 的 before/after 已被 tooltip 混入占用
+       （气泡+箭头），伪元素会与之合并渲染成底边色斑（真机 2026-11-03） */
+    .history-ws-chip__dot {
+      flex: none;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px; /* 圆角方块（用户定稿）：与标签栏色块同形态 */
+      background: var(--ws-chip-color);
+    }
   }
 
   &__remove {

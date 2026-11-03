@@ -32,10 +32,45 @@
     }
 }
 
+/* 历史页返回行右侧的色块图例（2026-11-03 用户定稿）：并入返回行空白区，固定两行
+   （「块内文字」起第二行），单行超宽省略号截断——行高恒定不撑高 header。
+   弱化小字左对齐 */
+.header-legend {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 400; /* 覆盖 header-left > * 的 500：图例是注记不是标题 */
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-tertiary);
+
+    .codicon {
+        flex: none;
+        font-size: 13px;
+    }
+
+    &__lines {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    &__line {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
 /* 目录徽标（多目录会话·变体A·方案A，2026-10-28 用户定稿）：标题下方紧凑徽标。
    row 占满一行触发 header-left 换行（本身无背景），徽标本体自适应内容宽度
    （背景只包住文字，不拉满整行）；header 增高约 17px；
-   两态语义（会话归属/待命落位）由 App 算好，本项目不显示（wsBadgeDir=null）。
+   两态语义（会话归属/待命落位）由 App 算好；唯一目录不显示（wsBadge=null）。
+   配色（2026-11-02 统一配色定稿）：本项目=金黄（--project 置 --ws-badge-color），
+   关联目录=色板色（--dir1..9 置 --ws-badge-color，Java 轮询分配），无色类回落主题蓝。
    左对齐 = 标题首字（.session-title 有 padding-left:8px，row 同步 8px）；
    悬浮全路径 = data-tooltip + tooltip-bottom-center（JCEF 下原生 title 不可靠）*/
 .ws-header-badge-row {
@@ -57,8 +92,8 @@
     line-height: 15px;
     font-weight: 400;
     cursor: default;
-    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
-    color: color-mix(in srgb, var(--accent-primary) 80%, var(--text-primary));
+    background: color-mix(in srgb, var(--ws-badge-color, var(--accent-primary)) 10%, transparent);
+    color: color-mix(in srgb, var(--ws-badge-color, var(--accent-primary)) 80%, var(--text-primary));
     max-width: 100%;
     min-width: 0;
     .tooltip-bottom-center(22px);
@@ -82,15 +117,38 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
+
+    /* 本项目：金黄（--ws-badge-gold）。关联目录：色板色（--ws-dir-N，variables.less
+       双主题），色相与标签色块/历史页 chips 三处一致——「这条会话属于哪个目录」
+       不用点开看。有色类统一 14%/75% 配比（今天金色定稿的观感），无色类回落
+       主题蓝 10%/80% 默认档 */
+    &--project {
+        --ws-badge-color: var(--ws-badge-gold);
+        background: color-mix(in srgb, var(--ws-badge-color) 14%, transparent);
+        color: color-mix(in srgb, var(--ws-badge-color) 75%, var(--text-primary));
+    }
+
+    &--dir1, &--dir2, &--dir3, &--dir4, &--dir5, &--dir6, &--dir7, &--dir8, &--dir9 {
+        background: color-mix(in srgb, var(--ws-badge-color) 14%, transparent);
+        color: color-mix(in srgb, var(--ws-badge-color) 75%, var(--text-primary));
+    }
+
+    &--dir1 { --ws-badge-color: var(--ws-dir-1); }
+    &--dir2 { --ws-badge-color: var(--ws-dir-2); }
+    &--dir3 { --ws-badge-color: var(--ws-dir-3); }
+    &--dir4 { --ws-badge-color: var(--ws-dir-4); }
+    &--dir5 { --ws-badge-color: var(--ws-dir-5); }
+    &--dir6 { --ws-badge-color: var(--ws-dir-6); }
+    &--dir7 { --ws-badge-color: var(--ws-dir-7); }
+    &--dir8 { --ws-badge-color: var(--ws-dir-8); }
+    &--dir9 { --ws-badge-color: var(--ws-dir-9); }
 }
 
 .header-right {
     display: flex;
     align-items: center;
     flex-shrink: 0; /* Prevent buttons from shrinking */
-}
-
-.new-chat-button {
+}.new-chat-button {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-secondary);
     color: var(--text-secondary);

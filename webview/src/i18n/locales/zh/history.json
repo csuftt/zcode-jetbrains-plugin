@@ -1,4 +1,8 @@
 {
+  "legend": {
+    "line1": "标签色块：实心=有会话，空心=空标签；颜色=所属目录",
+    "line2": "块内文字=目录首字符（单目录时会话名首字符）"
+  },
   "totalSessions": "共 {{count}} 个会话",
   "selectedSessions": "已选择 {{count}} 个会话",
   "selectAll": "全选",

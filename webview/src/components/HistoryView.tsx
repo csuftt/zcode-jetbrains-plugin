@@ -26,6 +26,7 @@ import { ConfirmDialog } from './ConfirmDialog'
 import { AutoArchivePanel } from './AutoArchivePanel'
 import { sortSessionsByPin } from '@/utils/sessionPinSort'
 import { wsBasename } from '@/utils/format'
+import { resolveWsColorIndex } from '@/utils/wsColors'
 import '../styles/history-view.less'
 
 interface Props {
@@ -65,6 +66,8 @@ interface Props {
   onLoadArchived: () => void
   /** 关联目录列表（多目录会话·变体A：chips 渲染；project 级 kv 持久化）*/
   linkedWorkspaces: string[]
+  /** 目录→色板序号映射（Java 轮询分配随 linkedWorkspaces 推送）：chips 统一配色取色 */
+  wsColors: Record<string, number>
   /** 激活目录（chips 高亮 + 列表/新建会话落位；空=本项目）*/
   activeWorkspacePath: string
   /** 本项目根（常驻第一个 chip，带徽标不可移除）*/
@@ -124,6 +127,7 @@ export function HistoryView({
   onRefresh,
   onLoadArchived,
   linkedWorkspaces = [],
+  wsColors = {},
   activeWorkspacePath = '',
   projectWorkspacePath = '',
   onSwitchWorkspace = () => {},
@@ -357,18 +361,33 @@ export function HistoryView({
             data-tooltip={projectWorkspacePath}
             onClick={() => onSwitchWorkspace(projectWorkspacePath)}
           >
-            <span className="history-ws-chip__name">{t('history.wsChips.project')}</span>
+            <span className="history-ws-chip__dot" />
+            {/* 项目标识（2026-11-03 用户定稿）：恒显示真实目录名（单/多工作区同一口径） */}
+            <span className="history-ws-chip__name">
+              {wsBasename(projectWorkspacePath) || t('history.wsChips.project')}
+            </span>
           </button>
           {linkedWorkspaces.map((ws) => {
             const active = wsSame(activeWorkspacePath || projectWorkspacePath, ws)
+            // 统一配色（2026-11-02）：chip 按目录色板着色，与徽标/标签色块同源；
+            // 未命中映射（应答未达/旧包）无色类回落默认主题
+            const colorIdx = resolveWsColorIndex(ws, wsColors)
             return (
               <button
                 type="button"
                 key={ws}
-                className={`history-ws-chip ${active ? 'history-ws-chip--active' : ''}`}
+                className={[
+                  'history-ws-chip',
+                  active ? 'history-ws-chip--active' : '',
+                  colorIdx != null ? `history-ws-chip--dir${colorIdx + 1}` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 data-tooltip={ws}
                 onClick={() => onSwitchWorkspace(ws)}
               >
+                {/* 圆点仅在有目录色类时渲染（colors 映射未达时无色可点，省出空隙）*/}
+                {colorIdx != null && <span className="history-ws-chip__dot" />}
                 <span className="history-ws-chip__name">{wsBasename(ws)}</span>
                 <span
                   className="history-ws-chip__remove codicon codicon-close"

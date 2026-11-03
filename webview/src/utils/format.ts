@@ -130,3 +130,9 @@ export function formatXLabelFull(t: string, granularity?: string): string {
 export function wsBasename(path: string): string {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path
 }
+
+/** 首字符（按码点取，emoji 等代理对不劈半）大写化：单工作区标签色块的会话名字符（2026-11-02）*/
+export function firstCharUpper(s: string): string {
+  if (!s) return ''
+  return String.fromCodePoint(s.codePointAt(0)!).toUpperCase()
+}

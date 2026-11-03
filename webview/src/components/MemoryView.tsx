@@ -295,7 +295,7 @@ export function MemoryView() {
               searchMemoryFiles('')
             }}
           >
-            <option value={projectPath} title={projectPath}>{t('history.wsChips.project')}</option>
+            <option value={projectPath} title={projectPath}>{wsBasename(projectPath)}</option>
             {linkedWorkspaces.map((w) => (
               <option key={w} value={w} title={w}>{wsBasename(w)}</option>
             ))}

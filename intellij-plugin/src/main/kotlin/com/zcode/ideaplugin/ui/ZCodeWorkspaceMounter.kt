@@ -14,8 +14,10 @@ import com.intellij.openapi.vfs.VfsUtilCore
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
@@ -32,6 +34,60 @@ object ZCodeLinkedWorkspaces {
 
     /** 关联目录列表的 project 级 kv key */
     const val KEY = "zcode.linkedWorkspaces.v1"
+
+    /** 目录→色板序号映射与轮询计数器（标签色块/徽标/chips 统一配色，2026-11-02）。
+     *  分配算法=首次出现顺序轮询（同 IDEA 项目颜色逻辑），kv 持久化保证跨重启稳定；
+     *  目录移除后映射保留——重新关联拿回同色（更稳，映射体量极小不清理） */
+    const val COLOR_MAP_KEY = "zcode.linkedWorkspaceColors.v1"
+    const val COLOR_COUNTER_KEY = "zcode.linkedWorkspaceColorCounter.v1"
+
+    /** 色板大小（与 [WsTabColors.PALETTE]、webview --ws-dir-1..9 三方对齐） */
+    const val PALETTE_SIZE = 9
+
+    /** 轮询取模（纯函数测试锚点）：计数器可能为负（外部误写）也归正 */
+    fun nextColorIndex(counter: Int): Int = ((counter % PALETTE_SIZE) + PALETTE_SIZE) % PALETTE_SIZE
+
+    /**
+     * 列表位置取色（纯函数测试锚点，用户定稿 2026-11-03「按顺序取」）：目录在关联列表
+     * 中的位置=色板序号——chips 顺序与色板顺序永远一致（首轮的计数器分配在增删后会
+     * 错位，第 N 个 chip 不再对应第 N 色，青色"丢失"即此因）。不在列表中返回 null。
+     */
+    fun positionalColorIndex(list: List<String>, path: String): Int? =
+        list.indexOfFirst { wsKey(it) == wsKey(path) }.takeIf { it >= 0 }?.let(::nextColorIndex)
+
+    /**
+     * 目录的色板序号（幂等）：**关联列表内的目录按列表位置取色**（chips 顺序=色板
+     * 顺序）；列表外的目录（已移除关联的旧会话/落位）按 kv 历史映射兜底（无则计数器
+     * 轮询分配持久化，与列表内位置无关）。协议 handler 均在 EDT 串行执行，
+     * @Synchronized 只防启动 reconcile 并发。
+     */
+    @Synchronized
+    fun colorIndexFor(project: Project, path: String): Int {
+        positionalColorIndex(read(project), path)?.let { return it }
+        val props = PropertiesComponent.getInstance(project)
+        val key = wsKey(path)
+        val existing = parseColorMap(props.getValue(COLOR_MAP_KEY))
+        existing[key]?.let { return it }
+        val counter = props.getInt(COLOR_COUNTER_KEY, 0)
+        val index = nextColorIndex(counter)
+        props.setValue(COLOR_COUNTER_KEY, counter + 1, 0)
+        props.setValue(COLOR_MAP_KEY, serializeColorMap(existing + (key to index)))
+        return index
+    }
+
+    /** {"<wsKey>": 序号} JSON 解析（损坏降级空表，同 [read] 口径） */
+    fun parseColorMap(raw: String?): Map<String, Int> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return try {
+            Json.parseToJsonElement(raw).jsonObject.entries.associate { (k, v) -> k to v.jsonPrimitive.content.toInt() }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun serializeColorMap(map: Map<String, Int>): String = buildJsonObject {
+        map.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+    }.toString()
 
     /** 目录路径归一比较键：统一分隔符 + 去尾 + 大小写折叠（Windows 不敏感） */
     fun wsKey(path: String): String =

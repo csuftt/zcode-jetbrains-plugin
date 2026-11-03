@@ -54,8 +54,10 @@ interface Props {
   /** 标题生成进行中（按钮转圈，全局单飞）*/
   regeneratingTitle: boolean
   /** 目录徽标（多目录会话·变体A，2026-10-28 方案A 定稿）：标题下方紧凑徽标。
-   *  语义两态由 App 算好传入：有会话=会话归属目录；待命=落位目录；本项目（或空）=null 不显示 */
-  wsBadgeDir?: string | null
+   *  语义两态由 App 算好传入：有会话=会话归属目录；待命=落位目录；唯一目录（或空）=null 不显示。
+   *  isProject=true 走金黄（2026-11-02：有其他目录时本项目也显示）；colorIndex=统一配色
+   *  色板序号（非本项目目录，Java 轮询分配），null 回落默认主题色 */
+  wsBadge?: { dir: string; isProject: boolean; colorIndex: number | null } | null
 }
 
 export function ChatHeader({
@@ -75,7 +77,7 @@ export function ChatHeader({
   onRegenerateTitle,
   canRegenerateTitle,
   regeneratingTitle,
-  wsBadgeDir = null,
+  wsBadge = null,
 }: Props) {
   const { t } = useTranslation()
   // settings 视图不渲染（SettingsView 自带关闭入口）
@@ -85,9 +87,22 @@ export function ChatHeader({
     <div className="header">
       <div className="header-left">
         {currentView === 'history' ? (
-          <button className="back-button" onClick={onBack} data-tooltip={t('chat.header.back')}>
-            <BackIcon /> {t('chat.header.back')}
-          </button>
+          <>
+            <button className="back-button" onClick={onBack} data-tooltip={t('chat.header.back')}>
+              <BackIcon /> {t('chat.header.back')}
+            </button>
+            {/* 色块图例（2026-11-03 用户定稿）：并入返回行右侧空白区，固定两行——
+                第一行到「颜色=所属目录」，「块内文字」起第二行；单行超宽省略号截断
+                （不自动换行，行高恒定不撑高 header）。标签色块是原生 Swing 图标无
+                tooltip 通道，说明统一收口在这条 */}
+            <div className="header-legend">
+              <span className="codicon codicon-info" aria-hidden />
+              <span className="header-legend__lines">
+                <span className="header-legend__line">{t('history.legend.line1')}</span>
+                <span className="header-legend__line">{t('history.legend.line2')}</span>
+              </span>
+            </div>
+          </>
         ) : (
           <SessionTitle
             title={sessionTitle}
@@ -99,16 +114,23 @@ export function ChatHeader({
         )}
         {/* 目录徽标（多目录会话·变体A·方案A 定稿 2026-10-28）：紧凑徽标挂标题下方，
             header 仅增高 ~17px。两态语义（会话归属/待命落位）由 App 算好传入，
-            本项目不显示；悬浮 title 完整路径。
+            唯一目录不显示；本项目=金黄，关联目录=统一配色色板（colorIndex 由 Java
+            轮询分配，null 回落默认主题色），悬浮 title 完整路径。
             外层 row 占满一行触发换行（无背景），徽标本体自适应内容宽度（背景不拉满） */}
-        {wsBadgeDir && currentView === 'chat' && (
+        {wsBadge && currentView === 'chat' && (
           <span className="ws-header-badge-row">
             <span
-              className="ws-header-badge"
-              data-tooltip={wsBadgeDir}
+              className={[
+                'ws-header-badge',
+                wsBadge.isProject ? 'ws-header-badge--project' : '',
+                wsBadge.colorIndex != null ? `ws-header-badge--dir${wsBadge.colorIndex + 1}` : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              data-tooltip={wsBadge.dir}
             >
               <span className="ws-header-badge__name">
-                {wsBadgeDir.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop()}
+                {wsBadge.dir.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop()}
               </span>
             </span>
           </span>

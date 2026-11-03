@@ -1,4 +1,8 @@
 {
+  "legend": {
+    "line1": "Tab block: solid = has session, hollow = empty tab; color = its directory",
+    "line2": "Letter: directory initial (session initial when single dir)"
+  },
   "openChoiceTitle": "Open Session",
   "openChoiceMessage": "The current tab already has a session. Where should \"{{title}}\" be opened?",
   "openHere": "Replace current tab",

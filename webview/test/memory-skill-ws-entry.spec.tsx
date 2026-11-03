@@ -65,8 +65,8 @@ describe('记忆页目录下拉', () => {
     expect(sel).not.toBeNull()
     // 挂载首拉落在本项目
     expect(sentRequests.filter((r) => r.op === 'listMemoryFiles')[0]).toMatchObject({ workspacePath: WS_PROJECT })
-    // option 集合：本项目（中文文案）+ 目录名
-    expect(screen.getByText('当前项目')).not.toBeNull()
+    // option 集合：本项目（真实目录名，多工作区口径 2026-11-03）+ 关联目录名
+    expect(screen.getByText('mock-project')).not.toBeNull()
     expect(screen.getByText('other-project')).not.toBeNull()
     // 切到关联目录 → 重拉带新目录 + 作用域更新
     fireEvent.change(sel, { target: { value: WS_OTHER } })

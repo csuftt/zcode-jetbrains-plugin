@@ -37,6 +37,8 @@ import { EnvBanner } from '@/components/EnvBanner'
 import { ZoomIndicator } from '@/components/ZoomIndicator'
 import { sendToJava, isInJcef } from '@/ipc/bridge'
 import { getPersisted, setPersisted, isKvHydrated, KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
+import { firstCharUpper } from '@/utils/format'
+import { resolveWsColorIndex } from '@/utils/wsColors'
 import { readNewSessionConfig } from '@/utils/newSessionConfig'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
 import { APP_VERSION } from '@/version/version'
@@ -274,18 +276,22 @@ export default function App() {
     (currentSessionId ? currentSessionId.slice(0, 12) : '')
 
   // 目录徽标（多目录会话·变体A·方案A）：语义两态——有会话=会话归属目录（不随 chips
-  // 漂移），待命=落位目录（随 chips 切换）；=本项目（或空）不显示
-  const wsBadgeDir = useMemo(() => {
-    const dir = currentSessionId ? currentWorkspacePath : linkedActiveWorkspacePath
+  // 漂移），待命=落位目录（随 chips 切换；取值链同 createSession/listSessions 的
+  // activeWorkspacePath || projectPath——落位空串=本项目，新标签默认落本项目徽标同样
+  // 显示，2026-11-02 真机）。本项目在存在关联目录时也显示（isProject 供金黄区分，
+  // 2026-11-02 用户优化）；唯一目录（无关联）时本项目徽标无信息量，隐藏。
+  // colorIndex=统一配色色板序号（Java 轮询分配，2026-11-02）：非本项目目录取映射，
+  // 未命中（应答未达/旧包）null 回落默认主题色；与标签色块/历史页 chips 三处同源
+  const wsColors = useStore((s) => s.wsColors)
+  const wsBadge = useMemo<{ dir: string; isProject: boolean; colorIndex: number | null } | null>(() => {
+    const dir = currentSessionId ? currentWorkspacePath : linkedActiveWorkspacePath || projectPath
     if (!dir) return null
-    if (
+    const isProject =
       dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() ===
       projectPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-    ) {
-      return null
-    }
-    return dir
-  }, [currentSessionId, currentWorkspacePath, linkedActiveWorkspacePath, projectPath])
+    if (isProject && linkedWorkspaces.length === 0) return null
+    return { dir, isProject, colorIndex: isProject ? null : resolveWsColorIndex(dir, wsColors) }
+  }, [currentSessionId, currentWorkspacePath, linkedActiveWorkspacePath, projectPath, linkedWorkspaces, wsColors])
 
   // AI 重新生成标题：有真实用户消息才可生成；失败提示 6s 自动消失
   const canRegenerateTitle = useMemo(() => extractTitleExcerpt(messages) !== null, [messages])
@@ -295,30 +301,45 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [sessionTitleRegenError, clearSessionTitleRegenError])
 
-  // 会话标题推给 Java 作标签 tooltip（悬停显示会话名；标签本身保持「会话N」编号）。
-  // 变化时防抖 500ms；只在本 webview 连接 Java 时发送（mock 模式静默丢弃）
-  const lastPushedTitleRef = useRef('')
+  // 会话标题推给 Java 作标签 tooltip（标签本身保持「会话N」编号）。
+  // workspacePath 同推驱动标签色块（统一配色 2026-11-02）：有会话=会话归属目录；
+  // 待命=落位目录（**空标题推送**，Java 只挂图标不动 tooltip——新标签即有块）。
+  // 标题发裸文本不拼【目录名】前缀：多工作区的目录 chip 色块由 Java 侧组 HTML tooltip
+  // （用户定稿 2026-11-03：chip 样式对齐会话名下徽标，【】文字前缀废弃）。
+  // 变化时防抖 500ms；只在本 webview 连接 Java 时发送（mock 丢弃）
+  const lastPushedKeyRef = useRef('')
+  // 推送目录轴：会话=归属目录；待命=落位（与 createSession/listSessions 同一取值链）
+  const pushWsPath = currentSessionId ? currentWorkspacePath || projectPath : linkedActiveWorkspacePath || projectPath
   useEffect(() => {
     const effective = sessionTitle || (currentSessionId ? currentSessionId.slice(0, 12) : '')
-    // 待命态（无会话）时复位已推标记：否则新会话标题与旧会话相同时会被去重跳过
-    if (!effective) {
-      lastPushedTitleRef.current = ''
+    if (!effective && !pushWsPath) {
+      lastPushedKeyRef.current = ''
       return
     }
-    if (effective === lastPushedTitleRef.current) return
+    // 去重键=目录+全文：跨目录切同标题会话、待命落位切换都要重推
+    const key = `${pushWsPath}\u0001${effective}`
+    if (key === lastPushedKeyRef.current) return
     const timer = setTimeout(() => {
-      lastPushedTitleRef.current = effective
-      sendToJava({ op: 'setTabTitle', title: effective.slice(0, 50), sessionId: currentSessionId ?? undefined })
+      lastPushedKeyRef.current = key
+      sendToJava({
+        op: 'setTabTitle',
+        title: effective.slice(0, 50),
+        sessionId: currentSessionId ?? undefined,
+        // 目录：Java 据此算标签色块颜色与 tooltip 目录 chip（与徽标/chips 同一色板）
+        workspacePath: pushWsPath || undefined,
+        // 会话名首字符：Java 在单工作区时用它作色块文字（目录字符在单工作区全同无区分度）
+        letter: effective && linkedWorkspaces.length === 0 ? firstCharUpper(effective) : undefined,
+      })
     }, 500)
     return () => clearTimeout(timer)
-  }, [sessionTitle, currentSessionId])
+  }, [sessionTitle, currentSessionId, pushWsPath, linkedWorkspaces])
 
   return (
     <div className="app">
       <ChatHeader
         currentView={currentView}
         sessionTitle={sessionTitle}
-        wsBadgeDir={wsBadgeDir}
+        wsBadge={wsBadge}
         onBack={() => setCurrentView('chat')}
         newSessionDisabled={currentSessionEmpty}
         onNewSession={handleNewSession}
@@ -413,6 +434,7 @@ export default function App() {
             onRefresh={loadSessions}
             onLoadArchived={loadArchivedSessions}
             linkedWorkspaces={linkedWorkspaces}
+            wsColors={wsColors}
             activeWorkspacePath={linkedActiveWorkspacePath}
             projectWorkspacePath={projectPath}
             onSwitchWorkspace={switchWorkspace}
