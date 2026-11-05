@@ -8,6 +8,8 @@
  * 4. listSessions 应答的 staleLocal 补插按列表作用域过滤——切到关联目录后，
  *    本项目"刚活跃"的会话不得残留进关联目录列表（sessionsWorkspace 作用域）
  * 5. createSession 请求携带激活目录（新会话落位）
+ * 6. 会话标签 init 落位随标签目录（用户定稿 2026-11-05）：boot 恢复后作用域不切回、
+ *    目录被移出关联列表时 linkedWorkspaces 守卫兜底回本项目
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -164,7 +166,7 @@ describe('跨目录会话新标签打开（标签初始目录注入）', () => {
     expect(req?.workspacePath).toBe(WS_OTHER)
   })
 
-  it('会话标签 init 只落标签初始目录到 bootWorkspace（首拉恢复绑定会话），activeWorkspacePath 不被污染（落位恒本项目）', () => {
+  it('会话标签 init：落位随标签目录（历史页默认选中它）+ boot 目录服务绑定会话恢复', () => {
     tabWorkspaceInjected = WS_OTHER
     tabInitialSessionId = 'sess_bound' // 有绑定会话=会话标签，走 boot 链
     useStore.setState({ activeWorkspacePath: '' })
@@ -172,19 +174,23 @@ describe('跨目录会话新标签打开（标签初始目录注入）', () => {
     // 首拉按注入目录（绑定会话在列表里可恢复）；init 同步链内即消费（bootWorkspace 清空）
     const req = sentRequests.find((r) => r.op === 'listSessions')
     expect(req?.workspacePath).toBe(WS_OTHER)
-    expect(useStore.getState().activeWorkspacePath).toBe('') // 落位仍是本项目
+    expect(useStore.getState().activeWorkspacePath).toBe(WS_OTHER) // 落位=标签目录（用户定稿 2026-11-05）
     expect(useStore.getState().bootWorkspace).toBe('') // 一次性已消费
+    // boot 消费后例行刷新延续落位目录（标签目录），不再回落本项目
+    sentRequests.length = 0
+    useStore.getState().loadSessions()
+    expect(sentRequests.find((r) => r.op === 'listSessions')?.workspacePath).toBe(WS_OTHER)
   })
 
-  it('bootWorkspace 一次性（会话标签）：消费后再次 loadSessions 回落激活目录（本项目）', () => {
+  it('bootWorkspace 一次性（空标签/守卫已消费的 init）：loadSessions 回落激活目录', () => {
     tabWorkspaceInjected = WS_OTHER
     tabInitialSessionId = 'sess_bound'
     useStore.setState({ activeWorkspacePath: '' })
-    void useStore.getState().init()
+    void useStore.getState().init() // bridgeInitialized 已被前用例消费，此处空转
     sentRequests.length = 0
     useStore.getState().loadSessions()
     const req = sentRequests.find((r) => r.op === 'listSessions')
-    expect(req?.workspacePath).toBe(WS_PROJECT)
+    expect(req?.workspacePath).toBe(WS_PROJECT) // 落位空串 → 回落本项目
     expect(useStore.getState().bootWorkspace).toBe('')
   })
 
@@ -200,6 +206,60 @@ describe('跨目录会话新标签打开（标签初始目录注入）', () => {
     expect(s.activeWorkspacePath).toBe(WS_OTHER) // 落位即标签目录（待命态徽标由此显示）
     expect(s.bootWorkspace).toBe('')
     expect(s.bootRestorePending).toBe(false) // 无恢复需求，收尾不触发不二次重拉
+  })
+
+  it('会话标签 boot 首拉响应后作用域不切回（落位已随标签目录，chips 与列表天然一致）', async () => {
+    vi.resetModules()
+    const { useStore: freshStore, handleResponse: freshHandle } = await import('@/store/useStore')
+    tabWorkspaceInjected = WS_OTHER
+    tabInitialSessionId = 'sess_bound'
+    freshStore.setState({
+      projectPath: WS_PROJECT,
+      linkedWorkspaces: [WS_OTHER],
+      activeWorkspacePath: '',
+      bootWorkspace: '',
+      bootRestorePending: false,
+      sessionsWorkspace: '',
+      skipInitialSessionRestore: false,
+    })
+    void freshStore.getState().init()
+    // boot 首拉响应（回显=标签目录），绑定会话在列表中 → 正常恢复
+    freshHandle(
+      { op: 'listSessions', sessions: [sess('sess_bound', WS_OTHER)], workspacePath: WS_OTHER } as never,
+      freshStore.setState, freshStore.getState,
+    )
+    const s = freshStore.getState()
+    expect(s.currentSessionId).toBe('sess_bound') // 绑定会话恢复不受影响
+    expect(s.bootRestorePending).toBe(false)
+    expect(s.sessionsWorkspace).toBe(WS_OTHER) // 作用域=标签目录，不再静默切回
+    // 全程只有 boot 那一次 listSessions（收尾空转，无第二拉）
+    expect(sentRequests.filter((r) => r.op === 'listSessions')).toHaveLength(1)
+  })
+
+  it('极端情况：标签目录已被移出关联列表 → linkedWorkspaces 守卫兜底回本项目（第一个 chip）', async () => {
+    vi.resetModules()
+    const { useStore: freshStore, handleResponse: freshHandle } = await import('@/store/useStore')
+    tabWorkspaceInjected = WS_OTHER
+    tabInitialSessionId = 'sess_bound'
+    freshStore.setState({
+      projectPath: WS_PROJECT,
+      linkedWorkspaces: [],
+      activeWorkspacePath: '',
+      bootWorkspace: '',
+      bootRestorePending: false,
+      sessionsWorkspace: '',
+    })
+    void freshStore.getState().init() // 落位=WS_OTHER（已不在关联列表）
+    expect(freshStore.getState().activeWorkspacePath).toBe(WS_OTHER)
+    sentRequests.length = 0
+    freshHandle(
+      { op: 'linkedWorkspaces', workspaces: [] } as never,
+      freshStore.setState, freshStore.getState,
+    )
+    const s = freshStore.getState()
+    expect(s.activeWorkspacePath).toBe(WS_PROJECT) // 兜底回本项目
+    expect(s.sessionsWorkspace).toBe(WS_PROJECT)
+    expect(sentRequests.find((r) => r.op === 'listSessions')?.workspacePath).toBe(WS_PROJECT) // 按兜底目录重拉
   })
 })
 
@@ -289,7 +349,9 @@ describe('切目录加载态与乱序丢弃', () => {
 describe('boot 场景作用域（真机 2026-10-28：高亮本项目但列表停在关联目录）', () => {
   // init 有一次性守卫（bridgeInitialized）且已被本文件前部用例消费——这里直接构造
   // "boot 首拉完成"后的状态：sessionsWorkspace=标签初始目录、落位仍空（本项目）、
-  // bootWorkspace 已消费。init 首拉行为由前部"init 落标签初始目录"用例覆盖
+  // bootWorkspace 已消费。落位随标签目录后（2026-11-05）常规路径落位=标签目录、
+  // 收尾空转（见前部新用例）——本组保留的是竞态保险：boot 期间落位被守卫回退等
+  // 场景下，收尾仍须把列表对齐落位目录。init 首拉行为由前部用例覆盖
   function bootConsumedIntoOther() {
     useStore.setState({ activeWorkspacePath: '', bootWorkspace: '', sessionsWorkspace: WS_OTHER })
     sentRequests.length = 0

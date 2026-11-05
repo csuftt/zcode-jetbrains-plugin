@@ -2282,17 +2282,19 @@ export const useStore = create<StoreState>((set, get) => ({
      */
     const ws = getWorkspacePath()
     set({ projectPath: ws })
-    // 标签初始目录（多目录会话）：按标签类型分叉——
+    // 标签初始目录（多目录会话）：落位随标签目录（用户定稿 2026-11-05，修订
+    // 2026-10-27「会话标签落位恒本项目」）——首次打开历史会话页默认选中标签所在
+    // 目录，chips 高亮/列表作用域/新建会话落位一致，boot 恢复后无需再切回；
     //   会话标签（gotoSession「新标签页打开」/重启恢复，initialSessionId 非空）：
-    //     只落 bootWorkspace 服务绑定会话恢复，落位恒本项目（用户定稿 2026-10-27），
-    //     chips 高亮/新会话落位不随"打开了别的目录的旧会话"漂移；
+    //     另落 bootWorkspace 服务绑定会话恢复（首拉按它拉列表才能命中绑定会话）；
     //   「新建会话」开的空标签（无绑定会话，用户点按钮即表达"在此目录新建"）：
-    //     落位即标签目录——徽标/chips 高亮/列表作用域/createSession 全按它走
-    //     （真机 2026-10-28：新标签没带工作区徽标），无恢复需求不进 boot 链
+    //     落位即标签目录（真机 2026-10-28：新标签没带工作区徽标），不进 boot 链。
+    // 极端情况标签目录已被移出关联列表（如目录删除）：linkedWorkspaces 应答守卫
+    // 自动兜底回本项目（=第一个 chip）
     const tabWs = getTabWorkspacePath()
     if (tabWs && tabWs !== ws) {
+      set({ activeWorkspacePath: tabWs })
       if (getInitialSessionId()) set({ bootWorkspace: tabWs, bootRestorePending: true })
-      else set({ activeWorkspacePath: tabWs })
     }
 
     // 桥就绪统一动作（热启动/冷启动轮询就绪/mock 态迟到恢复三处共用）：
@@ -4566,11 +4568,10 @@ export function handleResponse(
       }
 
       // boot 恢复收尾（多目录会话，真机 2026-10-28）：boot 首拉（标签初始目录）响应已
-      // 处理完（恢复或未命中），列表作用域静默切回落位目录并重拉——否则 chips 高亮
-      // （=落位，本项目）与列表（=标签初始目录）脱节，用户看到"选中本项目但列表是
-      // 别的目录的会话"。当前会话照常打开（消息已拉），暂不在本项目列表里（标题
-      // fallback 链已兜）。切回动作再发一次 listSessions（~百毫秒；bootRestorePending
-      // 此处已消费，不会循环）
+      // 处理完（恢复或未命中），列表作用域对齐落位目录并按需重拉。落位随标签目录后
+      // （2026-11-05）常规路径二者恒相等=空转；保留作竞态保险——boot 期间落位被
+      // linkedWorkspaces 守卫回退（标签目录已被移出）时，此处负责把列表切到兜底目录。
+      // 切回动作再发一次 listSessions（~百毫秒；bootRestorePending 此处已消费，不会循环）
       if (get().bootRestorePending) {
         const fallbackWs = get().activeWorkspacePath || get().projectPath
         set({ bootRestorePending: false })
