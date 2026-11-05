@@ -209,6 +209,55 @@ class RelayClientStateMachineTest {
     }
 
     @Test
+    fun `重发帧只 ack 与 dispatch 一次，换代后同 messageSeq 放行`() {
+        // 缺陷FV（2026-11-04 手机 HAR #237-245 实锤）：手机链路恢复会原样重发整段
+        // burst（相同 messageSeq），此前 dispatch 不去重 → subscribeConversationV4
+        // 双订阅烧 v4 槽、快照双推，并触发 H5 恢复链 resync 失败=「重新连接」
+        val ws = FakeWebSocket()
+        var requests = 0
+        val client = RelayClient(
+            config = RelayClient.RelayConfig(reconnectBackoffMs = longArrayOf()),
+            credentials = RelayCredentials(deviceMid = "m", deviceSid = "s", passHash = "h"),
+            transportFactory = { _, _, listener -> ws.listener = listener; listener.onOpen(ws); ws },
+        )
+        client.onChannelRequest = { _, _, responder -> requests++; responder.success(ChValue.Undefined) }
+        client.connect()
+        assertEquals(Relay.TYPE_AUTH_INIT, sentType(ws.sent.poll()))
+
+        val inner = ChannelCodec.encodeRequest(
+            7, "zcode-task", "echo",
+            listOf(ChValue.Obj(buildJsonObject { put("v", 1) })),
+        )
+        fun frame(seq: Long, mseq: Long, gen: Long?): String {
+            val genPart = if (gen != null) """"bridgeGeneration":$gen,""" else ""
+            return """{"type":"data","payload":{"zcode_type":"rpc-frame","bridgeSessionId":"br1",""" + genPart +
+                """"seq":$seq,"messageSeq":$mseq,"fragmentIndex":0,"fragmentCount":1,""" +
+                """"messageBytes":${inner.size},"checksum":{"algorithm":"crc32","value":"${FrameAssembler.crc32Hex(inner)}"},""" +
+                """"dataBase64":"${java.util.Base64.getEncoder().encodeToString(inner)}"}}"""
+        }
+
+        // 首发：ack + dispatch 应答
+        ws.fireText(frame(1, 1, null))
+        val ack1 = sentPayload(ws.sent.poll())!!
+        assertEquals(Relay.PAYLOAD_RPC_FRAME_ACK, (ack1["zcode_type"] as kotlinx.serialization.json.JsonPrimitive).content)
+        ws.sent.poll() // PromiseSuccess
+        assertEquals(1, requests)
+
+        // 原样重发（相同 messageSeq）：不得再 ack、不得二次 dispatch
+        ws.fireText(frame(1, 1, null))
+        assertTrue(ws.sent.isEmpty(), "重发帧不应产生任何下行帧")
+        assertEquals(1, requests, "重发帧不应二次 dispatch")
+
+        // 换代（bridgeGeneration 变化）后同 messageSeq 是新代消息：放行
+        ws.fireText(frame(2, 1, 2L))
+        val ack2 = sentPayload(ws.sent.poll())!!
+        assertEquals(Relay.PAYLOAD_RPC_FRAME_ACK, (ack2["zcode_type"] as kotlinx.serialization.json.JsonPrimitive).content)
+        ws.sent.poll() // PromiseSuccess
+        assertEquals(2, requests)
+        client.close()
+    }
+
+    @Test
     fun `并发 sendChannelMessage 时 wire 顺序与 messageSeq 分配一致`() {
         val ws = FakeWebSocket()
         val client = RelayClient(

@@ -1249,25 +1249,22 @@ class ZCodeProtocolClient private constructor(
      * id 与已注册值严格匹配，失配即静默丢弃重推的快照（2026-09-22 对照开源定案）。
      * base=null + forceSnapshot=true = 放弃增量水位、整段重放快照。
      * 快照帧经 v4/conversation/frame 通知到达（帧泵已透传）。
+     *
+     * **不带 workspace**（2026-11-04 手机 HAR 实锤：resync zod schema strict，
+     * 顶层 workspace 键即 -32603 unrecognized_keys；同订阅语义下订阅时已定位会话，
+     * 无需 workspace 二次定位——subscribe 的 workspace 形态对 resync 不适用）。
      */
     fun v4ConversationResync(
         topic: String,
         subscriptionId: String,
         connectionId: String,
         forceSnapshot: Boolean = true,
-        workspacePath: String? = null,
     ): JsonObject = requestResult("v4/conversation/resync") {
         put("topic", topic)
         put("subscriptionId", subscriptionId)
         put("connectionId", connectionId)
         put("base", kotlinx.serialization.json.JsonNull)
         if (forceSnapshot) put("forceSnapshot", true)
-        workspacePath?.let {
-            put("workspace", buildJsonObject {
-                put("workspacePath", it)
-                put("workspaceKey", it)
-            })
-        }
     }
 
     /**

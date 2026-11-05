@@ -507,7 +507,13 @@ class ZCodeRemoteService : Disposable {
         }
         // sessions-index 快照限流（delta 不动）：500+ 任务的全量 sessions 数组与 controller
         // tasks-index 同源放大 H5 端压力，只保留最近 150 行（按 lastActivityAt 降序）
-        val outbound = if (topic.startsWith("sessions-index/")) trimSessionsIndexSnapshot(frame) else frame
+        // conversation 帧过消毒（缺陷FV 四轮：CLI 新 display kind 毒化 H5 zod 整帧判定）
+        val outbound = when {
+            topic.startsWith("sessions-index/") -> trimSessionsIndexSnapshot(frame)
+            topic.startsWith("conversation/") ->
+                com.zcode.ideaplugin.protocol.V4FrameSanitizer.sanitizeOutbound(frame)
+            else -> frame
+        }
         for ((bridgeId, ctx) in handlers.activeContexts()) {
             if (ctx.subscriptions[topic] == null) continue
             for ((listenerId, sub) in router.bridge.subscriptionsFor(bridgeId)) {

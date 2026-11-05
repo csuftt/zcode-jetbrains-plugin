@@ -109,7 +109,10 @@ class RelayClient(
     private val outMessageSeq = AtomicLong(0)
     private val fallbackSeq = AtomicLong(0)
     private val sendLock = Any()
-    private val ackedMessages = ConcurrentHashMap.newKeySet<String>()
+    // 重发帧 ack/dispatch 去重（缺陷FV）：手机链路恢复会原样重发整段 burst（相同
+    // messageSeq），ack 只回一次之外 dispatch 也必须只分发一次；有界集防长会话无界泄漏
+    private val ackedMessages = BoundedKeySet()
+    private val dispatchedMessages = BoundedKeySet()
     private var reconnectAttempt = 0
 
     /**
@@ -405,10 +408,12 @@ class RelayClient(
         val bridge = (payload["bridgeSessionId"] as? JsonPrimitive)?.content ?: return
         val messageSeq = (payload["messageSeq"] as? JsonPrimitive)?.content?.toLongOrNull() ?: return
         val fragmentIndex = (payload["fragmentIndex"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+        // generation 入键：同 bridge 换代 recovery 后 H5 侧序号可能重计，无代键会误杀新代帧
+        val generation = (payload["bridgeGeneration"] as? JsonPrimitive)?.content
+        val epoch = if (generation != null) "$bridge\u0000$generation" else bridge
 
         // 每条消息首片回一次 ack（对齐官方行为）
-        val ackKey = "$bridge\u0000$messageSeq"
-        if (fragmentIndex == 0 && ackedMessages.add(ackKey)) {
+        if (fragmentIndex == 0 && !ackedMessages.seenOrAdd("$epoch\u0000$messageSeq")) {
             sendPayload(buildJsonObject {
                 put("zcode_type", Relay.PAYLOAD_RPC_FRAME_ACK)
                 put("bridgeSessionId", bridge)
@@ -419,6 +424,9 @@ class RelayClient(
         }
 
         val assembled = assembler.accept(payload) ?: return
+        // 重发帧（同代同 messageSeq，缺陷FV）不二次 dispatch——去重放组装成功后：
+        // 多片消息缺片靠重发补齐的路径不被误杀
+        if (dispatchedMessages.seenOrAdd("$epoch\u0000${assembled.messageSeq}")) return
         dispatchAssembled(bridge, assembled.data)
     }
 
@@ -541,4 +549,18 @@ class JdkWebSocketTransportFactory(
         for ((k, v) in headers) builder.header(k, v)
         return builder.buildAsync(URI.create(url), listener).join()
     }
+}
+
+/**
+ * 有界去重集：rpc-frame 的 ack/dispatch 去重键存放处。此前 ackedMessages 为无界
+ * ConcurrentHashMap.newKeySet，长驻进程慢性泄漏（缺陷FV 顺手收口）；容量远大于
+ * 实际窗口即可——重发总发生在紧邻帧段，淘汰最旧条目不影响判重。
+ */
+private class BoundedKeySet(private val cap: Int = 8_192) {
+    private val map = object : LinkedHashMap<String, Boolean>(64, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>): Boolean = size > cap
+    }
+
+    /** @return true=键此前已存在（重复帧） */
+    fun seenOrAdd(key: String): Boolean = synchronized(map) { map.put(key, true) != null }
 }

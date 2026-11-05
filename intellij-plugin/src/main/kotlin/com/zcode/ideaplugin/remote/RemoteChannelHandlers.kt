@@ -42,7 +42,14 @@ private fun jsonByteSize(el: kotlinx.serialization.json.JsonElement): Int =
 /** [trimRowsRangeResult] 纯函数：行数组升序旧→新，按累计 JSON 字节数保留尾部最新行，
  *  超预算从头部（更旧）丢弃并强制 hasMore=true；单行超预算无条件保留（最新尾行必在）。 */
 internal fun trimRowsRangeResult(result: JsonObject, budgetBytes: Int = ROWSRANGE_BUDGET_BYTES): JsonObject {
-    val rows = result["rows"] as? kotlinx.serialization.json.JsonArray ?: return result
+    // 先消毒（缺陷FV 四轮：H5 对分页行同走 El 行联合 zod 校验，未知 display kind 单行
+    // 毒化整页；裁剪在消毒后进行，剥除只减不增不影响预算正确性）
+    val sanitizedRows = (result["rows"] as? kotlinx.serialization.json.JsonArray)
+        ?.let { com.zcode.ideaplugin.protocol.V4FrameSanitizer.sanitizeRows(it) }
+        ?: return result
+    val preSanitized = if (sanitizedRows === result["rows"]) result
+    else kotlinx.serialization.json.JsonObject(result.toMutableMap().apply { put("rows", sanitizedRows) })
+    val rows = sanitizedRows
     var used = 0
     val keptRev = mutableListOf<kotlinx.serialization.json.JsonElement>()
     for (i in rows.size - 1 downTo 0) {
@@ -52,9 +59,9 @@ internal fun trimRowsRangeResult(result: JsonObject, budgetBytes: Int = ROWSRANG
         keptRev.add(el)
         used += sz
     }
-    if (keptRev.size == rows.size) return result
+    if (keptRev.size == rows.size) return preSanitized
     keptRev.reverse()
-    val out = result.toMutableMap()
+    val out = preSanitized.toMutableMap()
     out["rows"] = kotlinx.serialization.json.JsonArray(keptRev)
     out["hasMore"] = kotlinx.serialization.json.JsonPrimitive(true)
     return kotlinx.serialization.json.JsonObject(out)
@@ -210,6 +217,21 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
         @Volatile var lastActiveMs: Long = System.currentTimeMillis()
         /** topic → app-server 订阅（subscriptionId + EventFire listenerId） */
         val subscriptions = java.util.concurrent.ConcurrentHashMap<String, V4Subscription>()
+
+        /**
+         * 按 subscriptionId 反查 conversation 订阅的 sessionId。
+         * 官方 H5 恢复链 resyncConversationV4 只带 {workspacePath?, subscriptionId, base,
+         * forceSnapshot} 不带 sessionId（2026-11-04 手机 HAR #280 实锤）——此前硬性要求
+         * sessionId 回 "sessionId required"，恢复链必死=点大会话恒「重新连接」（缺陷FV）。
+         * 仅匹配 conversation/ 主题（sessions-index/ 的 topic 尾段不是 sessionId）；
+         * 空查值不参与命中（订阅先占坑期 subscriptionId 为占位空串）。
+         */
+        fun sessionIdForSubscription(subscriptionId: String): String? {
+            if (subscriptionId.isEmpty()) return null
+            return subscriptions.entries.firstOrNull { (topic, sub) ->
+                topic.startsWith("conversation/") && sub.subscriptionId == subscriptionId
+            }?.key?.removePrefix("conversation/")
+        }
     }
 
     class V4Subscription(val topic: String, var subscriptionId: String, val listenerIds: MutableSet<Long>)
@@ -1015,7 +1037,8 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
                 val client = service.appServer(project)
                     ?: return responder.error("app-server unavailable")
                 val result = runCatching {
-                    client.v4ConversationResync("sessions-index/$ws", subId, ctx.connectionId, workspacePath = ws)
+                    // 不带 workspace：resync zod strict 拒收该键（缺陷FV 二轮 HAR 实锤）
+                    client.v4ConversationResync("sessions-index/$ws", subId, ctx.connectionId)
                 }.getOrElse { e ->
                     return responder.error("resync failed: ${e.message?.take(120)}")
                 }
@@ -1027,15 +1050,18 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
                     ?: return responder.error("fault.connection.helloRequired")
                 val subId = args["subscriptionId"]?.jsonPrimitive?.content
                     ?: return responder.error("subscriptionId required")
+                // sessionId 三级来源：显式传参 → 按 subscriptionId 反查已注册 conversation
+                // 订阅（官方 H5 恢复链不带 sessionId，缺陷FV）→ 否则报缺
                 val sessionId = args["sessionId"]?.jsonPrimitive?.content
+                    ?: ctx.sessionIdForSubscription(subId)
                     ?: return responder.error("sessionId required")
                 val client = service.appServer(project)
                     ?: return responder.error("app-server unavailable")
                 val result = runCatching {
-                    client.v4ConversationResync(
-                        "conversation/$sessionId", subId, ctx.connectionId,
-                        workspacePath = resolveSubscribeWorkspace(project, args, bridgeSessionId),
-                    )
+                    // 不带 workspace：resync zod strict 拒收该键（-32603 unrecognized_keys，
+                    // 2026-11-04 手机 HAR #351 实锤）；subscribe 的 workspace 形态对
+                    // resync 不适用，同订阅语义无需二次定位
+                    client.v4ConversationResync("conversation/$sessionId", subId, ctx.connectionId)
                 }.getOrElse { e ->
                     // 未持久化会话（live draft 换进程后）resync 同样硬失败；H5 校验
                     // ack.subscriptionId 必须等于请求值，原样回填让恢复链落地空会话
