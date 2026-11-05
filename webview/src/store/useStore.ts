@@ -2280,29 +2280,46 @@ export const useStore = create<StoreState>((set, get) => ({
      * - 测试环境（isInJcef 被 mock 为 false，jsdom 有 window 但无桥注入）→ 轮询超时后
      *   走 mock 兜底；fake timers 下 setTimeout 不自动推进，测试需手动控制（见各 spec beforeEach）
      */
-    const ws = getWorkspacePath()
-    set({ projectPath: ws })
-    // 标签初始目录（多目录会话）：落位随标签目录（用户定稿 2026-11-05，修订
-    // 2026-10-27「会话标签落位恒本项目」）——首次打开历史会话页默认选中标签所在
-    // 目录，chips 高亮/列表作用域/新建会话落位一致，boot 恢复后无需再切回；
+    // 注入变量派生初始化（幂等，可重复调用）：__ZCODE_WORKSPACE__ / __ZCODE_TAB_WORKSPACE__
+    // 由 Java 桥脚本异步注入（URL 加载路径 onLoadStart/onLoadEnd → executeJavaScript，生产
+    // 内置 HttpServer 恒走此路径），与 React init 执行互为竞速——init 先跑读到空串。
+    // 丢失后果：落位 activeWorkspacePath 不随标签目录 → 发消息 createSession 回退 projectPath
+    // 跨目录落错（真机 2026-11-05：新标签待命色块 zcode、发消息跳变本项目，非必然=竞速窗口；
+    // 缺陷FN projectPath 空串固化同族——__ZCODE_INITIAL_SESSION__ 同窗口读空则 boot 恢复链
+    // 丢绑定会话，三变量同一补齐）。isInJcef()（CEF_QUERY）与注入变量同一脚本块——桥就绪后
+    // 重读必得值，故 onBridgeReady 再调一次补齐。
+    // 落位语义（2026-11-05 定稿，修订 2026-10-27「会话标签落位恒本项目」）：落位随标签目录，
+    // chips 高亮/列表作用域/新建会话落位一致，boot 恢复后无需再切回；
     //   会话标签（gotoSession「新标签页打开」/重启恢复，initialSessionId 非空）：
     //     另落 bootWorkspace 服务绑定会话恢复（首拉按它拉列表才能命中绑定会话）；
     //   「新建会话」开的空标签（无绑定会话，用户点按钮即表达"在此目录新建"）：
     //     落位即标签目录（真机 2026-10-28：新标签没带工作区徽标），不进 boot 链。
     // 极端情况标签目录已被移出关联列表（如目录删除）：linkedWorkspaces 应答守卫
-    // 自动兜底回本项目（=第一个 chip）
-    const tabWs = getTabWorkspacePath()
-    if (tabWs && tabWs !== ws) {
-      set({ activeWorkspacePath: tabWs })
-      if (getInitialSessionId()) set({ bootWorkspace: tabWs, bootRestorePending: true })
+    // 自动兜底回本项目（=第一个 chip）。
+    // projectPath 仅注入非空才写（空串不覆盖 ensureProjectPath 拉回的权威值）；落位段以
+    // activeWorkspacePath 已等 tabWs 作幂等闸，防热启动二次调用重复置 bootRestorePending
+    // 触发 boot 收尾二次重拉
+    const initFromInjection = () => {
+      const injected = getWorkspacePath()
+      if (injected) set({ projectPath: injected })
+      const tabWs = getTabWorkspacePath()
+      if (tabWs && tabWs !== get().projectPath) {
+        if (normalizeWsPath(get().activeWorkspacePath) !== normalizeWsPath(tabWs)) {
+          set({ activeWorkspacePath: tabWs })
+          if (getInitialSessionId()) set({ bootWorkspace: tabWs, bootRestorePending: true })
+        }
+      }
     }
+    initFromInjection()
 
     // 桥就绪统一动作（热启动/冷启动轮询就绪/mock 态迟到恢复三处共用）：
     // 拉反向请求挂起状态 + 定时消息列表（页面刷新/重载会错过 Java 广播）+ 环境检查 +
     // 会话与模型列表 + 配额轮询
     const onBridgeReady = (how: string) => {
       set({ connectionStatus: 'connected' })
-      console.log(`[store] 桥就绪（${how}），workspace=${ws || '(空)'}`)
+      // 冷启动竞态补齐（幂等）：CEF_QUERY 就绪 = 桥脚本块已执行，重读注入变量落位/projectPath
+      initFromInjection()
+      console.log(`[store] 桥就绪（${how}），workspace=${getWorkspacePath() || '(空)'}`)
       sendToJava({ op: 'askUserPendingState' })
       sendToJava({ op: 'scheduledList' })
       // 关联目录列表（多目录会话·变体A：历史页 chips 渲染）
@@ -2328,7 +2345,7 @@ export const useStore = create<StoreState>((set, get) => ({
     // 测试环境（vitest）无桥注入，跳过轮询直接走 mock（fake timers 不推进 setTimeout）
     if (import.meta.env?.VITEST) {
       set({ connectionStatus: 'mock' })
-      console.log(`[store] 测试环境，连接=mock，workspace=${ws || '(空)'}`)
+      console.log(`[store] 测试环境，连接=mock，workspace=${getWorkspacePath() || '(空)'}`)
       get().checkEnv()
       get().loadSessions()
       get().loadModels()
@@ -2353,7 +2370,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // 同时挂低频恢复轮询：桥迟到注入完成（IDE 卡顿场景）时自动从 mock 恢复 connected
       // 并重拉真数据，避免永远停在假列表。恢复动作幂等（loadSessions/loadModels 全量拉）
       set({ connectionStatus: 'mock' })
-      console.log(`[store] 桥等待超时，回退 mock（低频恢复轮询已挂），workspace=${ws || '(空)'}`)
+      console.log(`[store] 桥等待超时，回退 mock（低频恢复轮询已挂），workspace=${getWorkspacePath() || '(空)'}`)
       get().checkEnv()
       get().loadSessions()
       get().loadModels()

@@ -16,6 +16,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const sentRequests: Array<Record<string, unknown>> = []
 
+/** 模拟 Java 注入的本项目 workspace（__ZCODE_WORKSPACE__；竞态用例临时置空模拟未注入）*/
+let workspaceInjected = 'G:/mock-project'
+
 /** 模拟 Java 注入的标签初始目录（跨目录会话新标签打开/重启恢复路径）*/
 let tabWorkspaceInjected = ''
 
@@ -25,7 +28,7 @@ let tabInitialSessionId = ''
 vi.mock('@/ipc/bridge', () => ({
   initBridge: () => {},
   isInJcef: () => false,
-  getWorkspacePath: () => 'G:/mock-project',
+  getWorkspacePath: () => workspaceInjected,
   getTabWorkspacePath: () => tabWorkspaceInjected,
   getInitialSessionId: () => tabInitialSessionId,
   onMessage: () => {},
@@ -46,6 +49,7 @@ function sess(id: string, ws: string, updatedAt = Date.now()) {
 
 beforeEach(() => {
   sentRequests.length = 0
+  workspaceInjected = 'G:/mock-project'
   tabWorkspaceInjected = ''
   tabInitialSessionId = ''
   useStore.setState({
@@ -411,5 +415,68 @@ describe('新会话落位', () => {
     )
     expect(useStore.getState().currentSessionId).toBe('sess_new')
     expect(useStore.getState().currentWorkspacePath).toBe(WS_OTHER)
+  })
+})
+
+describe('冷启动竞态补齐（真机 2026-11-05：新标签落位跳变）', () => {
+  // 竞态现场：URL 加载路径（生产内置 HttpServer）的桥变量由 executeJavaScript 异步注入，
+  // React init 先跑读到空串 → 同步段落位丢失、发消息 createSession 回退 projectPath 跨目录
+  // 落错。CEF_QUERY 与注入变量同一脚本块——轮询到 CEF_QUERY 即注入已完成，onBridgeReady 的
+  // initFromInjection 重读必得值。vitest 默认走 mock 分支不进轮询，stubEnv('VITEST','') 绕过
+  // + fake timers 推进 waitForBridge 模拟冷启动
+  function setBridgeQuery() {
+    // node 环境（本 spec 非 jsdom）无 window——stubGlobal 供 waitForBridge 判定桥就绪
+    vi.stubGlobal('window', { __ZCODE_CEF_QUERY__: () => {} })
+  }
+  function cleanup() {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  }
+
+  it('空标签竞态：init 时注入未达（读空），桥就绪后重读补落位，首拉按标签目录', async () => {
+    vi.useFakeTimers()
+    vi.stubEnv('VITEST', '')
+    workspaceInjected = '' // 竞态窗口：executeJavaScript 尚未执行
+    tabWorkspaceInjected = ''
+    vi.resetModules()
+    const { useStore: freshStore } = await import('@/store/useStore')
+    void freshStore.getState().init() // 同步段读空，落位丢失（缺陷现场）
+    expect(freshStore.getState().activeWorkspacePath).toBe('')
+    // 注入随后到达（executeJavaScript 补执行）
+    workspaceInjected = WS_PROJECT
+    tabWorkspaceInjected = WS_OTHER
+    setBridgeQuery()
+    await vi.advanceTimersByTimeAsync(100) // 推进 50ms 轮询 → onBridgeReady
+    const s = freshStore.getState()
+    expect(s.activeWorkspacePath).toBe(WS_OTHER) // 落位补齐（跳变根因修复点）
+    expect(s.projectPath).toBe(WS_PROJECT) // projectPath 补齐
+    const listReq = sentRequests.filter((r) => r.op === 'listSessions').pop()
+    expect(listReq?.workspacePath).toBe(WS_OTHER) // 首拉即按标签目录（无二次拉取）
+    expect(s.sessionsWorkspace).toBe(WS_OTHER)
+    expect(s.bootRestorePending).toBe(false) // 空标签不进 boot 链
+    cleanup()
+  })
+
+  it('会话标签竞态：bootWorkspace/bootRestorePending 补齐，绑定会话恢复链不丢', async () => {
+    vi.useFakeTimers()
+    vi.stubEnv('VITEST', '')
+    workspaceInjected = ''
+    tabWorkspaceInjected = ''
+    vi.resetModules()
+    const { useStore: freshStore } = await import('@/store/useStore')
+    void freshStore.getState().init()
+    workspaceInjected = WS_PROJECT
+    tabWorkspaceInjected = WS_OTHER
+    tabInitialSessionId = 'sess_bound' // 会话标签（重启恢复/gotoSession「新标签页打开」）
+    setBridgeQuery()
+    await vi.advanceTimersByTimeAsync(100)
+    const s = freshStore.getState()
+    expect(s.bootRestorePending).toBe(true) // initFromInjection 会话标签分支已执行
+    const listReq = sentRequests.filter((r) => r.op === 'listSessions').pop()
+    // 首拉按 bootWorkspace（恢复作用域）——bootWorkspace 本身已被 loadSessions 一次性
+    // 消费清空（设计内），两个断言合起来证明 boot 补齐链路完整：置位 → 按它首拉 → 消费
+    expect(listReq?.workspacePath).toBe(WS_OTHER)
+    cleanup()
   })
 })
