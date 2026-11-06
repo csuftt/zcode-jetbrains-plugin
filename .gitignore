@@ -19,6 +19,8 @@ gradle-app.setting
 *.swo
 
 # ===== webview (Node/前端) =====
+# 根目录 node_modules（误从仓库根跑 vitest 留下的 .vite 缓存，不入库）
+node_modules/
 webview/node_modules/
 webview/dist/
 webview/.vite/

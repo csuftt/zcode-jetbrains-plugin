@@ -1349,6 +1349,37 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * workspace/mcp/trust — 工作区 MCP 服务器信任授予/撤销（设置页「MCP」untrusted 条目）。
+     *
+     * 项目/工作区来源的 MCP 配置变更走 admission 门控：mcp/list 里 status=untrusted 且
+     * 带 workspaceTrust{declarationDigest,...}，先信任才会被会话采用。declarationDigest
+     * 是服务端对配置声明的 sha256——信任时校验配置未再变（变了回
+     * accepted=false, reasonCode=workspace_mcp_declaration_changed，需重拉列表拿新 digest）。
+     * 成功后 app-server 对同 workspaceKey 的运行中会话 reloadWorkspaceMcpTrust（即时生效）。
+     */
+    fun workspaceMcpTrust(
+        workspacePath: String,
+        serverName: String,
+        declarationDigest: String,
+        trusted: Boolean,
+        timeoutMs: Long = 15_000,
+    ): JsonObject {
+        val nativePath = workspacePath.replace('/', File.separatorChar)
+        val params = buildJsonObject {
+            put("workspace", buildJsonObject {
+                put("workspacePath", nativePath)
+                put("workspaceKey", nativePath)
+            })
+            put("serverName", serverName)
+            put("declarationDigest", declarationDigest)
+            put("trusted", trusted)
+        }
+        val r = request("workspace/mcp/trust", params, timeoutMs)
+        requireOk(r)
+        return r["result"]?.jsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
      * v4/command reloadWorkspaceHookTrust — 通知 app-server 重读共享信任存储。
      *
      * CLI 写盘（grant 回退路径/revoke）后追加一发：服务端以盘上最新记录替换协调器

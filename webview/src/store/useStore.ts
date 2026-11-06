@@ -1528,6 +1528,22 @@ interface StoreState {
   mcpError: string | null
   // MCP 工具清单（McpToolsClient 直连服务器调 tools/list，按 serverName 存槽）
   mcpToolsByServer: Record<string, McpToolsState>
+  // MCP 自定义服务器增删（写 user/project 配置文件，McpConfigWriter 落盘）
+  /** 浏览目录（多目录会话下拉切换；''=IDE 项目根）：项目级配置扫描/增删落位/工具直连的占位符替换都按它 */
+  mcpWorkspace: string
+  /** 保存成功信号（写盘回包才置；McpServerEditDialog 监听后关弹窗，列表据此自动展开新卡片）*/
+  mcpSavedSignal: { name: string; scope: string; at: number } | null
+  /** 保存失败文案（McpServerEditDialog 内联展示，重开/关闭时清）*/
+  mcpSaveError: string | null
+  mcpSaving: boolean
+  /** 删除进行中的服务器名（按钮 loading；null = 空闲）*/
+  mcpDeletingName: string | null
+  /** 删除失败文案（列表红条展示，可手动关闭）*/
+  mcpDeleteError: string | null
+  /** 信任授予进行中的服务器名（按钮 loading；null = 空闲）*/
+  mcpTrustingName: string | null
+  /** 信任授予失败文案（列表红条展示，可手动关闭）*/
+  mcpTrustError: string | null
   // MCP 连接日志（CLI 落盘 mcp.* 事件，McpLogReader 读）
   mcpLogs: McpLogEntry[] | null
   // 模型调用轨迹（CLI 落盘 model-io，ModelIoTrajectoryReader 读；null=未加载）
@@ -1820,12 +1836,25 @@ interface StoreState {
   saveAgent: (scope: 'user' | 'project', agent: AgentDefInput, originalName?: string) => void
   /** 删除子智能体定义文件 */
   deleteAgent: (scope: 'user' | 'project', name: string) => void
-  /** 拉取 MCP 服务器清单（mode=connect 时真实连接各服务器，慢）*/
-  loadMcpServers: (mode?: 'status' | 'connect') => void
+  /** 拉取 MCP 服务器清单（mode=connect 时真实连接各服务器，慢；path 显式传=切浏览目录）*/
+  loadMcpServers: (mode?: 'status' | 'connect', path?: string) => void
   /** 拉单台服务器的工具清单（有缓存且非 force 直接跳过；loading 中防重入）*/
   loadMcpServerTools: (name: string, force?: boolean) => void
   /** 拉取 MCP 连接日志（CLI 落盘 mcp.* 事件）*/
   loadMcpLogs: () => void
+  /** 新增/保存自定义 MCP 服务器（scope=user 全局 / project 项目；entry 与磁盘配置条目同形态；
+   *  previousName=编辑保存的原键名——同名覆盖/改名由 Kotlin 单次写原子完成；失败落 mcpSaveError）*/
+  saveMcpServer: (scope: 'user' | 'project', name: string, entry: Record<string, unknown>, previousName?: string) => void
+  /** 清除保存失败文案（弹窗关闭/重开时）*/
+  clearMcpSaveError: () => void
+  /** 删除自定义 MCP 服务器（仅 user/project；失败落 mcpDeleteError 列表红条）*/
+  deleteMcpServer: (scope: 'user' | 'project', name: string) => void
+  /** 清除删除失败红条 */
+  clearMcpDeleteError: () => void
+  /** 工作区 MCP 信任授予（untrusted 卡片「信任」按钮；digest 来自列表 trustReview 原样带回）*/
+  trustMcpServer: (name: string, declarationDigest: string, trusted?: boolean) => void
+  /** 清除信任失败红条 */
+  clearMcpTrustError: () => void
   /** 拉取会话的模型调用轨迹（CLI 落盘 model-io，直读文件非协议 RPC）*/
   loadTrajectory: (sessionId: string) => void
   /** 拉取模型管理清单（设置视图「模型」条目，config.json 只读结构）*/
@@ -2165,7 +2194,15 @@ export const useStore = create<StoreState>((set, get) => ({
   mcpLoading: false,
   mcpChecking: false,
   mcpError: null,
+  mcpWorkspace: '',
   mcpToolsByServer: {},
+  mcpSavedSignal: null,
+  mcpSaveError: null,
+  mcpSaving: false,
+  mcpDeletingName: null,
+  mcpDeleteError: null,
+  mcpTrustingName: null,
+  mcpTrustError: null,
   mcpLogs: null,
   mcpLogsLoading: false,
   trajectory: null,
@@ -2374,6 +2411,10 @@ export const useStore = create<StoreState>((set, get) => ({
       get().checkEnv()
       get().loadSessions()
       get().loadModels()
+      // 关联目录（mock 表非空）：技能/MCP/钩子页的浏览目录下拉数据源，纯 mock 态也要有
+      sendToJava({ op: 'getLinkedWorkspaces' })
+      // projectPath 兜底（mock 应答 G:\mock）：下拉首项目录名/徽标判等都要用
+      get().ensureProjectPath()
       startQuotaPolling()
       const recoverTimer = setInterval(() => {
         if (isInJcef()) {
@@ -3700,10 +3741,14 @@ export const useStore = create<StoreState>((set, get) => ({
     sendToJava({ op: 'toggleSkill', path, enabled, workspacePath: get().skillsWorkspace || get().projectPath })
   },
 
-  loadMcpServers: (mode = 'status') => {
-    if (mode === 'connect') set({ mcpChecking: true, mcpError: null })
-    else set({ mcpLoading: true, mcpError: null })
-    sendToJava({ op: 'listMcpServers', mode })
+  loadMcpServers: (mode = 'status', path) => {
+    // 浏览目录：显式传参=切换（工具直连缓存按服务器名存，目录切换后同名服务器
+    // 配置可能不同，缓存随切换失效）；无参=延续当前作用域（同 loadSkills）
+    const ws = path ?? get().mcpWorkspace
+    const wsChanged = path !== undefined && ws !== get().mcpWorkspace
+    if (mode === 'connect') set({ mcpChecking: true, mcpError: null, mcpWorkspace: ws, ...(wsChanged ? { mcpToolsByServer: {} } : {}) })
+    else set({ mcpLoading: true, mcpError: null, mcpWorkspace: ws, ...(wsChanged ? { mcpToolsByServer: {} } : {}) })
+    sendToJava({ op: 'listMcpServers', mode, workspacePath: ws || get().projectPath })
   },
 
   loadMcpServerTools: (name, force = false) => {
@@ -3714,13 +3759,37 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       mcpToolsByServer: { ...s.mcpToolsByServer, [name]: { tools: [], loading: true, fetchedAt: Date.now() } },
     }))
-    sendToJava({ op: 'mcpServerTools', name, force })
+    sendToJava({ op: 'mcpServerTools', name, force, workspacePath: get().mcpWorkspace || get().projectPath })
   },
 
   loadMcpLogs: () => {
     set({ mcpLogsLoading: true })
     sendToJava({ op: 'getMcpLogs' })
   },
+
+  saveMcpServer: (scope, name, entry, previousName) => {
+    if (get().mcpSaving) return
+    set({ mcpSaving: true, mcpSaveError: null })
+    sendToJava({ op: 'mcpAddServer', scope, name, entry, previousName, workspacePath: get().mcpWorkspace || get().projectPath })
+  },
+
+  clearMcpSaveError: () => set({ mcpSaveError: null }),
+
+  deleteMcpServer: (scope, name) => {
+    if (get().mcpDeletingName) return
+    set({ mcpDeletingName: name, mcpDeleteError: null })
+    sendToJava({ op: 'mcpDeleteServer', scope, name, workspacePath: get().mcpWorkspace || get().projectPath })
+  },
+
+  clearMcpDeleteError: () => set({ mcpDeleteError: null }),
+
+  trustMcpServer: (name, declarationDigest, trusted = true) => {
+    if (get().mcpTrustingName) return
+    set({ mcpTrustingName: name, mcpTrustError: null })
+    sendToJava({ op: 'mcpTrustServer', name, declarationDigest, trusted, workspacePath: get().mcpWorkspace || get().projectPath })
+  },
+
+  clearMcpTrustError: () => set({ mcpTrustError: null }),
 
   loadTrajectory: (sessionId) => {
     set({ trajectoryLoading: true, trajectoryError: null, trajectory: null })
@@ -6499,6 +6568,37 @@ export function handleResponse(
       })
       break
     }
+
+    case 'mcpServerSaved':
+      // 新增自定义服务器回包：失败文案留弹窗内（mcpSaveError），成功置信号
+      //（弹窗据此关闭）+ 重拉清单（新卡片由列表监听 mcpSavedSignal 自动展开）
+      if (!msg.ok) {
+        set({ mcpSaving: false, mcpSaveError: msg.error ?? '保存失败' })
+        break
+      }
+      set({ mcpSaving: false, mcpSaveError: null, mcpSavedSignal: { name: msg.name ?? '', scope: msg.scope, at: Date.now() } })
+      get().loadMcpServers('status')
+      break
+
+    case 'mcpServerDeleted':
+      // 删除回包：成功重拉清单；失败红条展示（Kotlin 侧已把非 user/project 挡掉）
+      if (msg.ok) {
+        set({ mcpDeletingName: null, mcpDeleteError: null })
+        get().loadMcpServers('status')
+      } else {
+        set({ mcpDeletingName: null, mcpDeleteError: msg.error ?? '删除失败' })
+      }
+      break
+
+    case 'mcpServerTrusted':
+      // 信任回包：成功重拉清单（untrusted→disconnected/connected）；失败红条展示
+      if (msg.ok) {
+        set({ mcpTrustingName: null, mcpTrustError: null })
+        get().loadMcpServers('status')
+      } else {
+        set({ mcpTrustingName: null, mcpTrustError: msg.error ?? '信任授予失败' })
+      }
+      break
 
     case 'mcpLogs':
       set({ mcpLogs: msg.logs, mcpLogsLoading: false })

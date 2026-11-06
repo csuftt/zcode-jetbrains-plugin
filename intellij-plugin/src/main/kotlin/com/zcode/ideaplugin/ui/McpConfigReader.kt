@@ -44,6 +44,11 @@ object McpConfigReader {
         val pluginName: String?,
         /** 配置的 cwd（占位符原样，stdio 进程工作目录用）*/
         val cwd: String? = null,
+        /** 磁盘原始条目 JSON（编辑弹窗无损回填用；host/runtime 无磁盘定义恒 null）*/
+        val raw: JsonObject? = null,
+        /** mcp/list 的 workspaceTrust 节点原样（untrusted 条目的信任评审数据：
+         *  declarationDigest/sourcePaths/display/trusted/configuredEnabled/transport）*/
+        val trustReview: JsonObject? = null,
         // ---- 以下由 RPC mcp/list 状态合并填充（拿不到为 null）----
         /** connecting|connected|disabled|disconnected|failed|untrusted */
         val status: String?,
@@ -163,6 +168,7 @@ object McpConfigReader {
             configPath = configPath,
             pluginName = pluginName,
             cwd = cwd,
+            raw = cfg,
             status = null,
             toolCount = null,
             statusError = null,

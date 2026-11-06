@@ -8,8 +8,11 @@
  * 交互：刷新（status 快照）/ 检测连接（connect 真实连接，慢，连接成功的
  *       服务器自动拉工具清单）；工具栏状态汇总条 + 日志按钮（弹 McpLogDialog）；
  *       失败服务器卡片头部直接显示错误摘要（不必展开）；卡片展开看命令/URL
- *       详情 + 工具列表（hover 看描述，可强制刷新）；
- *       「打开配置文件」跳来源 config（openFile）
+ *       详情 + 工具列表（点工具行弹 McpToolDetailDialog 看入参表与原始
+ *       Schema，默认折叠；hover 看描述，可强制刷新）；
+ *       「打开配置文件」跳来源 config（openFile）；
+ *       新增服务器（弹 McpServerEditDialog 表单/JSON 双模式，写 user/project
+ *       配置）；删除仅 user/project 条目（确认后 McpConfigWriter 落盘）
  */
 
 import { useEffect, useState } from 'react'
@@ -19,7 +22,10 @@ import { useStore } from '@/store/useStore'
 import { sendToJava, isInJcef } from '@/ipc/bridge'
 import type { McpServerInfo, McpToolInfo } from '@/types/messages'
 import { McpLogDialog } from './McpLogDialog'
-import { fmtTime } from '@/utils/format'
+import { McpServerEditDialog } from './McpServerEditDialog'
+import { McpToolDetailDialog } from './McpToolDetailDialog'
+import { ConfirmDialog } from './ConfirmDialog'
+import { fmtTime, wsBasename } from '@/utils/format'
 import '../styles/mcp-list-view.less'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
@@ -27,6 +33,12 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 /** 配置来源 → 文案 key（未知来源回退原值）*/
 function scopeLabel(scope: string, t: TFunction): string {
   return t(`mcp.scope.${scope}`, { defaultValue: scope })
+}
+
+/** 是否可编辑（弹编辑弹窗）：writer 只落 user 全局 config 与 <项目>/.zcode/config.json，
+ *  zcode.json 同为 project 来源但不可写——按 configPath 排除，不给必失败的编辑入口 */
+function editableTarget(server: McpServerInfo): boolean {
+  return /config\.json$/.test(server.configPath.replace(/\\/g, '/'))
 }
 
 /** 连接状态 → 文案 + 状态点配色（对齐 cc-gui：绿=已连接 红=失败 灰=禁用/未知 黄=连接中）*/
@@ -65,9 +77,9 @@ function toolIcon(name: string): string {
 /**
  * 卡片展开区的工具列表面板（对齐 cc-gui ServerToolsPanel 状态分支）
  * 未连接=提示；已连接未加载=点击加载；loading=spin；失败=错误+重试；
- * 空结果=黄色警告；正常=「工具 (N)」+ 列表（hover title=description）。
+ * 空结果=黄色警告；正常=「工具 (N)」+ 列表（点工具行弹详情，hover title=description）。
  */
-function ToolsSection({ server }: { server: McpServerInfo }) {
+function ToolsSection({ server, onToolClick }: { server: McpServerInfo; onToolClick: (tool: McpToolInfo) => void }) {
   const { t } = useTranslation()
   const state = useStore((s) => s.mcpToolsByServer[server.name])
   const loadMcpServerTools = useStore((s) => s.loadMcpServerTools)
@@ -149,10 +161,16 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
       </div>
       <div className="mcp-card__tool-list">
         {state.tools.map((t: McpToolInfo) => (
-          <div key={t.name} className="mcp-card__tool-item" title={t.description || t.name}>
+          <div
+            key={t.name}
+            className="mcp-card__tool-item clickable"
+            title={t.description || t.name}
+            onClick={() => onToolClick(t)}
+          >
             <div className="mcp-card__tool-name-row">
               <span className={cx('codicon', 'mcp-card__tool-icon', toolIcon(t.name))} />
               <span className="mcp-card__tool-name">{t.name}</span>
+              <span className="codicon codicon-chevron-right mcp-card__tool-go" />
             </div>
             {t.description && <div className="mcp-card__tool-desc">{t.description}</div>}
           </div>
@@ -163,7 +181,23 @@ function ToolsSection({ server }: { server: McpServerInfo }) {
 }
 
 /** 单个服务器卡片（手风琴展开）*/
-function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInfo; expanded: boolean; onToggleExpand: () => void }) {
+function ServerCard({
+  server,
+  expanded,
+  onToggleExpand,
+  onRequestDelete,
+  onEdit,
+  onTrust,
+  onToolClick,
+}: {
+  server: McpServerInfo
+  expanded: boolean
+  onToggleExpand: () => void
+  onRequestDelete: (server: McpServerInfo) => void
+  onEdit: (server: McpServerInfo) => void
+  onTrust: (server: McpServerInfo) => void
+  onToolClick: (serverName: string, tool: McpToolInfo) => void
+}) {
   const { t } = useTranslation()
   const meta = statusMeta(server.status, t)
   // 头部工具数徽章：直连结果优先（mcp/list 的 toolCount 在 status 快照模式下
@@ -175,6 +209,8 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
   const showToolCount = server.status === 'connected' && (displayCount ?? 0) > 0
   // 「0 工具」警告只在直连确认 0 时显示（RPC 0 未直连不误导）
   const zeroToolsWarning = server.status === 'connected' && liveCount === 0
+  const deleting = useStore((s) => s.mcpDeletingName) === server.name
+  const trusting = useStore((s) => s.mcpTrustingName) === server.name
 
   return (
     <div className={cx('mcp-card', expanded && 'expanded', !server.enabled && 'off')}>
@@ -202,7 +238,7 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
 
       {expanded && (
         <div className="mcp-card__body">
-          <ToolsSection server={server} />
+          <ToolsSection server={server} onToolClick={(tool) => onToolClick(server.name, tool)} />
           {server.command && (
             <div className="mcp-card__row">
               <span className="mcp-card__row-label">{t('mcp.command')}</span>
@@ -246,6 +282,38 @@ function ServerCard({ server, expanded, onToggleExpand }: { server: McpServerInf
                 <span className="codicon codicon-go-to-file" />
                 {t('mcp.openConfigFile')}
               </button>
+              {server.status === 'untrusted' && server.trustReview?.declarationDigest && (
+                <button
+                  className="mcp-card__action mcp-card__action--trust"
+                  onClick={() => onTrust(server)}
+                  disabled={trusting}
+                  title={t('mcp.trustTitle')}
+                >
+                  <span className={cx('codicon', trusting ? 'codicon-loading spin' : 'codicon-shield')} />
+                  {trusting ? t('mcp.trusting') : t('mcp.trustServer')}
+                </button>
+              )}
+              {(server.scope === 'user' || server.scope === 'project') && editableTarget(server) && (
+                <button
+                  className="mcp-card__action"
+                  onClick={() => onEdit(server)}
+                  title={t('mcp.edit.titleEdit')}
+                >
+                  <span className="codicon codicon-edit" />
+                  {t('mcp.editServer')}
+                </button>
+              )}
+              {(server.scope === 'user' || server.scope === 'project') && (
+                <button
+                  className="mcp-card__action mcp-card__action--danger"
+                  onClick={() => onRequestDelete(server)}
+                  disabled={deleting}
+                  title={t('mcp.deleteTitle')}
+                >
+                  <span className={cx('codicon', deleting ? 'codicon-loading spin' : 'codicon-trash')} />
+                  {deleting ? t('mcp.deleting') : t('mcp.deleteServer')}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -261,11 +329,25 @@ export function McpListView() {
   const mcpChecking = useStore((s) => s.mcpChecking)
   const mcpError = useStore((s) => s.mcpError)
   const mcpLogs = useStore((s) => s.mcpLogs)
+  const mcpDeleteError = useStore((s) => s.mcpDeleteError)
+  const mcpSavedSignal = useStore((s) => s.mcpSavedSignal)
+  const linkedWorkspaces = useStore((s) => s.linkedWorkspaces)
+  const projectPath = useStore((s) => s.projectPath)
+  const mcpWorkspace = useStore((s) => s.mcpWorkspace)
   const loadMcpServers = useStore((s) => s.loadMcpServers)
   const loadMcpLogs = useStore((s) => s.loadMcpLogs)
+  const deleteMcpServer = useStore((s) => s.deleteMcpServer)
+  const clearMcpDeleteError = useStore((s) => s.clearMcpDeleteError)
+  const mcpTrustError = useStore((s) => s.mcpTrustError)
+  const trustMcpServer = useStore((s) => s.trustMcpServer)
+  const clearMcpTrustError = useStore((s) => s.clearMcpTrustError)
 
   const [expandedName, setExpandedName] = useState<string | null>(null)
   const [logOpen, setLogOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<McpServerInfo | null>(null)
+  const [toolDetail, setToolDetail] = useState<{ serverName: string; tool: McpToolInfo } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<McpServerInfo | null>(null)
 
   useEffect(() => {
     loadMcpServers('status')
@@ -276,6 +358,11 @@ export function McpListView() {
       if (m) setExpandedName(decodeURIComponent(m[1]))
     }
   }, [loadMcpServers])
+
+  // 保存成功信号 → 自动展开新卡片（弹窗自身监听同一信号负责关闭）
+  useEffect(() => {
+    if (mcpSavedSignal) setExpandedName(mcpSavedSignal.name)
+  }, [mcpSavedSignal])
 
   const servers = mcpServers ?? []
 
@@ -294,8 +381,31 @@ export function McpListView() {
 
   return (
     <div className="mcp-list-view">
+      {/* 浏览目录行（多目录会话）：独占一行——切目录重扫清单，项目档增删落位与工具直连占位符都随目录 */}
+      {linkedWorkspaces.length > 0 && (
+        <div className="mcp-list-view__ws-row">
+          <span className="mcp-list-view__ws-label">{t('history.wsChips.workspace')}</span>
+          <select
+            className="mcp-list-view__ws-select"
+            value={mcpWorkspace || projectPath}
+            onChange={(e) => {
+              const v = e.target.value
+              loadMcpServers('status', v === projectPath ? '' : v)
+            }}
+          >
+            <option value={projectPath} title={projectPath}>{wsBasename(projectPath)}</option>
+            {linkedWorkspaces.map((w) => (
+              <option key={w} value={w} title={w}>{wsBasename(w)}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="mcp-list-view__toolbar">
         <span className="mcp-list-view__hint">{t('mcp.toolbarHint')}</span>
+        <button className="mcp-list-view__btn" onClick={() => setAddOpen(true)} title={t('mcp.edit.title')}>
+          <span className="codicon codicon-add" />
+          {t('mcp.addServer')}
+        </button>
         <button
           className="mcp-list-view__btn"
           onClick={() => loadMcpServers('connect')}
@@ -345,6 +455,26 @@ export function McpListView() {
         </div>
       )}
 
+      {mcpDeleteError && (
+        <div className="mcp-list-view__delete-error">
+          <span className="codicon codicon-error" />
+          <span className="mcp-list-view__delete-error-text">{t('mcp.deleteFailed', { error: mcpDeleteError })}</span>
+          <button className="mcp-list-view__delete-error-close" onClick={clearMcpDeleteError} title={t('mcp.toolDetail.close')}>
+            <span className="codicon codicon-close" />
+          </button>
+        </div>
+      )}
+
+      {mcpTrustError && (
+        <div className="mcp-list-view__delete-error">
+          <span className="codicon codicon-error" />
+          <span className="mcp-list-view__delete-error-text">{t('mcp.trustFailed', { error: mcpTrustError })}</span>
+          <button className="mcp-list-view__delete-error-close" onClick={clearMcpTrustError} title={t('mcp.toolDetail.close')}>
+            <span className="codicon codicon-close" />
+          </button>
+        </div>
+      )}
+
       {mcpLoading && !mcpServers ? (
         <div className="mcp-list-view__loading">
           <span className="codicon codicon-loading spin" /> {t('mcp.loadingConfig')}
@@ -365,12 +495,37 @@ export function McpListView() {
               server={s}
               expanded={expandedName === s.name}
               onToggleExpand={() => setExpandedName(expandedName === s.name ? null : s.name)}
+              onRequestDelete={setDeleteTarget}
+              onEdit={setEditTarget}
+              onTrust={(srv) => srv.trustReview?.declarationDigest && trustMcpServer(srv.name, srv.trustReview.declarationDigest)}
+              onToolClick={(serverName, tool) => setToolDetail({ serverName, tool })}
             />
           ))}
         </div>
       )}
 
       {logOpen && <McpLogDialog onClose={() => setLogOpen(false)} />}
+      {addOpen && <McpServerEditDialog onClose={() => setAddOpen(false)} />}
+      {editTarget && (
+        <McpServerEditDialog
+          initial={{ name: editTarget.name, scope: editTarget.scope as 'user' | 'project', raw: editTarget.rawEntry }}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+      {toolDetail && <McpToolDetailDialog serverName={toolDetail.serverName} tool={toolDetail.tool} onClose={() => setToolDetail(null)} />}
+      {deleteTarget && (
+        <ConfirmDialog
+          title={t('mcp.deleteTitle')}
+          message={t('mcp.deleteMessage', { name: deleteTarget.name, scope: scopeLabel(deleteTarget.scope, t) })}
+          confirmText={t('mcp.deleteServer')}
+          danger
+          onConfirm={() => {
+            deleteMcpServer(deleteTarget.scope as 'user' | 'project', deleteTarget.name)
+            setDeleteTarget(null)
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   )
 }

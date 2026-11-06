@@ -38,6 +38,37 @@
     background: var(--border-primary);
   }
 
+  /* 浏览目录行（多目录会话）：独占一行——工作区标签 + 下拉（切目录重取工作区钩子域）*/
+  &__ws-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__ws-label {
+    color: var(--text-secondary);
+    font-size: var(--fs-body);
+    white-space: nowrap;
+  }
+
+  /* 浏览目录下拉（多目录会话）：置作用域 Tab 后，风格同技能页 ws-select */
+  &__ws-select {
+    max-width: 200px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-secondary);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: var(--fs-body);
+    font-family: inherit;
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent-primary, #4c8dff);
+    }
+  }
+
   /* 作用域分段切换：工作区 / 用户级 */
   &__scope {
     display: inline-flex;

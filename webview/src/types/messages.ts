@@ -640,10 +640,16 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 新建/更新/改名子智能体（originalName 非空且 ≠ name = 改名）*/
   | { op: 'saveAgent'; scope: 'user' | 'project'; agent: AgentDefInput; originalName?: string }
   | { op: 'deleteAgent'; scope: 'user' | 'project'; name: string }
-  /** mode：status=状态快照（默认）| connect=真实连接（慢）*/
-  | { op: 'listMcpServers'; mode?: 'status' | 'connect' }
-  /** 单台服务器工具清单（force=true 前端绕过缓存强制重拉）*/
-  | { op: 'mcpServerTools'; name: string; force?: boolean }
+  /** mode：status=状态快照（默认）| connect=真实连接（慢）；workspacePath=浏览目录（多目录下拉，缺省=项目根）*/
+  | { op: 'listMcpServers'; mode?: 'status' | 'connect'; workspacePath?: string }
+  /** 单台服务器工具清单（force=true 前端绕过缓存强制重拉）；workspacePath 与列表页同源 */
+  | { op: 'mcpServerTools'; name: string; force?: boolean; workspacePath?: string }
+  /** 新增/保存自定义 MCP 服务器（entry 与磁盘配置条目同形态，Kotlin 校验+落盘；project 档落 workspacePath）*/
+  | { op: 'mcpAddServer'; scope: 'user' | 'project'; name: string; entry: Record<string, unknown>; previousName?: string; workspacePath?: string }
+  /** 删除自定义 MCP 服务器（仅 user/project；确认在弹窗，落盘回滚在 Kotlin）*/
+  | { op: 'mcpDeleteServer'; scope: 'user' | 'project'; name: string; workspacePath?: string }
+  /** 工作区 MCP 信任授予（untrusted 卡片「信任」按钮；digest 来自列表 trustReview 原样带回）*/
+  | { op: 'mcpTrustServer'; name: string; declarationDigest: string; trusted?: boolean; workspacePath?: string }
   /** MCP 连接日志（CLI 落盘的 mcp.* 事件，今天+昨天文件尾部）*/
   | { op: 'getMcpLogs' }
   /** 模型调用轨迹（CLI 落盘的 model-io jsonl，debug+rollout 双目录尾部）*/
@@ -1103,6 +1109,10 @@ export interface McpServerInfo {
   enabled: boolean
   /** 来源配置文件路径（「打开配置文件」用；runtime 条目为空串）*/
   configPath: string
+  /** 磁盘原始条目 JSON（编辑弹窗无损回填；仅 user/project 有，host/runtime 无）*/
+  rawEntry?: Record<string, unknown>
+  /** 信任评审数据（mcp/list 的 workspaceTrust 原样；untrusted 条目的「信任」按钮数据源）*/
+  trustReview?: { declarationDigest: string; sourcePaths?: string[]; display?: string; trusted?: boolean; configuredEnabled?: boolean; transport?: string }
   pluginName?: string
   /** connecting | connected | disabled | disconnected | failed | untrusted（null=未知）*/
   status?: string
@@ -1118,8 +1128,10 @@ export interface McpServerInfo {
  */
 export interface McpToolInfo {
   name: string
-  /** 工具描述（Kotlin 端已截 400 字符，tooltip 用）*/
+  /** 工具描述全文（列表展示由 CSS line-clamp 截断，弹窗展示全文）*/
   description?: string
+  /** tools/list 原样 inputSchema（JSON Schema 形态；工具详情弹窗入参表数据源）*/
+  inputSchema?: Record<string, unknown>
 }
 
 /** 单台服务器的工具列表加载状态（store 按 serverName 存槽）*/
@@ -1536,7 +1548,14 @@ export type JavaResponse =
   /** rpcError 存在 = mcp/list RPC 失败，servers 为磁盘配置降级清单 */
   | { op: 'mcpServers'; mode: string; servers: McpServerInfo[]; rpcError?: string }
   /** 单台服务器的工具清单（McpToolsClient 直连结果；失败只有 error）*/
+  /** op=mcpServerTools 的响应（error 非 nil = 直连失败）*/
   | { op: 'mcpServerTools'; name: string; tools?: McpToolInfo[]; toolCount?: number; error?: string }
+  /** op=mcpAddServer 的响应（ok=false 时 error = 弹窗内联展示的失败文案）*/
+  | { op: 'mcpServerSaved'; ok: boolean; name?: string; scope: string; error?: string }
+  /** op=mcpDeleteServer 的响应（ok=false 时 error = 列表红条展示）*/
+  | { op: 'mcpServerDeleted'; ok: boolean; name?: string; scope?: string; error?: string }
+  /** op=mcpTrustServer 的响应（ok=false 时 error = 列表红条展示；digest 过期提示刷新重试）*/
+  | { op: 'mcpServerTrusted'; ok: boolean; name?: string; error?: string }
   /** MCP 连接日志条目（McpLogReader 读 CLI jsonl，中文摘要已拼好）*/
   | { op: 'mcpLogs'; logs: McpLogEntry[] }
   /** 模型调用轨迹（ModelIoTrajectoryReader 读 model-io jsonl；error 存在 = 读取失败）*/

@@ -69,7 +69,12 @@ export function HookListView() {
   // 回退 IDE 项目根 projectPath（init 时由桥注入，可靠有值）。
   const currentWorkspace = useStore((s) => s.currentWorkspacePath)
   const projectPath = useStore((s) => s.projectPath)
-  const workspace = currentWorkspace || projectPath
+  const linkedWorkspaces = useStore((s) => s.linkedWorkspaces)
+  const connectionStatus = useStore((s) => s.connectionStatus)
+  // 浏览目录（多目录会话）：'' = 跟随会话目录（现行为）；显式选择后定死为该目录，
+  // workspace 域的重取/乐观覆盖清空由下方 seenWorkspace effect 统一接管
+  const [hooksWorkspace, setHooksWorkspace] = useState('')
+  const workspace = hooksWorkspace || currentWorkspace || projectPath
 
   const [scope, setScope] = useState<HookScope>('workspace')
   const [statusCache, setStatusCache] = useState<StatusCache>(EMPTY_STATUS_CACHE)
@@ -131,6 +136,19 @@ export function HookListView() {
 
   // 首次挂载并行预取两域；之后 workspace 变化只重取工作区域（用户域与项目无关）
   const seenWorkspace = useRef<string | null>(null)
+  // 桥就绪前挂载的首屏请求会被丢弃（dev mock 回退 10s 才就绪 / 真机冷启动窗口）：
+  // 连接态落定后补拉一次。mountStatus 记挂载时连接态——热刷新（mount 即 connected）
+  // 不重复拉；冷启动/回退 mock 后落定才补。
+  const mountStatus = useRef(connectionStatus)
+  useEffect(() => {
+    if (mountStatus.current === connectionStatus) return
+    mountStatus.current = connectionStatus
+    if (connectionStatus === 'connected' || connectionStatus === 'mock') {
+      requestScope('user')
+      requestScope('workspace')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionStatus])
   useEffect(() => {
     if (seenWorkspace.current === workspace) return
     const firstMount = seenWorkspace.current === null
@@ -250,6 +268,26 @@ export function HookListView() {
 
   return (
     <div className="hook-list">
+      {/* 浏览目录行（多目录会话）：独占一行——''=跟随会话目录；切目录重取工作区钩子域（用户域与目录无关） */}
+      {linkedWorkspaces.length > 0 && (
+        <div className="hook-list__ws-row">
+          <span className="hook-list__ws-label">{t('history.wsChips.workspace')}</span>
+          <select
+            className="hook-list__ws-select"
+            value={hooksWorkspace}
+            onChange={(e) => setHooksWorkspace(e.target.value)}
+          >
+            <option value="" title={currentWorkspace || projectPath}>
+              {workspaceBasename(currentWorkspace || projectPath)}
+            </option>
+            {[...new Set([projectPath, ...linkedWorkspaces])]
+              .filter((w) => w && w !== (currentWorkspace || projectPath))
+              .map((w) => (
+                <option key={w} value={w} title={w}>{workspaceBasename(w)}</option>
+              ))}
+          </select>
+        </div>
+      )}
       {/* 工具栏：作用域切换 + 搜索 + 打开配置 + 刷新 */}
       <div className="hook-list__toolbar">
         <div className="hook-list__scope" role="tablist" aria-label={t('hooks.scopeLabel')}>

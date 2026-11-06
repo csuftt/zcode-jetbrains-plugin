@@ -993,6 +993,16 @@ function mockModelProviders(): import('../types/messages').ModelManageProvider[]
   return _mockProviders
 }
 
+/** dev mock：插件内新增的自定义 MCP 服务器（模块级有状态，listMcpServers 时合并展示）*/
+const mockCustomMcpServers: import('../types/messages').McpServerInfo[] = [
+  // 预置一台 untrusted（验信任按钮全流程：信任→翻转 disconnected）
+  {
+    name: 'untrusted-demo', scope: 'project', transport: 'http', url: 'https://mcp.example.com/gated',
+    enabled: true, configPath: 'G:\\mock\\project\\.zcode\\config.json', status: 'untrusted', toolCount: 0,
+    trustReview: { declarationDigest: 'a'.repeat(64), sourcePaths: ['G:\\mock\\project\\.zcode\\config.json'], display: 'untrusted-demo', trusted: false, configuredEnabled: true, transport: 'http' },
+  },
+]
+
 function mockResponse(req: JavaRequest): JavaResponse | null {
   switch (req.op) {
     case 'listSessions':
@@ -2168,28 +2178,55 @@ flowchart LR
     case 'deleteAgent':
       return { op: 'agentDeleted', name: req.name, scope: req.scope }
     case 'listMcpServers':
-      // mock：stdio/http、connected/failed/disconnected/disabled、runtime 来源各形态
+      // mock：stdio/http、connected/failed/disconnected/disabled、runtime 来源各形态；
+      // dev 内新增的自定义服务器合并进清单（mockCustomMcpServers 模块级有状态）
       return {
         op: 'mcpServers',
         mode: req.mode ?? 'status',
         servers: [
-          { name: 'context7', scope: 'user', transport: 'stdio', command: 'npx', args: ['-y', '@upstash/context7-mcp'], envKeys: ['DEFAULT_MINIMUM_TOKENS'], enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', status: 'connected', toolCount: 2, updatedAt: new Date().toISOString() },
-          { name: 'web-reader', scope: 'user', transport: 'http', url: 'https://mcp.example.com/web-reader', enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', status: 'failed', toolCount: 0, statusError: 'connect ETIMEDOUT 1.2.3.4:443', updatedAt: new Date().toISOString() },
+          { name: 'context7', scope: 'user', transport: 'stdio', command: 'npx', args: ['-y', '@upstash/context7-mcp'], envKeys: ['DEFAULT_MINIMUM_TOKENS'], enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', rawEntry: { command: 'npx', args: ['-y', '@upstash/context7-mcp'], env: { DEFAULT_MINIMUM_TOKENS: '30000' }, cwd: '~/mcp-work' }, status: 'connected', toolCount: 2, updatedAt: new Date().toISOString() },
+          { name: 'web-reader', scope: 'user', transport: 'http', url: 'https://mcp.example.com/web-reader', enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', rawEntry: { type: 'http', url: 'https://mcp.example.com/web-reader', headers: { Authorization: 'Bearer mock-token' } }, status: 'failed', toolCount: 0, statusError: 'connect ETIMEDOUT 1.2.3.4:443', updatedAt: new Date().toISOString() },
           { name: 'legacy-search', scope: 'project', transport: 'sse', url: 'https://mcp.example.com/sse', enabled: false, configPath: 'G:\\mock\\project\\zcode.json', status: 'disabled', toolCount: 0, updatedAt: new Date().toISOString() },
           { name: 'browser-tools', scope: 'plugin', transport: 'stdio', command: 'node', args: ['server.js'], enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\plugins\\cache\\official\\browser-use\\0.2.1\\.mcp.json', pluginName: 'browser-use', status: 'connected', toolCount: 0 },
           { name: 'rpc-count-stale', scope: 'user', transport: 'http', url: 'https://mcp.example.com/stale', enabled: true, configPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', status: 'connected', toolCount: 0 },
+          ...mockCustomMcpServers,
         ],
       }
     case 'mcpServerTools':
-      // mock：context7 正常返回；browser-tools 已连接但 0 工具（黄色警告态）；其余报错
+      // mock：context7 正常返回（带 inputSchema 验收工具详情弹窗）；browser-tools 已连接
+      // 但 0 工具（黄色警告态）；其余报错
       if (req.name === 'context7') {
         return {
           op: 'mcpServerTools',
           name: req.name,
           toolCount: 2,
           tools: [
-            { name: 'resolve-library-id', description: '将通用库/框架名称解析为 Context7 兼容的库 ID（支持模糊匹配）' },
-            { name: 'get-library-docs', description: '按 Context7 库 ID 拉取最新文档片段，用于回答库/框架使用问题' },
+            {
+              name: 'resolve-library-id',
+              description: '将通用库/框架名称解析为 Context7 兼容的库 ID（支持模糊匹配）',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  libraryName: { type: 'string', description: '通用库名（如 react）' },
+                  contextTokens: { type: ['number', 'null'], description: '上下文预算' },
+                },
+                required: ['libraryName'],
+              },
+            },
+            {
+              name: 'get-library-docs',
+              description: '按 Context7 库 ID 拉取最新文档片段，用于回答库/框架使用问题',
+              // 真机同款形态（2020-12 draft 带 $schema 键 + query/libraryName），渲染回归锚点
+              inputSchema: {
+                type: 'object',
+                $schema: 'https://json-schema.org/draft/2020-12/schema',
+                properties: {
+                  query: { type: 'string', description: 'What to look up in the library\'s documentation. This is useful...' },
+                  libraryName: { type: 'string', description: 'Library name to search for and retrieve a Context7-compatible...' },
+                },
+                required: ['query', 'libraryName'],
+              },
+            },
           ],
         }
       }
@@ -2210,6 +2247,56 @@ flowchart LR
         }
       }
       return { op: 'mcpServerTools', name: req.name, error: 'mock：连接超时（ETIMEDOUT 1.2.3.4:443）' }
+    case 'mcpAddServer': {
+      // mock：写入模块级清单（listMcpServers 合并展示），重名拒绝验收错误内联；
+      // previousName=编辑保存（同名覆盖 / 改名移除旧键），自身豁免重名检查
+      if (mockCustomMcpServers.some((s) => s.name === req.name && s.name !== req.previousName)) {
+        return { op: 'mcpServerSaved', ok: false, name: req.name, scope: req.scope, error: `同名服务器已存在: ${req.name}` }
+      }
+      const prevIdx = req.previousName ? mockCustomMcpServers.findIndex((s) => s.name === req.previousName) : -1
+      if (prevIdx >= 0) mockCustomMcpServers.splice(prevIdx, 1)
+      mockCustomMcpServers.push({
+        name: req.name,
+        scope: req.scope,
+        transport: typeof req.entry.command === 'string' ? 'stdio' : 'http',
+        command: typeof req.entry.command === 'string' ? req.entry.command : undefined,
+        args: Array.isArray(req.entry.args) ? (req.entry.args as string[]) : undefined,
+        url: typeof req.entry.url === 'string' ? req.entry.url : undefined,
+        envKeys: req.entry.env && typeof req.entry.env === 'object' ? Object.keys(req.entry.env) : undefined,
+        enabled: true,
+        configPath: req.scope === 'user' ? 'C:\\Users\\mock\\.zcode\\cli\\config.json' : 'G:\\mock\\project\\.zcode\\config.json',
+        rawEntry: { ...req.entry },
+        status: 'disconnected',
+        toolCount: 0,
+      })
+      return { op: 'mcpServerSaved', ok: true, name: req.name, scope: req.scope }
+    }
+    case 'mcpDeleteServer': {
+      // mock：保留名（context7）拒绝验收失败红条，其余从模块级清单移除
+      if (req.name === 'context7') {
+        return { op: 'mcpServerDeleted', ok: false, name: req.name, scope: req.scope, error: 'mock：保留服务器不允许删除' }
+      }
+      const idx = mockCustomMcpServers.findIndex((s) => s.name === req.name)
+      if (idx >= 0) mockCustomMcpServers.splice(idx, 1)
+      return { op: 'mcpServerDeleted', ok: true, name: req.name, scope: req.scope }
+    }
+    case 'mcpTrustServer': {
+      // mock：digest 长度不符拒绝（验 digest 过期红条），否则清单条目转 disconnected
+      if (!/^[a-f0-9]{64}$/.test(req.declarationDigest)) {
+        return { op: 'mcpServerTrusted', ok: false, name: req.name, error: '配置已变更（digest 过期），刷新列表后重试' }
+      }
+      const it = mockCustomMcpServers.find((s) => s.name === req.name)
+      if (it) {
+        it.status = 'disconnected'
+        it.trustReview = undefined
+      }
+      return { op: 'mcpServerTrusted', ok: true, name: req.name }
+    }
+    case 'workspaceHooksList':
+      // mock：两域空清单（钩子页 dev 不落「mock 不支持」红条；行数据验收临时填 items）
+      return req.scope === 'user'
+        ? { op: 'workspaceHooksList', status: { scope: 'user', items: [], userConfigPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', rootEnabled: true } }
+        : { op: 'workspaceHooksList', status: { scope: 'workspace', workspacePath: 'G:\\mock', items: [], rootEnabled: true } }
     case 'getMcpLogs':
       // mock：完整连接生命周期样例（started→connected / failed 带 stderr / 启动汇总）
       return {

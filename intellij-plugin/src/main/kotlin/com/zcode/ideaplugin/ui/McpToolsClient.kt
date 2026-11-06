@@ -39,18 +39,23 @@ import kotlin.concurrent.thread
  *          （GET /sse 建 endpoint 流）不做，按 streamable 尝试。
  *
  * 协议版本发 "2025-06-18"（server 响应回自身支持版本，双方忽略不识别的更高
- * 版本即可协商成功）。仅读 name/description（description 截 400 字符给 tooltip）。
+ * 版本即可协商成功）。读取 name/description/inputSchema（描述全文透传，
+ * 列表展示侧自行截断）。
  */
 object McpToolsClient {
 
-    data class McpToolInfo(val name: String, val description: String?)
+    data class McpToolInfo(
+        val name: String,
+        val description: String?,
+        /** tools/list 条目的 inputSchema 原样（JSON Schema 形态；工具入参弹窗数据源）*/
+        val inputSchema: JsonObject? = null,
+    )
 
     class McpClientException(message: String) : Exception(message)
 
     private const val PROTOCOL_VERSION = "2025-06-18"
     private const val CLIENT_NAME = "zcode-idea-plugin"
     private const val CLIENT_VERSION = "0.4.2"
-    private const val DESC_MAX_LEN = 400
 
     /**
      * ZCode modern era 协议版本（宿主内置 server 如 node_repl 专用，2026-07-28）：
@@ -283,18 +288,16 @@ object McpToolsClient {
 
     // ============ 公共解析 ============
 
-    /** tools/list 的 result.tools → [{name, description}] */
+    /** tools/list 的 result.tools → [{name, description, inputSchema}] */
     private fun parseTools(result: JsonObject?): List<McpToolInfo> {
         val tools = result?.get("tools")?.let { runCatching { it.jsonArray }.getOrNull() } ?: return emptyList()
         return tools.mapNotNull { el ->
             val obj = runCatching { el.jsonObject }.getOrNull() ?: return@mapNotNull null
             val name = runCatching { obj["name"]?.jsonPrimitive?.content }.getOrNull() ?: return@mapNotNull null
             // contentOrNull 已可空，runCatching.getOrNull 再包一层 → 先提变量剥掉双重可空
-            val descRaw = runCatching { obj["description"]?.jsonPrimitive?.contentOrNull }.getOrNull()
-            val desc = descRaw
+            val desc = runCatching { obj["description"]?.jsonPrimitive?.contentOrNull }.getOrNull()
                 ?.takeIf { it.isNotBlank() }
-                ?.let { if (it.length > DESC_MAX_LEN) it.take(DESC_MAX_LEN) + "…" else it }
-            McpToolInfo(name, desc)
+            McpToolInfo(name, desc, obj["inputSchema"] as? JsonObject)
         }
     }
 }

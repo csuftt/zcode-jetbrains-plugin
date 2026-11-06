@@ -32,6 +32,36 @@
     color: var(--text-muted);
   }
 
+  /* 浏览目录行（多目录会话）：独占一行——工作区标签 + 下拉（切目录重扫清单）*/
+  &__ws-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__ws-label {
+    color: var(--text-secondary);
+    font-size: var(--fs-body);
+    white-space: nowrap;
+  }
+
+  &__ws-select {
+    max-width: 200px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-secondary);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: var(--fs-body);
+    font-family: inherit;
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent-primary, #4c8dff);
+    }
+  }
+
   &__btn {
     background: transparent;
     border: 1px solid var(--border-primary);
@@ -185,6 +215,49 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* 删除失败红条（可关闭）*/
+  &__delete-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 6px;
+    color: var(--status-error-text, #ef4444);
+    font-size: var(--fs-body);
+    line-height: 1.6;
+
+    > .codicon {
+      flex-shrink: 0;
+      margin-top: 3px;
+    }
+  }
+
+  &__delete-error-text {
+    flex: 1;
+    min-width: 0;
+    word-break: break-all;
+  }
+
+  &__delete-error-close {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-tertiary, rgba(128, 128, 128, 0.12));
+    }
   }
 
   &__loading {
@@ -476,9 +549,38 @@
     gap: 5px;
     transition: all 0.15s;
 
-    &:hover {
+    &:hover:not(:disabled) {
       color: var(--accent-primary, #3574f0);
       border-color: var(--accent-primary, #3574f0);
+    }
+
+    /* 删除（危险红）*/
+    &--danger {
+      &:hover:not(:disabled) {
+        color: var(--status-error-text, #ef4444);
+        border-color: var(--status-error-text, #ef4444);
+      }
+      &:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+    }
+
+    /* 信任（绿色语义，对齐官方 admission 形态与钩子页信任按钮）*/
+    &--trust {
+      color: #6fbf73;
+      border-color: rgba(111, 191, 115, 0.4);
+      background: rgba(111, 191, 115, 0.08);
+
+      &:hover:not(:disabled) {
+        color: #6fbf73;
+        border-color: #6fbf73;
+        background: rgba(111, 191, 115, 0.16);
+      }
+      &:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
     }
   }
 
@@ -602,6 +704,27 @@
     &:hover {
       background: var(--bg-tertiary, rgba(128, 128, 128, 0.1));
     }
+
+    /* 可点开详情弹窗的工具行（hover 提示 + 右侧箭头浮现）*/
+    &.clickable {
+      cursor: pointer;
+
+      .mcp-card__tool-go {
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+
+      &:hover .mcp-card__tool-go {
+        opacity: 1;
+      }
+    }
+  }
+
+  &__tool-go {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-muted);
   }
 
   &__tool-name-row {

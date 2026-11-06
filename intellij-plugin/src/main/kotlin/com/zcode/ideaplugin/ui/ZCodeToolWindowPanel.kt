@@ -1280,6 +1280,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "deleteAgent" -> handleDeleteAgent(msg)
                         "listMcpServers" -> handleListMcpServers(msg)
                         "mcpServerTools" -> handleMcpServerTools(msg)
+                        "mcpAddServer" -> handleMcpAddServer(msg)
+                        "mcpTrustServer" -> handleMcpTrustServer(msg)
+                        "mcpDeleteServer" -> handleMcpDeleteServer(msg)
                         "getMcpLogs" -> handleGetMcpLogs(msg)
                         "getModelTrajectory" -> handleGetModelTrajectory(msg)
                         "vizOpen" -> handleVizOpen(msg)
@@ -8528,12 +8531,15 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun handleListMcpServers(msg: JsonObject): JsonObject {
         val mode = msg["mode"]?.jsonPrimitive?.content?.takeIf { it == "connect" } ?: "status"
-        val servers = McpConfigReader.scan(project.basePath).toMutableList()
+        // 浏览目录（设置页目录下拉切换，多目录会话；缺省=IDE 项目根）：项目级配置
+        // 扫描与 connect 模式显式传参的占位符替换都落在这个目录
+        val basePath = msg["workspacePath"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() } ?: project.basePath
+        val servers = McpConfigReader.scan(basePath).toMutableList()
 
         // 0. 宿主内置插件 MCP（CLI 内置注册表声明的 hostMcpServerNames，如
         // browser-use → node_repl）：定义不在任何磁盘配置里（注册表硬编码在
         // zcode.cjs），按 plugins/list 补齐；RPC 失败静默降级不影响磁盘条目
-        val basePath = project.basePath
         if (basePath != null) {
             runCatching {
                 appendHostPluginMcpServers(servers, project.zCodeService().getClient(), basePath)
@@ -8582,6 +8588,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         toolCount = st["toolCount"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
                         statusError = st["error"]?.jsonPrimitive?.contentOrNull,
                         updatedAt = st["updatedAt"]?.jsonPrimitive?.contentOrNull,
+                        // untrusted 条目的信任评审数据（「信任」按钮的数据源：declarationDigest）
+                        trustReview = st["workspaceTrust"]?.let { runCatching { it.jsonObject }.getOrNull() },
                     )
                 }
                 // RPC 有但磁盘配置没有的 → 运行时条目（如会话临时注入的服务器）；
@@ -8658,6 +8666,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     if (s.envKeys.isNotEmpty()) put("envKeys", JsonArray(s.envKeys.map { JsonPrimitive(it) }))
                     put("enabled", s.enabled)
                     put("configPath", s.configPath)
+                    // 磁盘原始条目（编辑弹窗无损回填：cwd/timeout 等表单外字段保存时原样保留）
+                    s.raw?.let { put("rawEntry", it) }
+                    s.trustReview?.let { put("trustReview", it) }
                     s.pluginName?.let { put("pluginName", it) }
                     s.status?.let { put("status", it) }
                     s.toolCount?.let { put("toolCount", it) }
@@ -8691,14 +8702,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     buildJsonObject {
                         put("name", t.name)
                         t.description?.let { d -> put("description", d) }
+                        t.inputSchema?.let { s -> put("inputSchema", s) }
                     }
                 }))
             }
             error?.let { put("error", it) }
         }
 
-        // 磁盘三来源 + 宿主内置插件条目（node_repl 等不在磁盘配置，plugins/list 合成）
-        val basePath = project.basePath
+        // 磁盘三来源（按浏览目录）+ 宿主内置插件条目（node_repl 等不在磁盘配置，plugins/list 合成）
+        val basePath = msg["workspacePath"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() } ?: project.basePath
         var server = McpConfigReader.scan(basePath).find { it.name == name }
         if (server == null && basePath != null) {
             val hostServers = mutableListOf<McpConfigReader.McpServerInfo>()
@@ -8708,13 +8721,166 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (server == null) return resp(error = "未在磁盘配置与宿主内置插件中找到该服务器（会话临时注入的无法获取工具列表）")
         if (!server.enabled) return resp(error = "服务器已禁用")
         return try {
-            val tools = McpToolsClient.listTools(server, project.basePath ?: ".")
+            val tools = McpToolsClient.listTools(server, basePath ?: ".")
             log.info("MCP tool list [$name] fetched, ${tools.size} item(s)")
             resp(tools = tools)
         } catch (e: Exception) {
             log.warn("MCP tool list [$name] fetch failed: ${e.message}")
             resp(error = e.message ?: "未知错误")
         }
+    }
+
+    /**
+     * op=mcpAddServer — 新增/保存自定义 MCP 服务器（设置页「MCP → 新增/编辑」）
+     *
+     * 前端拼好单条目（entry 形态与 McpConfigReader 解析字段一致）+ scope 传上来，
+     * 本处做校验与落盘：scope 只放行 user/project（plugin 缓存目录不可改、host/runtime
+     * 无磁盘定义）；name 非空无空白 ≤128；stdio 必有 command / 远程必有 http(s) url；
+     * reader.scan 全源重名检查（user 优先级高于 project，跨源重名会互相遮蔽，一并拒绝；
+     * 编辑保存时 previousName 指向的原条目自身豁免——同一文件同键即覆盖）。
+     * 失败回 {op, ok:false, error}（弹窗内联展示），不用全局 errorResponse。
+     */
+    private fun handleMcpAddServer(msg: JsonObject): JsonObject {
+        val scope = msg["scope"]?.jsonPrimitive?.content ?: "user"
+        if (scope !in setOf("user", "project")) return mcpSaveFailed(scope, null, "无效作用域: $scope")
+        val name = msg["name"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
+        if (name.isEmpty() || name.length > 128 || name.any { it.isWhitespace() }) {
+            return mcpSaveFailed(scope, name.ifEmpty { null }, "名称无效：必填、不含空白、不超过 128 字符")
+        }
+        // 编辑模式携带原键名：改名=删旧键写新键（writer 单次写原子完成），未改名=覆盖保存
+        val previousName = msg["previousName"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        if (previousName != null && (previousName.length > 128 || previousName.any { it.isWhitespace() })) {
+            return mcpSaveFailed(scope, name, "原名称无效：不含空白、不超过 128 字符")
+        }
+        val entry = msg["entry"]?.jsonObject ?: return mcpSaveFailed(scope, name, "缺少 entry")
+        entry["name"]?.let {
+            // JSON 模式可能把 name 也写进条目；与外层不一致时以外层为准并去掉（防困惑）
+            if (it.jsonPrimitive.contentOrNull != name) {
+                return mcpSaveFailed(scope, name, "条目内 name（${it.jsonPrimitive.contentOrNull}）与外层不一致")
+            }
+        }
+        val command = entry["command"]?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }?.takeIf { it.isNotBlank() }
+        val url = entry["url"]?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }?.takeIf { it.isNotBlank() }
+        if (command == null && url == null) {
+            return mcpSaveFailed(scope, name, "配置无效：stdio 服务器需要 command，远程服务器需要 url")
+        }
+        if (url != null && !url.startsWith("http://") && !url.startsWith("https://")) {
+            return mcpSaveFailed(scope, name, "url 需以 http:// 或 https:// 开头")
+        }
+        // env/headers 只认 {K:V} 对象形态（[{name,value}] 是协议传参形态，配置文件不用）
+        for (key in listOf("env", "headers")) {
+            if (entry[key] != null && entry[key] !is kotlinx.serialization.json.JsonObject) {
+                return mcpSaveFailed(scope, name, "$key 需为 {键: 值} 对象形态")
+            }
+        }
+        // 浏览目录（下拉切换；缺省=IDE 项目根）：重名检查与项目档落盘都按它
+        val ws = msg["workspacePath"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() } ?: project.basePath
+        val file = McpConfigWriter.resolveFile(scope, ws)
+            ?: return mcpSaveFailed(scope, name, "项目路径不可用")
+        McpConfigReader.scan(ws).find { clash ->
+            // 只拦与新名字真正同名的条目（find 谓词漏 clash.name==name 会把扫到的
+            // 第一个不豁免条目——名字都对不上——误判成重名，obsidian 编辑被
+            // plugin 的 context7 条目无辜拦截即此回归）；previousName 指向的
+            // 同文件自身条目豁免（覆盖保存将替换它 / 改名将移除它）
+            clash.name == name && !(clash.name == previousName && clash.configPath == file.absolutePath)
+        }?.let { clash ->
+            return mcpSaveFailed(scope, name, "同名服务器已存在（来源：${clash.configPath}），请先删除或改名")
+        }
+        val err = McpConfigWriter.addServer(file, name, entry, previousName)
+        if (err != null) return mcpSaveFailed(scope, name, err)
+        log.info("MCP server saved: $name (scope=$scope, previous=$previousName, file=${file.absolutePath})")
+        return buildJsonObject {
+            put("op", "mcpServerSaved")
+            put("ok", true)
+            put("name", name)
+            put("scope", scope)
+        }
+    }
+
+    /** op=mcpDeleteServer — 删除自定义 MCP 服务器（仅 user/project；确认弹窗在前端） */
+    private fun handleMcpDeleteServer(msg: JsonObject): JsonObject {
+        val scope = msg["scope"]?.jsonPrimitive?.content ?: return mcpDeleteFailed(null, null, "缺少 scope")
+        if (scope !in setOf("user", "project")) {
+            return mcpDeleteFailed(scope, null, "该来源的条目不由本插件托管，无法删除")
+        }
+        val name = msg["name"]?.jsonPrimitive?.contentOrNull?.trim()
+            ?: return mcpDeleteFailed(null, null, "缺少 name")
+        val file = McpConfigWriter.resolveFile(scope, msg["workspacePath"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() } ?: project.basePath)
+            ?: return mcpDeleteFailed(scope, name, "项目路径不可用")
+        val err = McpConfigWriter.deleteServer(file, name)
+        if (err != null) return mcpDeleteFailed(scope, name, err)
+        log.info("MCP server deleted: $name (scope=$scope, file=${file.absolutePath})")
+        return buildJsonObject {
+            put("op", "mcpServerDeleted")
+            put("ok", true)
+            put("name", name)
+            put("scope", scope)
+        }
+    }
+
+    /**
+     * op=mcpTrustServer — 工作区 MCP 服务器信任授予（设置页「MCP」untrusted 卡片「信任」按钮）
+     *
+     * 项目级 MCP 配置走 admission 门控：新配置先信任才会被会话采用。declarationDigest
+     * 由前端从列表应答的 trustReview 原样带回（服务端校验配置未再变，digest 过期回
+     * accepted=false, reasonCode=workspace_mcp_declaration_changed → 前端重拉列表即可）。
+     * 失败回自有 op 带 ok:false（列表红条内联展示），不用全局 errorResponse。
+     */
+    private fun handleMcpTrustServer(msg: JsonObject): JsonObject {
+        val name = msg["name"]?.jsonPrimitive?.contentOrNull?.trim()
+            ?: return mcpTrustFailed(null, "缺少 name")
+        val digest = msg["declarationDigest"]?.jsonPrimitive?.contentOrNull?.trim()
+            ?: return mcpTrustFailed(name, "缺少 declarationDigest（请刷新列表后重试）")
+        val trust = msg["trusted"]?.jsonPrimitive?.contentOrNull != "false"
+        val ws = msg["workspacePath"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() } ?: project.basePath
+        if (ws.isNullOrBlank()) return mcpTrustFailed(name, "项目路径不可用")
+        return try {
+            val client = project.zCodeService().getClient()
+            val r = client.workspaceMcpTrust(ws, name, digest, trust)
+            val accepted = r["accepted"]?.jsonPrimitive?.booleanOrNull ?: false
+            if (!accepted) {
+                val reason = r["reasonCode"]?.jsonPrimitive?.contentOrNull
+                val hint = if (reason == "workspace_mcp_declaration_changed") "配置已变更（digest 过期），刷新列表后重试"
+                else "信任授予被拒绝${reason?.let { "（$reason）" } ?: ""}"
+                mcpTrustFailed(name, hint)
+            } else {
+                log.info("MCP server trust granted: $name (workspace=$ws)")
+                buildJsonObject {
+                    put("op", "mcpServerTrusted")
+                    put("ok", true)
+                    put("name", name)
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("MCP trust RPC failed: ${e.message}")
+            mcpTrustFailed(name, e.message ?: "信任授予失败")
+        }
+    }
+
+    private fun mcpTrustFailed(name: String?, error: String): JsonObject = buildJsonObject {
+        put("op", "mcpServerTrusted")
+        put("ok", false)
+        name?.let { put("name", it) }
+        put("error", error)
+    }
+
+    private fun mcpSaveFailed(scope: String, name: String?, error: String): JsonObject = buildJsonObject {
+        put("op", "mcpServerSaved")
+        put("ok", false)
+        name?.let { put("name", it) }
+        put("scope", scope)
+        put("error", error)
+    }
+
+    private fun mcpDeleteFailed(scope: String?, name: String?, error: String): JsonObject = buildJsonObject {
+        put("op", "mcpServerDeleted")
+        put("ok", false)
+        name?.let { put("name", it) }
+        scope?.let { put("scope", it) }
+        put("error", error)
     }
 
     /** 从连接日志推断服务器最近状态与工具数（从新到旧找第一条生命周期事件；无记录 null）*/
