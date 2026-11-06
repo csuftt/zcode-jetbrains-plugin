@@ -19,30 +19,37 @@ import javax.swing.Icon
  * 按目录轮询分配（[ZCodeLinkedWorkspaces.colorIndexFor]，kv 持久化跨重启稳定）。
  * 注意：IDEA git 面板那个色块本质是分支颜色非项目颜色，逐分支复刻已否——
  * 同观感、目录键位，这是调研定稿的核心取舍。
- * 本项目目录固定金黄（webview --ws-badge-gold 同源值），不进轮询。
+ * 金黄保留为项目专属色（2026-11-06 用户终审：突兀感根因是块内中文字形——笔画密，
+ * 白字压亮底劣化远比 ASCII 字母严重；解法=整套色板按「白字对比度 ≥4.5」压暗一档，
+ * 色相/顺序/专属语义全不动），金黄同步压暗见 [PROJECT_GOLD]。
  * webview 侧同款色值在 variables.less --ws-dir-1..9，改动须三处同步。
  */
 object WsTabColors {
 
-    /** 9 色板：JBColor(light, dark)，IDEA ProjectIconPalette Start 色对。
-     *  顺序为用户定稿（2026-11-03 三轮修正）：金黄(本项目) → 橙 → 青 → 蓝…红 */
+    /** 9 色板：JBColor(light, dark)，IDEA ProjectIconPalette Start 色对亮度定稿
+     *  （2026-11-06 五轮收敛：原亮版白字 1.95~4.4 洗白 → 压暗一档 ≥4.5 偏暗 →
+     *  回调半档 3.9~4.15 → 再亮半档 3.3~3.4 → **终稿再亮一档落 2.7~2.9 带**，HSL
+     *  亮度等比搜索、色相饱和度不动；中文粗字形在此带可读且鲜亮，暗条底可见性 5.1+、
+     *  选中标签蓝底 4.2+。空心待命块暗主题提亮由 [WsColorBlockIcon] 内部处理）。
+     *  顺序为用户定稿（2026-11-03 三轮修正）：橙 → 青 → 蓝…红 */
     val PALETTE: List<JBColor> = listOf(
-        JBColor(0xF57236, 0xE27237), // 1 橙
-        JBColor(0x2BC8BB, 0x2DBCAD), // 2 青
-        JBColor(0x359AF2, 0x3895E1), // 3 蓝
-        JBColor(0x8379FB, 0x7B75E8), // 4 紫
-        JBColor(0x7E54B5, 0x7854AD), // 5 深紫
-        JBColor(0xD63CC8, 0x8F4593), // 6 洋红
-        JBColor(0x954294, 0xC840B9), // 7 紫红
-        JBColor(0xE75371, 0xD75370), // 8 粉红
-        JBColor(0xDB3D3C, 0xCE443C), // 9 红
+        JBColor(0xF07500, 0xF07500), // 1 橙（3.3 带 DE6C00）
+        JBColor(0x10AB98, 0x12AB9A), // 2 青（3.3 带 0F9F8E/119D8E）
+        JBColor(0x549BEC, 0x539DE6), // 3 蓝（3.3 带 3D8DEA/3B8FE2）
+        JBColor(0x9C8EDA, 0x9C8CE7), // 4 紫（3.3 带 9081D6/8F7DE4）
+        JBColor(0xA98DCE, 0xA58DC8), // 5 深紫（3.3 带 9D7DC7/9A7FC1）
+        JBColor(0xD676C8, 0xC182C4), // 6 洋红（3.3 带 D062C0/B972BD）
+        JBColor(0xC67FC5, 0xD27AC7), // 7 紫红（3.3 带 BF6FBE/CB67BF）
+        JBColor(0xDA7C95, 0xD77D94), // 8 粉红（3.3 带 D56A87/D26B85）
+        JBColor(0xDD7D75, 0xDD7D76), // 9 红（3.3 带 D96B63/D86B64）
     )
 
-    /** 本项目金黄（webview --ws-badge-gold 同值：浅底加深/暗底提亮） */
-    val PROJECT_GOLD: JBColor = JBColor(0xA67708, 0xE2B34E)
+    /** 本项目金黄（webview --ws-badge-gold 同值）：亮度随整板终稿一档
+     *  （原 A67708/E2B34E 洗白 → 压暗版 8F6400/976B00 → 回调版 A67400/A47400 → 3.3 带 BA8200/B88200） */
+    val PROJECT_GOLD: JBColor = JBColor(0xC98D00, 0xCA8F00)
 
     /**
-     * 目录颜色解析：项目根=金黄；关联目录（及任何会话归属目录）=轮询色板。
+     * 目录颜色解析：项目根=金黄（专属语义保留）；关联目录（及任何会话归属目录）=色板。
      * 空路径回退金黄（落位空=本项目的默认语义）。
      */
     fun resolve(project: Project, workspacePath: String): JBColor {
@@ -59,11 +66,19 @@ object WsTabColors {
      * 目录色块图标工厂：色板色 + 块内字符（IDEA 项目头像同款辨识）。
      * [hollow]=待命空标签变体（° 前缀退役后的空标签标识，用户定稿 2026-11-02）：
      * 空心描边块+彩色字=无会话，实心填充+白字=有会话——延续 ●实心在跑/○空心空 的设计语言。
-     * [letterOverride]=会话名首字符（webview setTabTitle 推送）：**仅单工作区时采用**
-     * （目录字符在单工作区全同无区分度，2026-11-02 用户定稿），多工作区仍用目录首字符。
+     * [letterOverride]=会话名首字符（webview setTabTitle 无条件推送）：**仅 [singleWorkspace]
+     * 时采用**（目录字符全同无区分度，2026-11-02 用户定稿），多目录仍用目录首字符。
+     * [singleWorkspace] 判据由调用方给（2026-11-06 扩展）：面板实况=打开标签取色轴目录
+     * 唯一（[ZCodeToolWindowPanel.isOpenTabsSingleDirectory]），缺省回落「无关联目录」旧口径。
      */
-    fun iconFor(project: Project, workspacePath: String, hollow: Boolean = false, letterOverride: String? = null): Icon =
-        WsColorBlockIcon(resolve(project, workspacePath), pickLetter(ZCodeLinkedWorkspaces.read(project).isEmpty(), letterOverride, workspacePath), hollow)
+    fun iconFor(
+        project: Project,
+        workspacePath: String,
+        hollow: Boolean = false,
+        letterOverride: String? = null,
+        singleWorkspace: Boolean = ZCodeLinkedWorkspaces.read(project).isEmpty(),
+    ): Icon =
+        WsColorBlockIcon(resolve(project, workspacePath), pickLetter(singleWorkspace, letterOverride, workspacePath), hollow)
 
     /**
      * 块内字符选取（纯函数单测锚点）：单工作区且有会话名首字符 → 会话名首字符；
@@ -136,6 +151,20 @@ class WsColorBlockIcon(private val color: JBColor, private val letter: String, p
         com.intellij.util.ui.JBFont.label().deriveFont(java.awt.Font.BOLD, com.intellij.util.ui.JBFont.label().size2D * 0.72f)
     }
 
+    /** 定比混合（纯色混合不引 ColorUtil 语义歧义）：a×(1-t) + b×t */
+    private fun blend(a: java.awt.Color, b: java.awt.Color, t: Double): java.awt.Color = java.awt.Color(
+        (a.red * (1 - t) + b.red * t).toInt().coerceIn(0, 255),
+        (a.green * (1 - t) + b.green * t).toInt().coerceIn(0, 255),
+        (a.blue * (1 - t) + b.blue * t).toInt().coerceIn(0, 255),
+    )
+
+    /** 空心态用色：色板压暗后（白字达标线）描边/彩字在暗底上会发闷，暗主题混 35% 白
+     *  提亮回可见性 ≥4.4:1（实测校验 2026-11-06）；浅主题直接用压暗色（浅底上压暗色
+     *  本就醒目）。paintIcon 每帧按 JBColor.isBright() 现算，切主题跟随（缺陷FC 同款
+     *  纪律；2023.3 JBColor 无 Supplier 构造器，不能字段级懒缓存）。 */
+    private fun hollowColor(): java.awt.Color =
+        if (JBColor.isBright()) color else blend(color, java.awt.Color.WHITE, 0.35)
+
     override fun paintIcon(c: Component?, g: Graphics?, x: Int, y: Int) {
         val g2 = g?.create() as? Graphics2D ?: return
         try {
@@ -144,7 +173,7 @@ class WsColorBlockIcon(private val color: JBColor, private val letter: String, p
             val arc = JBUI.scale(3.5f)
             val fx = x + (iconWidth - size) / 2f
             val fy = y + (iconHeight - size) / 2f
-            g2.color = color
+            g2.color = if (hollow) hollowColor() else color
             if (hollow) {
                 // 空心：1.2px 圆角描边内收半线宽防裁切；首字符用色板色（透明底上保持可读）
                 val sw = JBUI.scale(1.2f)
@@ -155,7 +184,7 @@ class WsColorBlockIcon(private val color: JBColor, private val letter: String, p
             }
             g2.font = glyphFont
             val fm = g2.fontMetrics
-            // 字形色：实心=白（饱和彩底可读）；空心=色板色（透明底直接彩字）
+            // 字形色：实心=白（压暗彩底 ≥4.5 可读）；空心=色板色（透明底直接彩字）
             if (!hollow) g2.color = java.awt.Color.WHITE
             val tx = fx + (size - fm.stringWidth(letter)) / 2f
             val ty = fy + (size - (fm.ascent + fm.descent)) / 2f + fm.ascent

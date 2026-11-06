@@ -279,7 +279,8 @@ export default function App() {
   // 漂移），待命=落位目录（随 chips 切换；取值链同 createSession/listSessions 的
   // activeWorkspacePath || projectPath——落位空串=本项目，新标签默认落本项目徽标同样
   // 显示，2026-11-02 真机）。本项目在存在关联目录时也显示（isProject 供金黄区分，
-  // 2026-11-02 用户优化）；唯一目录（无关联）时本项目徽标无信息量，隐藏。
+  // 2026-11-02 用户优化，金黄专属语义 2026-11-06 终审保留）；唯一目录（无关联）时
+  // 本项目徽标无信息量，隐藏。
   // colorIndex=统一配色色板序号（Java 轮询分配，2026-11-02）：非本项目目录取映射，
   // 未命中（应答未达/旧包）null 回落默认主题色；与标签色块/历史页 chips 三处同源
   const wsColors = useStore((s) => s.wsColors)
@@ -327,12 +328,14 @@ export default function App() {
         sessionId: currentSessionId ?? undefined,
         // 目录：Java 据此算标签色块颜色与 tooltip 目录 chip（与徽标/chips 同一色板）
         workspacePath: pushWsPath || undefined,
-        // 会话名首字符：Java 在单工作区时用它作色块文字（目录字符在单工作区全同无区分度）
-        letter: effective && linkedWorkspaces.length === 0 ? firstCharUpper(effective) : undefined,
+        // 会话名首字符：无条件推送，采纳与否由 Java 判据决定（2026-11-06 扩展：
+        // 「单工作区」从无关联目录扩为打开标签落目录唯一——该视图只有 Java 有，
+        // webview 无法自知；判据不成立时 Java 侧仍用目录首字符）
+        letter: effective ? firstCharUpper(effective) : undefined,
       })
     }, 500)
     return () => clearTimeout(timer)
-  }, [sessionTitle, currentSessionId, pushWsPath, linkedWorkspaces])
+  }, [sessionTitle, currentSessionId, pushWsPath])
 
   return (
     <div className="app">

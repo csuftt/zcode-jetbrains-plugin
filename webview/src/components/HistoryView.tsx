@@ -355,6 +355,7 @@ export function HistoryView({
           目录的唯一入口，空态藏行=功能不可达（首版真机踩坑）*/}
       <div className={`history-ws-chips ${wsEditing ? 'history-ws-chips--editing' : ''}`}>
         <div className="history-ws-chips__flow">
+
           <button
             type="button"
             className={`history-ws-chip history-ws-chip--project ${wsSame(activeWorkspacePath || projectWorkspacePath, projectWorkspacePath) ? 'history-ws-chip--active' : ''}`}

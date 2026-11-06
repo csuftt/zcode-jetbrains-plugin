@@ -55,8 +55,9 @@ interface Props {
   regeneratingTitle: boolean
   /** 目录徽标（多目录会话·变体A，2026-10-28 方案A 定稿）：标题下方紧凑徽标。
    *  语义两态由 App 算好传入：有会话=会话归属目录；待命=落位目录；唯一目录（或空）=null 不显示。
-   *  isProject=true 走金黄（2026-11-02：有其他目录时本项目也显示）；colorIndex=统一配色
-   *  色板序号（非本项目目录，Java 轮询分配），null 回落默认主题色 */
+   *  isProject=true 走金黄（2026-11-02：有其他目录时本项目也显示；金黄专属语义
+   *  2026-11-06 终审保留）；colorIndex=统一配色色板序号（非本项目目录，Java 轮询
+   *  分配），null 回落默认主题色 */
   wsBadge?: { dir: string; isProject: boolean; colorIndex: number | null } | null
 }
 
@@ -114,8 +115,8 @@ export function ChatHeader({
         )}
         {/* 目录徽标（多目录会话·变体A·方案A 定稿 2026-10-28）：紧凑徽标挂标题下方，
             header 仅增高 ~17px。两态语义（会话归属/待命落位）由 App 算好传入，
-            唯一目录不显示；本项目=金黄，关联目录=统一配色色板（colorIndex 由 Java
-            轮询分配，null 回落默认主题色），悬浮 title 完整路径。
+            唯一目录不显示；本项目=金黄（2026-11-06 同步压暗），关联目录=统一配色色板
+            （colorIndex 由 Java 轮询分配，null 回落默认主题色），悬浮 title 完整路径。
             外层 row 占满一行触发换行（无背景），徽标本体自适应内容宽度（背景不拉满） */}
         {wsBadge && currentView === 'chat' && (
           <span className="ws-header-badge-row">
