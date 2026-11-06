@@ -178,4 +178,88 @@ class V4FrameSanitizerTest {
         val arr = buildJsonArray { add(poisonRow) }
         assertSame(arr, V4FrameSanitizer.sanitizeRows(arr), "rowsRange 入口同验")
     }
+
+    /** 缺陷FZ 真实毒形状（2026-11-06 HAR rows[6/30/56]）：MCP Apps 给 mcp_tool
+     *  行级 display 塞 ui:// 面板字段 ui 键，H5 strict 拒收毒化整帧 178KB */
+    private val mcpUiRow = buildJsonObject {
+        put("rowId", 6); put("turnId", "t"); put("kind", "toolCall")
+        put("toolName", "mcp__plugin_spreadsheets_spreadsheets__open_document")
+        put("display", buildJsonObject {
+            put("kind", "mcp_tool")
+            put("serverName", "plugin:spreadsheets:spreadsheets")
+            put("toolName", "open_document")
+            put("description", "Open a .xlsx file from the workspace")
+            put("ui", buildJsonObject {
+                put("pluginId", "spreadsheets@zcode-plugins-official")
+                put("resourceUri", "ui://spreadsheets/panel.html")
+                put("preferredDisplayMode", "fullscreen")
+                put("structuredContent", "{\"document\":{\"path\":\"x.xlsx\"}}")
+            })
+        })
+    }
+
+    @Test
+    fun `mcp_tool 行级 display 的 ui 键剥除 合法键全保留`() {
+        val out = V4FrameSanitizer.sanitizeOutbound(snapshotFrame(mcpUiRow))
+        val row = out["frame"]!!.jsonObject["payload"]!!.jsonObject["snapshot"]!!.jsonObject["rows"]!!.jsonObject["window"]!!.jsonArray[0].jsonObject
+        val display = row["display"]!!.jsonObject
+        assertEquals("mcp_tool", display["kind"]!!.jsonPrimitive.content, "kind 保留")
+        assertEquals("plugin:spreadsheets:spreadsheets", display["serverName"]!!.jsonPrimitive.content, "serverName 保留")
+        assertEquals("open_document", display["toolName"]!!.jsonPrimitive.content, "toolName 保留")
+        assertEquals("Open a .xlsx file from the workspace", display["description"]!!.jsonPrimitive.content, "description 保留")
+        assertNull(display["ui"], "ui 键（MCP Apps 面板）必须剥除——H5 strict 拒收")
+    }
+
+    @Test
+    fun `output 位 mcp_tool display 的 ui 键同样剥除`() {
+        val row = buildJsonObject {
+            put("rowId", 7); put("turnId", "t"); put("kind", "toolCall"); put("toolName", "X")
+            put("output", buildJsonObject {
+                put("text", "正文")
+                put("display", buildJsonObject {
+                    put("kind", "mcp_tool"); put("serverName", "s"); put("toolName", "t")
+                    put("unavailable", true); put("ui", buildJsonObject { put("x", 1) })
+                })
+            })
+        }
+        val out = V4FrameSanitizer.sanitizeOutbound(snapshotFrame(row))
+        val cleaned = out["frame"]!!.jsonObject["payload"]!!.jsonObject["snapshot"]!!.jsonObject["rows"]!!.jsonObject["window"]!!.jsonArray[0].jsonObject
+        val display = cleaned["output"]!!.jsonObject["display"]!!.jsonObject
+        assertEquals(true, display["unavailable"]!!.jsonPrimitive.boolean, "unavailable 白名单键保留")
+        assertNull(display["ui"], "output 位 ui 键同样剥除")
+        assertEquals("正文", cleaned["output"]!!.jsonObject["text"]!!.jsonPrimitive.content, "output.text 正文保留")
+    }
+
+    @Test
+    fun `cua display 全合法键原样保留不误剥`() {
+        val row = buildJsonObject {
+            put("rowId", 8); put("turnId", "t"); put("kind", "toolCall"); put("toolName", "computer")
+            put("output", buildJsonObject {
+                put("text", "")
+                put("display", buildJsonObject {
+                    put("kind", "cua"); put("schemaVersion", 2); put("toolName", "screenshot")
+                    put("status", "success"); put("input", buildJsonObject { put("action", "screenshot") })
+                    put("structuredContent", buildJsonObject { put("ok", true) }); put("text", "截图完成")
+                    put("errorCode", buildJsonObject {}); put("suggestedAction", buildJsonObject {})
+                    put("permissionStatus", "granted"); put("targetApp", buildJsonObject {})
+                    put("media", buildJsonArray { }); put("truncated", false)
+                })
+            })
+        }
+        val frame = snapshotFrame(row)
+        val out = V4FrameSanitizer.sanitizeOutbound(frame)
+        assertSame(frame, out, "全部键在白名单内应零拷贝透传（防误剥回归锁）")
+    }
+
+    @Test
+    fun `display kind 异形对象整只剥除`() {
+        // kind 异形对 H5 = No matching discriminator，放行即毒（行为升级：早期版本透传）
+        val row = buildJsonObject {
+            put("rowId", 9); put("turnId", "t"); put("kind", "toolCall"); put("toolName", "X")
+            put("display", buildJsonObject { put("kind", buildJsonObject { put("evil", true) }) })
+        }
+        val out = V4FrameSanitizer.sanitizeOutbound(snapshotFrame(row))
+        val cleaned = out["frame"]!!.jsonObject["payload"]!!.jsonObject["snapshot"]!!.jsonObject["rows"]!!.jsonObject["window"]!!.jsonArray[0].jsonObject
+        assertNull(cleaned["display"], "异形 kind display 应整只剥除")
+    }
 }

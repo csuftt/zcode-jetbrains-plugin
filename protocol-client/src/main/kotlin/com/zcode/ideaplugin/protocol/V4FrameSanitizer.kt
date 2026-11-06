@@ -18,9 +18,14 @@ import kotlinx.serialization.json.buildJsonObject
  * forceSnapshot 已在飞 → `fault.subscription.recoveryFailed`，会话页死。
  * 健康会话恰好无此 kind 行，掩盖成「只有某个会话打不开」。
  *
- * 消毒策略：白名单外的 display 对象整只剥除（output.text 等正文保留，H5 渲染退化为
- * 纯文本不丢行）。快照 rows、deltas 的 row.appended/row.upserted、rowsRange 结果行
- * 三个入口共用 [sanitizeRow]。无违例帧原对象透传（热路径零拷贝）。
+ * 消毒策略（缺陷FZ 两轮升级）：白名单外的 display 对象整只剥除；白名单内的按
+ * **键白名单收缩**（未知键剥除——kind 合法但带 H5 schema 不认的新键同样 strict
+ * 拒收毒化整帧，2026-11-06 HAR 实锤：MCP Apps 给 mcp_tool display 塞 ui:// 面板
+ * 字段 `ui` 键，ll/ol 双位 15 处，单行毒化 178KB 快照 → 恢复重推同毒 → recoveryFailed）。
+ * 键集来源=H5 bundle zod schema 运行时内省（G:/tmp/fy-har/introspect*.mjs，bundle
+ * 更新后重跑提取）。output.text 等正文保留，H5 渲染退化为纯文本不丢行。快照 rows、
+ * deltas 的 row.appended/row.upserted、rowsRange 结果行三个入口共用 [sanitizeRow]。
+ * 无违例行原对象透传（热路径零拷贝）。
  *
  * kind 提取一律 `as? JsonPrimitive` 安全转型，**不用 jsonPrimitive 扩展**——后者对
  * 对象/数组形状抛 IllegalArgumentException，会被调用侧 runCatching 放大成整帧静默
@@ -37,6 +42,25 @@ object V4FrameSanitizer {
     /** H5 行级 display 联合（ll）实成员（同上） */
     private val ROW_DISPLAY_KINDS = setOf(
         "node_repl_images", "task_output", "respond_to_coordinator", "mcp_tool",
+    )
+
+    /**
+     * 各 display kind 的 H5 合法键集（2026-11-06 缺陷FZ bundle zod 内省实锤；
+     * ol/ll 同名 kind 键集一致，故一表共用）。白名单内 display 收缩到本表，
+     * 未知键剥除——CLI 侧演进（如 MCP Apps 的 ui 面板字段）不再毒化 H5。
+     */
+    private val DISPLAY_ALLOWED_KEYS: Map<String, Set<String>> = mapOf(
+        "file_diff" to setOf("kind", "filePath", "additions", "deletions", "structuredPatch", "truncated"),
+        "local_agent_message" to setOf("kind", "status", "error", "message"),
+        "task_stop" to setOf("kind", "taskId", "taskType", "command", "message", "truncated"),
+        "task_output" to setOf("kind", "retrievalStatus", "taskStatus", "output", "truncated"),
+        "respond_to_coordinator" to setOf("kind", "status"),
+        "cua" to setOf(
+            "kind", "schemaVersion", "toolName", "status", "input", "structuredContent",
+            "text", "errorCode", "suggestedAction", "permissionStatus", "targetApp", "media", "truncated",
+        ),
+        "node_repl_images" to setOf("kind", "images", "truncated", "source"),
+        "mcp_tool" to setOf("kind", "serverName", "toolName", "description", "unavailable"),
     )
 
     /**
@@ -94,22 +118,47 @@ object V4FrameSanitizer {
         return if (touched) out else rows
     }
 
-    /** 单行消毒：toolCall 行的 output.display / 行级 display 白名单外剥除 */
+    /** 单行消毒：toolCall 行的 output.display / 行级 display 双位过 [sanitizeDisplay] */
     fun sanitizeRow(row: JsonObject): JsonObject {
         if ((row["kind"] as? JsonPrimitive)?.content != "toolCall") return row
         var current = row
         val output = current["output"] as? JsonObject
         if (output != null) {
             val display = output["display"] as? JsonObject
-            if (display != null && (display["kind"] as? JsonPrimitive)?.content !in OUTPUT_DISPLAY_KINDS) {
-                val newOutput = JsonObject(output.toMutableMap().apply { remove("display") })
-                current = JsonObject(current.toMutableMap().apply { put("output", newOutput) })
+            if (display != null) {
+                when (val cleaned = sanitizeDisplay(display, OUTPUT_DISPLAY_KINDS)) {
+                    null -> current = JsonObject(current.toMutableMap().apply {
+                        put("output", JsonObject(output.toMutableMap().apply { remove("display") }))
+                    })
+                    display -> {}
+                    else -> current = JsonObject(current.toMutableMap().apply {
+                        put("output", JsonObject(output.toMutableMap().apply { put("display", cleaned) }))
+                    })
+                }
             }
         }
         val display = current["display"] as? JsonObject
-        if (display != null && (display["kind"] as? JsonPrimitive)?.content !in ROW_DISPLAY_KINDS) {
-            current = JsonObject(current.toMutableMap().apply { remove("display") })
+        if (display != null) {
+            when (val cleaned = sanitizeDisplay(display, ROW_DISPLAY_KINDS)) {
+                null -> current = JsonObject(current.toMutableMap().apply { remove("display") })
+                display -> {}
+                else -> current = JsonObject(current.toMutableMap().apply { put("display", cleaned) })
+            }
         }
         return current
+    }
+
+    /**
+     * 单个 display 对象消毒：kind 提取失败或不在 [allowedKinds] → 整只剥除（返回 null）；
+     * 在白名单内 → 按 [DISPLAY_ALLOWED_KEYS] 键收缩（未知键剥除，缺陷FZ），无未知键时
+     * 原对象透传（热路径零拷贝）。
+     */
+    private fun sanitizeDisplay(display: JsonObject, allowedKinds: Set<String>): JsonObject? {
+        val kind = (display["kind"] as? JsonPrimitive)?.content ?: return null
+        if (kind !in allowedKinds) return null
+        val allowed = DISPLAY_ALLOWED_KEYS[kind] ?: return null
+        val extra = display.keys.filter { it !in allowed }
+        if (extra.isEmpty()) return display
+        return JsonObject(display.toMutableMap().apply { keys.removeAll(extra.toSet()) })
     }
 }
