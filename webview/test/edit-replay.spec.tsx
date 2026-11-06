@@ -33,7 +33,7 @@ vi.mock('@/ipc/bridge', () => ({
 }))
 
 import '@/i18n/config'
-import { useStore } from '@/store/useStore'
+import { useStore, resetTurnEndGuardsForTest } from '@/store/useStore'
 import { commitStagedRewindCuts } from '@/utils/editHistory'
 
 /* localStorage mock（jsdom 空壳，同 goal-card.spec 模式）*/
@@ -64,6 +64,7 @@ function twoTurns() {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  resetTurnEndGuardsForTest()
   sentRequests.length = 0
   useStore.getState().init()
   sentRequests.length = 0

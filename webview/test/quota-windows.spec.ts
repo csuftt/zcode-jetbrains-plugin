@@ -224,16 +224,17 @@ vi.mock('@/ipc/bridge', () => ({
   sendToJava: () => {},
 }))
 
-import { useStore } from '@/store/useStore'
+import { useStore, resetTurnEndGuardsForTest } from '@/store/useStore'
 
 const SID = 'sess_quota_1'
 
-function pushEvent(type: string, payload: Record<string, unknown>): void {
-  streamEventHandler!(SID, { type, seq: 100, sessionId: SID, turnId: 'turn_q', timestamp: Date.now(), payload })
+function pushEvent(type: string, payload: Record<string, unknown>, turnId = 'turn_q'): void {
+  streamEventHandler!(SID, { type, seq: 100, sessionId: SID, turnId, timestamp: Date.now(), payload })
 }
 
 beforeEach(() => {
   vi.useFakeTimers()
+  resetTurnEndGuardsForTest()
   useStore.getState().init()
   useStore.setState({
     connectionStatus: 'mock',
@@ -263,13 +264,14 @@ describe('store：额度横幅挂钩', () => {
 
   it('turn.failed 同样点亮；新回合开始撤下瞬态（并发），耗尽保留', () => {
     useStore.setState({ streaming: true, streamingMessageId: 'm1' })
-    pushEvent('turn.failed', { error: { type: 'api_error', code: '3010', message: 'concurrency limit' } })
+    pushEvent('turn.failed', { error: { type: 'api_error', code: '3010', message: 'concurrency limit' } }, 'turn_q1')
     expect(useStore.getState().quotaBannerError?.kind).toBe('concurrent-limit')
     pushEvent('turn.started', { turnNumber: 2, messageId: 'm2' })
     expect(useStore.getState().quotaBannerError).toBeNull()
 
     useStore.setState({ streaming: true, streamingMessageId: 'm3', quotaBannerError: null })
-    pushEvent('turn.failed', { error: { type: 'api_error', code: 'token_quota_exceeded', message: 'x' } })
+    // 第二个回合的失败须用新 turnId（每回合一个 id；同 id 重复帧会被终止帧幂等判重拦截）
+    pushEvent('turn.failed', { error: { type: 'api_error', code: 'token_quota_exceeded', message: 'x' } }, 'turn_q2')
     expect(useStore.getState().quotaBannerError?.kind).toBe('window-exhausted')
     pushEvent('turn.started', { turnNumber: 3, messageId: 'm4' })
     expect(useStore.getState().quotaBannerError?.kind).toBe('window-exhausted')

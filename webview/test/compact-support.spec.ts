@@ -34,7 +34,7 @@ vi.mock('@/ipc/bridge', () => ({
   sendToJava: (req: Record<string, unknown>) => { sentRequests.push(req) },
 }))
 
-import { useStore, stopSubagentStatusPolling } from '@/store/useStore'
+import { useStore, stopSubagentStatusPolling, resetTurnEndGuardsForTest } from '@/store/useStore'
 import { isCompactSummaryMessage, isHiddenSyntheticMessage, findTimelinePart } from '@/utils/parseNotification'
 import type { MessageInfo } from '@/types/messages'
 
@@ -49,6 +49,7 @@ function pushEvent(type: string, payload: Record<string, unknown>): void {
 beforeEach(() => {
   vi.useFakeTimers()
   stopSubagentStatusPolling()
+  resetTurnEndGuardsForTest()
   sentRequests.length = 0
   useStore.getState().init()
   sentRequests.length = 0

@@ -33,7 +33,7 @@ vi.mock('@/ipc/bridge', () => ({
   sendToJava: (req: Record<string, unknown>) => { sentRequests.push(req) },
 }))
 
-import { useStore } from '@/store/useStore'
+import { useStore, resetTurnEndGuardsForTest } from '@/store/useStore'
 import { applyStreamEvent, looksLikeQuotaError } from '@/utils/streamReducer'
 import type { StreamEvent } from '@/types/messages'
 
@@ -51,6 +51,7 @@ function mkEvent(type: string, payload: Record<string, unknown>): StreamEvent {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  resetTurnEndGuardsForTest()
   sentRequests.length = 0
   useStore.getState().init()
   sentRequests.length = 0

@@ -38,7 +38,10 @@ vi.mock('@/ipc/bridge', () => ({
 import { useStore } from '@/store/useStore'
 import type { ZCodeMessage } from '@/types/messages'
 
-const SID = 'sess_race_1'
+// 每用例独立会话 id：useStore 模块级的 lastCompletedTurn（终止帧幂等判重，绑 sid）
+// 跨用例不重置，同 sid + 同 turnId 的终止帧会被前用例拦住（缺陷GQ 修复引入）
+let sidSeq = 0
+let SID: string
 
 /** 推一个流式事件（走单推通道，真实环境 turn 生命周期走此通道）*/
 function pushEvent(type: string, payload: Record<string, unknown>, turnId = 'turn_2', seq = 100): void {
@@ -58,6 +61,7 @@ function lastUserMsg(): ZCodeMessage | undefined {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  SID = `sess_race_${++sidSeq}`
   sentRequests.length = 0
   useStore.getState().init() // 注册桥接回调（onMessage/onStreamEvent）
   sentRequests.length = 0 // 清掉 init 触发的 listSessions/listModels

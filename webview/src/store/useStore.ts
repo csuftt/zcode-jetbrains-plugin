@@ -953,7 +953,16 @@ let reconcileLastFingerprint = ''
 let serverActiveTurnId: string | null = null
 /** 客户端最近处理过 turn.completed/failed 的回合 id：usage 响应的 activeTurnId
  *  与之相同 = 服务端清算滞后的「已完成那轮」读数，不得据此复活压缩指示器 */
-let lastCompletedTurnId: string | null = null
+/** 最近完成的回合（跨流通道终止帧幂等判重 + usage 滞后读数 stale 判定共用）。
+ *  绑 sessionId：turnId 只在会话内唯一，跨会话同 id（多会话并行/重装恢复）不得
+ *  互相误判为重复帧 */
+let lastCompletedTurn: { sid: string; turnId: string } | null = null
+
+/** 测试专用：重置终止帧幂等判重状态（模块级，vitest 用例间不自动重置——不重置时
+ *  前用例推进的 turnId 会把后用例同名终止帧误拦，终态善后/flushQueue 全部跳过） */
+export function resetTurnEndGuardsForTest(): void {
+  lastCompletedTurn = null
+}
 /** locateSession 在途应答的解析器（单槽，见 locateSessionTab）*/
 let pendingTabLocate: ((found: boolean) => void) | null = null
 /** listOpenSessions 在途应答解析器（单槽瞬态查询，不入 store state）*/
@@ -6162,14 +6171,18 @@ export function handleResponse(
         // true 并连锁毒化下一回合（turn.started 被压缩守卫吞掉、delta 无处落地
         // → 只转圈，2026-08-24 缺陷）。真实的新压缩回合（autocompact 紧接上一
         // 回合结束）带新 turnId，不受影响
-        const staleCompact = compacting && msg.activeTurnId != null && msg.activeTurnId === lastCompletedTurnId
+        const lastDone = lastCompletedTurn
+        const usageSid = msg.sessionId ?? get().currentSessionId
+        const staleCompact = compacting && msg.activeTurnId != null
+          && usageSid === lastDone?.sid && msg.activeTurnId === lastDone.turnId
         compactingServerConfirmed = compacting && !staleCompact
         if (!staleCompact && get().compacting !== compacting) {
           set({ compacting })
         }
         // 服务端活跃信号（看门狗用）：同一滞后校验对任意 activeTurnId 生效——
         // 回合结束清算滞后的读数不算活跃（否则真断流收尾被豁免成永久转圈）
-        const staleTurnId = msg.activeTurnId != null && msg.activeTurnId === lastCompletedTurnId
+        const staleTurnId = msg.activeTurnId != null
+          && usageSid === lastDone?.sid && msg.activeTurnId === lastDone.turnId
         serverActiveTurnId = staleTurnId ? null : (msg.activeTurnId ?? null)
       }
       if (msg.breakdown) {
@@ -7176,6 +7189,10 @@ function handleStreamBatchDirect(
   let activities = get().subagentActivities
   let turnStarted = false
   let turnEnded = false
+  // 终止帧幂等判重（缺陷GQ，单推路径 handleStreamEvent 同款）：基准须在循环推进
+  // lastCompletedTurn 之前捕获，否则恒不相等
+  const prevCompletedTurn = lastCompletedTurn
+  let endedTurnId: string | null = null
   let modeEvent: 'enter_plan' | 'exit_plan' | undefined
   let turnError: TurnErrorInfo | undefined
   let bgTasks: BackgroundTaskMap | null = null
@@ -7392,12 +7409,22 @@ function handleStreamBatchDirect(
       streamingMessageId = result.streamingMessageId
       if (result.turnEnded) {
         turnEnded = true
-        if (event.turnId) lastCompletedTurnId = event.turnId
+        if (event.turnId) {
+          lastCompletedTurn = { sid: sessionId, turnId: event.turnId }
+          endedTurnId = event.turnId
+        }
       }
       if (result.modeEvent) modeEvent = result.modeEvent
       if (result.turnError) turnError = result.turnError
     }
   }
+
+  // 同一回合终止帧重复到达判重（缺陷GQ，语义见循环内 prevCompletedTurnId 注释）：
+  // 消息归约照常并入（completed 补时间戳幂等），终态善后（streaming 清理/flushQueue/
+  // 重拉）整批跳过——照跑会把 flushQueue 刚发出的排队消息所在新回合流式清掉，
+  // 队列守卫失效连环发出
+  const duplicateTurnEnd = turnEnded && endedTurnId != null
+    && sessionId === prevCompletedTurn?.sid && endedTurnId === prevCompletedTurn.turnId
 
   // 一次性 set（整批只触发一次重渲染）
   const patch: Partial<StoreState> = {
@@ -7417,7 +7444,7 @@ function handleStreamBatchDirect(
   }
   // 同批 completed+started（服务端自动续轮）时保留 reducer 返回的新 streamingMessageId，
   // 不能按"turn 结束"清空——清了后续 delta 全部丢失（实时断流）
-  if (turnEnded && !turnStarted) {
+  if (turnEnded && !turnStarted && !duplicateTurnEnd) {
     cancelSwitchStallHint()
     patch.streaming = false
     patch.streamingMessageId = null
@@ -7473,7 +7500,8 @@ function handleStreamBatchDirect(
   // 推断值覆盖回去。推断值保持显示到回合结束，由下方 turnEnded 路径
   //（state.updated 即时推送 + loadSettings）校正
 
-  if (turnEnded) {
+  // 重复终止帧跳过善后（finalizeEditReplay/flushQueue/轮末重拉——首帧已做过）
+  if (turnEnded && !duplicateTurnEnd) {
     console.log(`[store] turn 结束（批量），重新拉取消息确保一致`)
     // 编辑编排收尾（收口见 finalizeEditReplayOnTurnEnd，同单推路径）：v4 通道重发由
     // 服务端完成，编辑后新 turn 结束即终点（含失败回合——编辑本身已生效）；stopping=
@@ -7769,12 +7797,23 @@ function handleStreamEvent(
     retireEditReplayOnTurnStarted(event.payload, set, get)
   }
 
+  // 终止帧幂等判重基准（缺陷GQ）：applyStreamEvent 之前捕获——applyStreamEvent 之后
+  // lastCompletedTurn 已被推进为本帧 turnId，再比对就恒不相等、判重失效
+  const prevCompletedTurn = lastCompletedTurn
   const { messages, streamingMessageId, turnEnded, modeEvent, turnError } = applyStreamEvent(
     get().messages,
     event,
     get().streamingMessageId,
   )
-  if (turnEnded && event.turnId) lastCompletedTurnId = event.turnId
+  if (turnEnded && event.turnId) lastCompletedTurn = { sid: sessionId, turnId: event.turnId }
+  // 同一回合的终止帧第二次到达（缺陷GQ）：Java stop 序列的合成帧（NEW CLI 被停回合
+  // 不发终态帧，2s 后合成补位）与迟到的服务端真实帧双到——第二次若照常走终态善后，
+  // 会把 flushQueue 刚发出的下一条消息所在新回合的 streaming 清掉，队列守卫失效，
+  // 剩余排队项连环发出（点「立即」后多条同时发出的根因）。同 turnId 的终止帧只
+  // 做消息归约（幂等），善后（清流式/flushQueue/重拉）只跑一次。turnId 缺失的帧
+  // 不拦（legacy 帧可能无 turnId，保持原行为）
+  const duplicateTurnEnd = turnEnded && !!event.turnId
+    && sessionId === prevCompletedTurn?.sid && event.turnId === prevCompletedTurn.turnId
 
   // turn.started：进入流式，清除 waiting（开始有内容了）
   if (event.type === 'turn.started') {
@@ -7796,7 +7835,9 @@ function handleStreamEvent(
   // exit_plan 不立即回读 settings（同批量路径：批准瞬间 state 层仍是旧值，回读=回滚）
 
   // turn 结束：重新拉完整消息确保数据一致，清除流式状态，自动发送队列下一条
-  if (turnEnded) {
+  // （重复终止帧跳过全部善后——streaming 清理在此块内，照跑会把 flushQueue 刚开的
+  // 新回合流式清掉，见上方 duplicateTurnEnd 注释）
+  if (turnEnded && !duplicateTurnEnd) {
     cancelSwitchStallHint()
     const wasCompacting = get().compacting
     // 编辑重放的 rewind turn 结束收尾（收口见 finalizeEditReplayOnTurnEnd，同批量路径）：
