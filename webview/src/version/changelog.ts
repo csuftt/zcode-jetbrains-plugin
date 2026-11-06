@@ -23,6 +23,58 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    "version": "0.4.3",
+    "date": "2026-11-06",
+    "zh": {
+      "sections": [
+        {
+          "title": "新增",
+          "items": [
+            "**设置页 MCP 服务器管理**：可在设置页直接新增、编辑、删除 MCP 服务器（用户级 / 项目级作用域），并查看各服务器的信任状态与工具详情。",
+            "**手机远程支持多工作区**：手机端可接入挂载目录工作区，直接打开和操作其他目录的项目与会话。",
+            "**编辑器右键发送到其他工作区**：右键菜单可直接把当前文件 / 选中的代码发送到其他工作区标签的输入框（多目标时收进子菜单选择，新标签自动创建）。",
+            "**标签页目录色块**：标签页、标题目录徽标、历史会话列表三处统一按目录配色，不同目录的会话一眼可辨；无会话的空标签以空心色块标识，支持在标题栏一键批量关闭。",
+            "**历史会话页默认定位当前目录**：打开历史会话页自动选中当前标签所在目录。",
+            "**会话列表更快呈现**：打开会话列表先展示会话条目，消息数 / 大小等统计信息随后补充，不再等待全部统计完成。"
+          ]
+        },
+        {
+          "title": "修复",
+          "items": [
+            "修复手机端打开大会话时反复重连、容易断开的问题。",
+            "修复手机端任务列表在同一目录被多个项目关联时出现重复条目的问题。",
+            "修复新开标签页发送消息偶尔落错目录的问题。",
+            "修复同时运行多个 JetBrains IDE 时，AI 的内嵌浏览器操作（页面快照 / 截图 / 执行脚本）可能作用到错误 IDE 的问题。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "**MCP server management in settings**: add, edit and delete MCP servers directly in the settings page (user / project scope), with per-server trust status and tool details viewable.",
+            "**Mobile remote for multi-workspace**: the mobile client can access mounted-directory workspaces, opening and operating projects and sessions in other directories.",
+            "**Send to other workspaces from the editor context menu**: send the current file / selected code straight to another workspace tab's input box (multiple targets collapse into a submenu; new tabs are created automatically).",
+            "**Directory color blocks on tabs**: tabs, the title-bar directory badge and the history session list share a unified per-directory color scheme, so sessions from different directories are told apart at a glance; empty tabs without a session show a hollow color block and can be batch-closed from the title bar.",
+            "**History page locates the current directory**: opening the history page auto-selects the directory of the current tab.",
+            "**Faster session list**: the list renders immediately while message counts / sizes fill in afterwards, instead of waiting for all statistics to finish."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "Fixed the mobile client repeatedly reconnecting or dropping connections when opening large sessions.",
+            "Fixed duplicated entries in the mobile task list when one directory is associated with multiple projects.",
+            "Fixed messages sent from newly opened tabs occasionally landing in the wrong directory.",
+            "Fixed AI browser operations (page snapshots / screenshots / script execution) landing on the wrong IDE when multiple JetBrains IDEs run simultaneously."
+          ]
+        }
+      ]
+    }
+  },
+  {
     "version": "0.4.2",
     "date": "2026-10-29",
     "zh": {

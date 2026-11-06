@@ -55,7 +55,7 @@ object McpToolsClient {
 
     private const val PROTOCOL_VERSION = "2025-06-18"
     private const val CLIENT_NAME = "zcode-idea-plugin"
-    private const val CLIENT_VERSION = "0.4.2"
+    private const val CLIENT_VERSION = "0.4.3"
 
     /**
      * ZCode modern era 协议版本（宿主内置 server 如 node_repl 专用，2026-07-28）：
