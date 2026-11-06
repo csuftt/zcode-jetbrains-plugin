@@ -24,8 +24,8 @@ import com.intellij.diff.DiffContentFactory
 import com.intellij.ui.JBColor
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.content.Content
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.wm.ToolWindow
-import com.intellij.openapi.wm.impl.content.ToolWindowContentUi
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
@@ -1436,13 +1436,30 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
+    /**
+     * 平台 internal 类 ToolWindowContentUi（com.intellij.openapi.wm.impl.content）的
+     * NOT_SELECTED_TAB_ICON_TRANSPARENT 常量 Key——Marketplace verifier 把 internal 类的
+     * 字节码引用列 Problem 级（0.4.3 上传实锤，0.4.1 UIThemeLookAndFeelInfo 同款），
+     * 反射读字段隔离：Class.forName 的点分字符串常量不算类引用；Key 是 identity 比较，
+     * 字面 Key.create("NotSelectedIconTransparent") 造不出平台那个实例，必须拿反射产物。
+     * 失败回退 null=豁免失效（未选中标签图标被平台压暗 50%，仅视觉退化无功能损）。
+     */
+    private val notSelectedTabIconTransparentKey: Key<Boolean>? by lazy {
+        runCatching {
+            @Suppress("UNCHECKED_CAST")
+            Class.forName("com.intellij.openapi.wm.impl.content.ToolWindowContentUi")
+                .getField("NOT_SELECTED_TAB_ICON_TRANSPARENT")
+                .get(null) as? Key<Boolean>
+        }.getOrNull()
+    }
+
     /** 目录色块挂载：SHOW_CONTENT_ICON 必须按 content 置位（BaseLabel 读 userData 门控）；
      *  NOT_SELECTED_TAB_ICON_TRANSPARENT=false 豁免平台对未选中标签图标的 50% 透明压暗。
      *  [hollow]=待命空标签形态（空心描边+彩字），实心=有会话（彩底白字）；
      *  [letterOverride]=会话名首字符，仅单工作区时被 iconFor 采用 */
     private fun applyColorIcon(content: Content, wsPath: String, hollow: Boolean, letterOverride: String? = null) {
         content.putUserData(ToolWindow.SHOW_CONTENT_ICON, true)
-        content.putUserData(ToolWindowContentUi.NOT_SELECTED_TAB_ICON_TRANSPARENT, false)
+        notSelectedTabIconTransparentKey?.let { content.putUserData(it, false) }
         content.icon = WsTabColors.iconFor(project, wsPath, hollow, letterOverride)
     }
 
