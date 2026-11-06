@@ -3,8 +3,8 @@ package com.zcode.ideaplugin.protocol
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * 出站 v4 帧消毒（缺陷FV 四轮定案，2026-11-05）：
@@ -21,6 +21,10 @@ import kotlinx.serialization.json.jsonPrimitive
  * 消毒策略：白名单外的 display 对象整只剥除（output.text 等正文保留，H5 渲染退化为
  * 纯文本不丢行）。快照 rows、deltas 的 row.appended/row.upserted、rowsRange 结果行
  * 三个入口共用 [sanitizeRow]。无违例帧原对象透传（热路径零拷贝）。
+ *
+ * kind 提取一律 `as? JsonPrimitive` 安全转型，**不用 jsonPrimitive 扩展**——后者对
+ * 对象/数组形状抛 IllegalArgumentException，会被调用侧 runCatching 放大成整帧静默
+ * 丢弃（0.4.3 审查：把「单行毒化」换成「整帧丢失」，同症状家族）。
  */
 object V4FrameSanitizer {
 
@@ -43,7 +47,7 @@ object V4FrameSanitizer {
     fun sanitizeOutbound(frame: JsonObject): JsonObject {
         val inner = frame["frame"] as? JsonObject ?: return frame
         val payload = inner["payload"] as? JsonObject ?: return frame
-        val changed = when (payload["kind"]?.jsonPrimitive?.content) {
+        val changed = when ((payload["kind"] as? JsonPrimitive)?.content) {
             "snapshot" -> {
                 val snapshot = payload["snapshot"] as? JsonObject ?: return frame
                 val rows = snapshot["rows"] as? JsonObject ?: return frame
@@ -92,18 +96,18 @@ object V4FrameSanitizer {
 
     /** 单行消毒：toolCall 行的 output.display / 行级 display 白名单外剥除 */
     fun sanitizeRow(row: JsonObject): JsonObject {
-        if (row["kind"]?.jsonPrimitive?.content != "toolCall") return row
+        if ((row["kind"] as? JsonPrimitive)?.content != "toolCall") return row
         var current = row
         val output = current["output"] as? JsonObject
         if (output != null) {
             val display = output["display"] as? JsonObject
-            if (display != null && display["kind"]?.jsonPrimitive?.content !in OUTPUT_DISPLAY_KINDS) {
+            if (display != null && (display["kind"] as? JsonPrimitive)?.content !in OUTPUT_DISPLAY_KINDS) {
                 val newOutput = JsonObject(output.toMutableMap().apply { remove("display") })
                 current = JsonObject(current.toMutableMap().apply { put("output", newOutput) })
             }
         }
         val display = current["display"] as? JsonObject
-        if (display != null && display["kind"]?.jsonPrimitive?.content !in ROW_DISPLAY_KINDS) {
+        if (display != null && (display["kind"] as? JsonPrimitive)?.content !in ROW_DISPLAY_KINDS) {
             current = JsonObject(current.toMutableMap().apply { remove("display") })
         }
         return current

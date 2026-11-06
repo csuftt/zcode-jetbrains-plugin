@@ -58,8 +58,9 @@ object ZCodeLinkedWorkspaces {
     /**
      * 目录的色板序号（幂等）：**关联列表内的目录按列表位置取色**（chips 顺序=色板
      * 顺序）；列表外的目录（已移除关联的旧会话/落位）按 kv 历史映射兜底（无则计数器
-     * 轮询分配持久化，与列表内位置无关）。协议 handler 均在 EDT 串行执行，
-     * @Synchronized 只防启动 reconcile 并发。
+     * 轮询分配持久化，与列表内位置无关）。调用方跨线程：webview 桥回调与远程协议
+     * handler（channelExecutor 多线程池，非 EDT 非串行）各有入口，@Synchronized
+     * 串行化全部并发（含启动 reconcile），不能只当 reconcile 防抖看。
      */
     @Synchronized
     fun colorIndexFor(project: Project, path: String): Int {

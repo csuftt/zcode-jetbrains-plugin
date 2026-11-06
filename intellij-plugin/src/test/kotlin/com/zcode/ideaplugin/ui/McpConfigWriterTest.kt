@@ -135,6 +135,14 @@ class McpConfigWriterTest {
     }
 
     @Test
+    fun `写回持跨进程点lock文件锁`() {
+        val f = file()
+        assertNull(McpConfigWriter.addServer(f, "x", entry()))
+        assertTrue(tmp.resolve("config.json.lock").toFile().isFile, "写回应创建 .lock 跨进程锁文件（0.4.3 审查补齐）")
+        assertNull(McpConfigWriter.deleteServer(f, "x"), "锁文件存在不影响后续读写")
+    }
+
+    @Test
     fun `作用域解析文件路径`() {
         val user = McpConfigWriter.resolveFile("user", null)
         assertNotNull(user)

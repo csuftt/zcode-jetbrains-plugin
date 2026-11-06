@@ -156,4 +156,26 @@ class V4FrameSanitizerTest {
         val clean = buildJsonArray { add(fileDiffRow(1)) }
         assertSame(clean, V4FrameSanitizer.sanitizeRows(clean), "干净数组应零拷贝")
     }
+
+    @Test
+    fun `毒形kind对象数组不炸帧不丢帧 原样透传`() {
+        // jsonPrimitive 扩展对对象/数组形状抛 IllegalArgumentException，曾被调用侧
+        // runCatching 放大成整帧静默丢（0.4.3 审查）；as? 安全转型后按不匹配透传
+        val poisonRow = buildJsonObject {
+            put("rowId", 1); put("turnId", "t")
+            put("kind", buildJsonObject { put("evil", true) })
+            put("display", buildJsonObject { put("kind", buildJsonArray { add("x") }) })
+        }
+        val frame = snapshotFrame(poisonRow)
+        assertSame(frame, V4FrameSanitizer.sanitizeOutbound(frame), "行级毒形 kind 按不匹配透传")
+        val poisonPayload = buildJsonObject {
+            put("topic", "conversation/sess_x")
+            put("frame", buildJsonObject {
+                put("payload", buildJsonObject { put("kind", buildJsonArray { add("deltas") }) })
+            })
+        }
+        assertSame(poisonPayload, V4FrameSanitizer.sanitizeOutbound(poisonPayload), "payload 毒形 kind 透传")
+        val arr = buildJsonArray { add(poisonRow) }
+        assertSame(arr, V4FrameSanitizer.sanitizeRows(arr), "rowsRange 入口同验")
+    }
 }

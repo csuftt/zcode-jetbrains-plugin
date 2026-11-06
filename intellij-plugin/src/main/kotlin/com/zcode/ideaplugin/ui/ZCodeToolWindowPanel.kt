@@ -752,7 +752,7 @@ class ZCodeToolWindowPanel(
                     if (op != "__jsLog") {
                         frontendReady = true
                         // 懒加载标签此刻才算「表态完毕」：boot 后仍无绑定（恢复失败/待命）
-                        // 才该挂「°」标，boot 前不标（TabState 里可能有会话，等恢复）
+                        // 才该落待命视觉（空心色块+tooltip），boot 前不标（TabState 里可能有会话，等恢复）
                         applyTabDisplayName()
                         ZCodeToolWindowFactory.refreshTitleToolbar(project) // 空标签数量变化，标题栏按钮显隐重算
                         log.info("Frontend ready: first JS message arrived (op=$op, ${System.currentTimeMillis() - panelCreatedAt}ms after panel creation)")
@@ -1402,7 +1402,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
     fun attachContent(content: Content) {
         attachedContent = content
         if (baseTabTitle.isBlank()) baseTabTitle = content.displayName ?: ""
-        // 出生即刷一次 displayName：新标签/待命恢复标签此刻挂上「°」前缀
+        // 出生即刷一次 displayName：新标签/待命恢复标签此刻落待命视觉（空心色块标识）
         // （标题栏按钮显隐的刷新不在此处——本标签尚未 addContent 进 cm，时机由 Factory 的
         //   contentAdded 接管）
         applyTabDisplayName()
@@ -1507,7 +1507,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun handleClearTabSession(): JsonObject {
         currentSessionId = null
-        applyTabDisplayName() // 进入待命态：° 前缀 + 「无会话」提示 tooltip（下面两个复位可能 early-return 不刷新）
+        applyTabDisplayName() // 进入待命态：空心色块 + 「无会话」提示 tooltip（下面两个复位可能 early-return 不刷新）
         refreshTabColorIcon() // 待命落位色块：取色轴切到落位目录（lastListedWorkspace/初始目录链）
         ZCodeToolWindowFactory.refreshTitleToolbar(project) // 空标签数量变化，标题栏按钮显隐重算
         setTabStreaming(false)
@@ -1951,7 +1951,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
     @Volatile
     private var lastAppliedStandby = false
 
-    /** 本标签当前是否为无会话空标签（° 标记 + 批量关闭 + 关闭免确认共用判据）*/
+    /** 本标签当前是否为无会话空标签（空心色块标识 + 批量关闭 + 关闭免确认共用判据）*/
     fun isStandbyUnbound(): Boolean =
         isStandbyUnbound(currentSessionId, initialSessionId, frontendReady)
 
@@ -6585,7 +6585,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
         // 记录当前会话（标签持久化 + 生成中状态归属判断）+ 同步 TabState
         currentSessionId = sessionId
-        applyTabDisplayName() // 会话落位：标签名「°」前缀消失
+        applyTabDisplayName() // 会话落位：待命视觉（空心块+tooltip）清除
         ZCodeToolWindowFactory.refreshTitleToolbar(project) // 空标签数量变化，标题栏按钮显隐重算
         persistSelfTabState()
 

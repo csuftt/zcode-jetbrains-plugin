@@ -74,8 +74,34 @@ object McpConfigWriter {
 
     // ============ 读-改-写骨架（mcp.servers 节点替换，其余键保序保留）============
 
-    /** mutator 收 servers 节点返回新 servers 节点；业务冲突抛 IllegalStateException = 拒绝文案 */
-    private fun updateFile(file: File, mutator: (JsonObject) -> JsonObject): String? {
+    /**
+     * mutator 收 servers 节点返回新 servers 节点；业务冲突抛 IllegalStateException = 拒绝文案。
+     * 进程内锁由调用方持有（synchronized(WRITE_LOCK)），此处再叠 .lock 跨进程文件锁——
+     * config.json 是 CLI 也在写的活文件，跨进程并发写必须有防护（0.4.3 审查补齐：
+     * KDoc 早已声称此锁而实现缺失，ProviderConfigWriterV2 同款分工）。
+     */
+    private fun updateFile(file: File, mutator: (JsonObject) -> JsonObject): String? =
+        try {
+            // 父目录先建：FileChannel.open 只建文件不建父目录，首次添加场景 .zcode/ 尚不存在
+            file.parentFile?.let { Files.createDirectories(it.toPath()) }
+            // 官方 withFileLock 同款：advisory 独占文件锁串行多进程写方；OS 级锁
+            // 进程崩溃自动释放无残留。写入毫秒级，阻塞等待即可。
+            java.nio.channels.FileChannel.open(
+                file.toPath().resolveSibling(file.name + ".lock"),
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE,
+            ).use { ch ->
+                ch.lock()
+                updateUnderLocks(file, mutator)
+            }
+        } catch (_: java.nio.channels.OverlappingFileLockException) {
+            // 同进程重入理论不可达（WRITE_LOCK 已串行），防御性拒绝
+            "文件锁冲突，放弃写入: ${file.name}"
+        } catch (e: Exception) {
+            "获取文件锁失败（放弃写入）: ${e.message}"
+        }
+
+    /** 进程内锁 + 跨进程 .lock 都已持有的读-改-写本体（ProviderConfigWriterV2 同名分工） */
+    private fun updateUnderLocks(file: File, mutator: (JsonObject) -> JsonObject): String? {
         val root: JsonObject = if (file.isFile) {
             try {
                 Json.parseToJsonElement(file.readText(Charsets.UTF_8)).jsonObject

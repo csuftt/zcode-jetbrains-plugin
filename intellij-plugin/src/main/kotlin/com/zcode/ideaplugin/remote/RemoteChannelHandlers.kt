@@ -181,6 +181,32 @@ internal fun buildRemoteConfigOptions(settings: JsonObject): kotlinx.serializati
     return kotlinx.serialization.json.JsonArray(items)
 }
 
+/** 附件引用解析结果：artifacts 内 sid 子目录 + 文件名段（两段均已过穿越校验） */
+internal data class ArtifactRef(val dir: java.nio.file.Path, val name: String)
+
+/**
+ * 解析手机附件引用 zcode-artifact://&lt;sid&gt;/&lt;name&gt; → artifacts 落盘目录与文件名，
+ * 非法（前缀/形态/路径穿越）返回 null。sid 与 name 段内均不允许分隔符与 ..——
+ * sid 段原漏校验，zcode-artifact://../config.json 会把目录逃逸到 ~/.zcode/cli 层
+ * （0.4.3 审查发现）；解析归一后再验仍落在 artifacts 子树内（Windows 下 resolve
+ * 对绝对路径/盘符的语义作双保险兜底）。抽 internal 纯函数供单测（同 trimRowsRangeResult 惯例）。
+ */
+internal fun parseArtifactRef(ref: String): ArtifactRef? {
+    val prefix = "zcode-artifact://"
+    if (!ref.startsWith(prefix)) return null
+    val rel = ref.removePrefix(prefix)
+    val slash = rel.indexOf('/')
+    if (slash <= 0) return null
+    val sid = rel.substring(0, slash)
+    val name = rel.substring(slash + 1)
+    if (sid.contains('/') || sid.contains("\\") || sid.contains("..")) return null
+    if (name.contains('/') || name.contains("\\") || name.contains("..")) return null
+    val root = java.nio.file.Path.of(System.getProperty("user.home"), ".zcode", "cli", "artifacts")
+    val dir = root.resolve(sid)
+    if (!dir.normalize().startsWith(root)) return null
+    return ArtifactRef(dir, name)
+}
+
 /**
  * 手机远程 channel 语义层（M0 报告映射表实现，混合路线）：
  * - 发消息走经典 session/send（成熟通道），流式走 v4/conversation/subscribe 直通
@@ -1108,35 +1134,24 @@ class RemoteChannelHandlers(private val service: ZCodeRemoteService) {
             // 分块回 {totalBytes, mediaType, dataBase64, nextOffset}。块收敛单片预算内
             //（384KB，多分片 ~1MB 帧手机断连——七轮教训）
             "attachmentReadV4" -> {
-                val prefix = "zcode-artifact://"
-                val ref = args["ref"]?.jsonPrimitive?.contentOrNull
-                    ?: return responder.error("ref required")
-                if (!ref.startsWith(prefix)) return responder.error("unsupported ref: ${ref.take(40)}")
-                val rel = ref.removePrefix(prefix)
-                val slash = rel.indexOf('/')
-                if (slash <= 0) return responder.error("malformed ref")
-                val refSid = rel.substring(0, slash)
-                val refName = rel.substring(slash + 1)
-                // 防路径穿越：段内不允许分隔符与 ..
-                if (refName.contains('/') || refName.contains("\\") || refName.contains("..")) {
-                    return responder.error("malformed ref name")
-                }
+                // ref 解析与穿越校验收口 parseArtifactRef（0.4.3 审查：sid 段原漏校验）
+                val artifact = parseArtifactRef(
+                    args["ref"]?.jsonPrimitive?.contentOrNull ?: return responder.error("ref required"),
+                ) ?: return responder.error("malformed ref")
                 val offset = args["offset"]?.jsonPrimitive?.longOrNull ?: 0L
                 val requested = args["limit"]?.jsonPrimitive?.longOrNull ?: ROWSRANGE_BUDGET_BYTES.toLong()
                 val limit = requested.coerceIn(1L, ROWSRANGE_BUDGET_BYTES.toLong())
                 try {
-                    val dir = java.nio.file.Path.of(
-                        System.getProperty("user.home"), ".zcode", "cli", "artifacts", refSid)
-                    val exact = dir.resolve(refName)
+                    val exact = artifact.dir.resolve(artifact.name)
                     val file = when {
                         java.nio.file.Files.isRegularFile(exact) -> exact
                         else -> runCatching {
-                            java.nio.file.Files.list(dir).use { stream ->
-                                stream.filter { p -> p.fileName.toString().endsWith(refName) }
+                            java.nio.file.Files.list(artifact.dir).use { stream ->
+                                stream.filter { p -> p.fileName.toString().endsWith(artifact.name) }
                                     .findFirst().orElse(null)
                             }
                         }.getOrNull()
-                    } ?: return responder.error("artifact not found: ${refName.take(60)}")
+                    } ?: return responder.error("artifact not found: ${artifact.name.take(60)}")
                     val text = java.nio.file.Files.readString(file)
                     // 落盘形态 data:<mime>;base64,<载荷>
                     val comma = text.indexOf(",") + 1
