@@ -168,4 +168,27 @@ class ZCodeBrowserCdpDiscoveryTest {
             }
         }
     }
+
+    @Test
+    fun `宿主 system 目录候选钉首位不被别家产品新 mtime 挤下`() {
+        // 缺陷FX 回归锁：多 JetBrains 产品并存时，别家产品后启动 jcef_cache mtime 更新，
+        // mtime 合并排序曾让发现池先试别家 CDP server，AI 浏览器命令全部路由到别的 IDE 组件
+        val store = MemStore()
+        ZCodeEnvChecker.setStoreForTest(store)
+        val variant = File(PathManager.getSystemDir().toFile(), "jcef_cache-cdp-unit-test")
+        assumeTrue(variant.mkdirs() || variant.isDirectory, "测试 system 目录不可写：$variant")
+        val f = writePortFile(variant, 1) // 本测试只验证候选顺序，端口可达性由 cdpBaseUrl 逐个 probe
+        f.setLastModified(0L) // 比机器上任何别家产品候选都旧 = 模拟别家 IDE 后启动场景
+        try {
+            val found = ZCodeBrowserExecutor.findDevToolsActivePortFiles()
+            val hostIdx = found.indexOfFirst { it.canonicalPath == f.canonicalPath }
+            assumeTrue(hostIdx >= 0, "system 目录变体未被发现（本机布局无该候选）")
+            assertEquals(
+                0, hostIdx,
+                "无显式配置时宿主候选必须钉自动池首位（别家 mtime 更新也不得越过）：${found.map { it.path }}",
+            )
+        } finally {
+            variant.deleteRecursively()
+        }
+    }
 }

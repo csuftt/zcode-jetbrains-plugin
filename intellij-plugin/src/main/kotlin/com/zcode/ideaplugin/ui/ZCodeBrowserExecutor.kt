@@ -139,10 +139,14 @@ class ZCodeBrowserExecutor(private val project: Project) {
                 else -> java.io.File(System.getProperty("user.home"), ".cache/JetBrains")
             }
 
-            val auto = buildList {
-                if (systemDir != null) addAll(devToolsPortFilesUnderSystem(systemDir))
-                addAll(devToolsPortFilesUnderHomeBase(homeBase))
-            }.sortedByDescending { it.lastModified() }
+            // 宿主自身 system 目录命中的候选钉自动池首位：多 JetBrains 产品并存时，
+            // 别家产品（后启动的 PyCharm/WebStorm 等）jcef_cache 的 mtime 往往比宿主新，
+            // mtime 合并排序会让发现池先试别家的 CDP server——快照/截图/evaluate 全部
+            // 路由到别的 IDE 的 JCEF 组件上（读错内容+向别家组件注入脚本，缺陷FX 实测）。
+            val hostFiles = if (systemDir != null) devToolsPortFilesUnderSystem(systemDir) else emptyList()
+            val auto = hostFiles + devToolsPortFilesUnderHomeBase(homeBase)
+                .filter { f -> hostFiles.none { h -> h.dedupKey() == f.dedupKey() } }
+                .sortedByDescending { it.lastModified() }
 
             for (f in auto) ordered.putIfAbsent(f.dedupKey(), f)
             return ordered.values.toList()
