@@ -76,6 +76,13 @@
     flex-direction: column;
     gap: 8px;
 
+    // 子项一律不收缩：长描述时 flex 收缩会把带 overflow 的参数表压成一条缝
+    // （table-wrap 因 overflow:auto 其 min-height:auto 解析为 0，可被无限压缩），
+    // 超出高度统一走 body 整体滚动
+    > * {
+      flex-shrink: 0;
+    }
+
     &::-webkit-scrollbar {
       width: 6px;
     }
@@ -91,6 +98,18 @@
     color: var(--text-secondary);
     white-space: pre-wrap;
     word-break: break-word;
+    // 长描述限高内部滚动，避免占满弹窗把输入参数挤到屏幕外
+    max-height: 40vh;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 3px;
+    }
   }
 
   &__section-title {
