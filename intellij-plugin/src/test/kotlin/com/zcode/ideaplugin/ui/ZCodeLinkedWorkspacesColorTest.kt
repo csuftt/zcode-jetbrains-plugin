@@ -102,6 +102,37 @@ class ZCodeLinkedWorkspacesColorTest {
     }
 
     @Test
+    fun `project hue rotation pushes rest back`() {
+        assertEquals(-1, WsTabColors.clampProjectHue(null), "缺省=默认金黄")
+        assertEquals(-1, WsTabColors.clampProjectHue(99), "越界收默认金黄")
+        assertEquals(2, WsTabColors.clampProjectHue(2))
+        // 默认金黄/自定义 hex（-2）：都不占轮换序列，目录按位置直轮（0=橙起）
+        assertEquals(-2, WsTabColors.clampProjectHue(-2), "自定义档保留")
+        assertEquals(0, WsTabColors.hueIndexForLink(0, -2), "自定义色不占序列：目录直轮")
+        assertEquals(0, WsTabColors.hueIndexForLink(0, -1))
+        assertEquals(8, WsTabColors.hueIndexForLink(8, -1))
+        assertEquals(0, WsTabColors.hueIndexForLink(9, -1), "位置回绕取模")
+        // 选中青(k=1)：项目=青（排所有色块之首），金黄降入目录序列且排第一（-1=金黄），
+        // 其余色相去掉青后推——目录序列=[金黄, 橙, 蓝, 紫, 深紫, 洋红, 紫红, 粉红, 红]
+        assertEquals(-1, WsTabColors.hueIndexForLink(0, 1), "第1个目录=金黄（参与序列且排第一）")
+        assertEquals(0, WsTabColors.hueIndexForLink(1, 1), "第2个目录=橙")
+        assertEquals(2, WsTabColors.hueIndexForLink(2, 1), "第3个目录=蓝（青已升项目不在目录位）")
+        assertEquals(8, WsTabColors.hueIndexForLink(8, 1), "第9个目录=红")
+        assertEquals(-1, WsTabColors.hueIndexForLink(9, 1), "第10个目录回绕金黄")
+        // 选中红(k=8)：目录序列=[金黄, 橙, 青, 蓝, 紫, 深紫, 洋红, 紫红, 粉红]
+        assertEquals(-1, WsTabColors.hueIndexForLink(0, 8))
+        assertEquals(0, WsTabColors.hueIndexForLink(1, 8))
+        assertEquals(7, WsTabColors.hueIndexForLink(8, 8))
+        // 无重复：任一项目色下 9 个目录色相互异（金黄+8色相）且不含项目色
+        for (k in 0..8) {
+            val hues = (0..8).map { WsTabColors.hueIndexForLink(it, k) }
+            assertEquals(9, hues.toSet().size, "k=$k 目录 9 色相互异")
+            assertTrue(k !in hues, "k=$k 目录色不与项目色撞色")
+            assertTrue(-1 in hues, "k=$k 金黄参与目录序列")
+        }
+    }
+
+    @Test
     fun `tooltip html uses badge ratio tint over tooltip bg`() {
         // 红@14% 混黑底：36/255*255=36→#240000；红@75% 混白前景：191/255 红+64/255 白→#ff4040
         val html = WsTabColors.tooltipHtml(

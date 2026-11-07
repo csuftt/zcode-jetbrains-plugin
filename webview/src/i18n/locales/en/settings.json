@@ -56,6 +56,11 @@
     "hint": "Drag to adjust directory color block shade (tab blocks, badges, history dots) in real time: darker to the left, brighter to the right. 50% is the recommended default; the arrow icon restores it.",
     "reset": "Reset to default"
   },
+  "wsProject": {
+    "label": "Default block color (this project)",
+    "hint": "Dedicated color of this project's tab block: gold by default. Picking another color moves it to the front of the directory color rotation and shifts the rest back.",
+    "default": "Default (gold)"
+  },
   "language": {
     "label": "Language",
     "hint": "Switch the UI language; applies to all session tabs"

@@ -23,6 +23,10 @@ import {
   getWsColorDepth,
   setWsColorDepth,
   DEFAULT_WS_DEPTH,
+  getWsProjectColor,
+  setWsProjectColor,
+  setWsProjectCustomHex,
+  getWsProjectCustomHex,
   type CustomColorKey,
   type FontScaleLevel,
 } from '@/utils/appearance'
@@ -277,6 +281,9 @@ export function BasicSettingsView() {
       dst.style.maxWidth = `${src.offsetWidth}px`
     }
     sync()
+    // jsdom 无 ResizeObserver（挂本组件的既有 spec 环境）：缺 API 就只做首帧 sync，
+    // 观察器只在真实浏览器（Chrome/IAB 均有）需要
+    if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(sync)
     ro.observe(src)
     return () => ro.disconnect()
@@ -296,6 +303,10 @@ export function BasicSettingsView() {
   const [chatBar, setChatBar] = useState(() => getCustomColor('chatBar'))
   const [userMsg, setUserMsg] = useState(() => getCustomColor('userMsg'))
   const [wsDepth, setWsDepth] = useState(() => getWsColorDepth())
+  const [wsProjectHue, setWsProjectHue] = useState(() => getWsProjectColor())
+  const [wsProjectHexInput, setWsProjectHexInput] = useState(() =>
+    getWsProjectColor() === -2 ? getWsProjectCustomHex() : '',
+  )
 
   // 下拉选中值 = 当前生效语言（手动选择即切换，广播同步时随 languageChanged 刷新）
   const currentLanguage = isSupportedLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE
@@ -465,6 +476,94 @@ export function BasicSettingsView() {
         </small>
       </section>
 
+      {/* 默认色块颜色（本项目）（2026-11-07）：首个=默认金黄，其余 9 色按当前轮换顺序
+          加载（选中某色后该色移到轮换序列首位、目录色依次后推，展示顺序同步）。
+          色板底色全部走 CSS 变量（--ws-badge-gold / --ws-dir-N）：深度滑条与主题
+          切换自动跟随，无需 JS 算色；选中值经 appearanceSave 回存 IDE 权威源 */}
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-symbol-color" />
+          <span className="basic-settings__field-label">{t('settings.wsProject.label')}</span>
+        </div>
+        <div className="basic-settings__color-presets">
+          {/* 首个=当前项目色（active）：默认态金黄永远排第一；选中色相后该色顶到首位、
+              金黄降入目录序列且排第二位（其余后推）——展示顺序=目录轮换实际顺序 */}
+          <button
+            type="button"
+            title={t('settings.wsProject.default')}
+            className={cx('basic-settings__color-swatch', wsProjectHue === -1 && 'active')}
+            onClick={() => {
+              setWsProjectColor(-1)
+              setWsProjectHue(-1)
+            }}
+          >
+            <span
+              className="basic-settings__color-swatch-inner"
+              style={{ background: wsProjectHue >= 0 ? `var(--ws-dir-${wsProjectHue + 1})` : 'var(--ws-badge-gold)' }}
+            />
+          </button>
+          {/* 目录轮换序列（与 Java hueIndexForLink 同构）：选中色相 k=金黄 + 其余色相按原序；
+              默认/自定义=基准 9 色相。金黄块点击=回默认金黄 */}
+          {((): number[] => {
+            const k = wsProjectHue
+            if (k < 0) return [0, 1, 2, 3, 4, 5, 6, 7, 8]
+            return [-1, ...[0, 1, 2, 3, 4, 5, 6, 7, 8].filter((i) => i !== k)]
+          })().map((hue) => (
+            <button
+              key={hue}
+              type="button"
+              title={hue === -1 ? t('settings.wsProject.default') : `#${['f07500', '10ab98', '549bec', '9c8eda', 'a98dce', 'd676c8', 'c67fc5', 'da7c95', 'dd7d75'][hue]}`}
+              className={cx('basic-settings__color-swatch', hue === -1 && wsProjectHue === -1 && 'active')}
+              onClick={() => {
+                // 金黄块=回默认金黄项目色（金黄同时也是目录轮换的下一个色，语义重合）
+                setWsProjectColor(hue === -1 ? -1 : hue)
+                setWsProjectHue(hue === -1 ? -1 : hue)
+              }}
+            >
+              <span
+                className="basic-settings__color-swatch-inner"
+                style={{ background: hue === -1 ? 'var(--ws-badge-gold)' : `var(--ws-dir-${hue + 1})` }}
+              />
+            </button>
+          ))}
+        </div>
+        <div className="basic-settings__custom-color-row">
+          <span className="basic-settings__custom-color-label">{t('settings.colors.custom')}</span>
+          <input
+            type="text"
+            className="basic-settings__hex-input"
+            value={wsProjectHexInput}
+            onChange={(e) => {
+              const v = e.target.value
+              setWsProjectHexInput(v)
+              // 合法 hex 即生效（档切自定义）；清空回默认金黄
+              setWsProjectCustomHex(isValidHexColor(v) ? v : '')
+              setWsProjectHue(isValidHexColor(v) ? -2 : -1)
+            }}
+            placeholder="#000000"
+            maxLength={7}
+          />
+          {wsProjectHue === -2 && (
+            <button
+              type="button"
+              className="basic-settings__reset-btn"
+              onClick={() => {
+                setWsProjectCustomHex('')
+                setWsProjectHexInput('')
+                setWsProjectHue(-1)
+              }}
+            >
+              <span className="codicon codicon-discard" />
+              {t('settings.colors.reset')}
+            </button>
+          )}
+        </div>
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.wsProject.hint')}</span>
+        </small>
+      </section>
+
       {/* 色块颜色深度（2026-11-07 横向滑条）：拖动实时改色（webview 即时注入 CSS 变量，
           持久化防抖 400ms），存外观配置（IDE 权威源+广播多标签），Java 标签图标随
           appearanceSave 重挂——两端同公式同色；discard 图标一键恢复默认档 50% */}
@@ -509,6 +608,7 @@ export function BasicSettingsView() {
           <span>{t('settings.wsDepth.hint')}</span>
         </small>
       </section>
+
 
       {/* 聊天背景色 */}
       <ColorSection

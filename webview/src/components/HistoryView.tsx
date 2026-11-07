@@ -477,7 +477,8 @@ export function HistoryView({
                   'history-ws-chip',
                   active ? 'history-ws-chip--active' : '',
                   ws === dragWs ? 'history-ws-chip--dragging' : '',
-                  colorIdx != null ? `history-ws-chip--dir${colorIdx + 1}` : '',
+                  colorIdx === -1 ? 'history-ws-chip--gold' : '',
+                  colorIdx != null && colorIdx >= 0 ? `history-ws-chip--dir${colorIdx + 1}` : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}

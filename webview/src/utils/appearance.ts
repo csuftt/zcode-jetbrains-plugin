@@ -32,8 +32,15 @@ const CHAT_BAR_COLOR_KEY = 'zcode.chatBarColor'
 /** 色块颜色深度 key（外观设置页「色块颜色深度」滑条，0..100 百分比）*/
 export const WS_DEPTH_KEY = 'zcode.wsColorDepth'
 
+/** 本项目专属色 key（外观设置页「默认色块颜色」）：-2=自定义 hex（wsProjectCustomHex）/
+ *  -1=默认金黄 / 0..8=基准色相序号。DOM 应用：色相走 var 间接引用（--ws-dir-N，深度/
+ *  主题自动跟随），自定义直接写 hex（用户钦定即最终色，不参与深度偏移） */
+export const WS_PROJECT_KEY = 'zcode.wsProjectColor'
+export const WS_PROJECT_CUSTOM_KEY = 'zcode.wsProjectCustom'
+export const WS_PROJECT_CUSTOM_IDX = -2
+
 /** 多标签同步监听的 key 集合（storage 事件过滤用） */
-const WATCHED_KEYS = [FONT_SCALE_KEY, CHAT_BG_COLOR_KEY, USER_MSG_COLOR_KEY, CHAT_BAR_COLOR_KEY, WS_DEPTH_KEY]
+const WATCHED_KEYS = [FONT_SCALE_KEY, CHAT_BG_COLOR_KEY, USER_MSG_COLOR_KEY, CHAT_BAR_COLOR_KEY, WS_DEPTH_KEY, WS_PROJECT_KEY]
 
 /* ============ 字号缩放（cc-gui：6 级 → --font-scale，global.less #root zoom） ============ */
 
@@ -239,6 +246,56 @@ function clampWsDepth(depth: number): number {
   return Math.min(WS_DEPTH_MAX, Math.max(WS_DEPTH_MIN, Math.round(depth)))
 }
 
+/** 读取项目色档（脏值/缺省回 -1 默认金黄；-2=自定义） */
+export function getWsProjectColor(): number {
+  const saved = parseInt(localStorage.getItem(WS_PROJECT_KEY) || '', 10)
+  return Number.isFinite(saved) && saved >= -2 && saved <= 8 ? saved : -1
+}
+
+/** 读取自定义项目色 hex（idx≠-2 时为空串） */
+export function getWsProjectCustomHex(): string {
+  const saved = localStorage.getItem(WS_PROJECT_CUSTOM_KEY) || ''
+  return isValidHexColor(saved) ? saved.toLowerCase() : ''
+}
+
+/** 应用项目色到 DOM：色相=var 间接引用 --ws-dir-{k+1}（深度/主题跟随）；自定义=直接
+ *  hex（用户钦定即最终色）；默认=-1 移除变量回落 --ws-badge-gold（消费点带 fallback） */
+function applyWsProjectColor(idx: number): void {
+  const root = document.documentElement
+  if (idx >= 0 && idx <= 8) {
+    root.style.setProperty('--ws-project-color', `var(--ws-dir-${idx + 1})`)
+  } else if (idx === WS_PROJECT_CUSTOM_IDX) {
+    root.style.setProperty('--ws-project-color', getWsProjectCustomHex() || '')
+    if (!getWsProjectCustomHex()) root.style.removeProperty('--ws-project-color')
+  } else {
+    root.style.removeProperty('--ws-project-color')
+  }
+}
+
+/** 设置项目色档：立即生效 + 持久化（切档时清自定义 hex，防残留误读——appearanceSave
+ *  回存时 idx≠-2 本就不携带 hex，但 localStorage 会话缓存要同口径） */
+export function setWsProjectColor(idx: number): void {
+  const clamped = idx >= -1 && idx <= 8 ? idx : -1
+  localStorage.setItem(WS_PROJECT_KEY, String(clamped))
+  localStorage.removeItem(WS_PROJECT_CUSTOM_KEY)
+  applyWsProjectColor(clamped)
+  persistAppearance()
+}
+
+/** 设置自定义项目色：合法 hex → 档切自定义并立即生效；空串 → 回默认金黄 */
+export function setWsProjectCustomHex(hex: string): void {
+  if (hex && isValidHexColor(hex)) {
+    localStorage.setItem(WS_PROJECT_KEY, String(WS_PROJECT_CUSTOM_IDX))
+    localStorage.setItem(WS_PROJECT_CUSTOM_KEY, hex.toLowerCase())
+    applyWsProjectColor(WS_PROJECT_CUSTOM_IDX)
+  } else {
+    localStorage.removeItem(WS_PROJECT_KEY)
+    localStorage.removeItem(WS_PROJECT_CUSTOM_KEY)
+    applyWsProjectColor(-1)
+  }
+  persistAppearance()
+}
+
 /** 读取深度百分比（脏值/缺省回 50） */
 export function getWsColorDepth(): number {
   const saved = parseInt(localStorage.getItem(WS_DEPTH_KEY) || '', 10)
@@ -325,6 +382,10 @@ interface InjectedAppearance {
   userMsg?: string
   /** 色块颜色深度百分比 0..100（旧包/缺省不动本端档位）*/
   wsColorDepth?: number
+  /** 本项目专属色 -2 自定义/-1 默认金黄/0..8 色相（旧包/缺省不动本端）*/
+  wsProjectColorIdx?: number
+  /** 自定义项目色 hex（idx=-2 时消费）*/
+  wsProjectCustomHex?: string
 }
 
 declare global {
@@ -375,6 +436,16 @@ function applyInjectedAppearance(cfg: InjectedAppearance): void {
     localStorage.setItem(WS_DEPTH_KEY, String(depth))
     applyWsColorDepth(depth)
   }
+  const proj = cfg.wsProjectColorIdx
+  if (typeof proj === 'number' && proj >= -2 && proj <= 8) {
+    localStorage.setItem(WS_PROJECT_KEY, String(proj))
+    const custom = typeof cfg.wsProjectCustomHex === 'string' && isValidHexColor(cfg.wsProjectCustomHex)
+      ? cfg.wsProjectCustomHex.toLowerCase()
+      : ''
+    if (custom) localStorage.setItem(WS_PROJECT_CUSTOM_KEY, custom)
+    else localStorage.removeItem(WS_PROJECT_CUSTOM_KEY)
+    applyWsProjectColor(proj)
+  }
 }
 
 /** 全量配置回存 IDE（PropertiesComponent）。localStorage 组装，JCEF 内才发送；
@@ -392,6 +463,8 @@ export function persistAppearance(): void {
         chatBar: getCustomColor('chatBar'),
         userMsg: getCustomColor('userMsg'),
         wsColorDepth: getWsColorDepth(),
+        wsProjectColorIdx: getWsProjectColor(),
+        wsProjectCustomHex: getWsProjectColor() === WS_PROJECT_CUSTOM_IDX ? getWsProjectCustomHex() : '',
       },
     })
   } catch {
@@ -413,6 +486,7 @@ let storageListenerInstalled = false
 export function initAppearance(): void {
   applyFontScale(getFontScaleLevel())
   applyWsColorDepth(getWsColorDepth())
+  applyWsProjectColor(getWsProjectColor())
   applyCustomColor('chatBg', getCustomColor('chatBg'))
   applyCustomColor('userMsg', getCustomColor('userMsg'))
   applyCustomColor('chatBar', getCustomColor('chatBar'))
@@ -445,5 +519,6 @@ export function initAppearance(): void {
     applyCustomColor('userMsg', getCustomColor('userMsg'))
     applyCustomColor('chatBar', getCustomColor('chatBar'))
     applyWsColorDepth(getWsColorDepth())
+    applyWsProjectColor(getWsProjectColor())
   })
 }

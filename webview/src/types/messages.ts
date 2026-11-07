@@ -413,6 +413,10 @@ export interface AppearanceConfig {
   userMsg: string
   /** 色块颜色深度百分比 0..100（50=默认档；缺省/旧 Java 包不回传该键不动本端）*/
   wsColorDepth: number
+  /** 本项目专属色 -2 自定义/-1 默认金黄/0..8 色相（缺省/旧 Java 包不回传不动本端）*/
+  wsProjectColorIdx: number
+  /** 自定义项目色 hex（idx=-2 时消费；空串=无）*/
+  wsProjectCustomHex: string
 }
 
 /** askUserResponse 请求（AskUserDialog 提交用；accept 时 answer/answers 二选一）*/

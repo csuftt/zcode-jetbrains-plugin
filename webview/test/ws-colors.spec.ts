@@ -17,7 +17,8 @@ describe('resolveWsColorIndex', () => {
 
   it('越界序号按色板大小取模归正（防脏数据越界无对应 CSS 类）', () => {
     expect(resolveWsColorIndex('e:/a', { 'e:/a': 11 })).toBe(2)
-    expect(resolveWsColorIndex('e:/a', { 'e:/a': -1 })).toBe(WS_PALETTE_SIZE - 1)
+    expect(resolveWsColorIndex('e:/a', { 'e:/a': -1 })).toBe(-1, '金黄哨兵直通（目录序列成员）')
+    expect(resolveWsColorIndex('e:/a', { 'e:/a': -10 })).toBe(8, '其余负值仍取模归正')
   })
 
   it('未命中/空目录/非数值返回 null（调用方回落默认主题色）', () => {

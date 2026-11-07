@@ -34,6 +34,25 @@ object ZCodeAppearanceStore {
         null
     }
 
+    /** 本项目专属色相原始值（外观设置页「默认色块颜色」；-1=默认金黄/无配置/非法，
+     *  消费方钳制）。catch Throwable：非 IDE 单测环境 PropertiesComponent 初始化抛 Error */
+    fun wsProjectColorIdxRaw(): Int? = try {
+        rawJson()?.let {
+            Json.parseToJsonElement(it).jsonObject["wsProjectColorIdx"]?.jsonPrimitive?.content?.toIntOrNull()
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** 自定义项目色 hex 原始值（idx=-2 时消费；无配置/非法 null。catch Throwable 同上） */
+    fun wsProjectCustomHexRaw(): String? = try {
+        rawJson()?.let {
+            Json.parseToJsonElement(it).jsonObject["wsProjectCustomHex"]?.jsonPrimitive?.contentOrNull
+        }?.takeIf { v -> v.matches(Regex("^#[0-9a-fA-F]{6}$")) }
+    } catch (_: Throwable) {
+        null
+    }
+
     /** 用户显式主题偏好：'light' / 'dark' / ''（空=跟随 IDE）*/
     fun themePref(): String = try {
         rawJson()?.let {

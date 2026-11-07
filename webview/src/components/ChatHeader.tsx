@@ -124,7 +124,11 @@ export function ChatHeader({
               className={[
                 'ws-header-badge',
                 wsBadge.isProject ? 'ws-header-badge--project' : '',
-                wsBadge.colorIndex != null ? `ws-header-badge--dir${wsBadge.colorIndex + 1}` : '',
+                // -1=金黄（项目色改选后金黄降入目录序列的目录项，2026-11-07）
+                wsBadge.colorIndex === -1 ? 'ws-header-badge--gold' : '',
+                wsBadge.colorIndex != null && wsBadge.colorIndex >= 0
+                  ? `ws-header-badge--dir${wsBadge.colorIndex + 1}`
+                  : '',
               ]
                 .filter(Boolean)
                 .join(' ')}

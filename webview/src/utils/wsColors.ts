@@ -12,6 +12,10 @@ export function normalizeWsKey(path: string): string {
 /** 色板大小（与 Java PALETTE_SIZE 对齐） */
 export const WS_PALETTE_SIZE = 9
 
+/** 金黄哨兵序号（2026-11-07：项目色改选后金黄降入目录轮换且排第一，Java 推 -1）。
+ *  消费端按 --gold 变体类渲染（--ws-badge-gold），不走 --ws-dir-N 键控 */
+export const WS_HUE_GOLD = -1
+
 /**
  * 查目录色板序号：colors 键为 wsKey 归一形态（Java colorsJson 产出）。
  * 命中返回 0-8；未命中（应答未达/旧包）返回 null，调用方回落默认主题色。
@@ -19,5 +23,8 @@ export const WS_PALETTE_SIZE = 9
 export function resolveWsColorIndex(dir: string, colors: Record<string, number>): number | null {
   if (!dir) return null
   const idx = colors[normalizeWsKey(dir)]
-  return typeof idx === 'number' && Number.isFinite(idx) ? ((idx % WS_PALETTE_SIZE) + WS_PALETTE_SIZE) % WS_PALETTE_SIZE : null
+  if (typeof idx !== 'number' || !Number.isFinite(idx)) return null
+  // 金黄哨兵（-1）直通，不被取模折算（-1 % 9 会错折成 8=红）
+  if (idx === WS_HUE_GOLD) return WS_HUE_GOLD
+  return ((idx % WS_PALETTE_SIZE) + WS_PALETTE_SIZE) % WS_PALETTE_SIZE
 }

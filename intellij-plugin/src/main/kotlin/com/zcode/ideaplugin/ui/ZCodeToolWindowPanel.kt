@@ -507,8 +507,11 @@ class ZCodeToolWindowPanel(
                 put("op", "linkedWorkspaces")
                 put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
                 put("colors", buildJsonObject {
+                    // 值=色相序号（非位置序号）：webview --ws-dir-N 按基准色相键控，项目色
+                    // 选中后序列轮转（该色占头、目录后推）在此折算（2026-11-07）
                     list.forEach { path ->
-                        put(ZCodeLinkedWorkspaces.wsKey(path), JsonPrimitive(ZCodeLinkedWorkspaces.colorIndexFor(project, path)))
+                        val hue = WsTabColors.hueIndexForLink(ZCodeLinkedWorkspaces.colorIndexFor(project, path), WsTabColors.projectHue())
+                        put(ZCodeLinkedWorkspaces.wsKey(path), JsonPrimitive(hue))
                     }
                 })
             }
@@ -1668,6 +1671,14 @@ if (!window.__ZCODE_LOG_HOOK__) {
             // 色块颜色深度（百分比 0..100，50=默认档）：缺省回默认档（旧前端不传不报错）
             val wsColorDepth = c["wsColorDepth"]?.jsonPrimitive?.intOrNull ?: WsTabColors.DEPTH_DEFAULT_PERCENT
             if (wsColorDepth !in 0..100) return errorResponse("wsColorDepth 越界")
+            // 本项目专属色相（-2=自定义/-1=默认金黄/0..8=基准色相）：缺省回默认（旧前端不传不报错）
+            val wsProjectColorIdx = c["wsProjectColorIdx"]?.jsonPrimitive?.intOrNull ?: WsTabColors.PROJECT_HUE_DEFAULT
+            if (wsProjectColorIdx !in -2..8) return errorResponse("wsProjectColorIdx 越界")
+            // 自定义项目色 hex（idx=-2 时消费；#rrggbb 或空串）
+            val wsProjectCustomHex = c["wsProjectCustomHex"]?.jsonPrimitive?.contentOrNull ?: ""
+            if (wsProjectCustomHex.isNotEmpty() && !wsProjectCustomHex.matches(Regex("^#[0-9a-fA-F]{6}$"))) {
+                return errorResponse("wsProjectCustomHex 颜色格式非法")
+            }
             buildJsonObject {
                 put("fontScale", fontScale)
                 put("themePref", themePref)
@@ -1675,6 +1686,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 put("chatBar", chatBar)
                 put("userMsg", userMsg)
                 put("wsColorDepth", wsColorDepth)
+                put("wsProjectColorIdx", wsProjectColorIdx)
+                put("wsProjectCustomHex", wsProjectCustomHex.lowercase())
             }.toString()
         } catch (e: Exception) {
             return errorResponse("appearanceSave 参数解析失败: ${e.message}")
@@ -1684,6 +1697,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 .setValue(ZCodeAppearanceStore.KEY_APPEARANCE, cfg)
             log.info("Appearance settings saved")
             broadcastAppearance(cfg)
+            // 项目色相变化会改变目录→色相映射（colorsJson 口径，hueIndexForLink 轮转折算），
+            // 已开标签的 chips/徽标消费的是旧 colors 映射——必须随存重推 linkedWorkspaces
+            // （历史页圆点/徽标 --dirN 才跟新序列走；CSS 变量只有项目色第一块会变）
+            broadcastLinkedWorkspaces(project)
             // 色块深度等 Java 侧绘制的观感随存随刷：本标签 + 兄弟标签色块图标重挂
             // （webview 侧徽标/chips 由 onAppearanceChanged → data-ws-depth 驱动 CSS 变量）
             refreshTabColorIcon()
@@ -5894,9 +5911,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 目录→色板序号映射（键=wsKey 归一形态；顺带按需分配，新目录当轮即有色） */
+    /** 目录→色相序号映射（键=wsKey 归一形态；顺带按需分配，新目录当轮即有色）。
+     *  值=基准色相序号（webview --ws-dir-N 键控口径；项目色选中后经 hueIndexForLink 轮转折算） */
     private fun colorsJson(list: List<String>): JsonObject = buildJsonObject {
-        list.forEach { path -> put(ZCodeLinkedWorkspaces.wsKey(path), JsonPrimitive(ZCodeLinkedWorkspaces.colorIndexFor(project, path))) }
+        list.forEach { path ->
+            val hue = WsTabColors.hueIndexForLink(ZCodeLinkedWorkspaces.colorIndexFor(project, path), WsTabColors.projectHue())
+            put(ZCodeLinkedWorkspaces.wsKey(path), JsonPrimitive(hue))
+        }
     }
 
     /**

@@ -77,24 +77,80 @@ object WsTabColors {
     /** 当前生效百分比（外观配置现读——色块绘制低频，PropertiesComponent 读是内存查找） */
     fun depthPercent(): Int = clampPercent(ZCodeAppearanceStore.wsColorDepthRaw())
 
-    /** 当前百分比 9 色板（resolve 消费；每次读取现算，滑条拖动即时生效） */
+    /** 本项目专属色相（外观设置页「默认色块颜色」，2026-11-07）：-2=自定义 hex（不占轮换
+     *  序列，不参与深度偏移——用户钦定即最终色）；-1=默认金黄（不占轮换序列，目录从序列
+     *  第 0 位轮起）；0..8=该基准色相成为本项目色——该色提到轮换序列第 0 位、其余按原
+     *  相对顺序后推，关联目录从第 1 位轮起（防与本项目撞色） */
+    const val PROJECT_HUE_DEFAULT = -1
+    const val PROJECT_HUE_CUSTOM = -2
+
+    /** 当前项目色相（外观配置现读；非法回默认 -1） */
+    fun projectHue(): Int = clampProjectHue(ZCodeAppearanceStore.wsProjectColorIdxRaw())
+
+    /** 项目色相钳制（纯函数测试锚点）：null/-1=默认金黄，-2=自定义，0..8 原样，越界收 -1 */
+    fun clampProjectHue(v: Int?): Int = (v ?: PROJECT_HUE_DEFAULT)
+        .takeIf { it in PROJECT_HUE_CUSTOM..8 } ?: PROJECT_HUE_DEFAULT
+
+    /**
+     * 关联目录 → 色序号映射（纯函数测试锚点；**-1=金黄**，0..8=基准色相）。
+     * 默认（[projectHue]<0，含 -2 自定义）：金黄是项目色不占目录序列，目录按位置直轮
+     * （0=橙…8=红）。
+     * 选中色相 k（2026-11-07 用户定稿修正）：项目色=该色（排所有色块之首），**金黄降入
+     * 目录序列且永远排第一**（用户定稿「金黄永远在第一个」+「金黄也参与其他目录序列」），
+     * 其余色相按原相对顺序去掉 k 后推——目录序列=[金黄, 0..8 去 k]；第 10 个目录回绕金黄。
+     */
+    fun hueIndexForLink(linkIdx: Int, projectHue: Int): Int {
+        val k = clampProjectHue(projectHue)
+        if (k < 0) return ((linkIdx % 9) + 9) % 9
+        val seq = listOf(-1) + (0..8).filter { it != k }
+        return seq[(((linkIdx % 9) + 9) % 9)]
+    }
+
+    /** 按色相序号+深度百分比取色（resolve/调用方共用）：depthPercent 零偏移走原色免浮点往返 */
+    fun hueAt(hue: Int, percent: Int): JBColor {
+        val idx = hue.coerceIn(0, 8)
+        val delta = lightnessOffset(percent)
+        val base = BASE_PALETTE[idx]
+        return if (delta == 0.0) JBColor(base.first, base.second)
+        else JBColor(shiftRgb(base.first, delta), shiftRgb(base.second, delta))
+    }
+
+    /** 当前项目色（resolve 消费）：默认金黄 / 选中色相的深度偏移色 / 自定义 hex 原色
+     *  （不参与深度偏移——用户钦定即最终色；hex 非法回退金黄） */
+    fun projectColor(): JBColor {
+        val hue = projectHue()
+        return when {
+            hue == PROJECT_HUE_CUSTOM -> customProjectColor() ?: goldAt(depthPercent())
+            hue < 0 -> goldAt(depthPercent())
+            else -> hueAt(hue, depthPercent())
+        }
+    }
+
+    /** 自定义项目色（hex #rrggbb，外观配置现读；解码失败 null 回退金黄） */
+    fun customProjectColor(): JBColor? = ZCodeAppearanceStore.wsProjectCustomHexRaw()?.let {
+        runCatching { JBColor(java.awt.Color.decode(it), java.awt.Color.decode(it)) }.getOrNull()
+    }
+
+    /** 当前百分比 9 色板（滑条深度维度的取值入口；目录色解析走 [hueAt]+[hueIndexForLink]） */
     val PALETTE: List<JBColor> get() = paletteAt(depthPercent())
 
-    /** 当前百分比金黄（resolve 消费） */
+    /** 当前百分比金黄（webview --ws-badge-gold 同值；项目色解析走 [projectColor]） */
     val PROJECT_GOLD: JBColor get() = goldAt(depthPercent())
 
     /**
-     * 目录颜色解析：项目根=金黄（专属语义保留）；关联目录（及任何会话归属目录）=色板。
-     * 空路径回退金黄（落位空=本项目的默认语义）。
+     * 目录颜色解析：项目根=项目色（默认金黄；外观设置页可选基准色相/自定义 hex）；
+     * 关联目录（及任何会话归属目录）=轮换序列（-1=金黄/0..8=色相，[hueIndexForLink]）。
+     * 空路径回退项目色（落位空=本项目的默认语义）。
      */
     fun resolve(project: Project, workspacePath: String): JBColor {
         val baseKey = project.basePath?.let { ZCodeLinkedWorkspaces.wsKey(it) }
         if (workspacePath.isNotBlank() && baseKey != null &&
             ZCodeLinkedWorkspaces.wsKey(workspacePath) != baseKey
         ) {
-            return PALETTE[ZCodeLinkedWorkspaces.colorIndexFor(project, workspacePath)]
+            val hue = hueIndexForLink(ZCodeLinkedWorkspaces.colorIndexFor(project, workspacePath), projectHue())
+            return if (hue < 0) goldAt(depthPercent()) else hueAt(hue, depthPercent())
         }
-        return PROJECT_GOLD
+        return projectColor()
     }
 
     /**

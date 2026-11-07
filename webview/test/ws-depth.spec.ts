@@ -13,6 +13,11 @@ import {
   WS_DEPTH_MIN,
   WS_DEPTH_MAX,
   WS_DEPTH_KEY,
+  getWsProjectColor,
+  setWsProjectColor,
+  setWsProjectCustomHex,
+  getWsProjectCustomHex,
+  WS_PROJECT_KEY,
 } from '../src/utils/appearance'
 
 const store = new Map<string, string>()
@@ -64,5 +69,64 @@ describe('色块颜色深度滑条', () => {
     expect(getWsColorDepth()).toBe(DEFAULT_WS_DEPTH)
     store.set(WS_DEPTH_KEY, '1000')
     expect(getWsColorDepth()).toBe(DEFAULT_WS_DEPTH)
+  })
+})
+
+describe('默认色块颜色（本项目）', () => {
+  beforeEach(() => {
+    store.clear()
+    document.documentElement.removeAttribute('style')
+  })
+
+  it('缺省 -1（默认金黄）且不写 --ws-project-color', () => {
+    expect(getWsProjectColor()).toBe(-1)
+    setWsProjectColor(-1)
+    expect(document.documentElement.style.getPropertyValue('--ws-project-color')).toBe('')
+  })
+
+  it('选中色相挂 var 间接引用（深度/主题自动跟随）', () => {
+    setWsProjectColor(2)
+    expect(getWsProjectColor()).toBe(2)
+    expect(localStorage.getItem(WS_PROJECT_KEY)).toBe('2')
+    expect(document.documentElement.style.getPropertyValue('--ws-project-color')).toBe('var(--ws-dir-3)')
+    setWsProjectColor(8)
+    expect(document.documentElement.style.getPropertyValue('--ws-project-color')).toBe('var(--ws-dir-9)')
+  })
+
+  it('越界收默认金黄', () => {
+    setWsProjectColor(42)
+    expect(getWsProjectColor()).toBe(-1)
+  })
+})
+
+describe('自定义项目色', () => {
+  beforeEach(() => {
+    store.clear()
+    document.documentElement.removeAttribute('style')
+  })
+
+  it('合法 hex → 档切 -2 并直接写 --ws-project-color（不参与深度偏移）', () => {
+    setWsProjectCustomHex('#AbCdEf')
+    expect(getWsProjectColor()).toBe(-2)
+    expect(getWsProjectCustomHex()).toBe('#abcdef')
+    expect(document.documentElement.style.getPropertyValue('--ws-project-color')).toBe('#abcdef')
+  })
+
+  it('空串/非法回默认金黄并移除变量', () => {
+    setWsProjectCustomHex('#aabbcc')
+    setWsProjectCustomHex('')
+    expect(getWsProjectColor()).toBe(-1)
+    expect(getWsProjectCustomHex()).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--ws-project-color')).toBe('')
+    setWsProjectCustomHex('nope')
+    expect(getWsProjectColor()).toBe(-1)
+  })
+
+  it('切回色相档清掉自定义 hex', () => {
+    setWsProjectCustomHex('#aabbcc')
+    setWsProjectColor(3)
+    expect(getWsProjectColor()).toBe(3)
+    expect(getWsProjectCustomHex()).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--ws-project-color')).toBe('var(--ws-dir-4)')
   })
 })

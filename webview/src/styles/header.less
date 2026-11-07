@@ -126,14 +126,22 @@
        ——「这条会话属于哪个目录」不用点开看。有色类统一 14%/75% 配比
        （原金色定稿的观感），无色类回落主题蓝 10%/80% 默认档 */
     &--project {
-        --ws-badge-color: var(--ws-badge-gold);
+        /* 项目专属色可选（外观设置页「默认色块颜色」）：--ws-project-color 为 var(--ws-dir-N)
+           间接引用（appearance.ts 挂 html 内联），深度滑条/主题切换自动跟随；缺省回落金黄 */
+        --ws-badge-color: var(--ws-project-color, var(--ws-badge-gold));
         background: color-mix(in srgb, var(--ws-badge-color) 14%, transparent);
         color: color-mix(in srgb, var(--ws-badge-color) 75%, var(--text-primary));
     }
 
-    &--dir1, &--dir2, &--dir3, &--dir4, &--dir5, &--dir6, &--dir7, &--dir8, &--dir9 {
+    &--dir1, &--dir2, &--dir3, &--dir4, &--dir5, &--dir6, &--dir7, &--dir8, &--dir9,
+    &--gold {
         background: color-mix(in srgb, var(--ws-badge-color) 14%, transparent);
         color: color-mix(in srgb, var(--ws-badge-color) 75%, var(--text-primary));
+    }
+
+    /* 金黄目录项（2026-11-07：项目色改选后金黄降入目录序列且排第一） */
+    &--gold {
+        --ws-badge-color: var(--ws-badge-gold);
     }
 
     &--dir1 { --ws-badge-color: var(--ws-dir-1); }
