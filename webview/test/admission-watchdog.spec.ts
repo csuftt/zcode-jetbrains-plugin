@@ -200,6 +200,22 @@ describe('发送落位看门狗（缺陷FF）', () => {
     expect(sentRequests.some((r) => r.op === 'send')).toBe(false)
   })
 
+  it('error 含 session-lineage-invalid → sessionLost：文本仍退回队列，但横幅指路新建会话而非"可重新发送"（缺陷GS）', () => {
+    // 真实场景（2026-11-07 真机）：createSession 受理与异步落盘之间进程暴毙，会话
+    // 从未写库；此后每次 send 都被 -32603 project.session-lineage-invalid 拒绝，
+    // 重试永远无效——原 sendError 文案"可重新发送"会诱导用户无限撞墙
+    realSend()
+    handleResponse(
+      { op: 'error', sourceOp: 'send', sessionId: SID, message: '发送失败: [-32603] project.session-lineage-invalid' },
+      useStore.setState, useStore.getState,
+    )
+    expect(queuedTexts()).toEqual([TEXT])
+    expect(useStore.getState().messages.some((m) => userText(m) === TEXT)).toBe(false)
+    expect(useStore.getState().lastNotice).toContain(i18n.t('input.queue.sendFailedSessionLost'))
+    expect(useStore.getState().lastNotice).not.toContain(i18n.t('input.queue.sendFailedRequeued'))
+    expect(useStore.getState().lastError).toContain(i18n.t('app.sessionLostHint'))
+  })
+
   it('切会话后收尾 → 静默丢弃，不往新会话队列插旧会话消息', () => {
     realSend()
     useStore.setState({ currentSessionId: 'sess_ff_other' })

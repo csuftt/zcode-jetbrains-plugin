@@ -64,6 +64,7 @@
     "promoteFailedServerSide": "'즉시 전송'이 적용되지 않았습니다: 메시지가 서버로 넘어갔으며 곧 대화에 표시됩니다",
     "promoteFailedUnknown": "'즉시 전송'이 적용되지 않았습니다: 메시지가 서버 대기열에 남아 있을 수 있습니다. 계속 표시되지 않으면 다시 보내주세요",
     "sendFailedRequeued": "전송 실패: 메시지를 대기열로 되돌렸습니다. 다시 보낼 수 있습니다",
+    "sendFailedSessionLost": "세션 기록이 손실되어 이 세션에서는 전송할 수 없습니다. 메시지는 대기열로 돌렸습니다—새 세션을 만들어 다시 보내세요",
     "admissionTimeoutRequeued": "보낸 메시지가 서버에서 적용되지 않아 대기열로 되돌렸습니다. 다시 보낼 수 있습니다",
     "admissionServerUnresponsive": "app-server가 응답하지 않습니다: 메시지를 대기열로 되돌렸습니다. 설정·프로세스 관리에서 재시작한 뒤 다시 보내주세요"
   },

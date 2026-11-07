@@ -64,6 +64,7 @@
     "promoteFailedServerSide": "「立即发送」未生效：消息已交回服务端处理，稍后应会出现在对话中",
     "promoteFailedUnknown": "「立即发送」未生效：消息可能仍停留在服务端队列；若一直未出现，请重新发送",
     "sendFailedRequeued": "发送失败，消息已放回队列，可重新发送",
+    "sendFailedSessionLost": "会话记录已丢失，此会话无法再发送；消息已放回队列——请新建会话后复制重发",
     "admissionTimeoutRequeued": "消息发出后一直未在服务端生效，已放回队列，可重新发送",
     "admissionServerUnresponsive": "app-server 无响应：消息已放回队列，可在设置·进程管理重启后再发送"
   },

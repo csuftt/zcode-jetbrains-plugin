@@ -7,6 +7,7 @@
   "turnFailed": "本輪執行失敗：{{message}}",
   "turnFailedNoDetail": "本輪執行失敗（伺服器未返回錯誤詳情）",
   "sessionInactiveHint": "會話槽位已滿（伺服器上限 16，已開啟的會話不會自動釋放）：重啟 IDE 釋放槽位後，重新傳送訊息或從歷史列表重新開啟會話即可",
+  "sessionLostHint": "會話記錄已遺失（多因程式異常中斷、會話未及落盤），此會話已無法繼續傳送——請新建會話後重新傳送",
   "modelSwitchInactiveHint": "模型切換失敗（會話尚未啟用）：從歷史列表重新開啟會話或傳送一條訊息後再切換即可",
   "modelSwitchDeferred": "模型切換將在本輪結束後生效：{{model}}",
   "modelCaptchaGated": "體驗套餐模型的介面需完成人機驗證（滑塊），插件無法代為完成，請選擇個人套餐或 API Key 渠道的模型",

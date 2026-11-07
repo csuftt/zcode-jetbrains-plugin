@@ -64,6 +64,7 @@
     "promoteFailedServerSide": "「立即傳送」未生效：訊息已交回伺服器處理，稍後應會出現在對話中",
     "promoteFailedUnknown": "「立即傳送」未生效：訊息可能仍停留在伺服器佇列中；若一直未出現，請重新傳送",
     "sendFailedRequeued": "傳送失敗，訊息已放回佇列，可重新傳送",
+    "sendFailedSessionLost": "會話記錄已遺失，此會話無法再傳送；訊息已放回佇列——請新建會話後複製重發",
     "admissionTimeoutRequeued": "訊息送出後一直未在伺服器生效，已放回佇列，可重新傳送",
     "admissionServerUnresponsive": "app-server 無回應：訊息已放回佇列，可在設定·程序管理重啟後再傳送"
   },

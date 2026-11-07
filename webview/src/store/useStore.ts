@@ -432,10 +432,15 @@ function armAdmission(
 
 /**
  * 失败收尾（notLanded=探测回来了但转录无此文本 / unresponsive=探测也超时 /
- * sendError=send 显式报错快路）：删凭据（防迟到 steerQueued 二次促发）+ 撤 FD
- * 打点（防退回队列后再被 FD 认领成双条）→ 切会话静默丢弃 → 撤气泡 + 队头重建 + 横幅。
+ * sendError=send 显式报错快路 / sessionLost=会话记录已丢失终态，缺陷GS）：删凭据
+ * （防迟到 steerQueued 二次促发）+ 撤 FD 打点（防退回队列后再被 FD 认领成双条）
+ * → 切会话静默丢弃 → 撤气泡 + 队头重建 + 横幅。
+ * sessionLost 与 sendError 同样退回队列（文本不丢），区别只在横幅：不再说
+ * "可重新发送"——该会话每次发送都必败（服务端 ensureReady 读不到会话记录直接拒），
+ * 明确指路新建会话。此类会话永远不会有 turn.completed，队列不会被自动续灌，
+ * 只有用户手动点「立即」才会再撞一次横幅，无循环骚扰。
  */
-function failAdmission(id: string, kind: 'notLanded' | 'unresponsive' | 'sendError', detail?: string): void {
+function failAdmission(id: string, kind: 'notLanded' | 'unresponsive' | 'sendError' | 'sessionLost', detail?: string): void {
   const e = pendingAdmissions.get(id)
   if (!e) return
   pendingAdmissions.delete(id)
@@ -456,9 +461,11 @@ function failAdmission(id: string, kind: 'notLanded' | 'unresponsive' | 'sendErr
     lastNotice:
       kind === 'unresponsive'
         ? i18n.t('input.queue.admissionServerUnresponsive')
-        : kind === 'sendError'
-          ? `${i18n.t('input.queue.sendFailedRequeued')}（${detail ?? ''}）`
-          : i18n.t('input.queue.admissionTimeoutRequeued'),
+        : kind === 'sessionLost'
+          ? `${i18n.t('input.queue.sendFailedSessionLost')}（${detail ?? ''}）`
+          : kind === 'sendError'
+            ? `${i18n.t('input.queue.sendFailedRequeued')}（${detail ?? ''}）`
+            : i18n.t('input.queue.admissionTimeoutRequeued'),
   })
 }
 
@@ -5549,6 +5556,11 @@ export function handleResponse(
       // 发送落位快路（缺陷FF）：sourceOp=send 的显式失败（10s 请求超时/管道断/
       // 恢复重试仍败）——对应凭据秒级收尾退回队列，不让乐观气泡悬死；sessionId
       // 由 Kotlin 携带（缺省回退当前会话最新一条在途凭据）
+      // 会话记录丢失终态（缺陷GS）：服务端 createSession 受理与异步落盘之间进程
+      // 暴毙 → 会话从未写库 → 之后每次 send ensureReady 都被 -32603
+      // project.session-lineage-invalid 拒绝（该校验把"读不到会话"也归为
+      // lineage-invalid）——重试永远无效，按 sessionLost 收尾指路新建会话
+      const sessionLost = /session-lineage-invalid/.test(msg.message)
       const sendSourced = msg.sourceOp === 'send'
       if (sendSourced) {
         const errSid = msg.sessionId ?? get().currentSessionId
@@ -5557,7 +5569,7 @@ export function handleResponse(
           if (e.sid !== errSid) continue
           newestId = id // Map 迭代按插入序，最后一条即最新
         }
-        if (newestId) failAdmission(newestId, 'sendError', msg.message)
+        if (newestId) failAdmission(newestId, sessionLost ? 'sessionLost' : 'sendError', msg.message)
       }
       // 建会话失败（Java 外层 catch 回 error）：复位懒创建标志与暂存消息（防卡死、防误重试）
       // -32004（Session is not active）追加人话提示：CLI 升级/重启后的新进程里会话
@@ -5589,13 +5601,15 @@ export function handleResponse(
         // 句尾会被截断——用户先看到"怎么办"，原文只作存证
         lastError: modelSwitchInactive
           ? `${i18n.t('app.modelSwitchInactiveHint')}（${msg.message}）`
-          : sessionInactive
-            ? `${i18n.t('app.sessionInactiveHint')}（${msg.message}）`
-            : promptRunning
-              ? `${i18n.t('app.promptRunningHint')}（${msg.message}）`
-              : resumeBusy
-                ? `${i18n.t('app.resumeBusyHint')}（${msg.message}）`
-                : msg.message,
+          : sessionLost
+            ? `${i18n.t('app.sessionLostHint')}（${msg.message}）`
+            : sessionInactive
+              ? `${i18n.t('app.sessionInactiveHint')}（${msg.message}）`
+              : promptRunning
+                ? `${i18n.t('app.promptRunningHint')}（${msg.message}）`
+                : resumeBusy
+                  ? `${i18n.t('app.resumeBusyHint')}（${msg.message}）`
+                  : msg.message,
         // 环境前置检查失败（EnvCheckException/envSave 验证失败）：附带 envStatus 刷新提醒条
         ...(msg.envStatus ? { envStatus: msg.envStatus } : {}),
         envSaving: false,

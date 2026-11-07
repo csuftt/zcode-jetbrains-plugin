@@ -64,6 +64,7 @@
     "promoteFailedServerSide": "Send now did not take effect: the message was handed back to the server and should appear in the conversation shortly",
     "promoteFailedUnknown": "Send now did not take effect: the message may still be sitting in the server queue; if it never shows up, please send it again",
     "sendFailedRequeued": "Send failed: the message has been put back in the queue; you can send it again",
+    "sendFailedSessionLost": "Session record lost — this session can no longer send; the message is back in the queue. Create a new session and resend it there",
     "admissionTimeoutRequeued": "The message never took effect on the server after being sent; it has been put back in the queue and can be sent again",
     "admissionServerUnresponsive": "app-server is unresponsive: the message has been put back in the queue; restart it from Settings · Process Manager, then send again"
   },
