@@ -44,7 +44,9 @@
 
 /**
  * 底部居中 Tooltip 样式（data-tooltip 属性驱动）
- * @param offset - tooltip 与触发元素的距离
+ * @param offset - 气泡「底边」距宿主底边的距离。注意不是间隙：offset 必须大于
+ *        气泡自身高（11px 字体+8px padding≈21px），否则顶边反扣进宿主压字
+ *        （GT 同族真机 2026-11-07）；建议 28px（间隙≈7px）起步，默认 32px
  *
  * 使用方式：
  * .my-button {
@@ -63,7 +65,7 @@
         color: var(--text-secondary);
         padding: 4px 8px;
         border-radius: 4px;
-        font-size: 12px;
+        font-size: 11px;
         white-space: nowrap;
         opacity: 0;
         pointer-events: none;

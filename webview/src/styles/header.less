@@ -33,8 +33,8 @@
 }
 
 /* 历史页返回行右侧的色块图例（2026-11-03 用户定稿）：并入返回行空白区，固定两行
-   （「块内文字」起第二行），单行超宽省略号截断——行高恒定不撑高 header。
-   弱化小字左对齐 */
+   （第一行=形态/颜色轴，第二行=文字轴+可拖动提示 2026-11-07 并入），单行超宽
+   省略号截断——行高恒定不撑高 header。弱化小字左对齐 */
 .header-legend {
     flex: 1;
     min-width: 0;
@@ -96,7 +96,10 @@
     color: color-mix(in srgb, var(--ws-badge-color, var(--accent-primary)) 80%, var(--text-primary));
     max-width: 100%;
     min-width: 0;
-    .tooltip-bottom-center(22px);
+    /* offset 28：mixin 语义是「气泡底边」距宿主的距离，不是间隙——offset 必须
+       大于气泡自身高（11px 字体+8padding≈21px）才有间隙，22px 时顶边反扣进
+       徽标底部压字（真机 2026-11-07「新平台部署」徽标实锤，GT 同族） */
+    .tooltip-bottom-center(28px);
 
     /* tooltip 左对齐展开（覆盖 mixin 的居中定位）：徽标贴面板左缘，居中的长路径
        tooltip 会伸出工具窗左缘被裁（真机 2026-10-28）；箭头对齐徽标左部 */

@@ -43,6 +43,19 @@ describe('renderUserRefChips 解析', () => {
     expect(html).toContain('和')
   })
 
+  it('chip 悬浮走 data-tip 自绘气泡，原生 title 必须去净（title 在现环境 JBR 渲染成 Swing tooltip 盖住 chip 自身——缺陷GT）', () => {
+    const nodes = renderUserRefChips(
+      '改了 @C:\\proj\\src\\App.tsx 和 #sess_bbb 与 /code-review',
+      resolver,
+      new Map([['code-review', { kind: 'skill' as const }]]),
+    )!
+    const html = JSON.stringify(nodes)
+    expect(html).toContain('"data-tip"')
+    expect(html).not.toContain('"title"')
+    // data-tip 内容非空且控长（nowrap 无 max-width，global.less 约定调用侧截断）
+    expect(html).not.toContain('"data-tip":""')
+  })
+
   it('带 @ 的路径 chip 边界含 @（差一位回归：chip 后不残留路径尾字符）', () => {
     const nodes = renderUserRefChips(
       '@G:/metrics/代码仓库数据.xlsx\n根据数据@G:/metrics/account_mapping.csv ，总结',

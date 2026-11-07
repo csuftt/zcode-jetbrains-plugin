@@ -12,12 +12,16 @@
  *   4. @绝对路径（含 #L10-20 行号后缀；@ 可选——输入框末尾未转 chip 的裸路径
  *      原样发送，序列化产物里两种都有）
  *
- * 纯函数返回 ReactNode（不碰 DOM/正则共享 lastIndex），气泡 overflow:hidden
- * 也会裁 CSS tooltip，chip 一律用原生 title 提示完整内容。
+ * 纯函数返回 ReactNode（不碰 DOM/正则共享 lastIndex）。悬浮完整内容一律走
+ * data-tip 自绘气泡（message-bubble.less 定死形态）——此前用原生 title 兜底，
+ * 但现环境 JBR 会把 title 渲染成 Swing tooltip：弹层位置跟鼠标走不锚定元素，
+ * 直接盖住 chip 自身文字（真机 2026-11-07），title 必须去净。
+ * 气泡 nowrap 无 max-width（global.less 约定调用侧截断），统一 truncateMiddle(60)。
  */
 
 import type { ReactNode } from 'react'
 import { splitReference, basename } from '@/components/FileRef'
+import { truncateMiddle } from '@/components/CurrentFileChip'
 import { FileIcon } from '@/components/FileIcon'
 import { SESS_MD_RE, SESS_BARE_RE, sessionRefShortLabel, sessionRefTip } from '@/utils/sessionRefPattern'
 import { SKILL_MD_RE, SKILL_BARE_RE, unescapeSkillMd } from '@/utils/skillRefPattern'
@@ -37,7 +41,7 @@ const PATH_RE = new RegExp(
 export interface CmdRefInfo {
   kind: 'skill' | 'command' | 'goal' | 'compact'
   icon?: string
-  /** 技能目录路径（skill 条目；chip title 悬浮展示用）*/
+  /** 技能目录路径（skill 条目；chip data-tip 悬浮展示用）*/
   path?: string
 }
 
@@ -56,11 +60,11 @@ interface RefToken {
   node: ReactNode
 }
 
-/** 只读文件 chip（@路径 引用，含行号后缀展示；title 完整路径）*/
+/** 只读文件 chip（@路径 引用，含行号后缀展示；data-tip 完整路径）*/
 function fileChip(path: string, key: string): ReactNode {
   const { file, lines } = splitReference(path)
   return (
-    <span key={key} className="file-ref user-ref-chip" title={file.replace(/[\\/]+$/, '')}>
+    <span key={key} className="file-ref user-ref-chip" data-tip={truncateMiddle(file.replace(/[\\/]+$/, ''), 60)}>
       <FileIcon path={file} mono className="file-ref__icon file-type-icon" />
       <span className="file-ref__name">{basename(file)}</span>
       {lines && <span className="file-ref__lines">:{lines}</span>}
@@ -68,22 +72,22 @@ function fileChip(path: string, key: string): ReactNode {
   )
 }
 
-/** 只读会话 chip（title 完整标题 + id）*/
+/** 只读会话 chip（data-tip 完整标题 + id）*/
 function sessionChip(sessionId: string, title: string, key: string): ReactNode {
   return (
-    <span key={key} className="sess-ref user-ref-chip" title={sessionRefTip(sessionId, title)}>
+    <span key={key} className="sess-ref user-ref-chip" data-tip={truncateMiddle(sessionRefTip(sessionId, title), 60)}>
       <span className="codicon codicon-comment-discussion sess-ref__icon" />
       <span className="sess-ref__name">{sessionRefShortLabel(sessionId, title)}</span>
     </span>
   )
 }
 
-/** 只读命令/技能 chip（显示裸名不带斜杠，对齐输入框内联 cmd chip；title 留完整前缀形态）*/
+/** 只读命令/技能 chip（显示裸名不带斜杠，对齐输入框内联 cmd chip；data-tip 留完整前缀形态）*/
 function cmdChip(name: string, info: CmdRefInfo, key: string, titlePrefix = '/'): ReactNode {
   const meta = MSG_CMD_META[info.kind] ?? MSG_CMD_META.command
-  const title = `${titlePrefix}${name}${info.path ? ` · ${info.path}` : ''}`
+  const tip = `${titlePrefix}${name}${info.path ? ` · ${info.path}` : ''}`
   return (
-    <span key={key} className={`cmd-ref user-ref-chip cmd-ref--${meta.variant}`} title={title}>
+    <span key={key} className={`cmd-ref user-ref-chip cmd-ref--${meta.variant}`} data-tip={truncateMiddle(tip, 60)}>
       <span className={`codicon ${info.icon ?? meta.icon} cmd-ref__icon`} />
       <span className="cmd-ref__name">{name}</span>
     </span>

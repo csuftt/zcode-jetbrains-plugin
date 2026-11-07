@@ -252,10 +252,24 @@
       color: var(--color-userchip, #ffdf6b);
     }
 
-    /* 文件 chip 基础块的 CSS tooltip（content: attr(data-tip)）在消息内没有
-       data-tip 属性，悬浮会渲染空壳盒——禁掉，完整路径靠原生 title */
+    /* 悬浮完整内容走全局 [data-tip] 自绘气泡（与 filectx 注脚 chip 同通道）。
+       此处形态定死（弹上方+左对齐+mono），不赌三条 ::after 规则（全局居中弹上方 /
+       file-ref 基类左对齐弹下方 mono）的加载顺序；也不能 display:none——chip 现在真带
+       data-tip（旧注释「空壳盒」已失效）。改自绘的根因：原生 title 在现环境 JBR 会
+       渲染成 Swing tooltip，弹层位置跟鼠标走不锚定元素，盖住 chip 自身文字
+       （真机 2026-11-07），title 必须去净。折叠态 overflow:hidden 会裁上方气泡，
+       属折叠展示的既有取舍（展开态无裁剪）。 */
     &:hover::after {
-      display: none;
+      display: block;
+      bottom: calc(100% + 6px);
+      top: auto;
+      left: 0;
+      right: auto;
+      transform: none;
+      white-space: nowrap;
+      max-width: none;
+      width: max-content;
+      font-family: var(--font-mono);
     }
 
     /* 图标与文字同色（文件图标 SVG 的按类型多彩 fill 由 mono 模式换 currentColor）：

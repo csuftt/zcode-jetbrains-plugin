@@ -605,7 +605,8 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  .tooltip-bottom-center(20px);
+  /* offset 28：须大于气泡自身高（≈21px），20px 时顶边压宿主（GT 同族，见 mixins 注释）*/
+  .tooltip-bottom-center(28px);
 
   &:hover {
     background: var(--bg-hover);
