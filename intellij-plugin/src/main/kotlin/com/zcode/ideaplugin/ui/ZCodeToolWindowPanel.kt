@@ -5705,10 +5705,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             // CLI 重启后的新进程）在本进程尚未激活，启动恢复上次会话时必撞。与
             // resumeAndReadMessages 同款自愈——resume 激活后重读一次（错误文案里
             // 承诺的"自动恢复后重发"在此落地；resumeSessionDeduped 与并发 messages
-            // 链路共用一次 resume）
-            val coldSession = e.message?.let {
-                it.contains("-32004") || it.contains("Session is not active", ignoreCase = true)
-            } == true
+            // 链路共用一次 resume）。判据已收口到异常类（3.17.x 增 runtimeNotReady）
+            val coldSession = ZCodeProtocolException.isSessionUnavailableText(e.message)
             if (coldSession) {
                 try {
                     resumeSessionDeduped(client, sessionId, effectiveWorkspacePath(msg))
@@ -6147,10 +6145,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
         } catch (e: ZCodeProtocolException) {
             // 冷会话 send：CLI 升级/重启后的新进程里会话未激活（-32004 Session is not
             // active）。与 resumeAndReadMessages 同一模式——先 resume 激活再重试一次，
-            // 否则用户要靠"从历史重开"手动触发 resume 才能续上（2026-08-19 实测踩坑）
-            val coldSession = e.message?.let {
-                it.contains("-32004") || it.contains("Session is not active", ignoreCase = true)
-            } == true
+            // 否则用户要靠"从历史重开"手动触发 resume 才能续上（2026-08-19 实测踩坑）。
+            // 判据已收口到异常类（3.17.x 增 runtimeNotReady）
+            val coldSession = ZCodeProtocolException.isSessionUnavailableText(e.message)
             // 悬挂回合 send：服务端 prompt 仍在 running（典型：审批反向请求被服务端
             // 退避放弃后回合未收尾，2026-08-20 实测；或多标签 resume 同会话并发）。
             // -32010 是同步拒绝、消息未入队，先 session/stop 打断悬挂回合再重发一次。

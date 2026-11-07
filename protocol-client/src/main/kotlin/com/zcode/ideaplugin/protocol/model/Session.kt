@@ -45,7 +45,7 @@ data class CreateSessionResult(
 
 /**
  * session/create、session/resume 的顶层 mcpServers 数组条目（wire 面 stdio 形态，
- * 源码 zcodeProtocolMcpServerSchema strict：无 type、无 cwd；env 是 {name,value} 数组）。
+ * 源码 zcodeProtocolMcpServerSchema strict：无 type；env 是 {name,value} 数组）。
  * 用途：电脑控制功能注入 zcgui-computer-use server（diag-cua-inject.py 实测通道）。
  */
 data class McpServerSpec(
@@ -57,6 +57,19 @@ data class McpServerSpec(
     /** "session" = 每会话独立进程（CUA 状态隔离首选）；"workspace" = 每工作区共享 */
     val isolation: String? = "session",
     val timeoutMs: Long? = null,
+    /**
+     * 3.17.x 新增 optional "user"|"workspace"（源码 zcode-protocol/index.ts:776）。
+     * 不带时名字与项目配置声明的 MCP server 撞名 → 被 workspace-mcp-trust 门控打成
+     * untrusted 拒连（callTool 抛 workspace_mcp_pending_trust）；带 "user" 完全绕开门控。
+     * 插件注入恒 "user"（工具面由插件自己管理，不属工作区声明域）。
+     */
+    val scope: String? = null,
+    /**
+     * 3.17.x 新增 optional（源码 zcode-protocol/index.ts:783）。ToolSearch 延迟加载
+     * （toolSearchMode 非 off）下所有 MCP 工具注册默认 shouldDefer=true，注入 server
+     * 不带 alwaysLoad=true 会被延迟出上下文、模型要先调 ToolSearch 才见到工具。
+     */
+    val alwaysLoad: Boolean? = null,
 )
 
 @Serializable

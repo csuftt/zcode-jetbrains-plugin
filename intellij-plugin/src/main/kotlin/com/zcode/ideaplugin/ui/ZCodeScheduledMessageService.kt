@@ -831,8 +831,7 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
                 client.send(item.sessionId, item.text, item.workspacePath, providerId = item.providerId, modelId = item.modelId)
                 true
             } catch (e: ZCodeProtocolException) {
-                val cold = e.message?.contains("-32004") == true ||
-                    e.message?.contains("Session is not active", ignoreCase = true) == true
+                val cold = ZCodeProtocolException.isSessionUnavailableText(e.message)
                 val running = e.code == -32010 || e.message?.contains("-32010") == true
                 val unsupportedModel = (e.code == -32603 || e.message?.contains("-32603") == true) &&
                     e.message?.contains("Unsupported model", ignoreCase = true) == true
@@ -883,8 +882,7 @@ class ZCodeScheduledMessageService(private val project: Project) : Disposable {
                 client.goal(item.sessionId, cmd.action, cmd.objective)
                 true
             } catch (e: ZCodeProtocolException) {
-                val cold = e.message?.contains("-32004") == true ||
-                    e.message?.contains("Session is not active", ignoreCase = true) == true
+                val cold = ZCodeProtocolException.isSessionUnavailableText(e.message)
                 val running = e.code == -32010 || e.message?.contains("-32010") == true
                 when {
                     cold -> {

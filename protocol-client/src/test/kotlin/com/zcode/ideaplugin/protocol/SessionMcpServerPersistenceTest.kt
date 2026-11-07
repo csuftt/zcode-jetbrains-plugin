@@ -4,6 +4,7 @@ import com.zcode.ideaplugin.protocol.model.McpServerSpec
 import com.zcode.ideaplugin.protocol.model.PermissionMode
 import com.zcode.ideaplugin.protocol.model.Workspace
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -83,6 +84,8 @@ class SessionMcpServerPersistenceTest {
             env = mapOf("A" to "1"),
             isolation = "session",
             timeoutMs = 300_000L,
+            scope = "user",
+            alwaysLoad = true,
         )
         // 进程 A：create 带注入面（CUA 形态）
         startFake(echo).use { a ->
@@ -109,6 +112,9 @@ class SessionMcpServerPersistenceTest {
         assertEquals("session", s["isolation"]!!.jsonPrimitive.content)
         assertEquals(300_000L, s["timeoutMs"]!!.jsonPrimitive.long)
         assertEquals("1", s["env"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        // 3.17.x 新字段回灌（scope 绕信任门控 / alwaysLoad 防延迟加载）
+        assertEquals("user", s["scope"]!!.jsonPrimitive.content)
+        assertEquals(true, s["alwaysLoad"]!!.jsonPrimitive.boolean)
     }
 
     @Test

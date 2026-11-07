@@ -4,6 +4,7 @@ import com.zcode.ideaplugin.protocol.model.McpServerSpec
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -75,7 +76,7 @@ internal object SessionMcpServerStore {
     }
 
     // ───────────────────────── JSON 形状 ─────────────────────────
-    // {"<sessionId>":[{name,command,args[],env:[{name,value}],isolation?,timeoutMs?},...]}
+    // {"<sessionId>":[{name,command,args[],env:[{name,value}],isolation?,timeoutMs?,scope?,alwaysLoad?},...]}
 
     private fun readRoot(): Map<String, JsonArray> {
         val f = storeFile()
@@ -114,6 +115,9 @@ internal object SessionMcpServerStore {
                 }))
                 s.isolation?.let { put("isolation", it) }
                 s.timeoutMs?.let { put("timeoutMs", it) }
+                // 与 ZCodeProtocolClient.mcpServersJson 同口径（3.17.x scope/alwaysLoad）
+                s.scope?.let { put("scope", it) }
+                s.alwaysLoad?.let { put("alwaysLoad", it) }
             })
         }
     }
@@ -131,6 +135,8 @@ internal object SessionMcpServerStore {
             }?.toMap() ?: emptyMap(),
             isolation = o["isolation"]?.jsonPrimitive?.content,
             timeoutMs = o["timeoutMs"]?.jsonPrimitive?.content?.toLongOrNull(),
+            scope = o["scope"]?.jsonPrimitive?.content,
+            alwaysLoad = o["alwaysLoad"]?.jsonPrimitive?.booleanOrNull,
         )
     }
 }

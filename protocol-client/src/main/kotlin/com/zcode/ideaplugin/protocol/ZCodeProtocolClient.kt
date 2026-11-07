@@ -1994,6 +1994,10 @@ class ZCodeProtocolClient private constructor(
                 }))
                 s.isolation?.let { put("isolation", it) }
                 s.timeoutMs?.let { put("timeoutMs", it) }
+                // 3.17.x：scope 绕开 workspace-mcp-trust 撞名门控；alwaysLoad 防
+                // toolSearchMode 延迟加载。与 SessionMcpServerStore.encodeServers 同口径。
+                s.scope?.let { put("scope", it) }
+                s.alwaysLoad?.let { put("alwaysLoad", it) }
             })
         }
     }
@@ -2604,7 +2608,17 @@ class ZCodeProtocolClient private constructor(
             put("connectionId", v4ConnectionId)
             put("clientMode", "desktop-continuous")
         }
-        val subResp = request("v4/conversation/subscribe", subParams, timeoutMs)
+        // 3.17.x 停止窗口瞬态（isSessionStopping 抛 fault.sessionLifecycle.stopping）：
+        // 同机官方桌面端对共享会话做 lifecycle stop/restart 时撞上，亚秒级窗口。subscribe
+        // 幂等（同 topic 复用同一 subscriptionId），延时一次重试即过；fork/edit/read 三条
+        // 临时订阅链路共用此入口，一处兜底全覆盖。
+        val subResp = try {
+            request("v4/conversation/subscribe", subParams, timeoutMs)
+        } catch (e: ZCodeProtocolException) {
+            if (!ZCodeProtocolException.isSessionStoppingText(e.message)) throw e
+            Thread.sleep(1500)
+            request("v4/conversation/subscribe", subParams, timeoutMs)
+        }
         requireOk(subResp)
         subResp["result"]?.jsonObject?.get("ack")?.jsonObject
             ?.get("subscriptionId")?.jsonPrimitive?.contentOrNull
@@ -4280,6 +4294,31 @@ class ZCodeProtocolException(
             val msg = err["message"]?.jsonPrimitive?.jsonStringOrNull ?: "未知错误"
             return ZCodeProtocolException("[$code] $msg", code = code)
         }
+
+        /**
+         * 「会话不可用」家族判据（resume 重试路径的统一识别）——成因矩阵，勿在调用点
+         * 内联复制（同口径成对注释是复制漏改高发位，缺陷 FU 教训）：
+         * - `[-32004] Session is not active`：经典冷会话（CLI 升级/重启后新进程未激活）；
+         * - `[-32004] Session runtime is not ready`（3.17.x 新增，开源增量勘查 2026-11-07）：
+         *   requireSession 在 lifecycle 未 ready 时抛，data.code=runtimeNotReady 被
+         *   [fromError] 丢弃只剩 message——判据须认 message 文本本身，不能只认旧文案。
+         */
+        fun isSessionUnavailableText(message: String?): Boolean =
+            message?.let {
+                it.contains("-32004") ||
+                    it.contains("Session is not active", ignoreCase = true) ||
+                    it.contains("Session runtime is not ready", ignoreCase = true) ||
+                    it.contains("runtimeNotReady")
+            } == true
+
+        /**
+         * 3.17.x 会话实例停止窗口瞬态（v4-gateway 对 command/subscribe 在
+         * isSessionStopping 时抛 Error("fault.sessionLifecycle.stopping") → -32603
+         * 透传）。典型触发=同机官方桌面端对共享会话做 lifecycle stop/restart，亚秒级
+         * 窗口；官方恢复手段是 session/lifecycle/ensureReady|restart（插件暂未接）。
+         */
+        fun isSessionStoppingText(message: String?): Boolean =
+            message?.contains("fault.sessionLifecycle.stopping") == true
     }
 }
 

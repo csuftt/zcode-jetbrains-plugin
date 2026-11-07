@@ -59,6 +59,11 @@ object CuaFeature {
             env = emptyMap(),
             isolation = "session",
             timeoutMs = 300_000L,
+            // 3.17.x 双保险（开源增量勘查 2026-11-07）：scope 绕开 workspace-mcp-trust
+            // 撞名门控（不带时名字与项目声明 MCP 撞名会被打成 untrusted 拒连）；
+            // alwaysLoad 防 toolSearchMode 非 off 时注入工具被默认延迟出上下文。
+            scope = "user",
+            alwaysLoad = true,
         )
     }
 
