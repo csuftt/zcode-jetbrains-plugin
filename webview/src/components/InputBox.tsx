@@ -53,6 +53,7 @@ import { readEnhanceConfig, ENHANCE_CONFIG_CHANGED_EVENT } from '@/utils/enhance
 import { CUA_SKILL_NAME, sessionReferencesCua } from '@/utils/cuaTools'
 import { PastedTextPreview, type PastedTextItem } from './PastedTextRef'
 import { readImageFile, decodeBase64Size, type ImageAttachmentResult } from '@/utils/imageAttachment'
+import { matchCopiedMessageImages } from '@/utils/copiedMessageClipboard'
 import { ImagePreview } from './ImagePreview'
 import '../styles/input-box.less'
 import '../styles/agent-select.less'
@@ -799,10 +800,27 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     return unsub
   }, [])
 
+  /** 读入图片 src（带图消息备份还原：data URL / 内置 server 同源 http URL），压缩后入附件 */
+  const addImageFromSrc = useCallback(
+    async (src: string) => {
+      try {
+        const blob = await (await fetch(src)).blob()
+        await addImageFile(new File([blob], '', { type: blob.type || 'image/png' }))
+      } catch (err) {
+        console.warn('备份图片还原失败', err)
+      }
+    },
+    [addImageFile],
+  )
+
   /**
    * 粘贴处理（一律以纯文本落地，杜绝富文本样式污染）：
-   *   剪贴板图片（image/* 项）优先 → 阻止默认粘贴（contenteditable 会把图片当
-   *   内联内容插入，破坏纯文本编辑语义），读入压缩后加入附件列表；
+   *   剪贴板图片（image/* 项）→ 阻止默认粘贴（contenteditable 会把图片当
+   *   内联内容插入，破坏纯文本编辑语义），读入压缩后加入附件列表；带纯文本时
+   *   文本一并插入正文（带图消息复制的还原：图进附件区、文进正文，同原形态；
+   *   图片项按文本全等命中 copiedMessageClipboard 备份时以备份为准——多图完整
+   *   还原，且绕开 JCEF 偶发不向 clipboardData 暴露系统剪贴板图片的问题）；
+   *   无图片项但文本命中备份 → 同样还原（JCEF 剪贴板图片不可见的兜底）；
    *   超阈值（≥PASTE_COLLAPSE_LINES 行或 ≥PASTE_COLLAPSE_CHARS 字符）→ 阻止默认粘贴，
    *   折叠为顶部 chip（点击预览），避免长文本撑爆输入框；
    *   未超阈值 → 同样阻止默认粘贴（contenteditable 默认会解析剪贴板 text/html，
@@ -866,29 +884,47 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     }, 0)
   }, [t])
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    // 图片优先（对齐 cc-gui：一旦有图即不处理文本，截图/网页复制图片的主路径）
-    const imageItems = Array.from(e.clipboardData.items).filter((it) =>
-      it.type.startsWith('image/'),
-    )
-    if (imageItems.length > 0) {
-      e.preventDefault()
-      for (const item of imageItems) {
-        const file = item.getAsFile()
-        if (file) addImageFile(file)
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      // 图片优先（对齐 cc-gui：截图/网页复制图片的主路径）；带纯文本时两者都收
+      const imageItems = Array.from(e.clipboardData.items).filter((it) =>
+        it.type.startsWith('image/'),
+      )
+      const pasted = e.clipboardData.getData('text/plain')
+      if (imageItems.length > 0) {
+        e.preventDefault()
+        // 带图消息复制的还原：文本全等命中备份 → 以备份全量图片为准（多图完整还原）
+        const stashed = matchCopiedMessageImages(pasted)
+        if (stashed) {
+          for (const src of stashed) void addImageFromSrc(src)
+        } else {
+          for (const item of imageItems) {
+            const file = item.getAsFile()
+            if (file) addImageFile(file)
+          }
+        }
+        if (pasted) insertPlainText(pasted)
+        return
       }
-      return
-    }
-    const pasted = e.clipboardData.getData('text/plain')
-    if (!pasted) {
-      // 无纯文本且无图片：JCEF 偶发不把剪贴板图片暴露给 clipboardData（IDE 场景），
-      // 走 Java 侧 AWT 剪贴板兜底（无图时返回空、无副作用）
-      sendToJava({ op: 'getClipboardImage' })
-      return
-    }
-    e.preventDefault()
-    insertPlainText(pasted)
-  }, [insertPlainText])
+      // 无图片项但文本命中备份：JCEF 不向 clipboardData 暴露系统剪贴板图片的兜底
+      const stashed = matchCopiedMessageImages(pasted)
+      if (pasted && stashed) {
+        e.preventDefault()
+        for (const src of stashed) void addImageFromSrc(src)
+        insertPlainText(pasted)
+        return
+      }
+      if (!pasted) {
+        // 无纯文本且无图片：JCEF 偶发不把剪贴板图片暴露给 clipboardData（IDE 场景），
+        // 走 Java 侧 AWT 剪贴板兜底（无图时返回空、无副作用）
+        sendToJava({ op: 'getClipboardImage' })
+        return
+      }
+      e.preventDefault()
+      insertPlainText(pasted)
+    },
+    [addImageFile, addImageFromSrc, insertPlainText],
+  )
 
   /** 内联 chip 的 ✕ 删除与粘贴 chip 点击预览（编辑器内动态 DOM，事件委托；四类 chip 共用）*/
   const handleEditorClick = useCallback((e: React.MouseEvent) => {

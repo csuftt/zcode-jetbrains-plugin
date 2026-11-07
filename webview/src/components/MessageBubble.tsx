@@ -40,7 +40,8 @@ import { clockTime, formatDuration } from '@/utils/time'
 import { readTurnCollapseConfig } from '@/utils/turnCollapseConfig'
 import { KV_HYDRATED_EVENT } from '@/utils/persist'
 import { useTick } from '@/hooks/useTick'
-import { copyText, useCopyFeedback } from '@/utils/clipboard'
+import { copyText, copyTextWithImages, useCopyFeedback } from '@/utils/clipboard'
+import { stashCopiedMessage } from '@/utils/copiedMessageClipboard'
 import { ScrollJumpButton } from './ScrollJumpButton'
 import { CompactionSummaryCard } from './CompactionSummaryCard'
 import { TimelineSeparator } from './TimelineSeparator'
@@ -234,7 +235,16 @@ function UserBubble({
   // 编辑态锚定本消息（store 级状态：提交/取消在 EditComposer 内完成）
   const editing = useStore((s) => !!messageId && s.editingMessageId === messageId)
   const { state: copyState, showResult } = useCopyFeedback(1200)
-  const onCopy = () => { void showResult(() => copyText(text)) }
+  const imageSrcs = useMemo(() => images.map((img) => img.src), [images])
+  const onCopy = () => {
+    void showResult(() => {
+      if (imageSrcs.length === 0) return copyText(text)
+      // 带图消息：系统剪贴板写 文本+首图（外部应用粘贴可用）；webview 内同步备份
+      // 全量图片（多图完整还原 + 绕开 JCEF 剪贴板图片可见性），粘贴侧按文本命中
+      stashCopiedMessage(text, imageSrcs)
+      return copyTextWithImages(text, imageSrcs)
+    })
+  }
 
   if (editing) {
     return (
@@ -326,7 +336,7 @@ function UserBubble({
           type="button"
           className="msg__action-btn"
           onClick={onCopy}
-          disabled={!text}
+          disabled={!text && imageSrcs.length === 0}
           title={copyState === 'ok' ? t('chat.message.copyCopied') : t('chat.message.copy')}
           aria-label={t('chat.message.copy')}
         >
