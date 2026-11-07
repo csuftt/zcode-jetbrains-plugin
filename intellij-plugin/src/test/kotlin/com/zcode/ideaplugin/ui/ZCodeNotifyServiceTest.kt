@@ -78,28 +78,28 @@ class ZCodeNotifyServiceTest {
         assertEquals(10, ZCodeNotifyService.NotifyConfig().popupDurationSec)
     }
 
-    // ============ 悬浮弹窗位置（popupPosition，默认右上角）============
+    // ============ 悬浮弹窗位置（popupPosition，默认右下角）============
 
     @Test
-    fun `popup 位置正常解析（BOTTOM_RIGHT）`() {
+    fun `popup 位置正常解析（TOP_RIGHT）`() {
         val c = ZCodeNotifyService.parseConfig(
-            kv("""{\"popupNotifyEnabled\":true,\"popupPosition\":\"BOTTOM_RIGHT\"}""")
+            kv("""{\"popupNotifyEnabled\":true,\"popupPosition\":\"TOP_RIGHT\"}""")
         )
-        assertEquals(ZCodePopupNotifier.PopupPosition.BOTTOM_RIGHT, c.popupPosition)
+        assertEquals(ZCodePopupNotifier.PopupPosition.TOP_RIGHT, c.popupPosition)
     }
 
     @Test
-    fun `popup 位置缺席与非法值回默认 TOP_RIGHT`() {
+    fun `popup 位置缺席与非法值回默认 BOTTOM_RIGHT`() {
         val missing = ZCodeNotifyService.parseConfig(kv("""{\"popupNotifyEnabled\":true}"""))
-        assertEquals(ZCodePopupNotifier.PopupPosition.TOP_RIGHT, missing.popupPosition)
+        assertEquals(ZCodePopupNotifier.PopupPosition.BOTTOM_RIGHT, missing.popupPosition)
 
         val unknown = ZCodeNotifyService.parseConfig(kv("""{\"popupPosition\":\"LEFT\"}"""))
-        assertEquals(ZCodePopupNotifier.PopupPosition.TOP_RIGHT, unknown.popupPosition)
+        assertEquals(ZCodePopupNotifier.PopupPosition.BOTTOM_RIGHT, unknown.popupPosition)
 
         val badType = ZCodeNotifyService.parseConfig(kv("""{\"popupPosition\":1}"""))
-        assertEquals(ZCodePopupNotifier.PopupPosition.TOP_RIGHT, badType.popupPosition)
+        assertEquals(ZCodePopupNotifier.PopupPosition.BOTTOM_RIGHT, badType.popupPosition)
 
-        assertEquals(ZCodePopupNotifier.PopupPosition.TOP_RIGHT, ZCodeNotifyService.NotifyConfig().popupPosition)
+        assertEquals(ZCodePopupNotifier.PopupPosition.BOTTOM_RIGHT, ZCodeNotifyService.NotifyConfig().popupPosition)
     }
 
     // ============ 轮末通知正文组装（缺陷DZ：会话名前缀）============

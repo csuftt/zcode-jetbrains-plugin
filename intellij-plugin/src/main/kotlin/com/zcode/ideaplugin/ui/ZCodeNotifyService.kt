@@ -58,8 +58,8 @@ object ZCodeNotifyService {
         val popupNotifyEnabled: Boolean = false,
         /** 悬浮弹窗时长（秒；0=常驻直到点击/关闭；缺省 10）*/
         val popupDurationSec: Int = 10,
-        /** 悬浮弹窗位置（缺省右上角，距顶 50px）*/
-        val popupPosition: ZCodePopupNotifier.PopupPosition = ZCodePopupNotifier.PopupPosition.TOP_RIGHT,
+        /** 悬浮弹窗位置（缺省右下角，贴系统 toast 位）*/
+        val popupPosition: ZCodePopupNotifier.PopupPosition = ZCodePopupNotifier.PopupPosition.BOTTOM_RIGHT,
     )
 
     /** 从 kv store 解析配置（缺失/损坏回默认值，绝不因配置问题抛异常）*/
@@ -95,7 +95,7 @@ object ZCodeNotifyService {
             notifyEnabled = obj.boolOr("notifyEnabled", false),
             popupNotifyEnabled = obj.boolOr("popupNotifyEnabled", false),
             popupDurationSec = obj.intOr("popupDurationSec", 10),
-            popupPosition = obj.popupPositionOr("popupPosition", ZCodePopupNotifier.PopupPosition.TOP_RIGHT),
+            popupPosition = obj.popupPositionOr("popupPosition", ZCodePopupNotifier.PopupPosition.BOTTOM_RIGHT),
         )
     }
 

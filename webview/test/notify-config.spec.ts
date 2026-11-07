@@ -38,7 +38,7 @@ describe('对话结束提醒配置', () => {
       notifyEnabled: false,
       popupNotifyEnabled: false,
       popupDurationSec: 10,
-      popupPosition: 'TOP_RIGHT',
+      popupPosition: 'BOTTOM_RIGHT',
     })
   })
 
@@ -58,7 +58,7 @@ describe('对话结束提醒配置', () => {
       notifyEnabled: true,
       popupNotifyEnabled: false,
       popupDurationSec: 10,
-      popupPosition: 'TOP_RIGHT',
+      popupPosition: 'BOTTOM_RIGHT',
     })
   })
 
@@ -68,7 +68,7 @@ describe('对话结束提醒配置', () => {
       notifyEnabled: true,
       popupNotifyEnabled: false,
       popupDurationSec: 10,
-      popupPosition: 'TOP_RIGHT',
+      popupPosition: 'BOTTOM_RIGHT',
     })
   })
 
@@ -83,15 +83,15 @@ describe('对话结束提醒配置', () => {
     expect(readNotifyConfig().popupDurationSec).toBe(10)
   })
 
-  it('悬浮弹窗位置解析：BOTTOM_RIGHT 合法，非法值/类型不对回默认 TOP_RIGHT', () => {
-    store.set('zcode.notify.config', JSON.stringify({ popupPosition: 'BOTTOM_RIGHT' }))
-    expect(readNotifyConfig().popupPosition).toBe('BOTTOM_RIGHT')
+  it('悬浮弹窗位置解析：TOP_RIGHT 合法，非法值/类型不对回默认 BOTTOM_RIGHT', () => {
+    store.set('zcode.notify.config', JSON.stringify({ popupPosition: 'TOP_RIGHT' }))
+    expect(readNotifyConfig().popupPosition).toBe('TOP_RIGHT')
 
     store.set('zcode.notify.config', JSON.stringify({ popupPosition: 'LEFT' }))
-    expect(readNotifyConfig().popupPosition).toBe('TOP_RIGHT')
+    expect(readNotifyConfig().popupPosition).toBe('BOTTOM_RIGHT')
 
     store.set('zcode.notify.config', JSON.stringify({ popupPosition: 1 }))
-    expect(readNotifyConfig().popupPosition).toBe('TOP_RIGHT')
+    expect(readNotifyConfig().popupPosition).toBe('BOTTOM_RIGHT')
   })
 
   it('写入后回读一致', () => {

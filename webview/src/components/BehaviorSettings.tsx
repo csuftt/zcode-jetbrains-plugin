@@ -1,17 +1,8 @@
 /**
  * 基础设置「行为」子页签（BasicSettingsView 第三个子页签）
  *
- * 任务系统通知（IDE 内气泡通知 + 系统通知悬浮弹窗，两通道收进同一张卡片，均默认关闭）：
- * 气泡通知无提示音、无焦点门控——开启即始终弹；悬浮弹窗为纯 Swing
- * 置顶卡片（全平台），仅在 IDE 窗口非激活时弹，时长/位置可配（开关打开才显示）。
- * 配置走 persist kv 通道（utils/notifyConfig.ts），Kotlin ZCodeNotifyService
- * 触发通知时即时读同一 key——前端无请求往返，改动即时生效。
- * 手动 stop 的回合不通知（Kotlin 侧 markManualStop 语义，无需前端配置）。
- *
- * 提示词润色（默认关闭，utils/enhanceConfig.ts）：控制输入框润色按钮（✨）
- * 是否显示；可配润色专用模型（默认跟随会话当前所选模型，失效后端回退默认
- * provider）；思考深度不设——generateText 为裸 AI SDK 调用天然不思考。开启
- * 即时生效（InputBox 监听变更事件重读）。
+ * 段落顺序按使用流程分组：对话内（折叠/提问等待）→ 输入框（润色/文件上下文）
+ * → 会话（新建）→ 会话外（通知）→ 收尾（提交信息）。
  *
  * 完成轮自动折叠（默认开启，utils/turnCollapseConfig.ts）：完成的对话轮默认
  * 只显示最终结论，点「执行过程」折叠栏展开；关闭则完整展开、可手动收起。
@@ -22,6 +13,11 @@
  * 则当前和后续提问一直等待回答（弹窗无倒计时不自动关闭）。persist kv 通道存储，
  * Kotlin 侧（ZCodeAskUserConfig）即时读取，无消息往返。
  *
+ * 提示词润色（默认关闭，utils/enhanceConfig.ts）：控制输入框润色按钮（✨）
+ * 是否显示；可配润色专用模型（默认跟随会话当前所选模型，失效后端回退默认
+ * provider）；思考深度不设——generateText 为裸 AI SDK 调用天然不思考。开启
+ * 即时生效（InputBox 监听变更事件重读）。
+ *
  * 文件上下文新会话自动启用（默认关闭，utils/currentFileConfig.ts）：开启后
  * 新建会话（按钮或新开标签页）自动点亮输入框的文件上下文 chip——仅影响新会话
  * 首条消息（发完即关）；读取方 = resetToNewSession + listSessions boot 待命分支
@@ -30,6 +26,17 @@
  * 新会话按钮直接覆盖当前标签页（默认关闭，utils/newSessionConfig.ts）：开启后
  * 工具栏「新会话」按钮跳过「覆盖 / 新标签页」三选确认直接 resetToNewSession；
  * 读取方 = App.tsx handleNewSession（调用时取值），历史列表的确认弹窗不受影响。
+ *
+ * 任务系统通知（IDE 内气泡通知 + 系统通知悬浮弹窗，两通道收进同一张卡片，均默认关闭）：
+ * 气泡通知无提示音、无焦点门控——开启即始终弹；悬浮弹窗为纯 Swing
+ * 置顶卡片（全平台），仅在 IDE 窗口非激活时弹，时长/位置可配（开关打开才显示）。
+ * 配置走 persist kv 通道（utils/notifyConfig.ts），Kotlin ZCodeNotifyService
+ * 触发通知时即时读同一 key——前端无请求往返，改动即时生效。
+ * 手动 stop 的回合不通知（Kotlin 侧 markManualStop 语义，无需前端配置）。
+ *
+ * AI 提交信息附加要求（utils/commitPromptConfig.ts）：IDE 提交框「AI 生成提交
+ * 信息」按钮的附加要求，失焦即存（内容有变化才写 kv）；追加在内置规约之后优先
+ * 遵循，并自动读取本仓库近期提交主题作为风格参照。留空只用默认风格。
  */
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -133,7 +140,157 @@ export function BehaviorSettings() {
     <>
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">
-          <span className="codicon codicon-bell" />
+          <span className="basic-settings__field-label">{t('settings.behavior.turnCollapseTitle')}</span>
+        </div>
+        <SettingToggle
+          icon="codicon-collapse-all"
+          title={t('settings.behavior.turnCollapseEnabled.title')}
+          desc={t('settings.behavior.turnCollapseEnabled.desc')}
+          on={collapse.autoCollapse}
+          onToggle={() => updateCollapse({ autoCollapse: !collapse.autoCollapse })}
+          onHint={t('settings.behavior.turnCollapseEnabled.offHint')}
+          offHint={t('settings.behavior.turnCollapseEnabled.onHint')}
+        />
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.turnCollapseEnabled.hint')}</span>
+        </small>
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="basic-settings__field-label">{t('settings.behavior.askUserAutoTitle')}</span>
+        </div>
+        <SettingToggle
+          icon="codicon-comment-discussion"
+          title={t('settings.behavior.askUserAuto.title')}
+          desc={t('settings.behavior.askUserAuto.desc')}
+          on={askUserAuto.autoContinueEnabled}
+          onToggle={() => updateAskUserAuto({ autoContinueEnabled: !askUserAuto.autoContinueEnabled })}
+          onHint={t('settings.behavior.askUserAuto.onHint')}
+          offHint={t('settings.behavior.askUserAuto.offHint')}
+        />
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.askUserAuto.hint')}</span>
+        </small>
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="basic-settings__field-label">{t('settings.behavior.enhanceTitle')}</span>
+        </div>
+        <SettingToggle
+          icon="codicon-sparkle"
+          title={t('settings.behavior.enhanceEnabled.title')}
+          desc={t('settings.behavior.enhanceEnabled.desc')}
+          on={enhance.enhanceEnabled}
+          onToggle={() => updateEnhance({ enhanceEnabled: !enhance.enhanceEnabled })}
+          onHint={t('settings.behavior.enhanceEnabled.offHint')}
+          offHint={t('settings.behavior.enhanceEnabled.onHint')}
+        />
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.enhanceEnabled.hint')}</span>
+        </small>
+        {enhance.enhanceEnabled && (
+          <div className="selector-button-wrap behavior-enhance-model">
+            <span className="behavior-enhance-model__label">{t('settings.behavior.enhanceModel.title')}</span>
+            <button
+              type="button"
+              className="selector-button"
+              onClick={() => setModelOpen((v) => !v)}
+            >
+              {enhance.enhanceModel
+                ? models.find(
+                    (m) => m.providerId === enhance.enhanceModel!.providerId && m.modelId === enhance.enhanceModel!.modelId,
+                  )?.modelName ?? enhance.enhanceModel.modelId
+                : t('settings.behavior.enhanceModel.followSession')}
+              <span className="codicon codicon-chevron-down selector-button-chevron" />
+            </button>
+            {selectedInvalid && (
+              <small className="behavior-enhance-model__invalid">
+                <span className="codicon codicon-warning" />
+                <span>{t('settings.behavior.enhanceModel.invalidHint')}</span>
+              </small>
+            )}
+            {modelOpen && (
+              <div className="selector-dropdown behavior-enhance-model__dropdown">
+                <div className="selector-dropdown-group">
+                  <div
+                    className={`selector-dropdown-item ${enhance.enhanceModel == null ? 'is-selected' : ''}`}
+                    onClick={() => {
+                      updateEnhance({ enhanceModel: null })
+                      setModelOpen(false)
+                    }}
+                  >
+                    {t('settings.behavior.enhanceModel.followSession')}
+                  </div>
+                </div>
+                {groups.map(([providerId, items]) => (
+                  <div key={providerId} className="selector-dropdown-group">
+                    <div className="selector-dropdown-group-title">{items[0]?.providerName ?? providerId}
+                      <PlanBadge plan={items[0]?.plan} />
+                    </div>
+                    {items.map((m) => (
+                      <div
+                        key={`${m.providerId}/${m.modelId}`}
+                        className={`selector-dropdown-item ${
+                          enhance.enhanceModel?.providerId === m.providerId && enhance.enhanceModel?.modelId === m.modelId
+                            ? 'is-selected'
+                            : ''
+                        }`}
+                        onClick={() => {
+                          updateEnhance({ enhanceModel: { providerId: m.providerId, modelId: m.modelId } as EnhanceModel })
+                          setModelOpen(false)
+                        }}
+                      >
+                        {m.modelName}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="basic-settings__field-label">{t('settings.behavior.currentFileTitle')}</span>
+        </div>
+        <SettingToggle
+          icon="codicon-file-code"
+          title={t('settings.behavior.currentFileAuto.title')}
+          desc={t('settings.behavior.currentFileAuto.desc')}
+          on={currentFileAuto.autoOnNewSession}
+          onToggle={() => updateCurrentFileAuto({ autoOnNewSession: !currentFileAuto.autoOnNewSession })}
+          onHint={t('settings.behavior.currentFileAuto.onHint')}
+          offHint={t('settings.behavior.currentFileAuto.offHint')}
+        />
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.currentFileAuto.hint')}</span>
+        </small>
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="basic-settings__field-label">{t('settings.behavior.newSessionTitle')}</span>
+        </div>
+        <SettingToggle
+          icon="codicon-add"
+          title={t('settings.behavior.newSessionDirect.title')}
+          desc={t('settings.behavior.newSessionDirect.desc')}
+          on={newSessionDirect.directOverwrite}
+          onToggle={() => updateNewSessionDirect({ directOverwrite: !newSessionDirect.directOverwrite })}
+          onHint={t('settings.behavior.newSessionDirect.onHint')}
+          offHint={t('settings.behavior.newSessionDirect.offHint')}
+        />
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.newSessionDirect.hint')}</span>
+        </small>
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
           <span className="basic-settings__field-label">{t('settings.behavior.notifyTitle')}</span>
         </div>
         <div className="behavior-popup-card">
@@ -214,124 +371,6 @@ export function BehaviorSettings() {
       </section>
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">
-          <span className="codicon codicon-sparkle" />
-          <span className="basic-settings__field-label">{t('settings.behavior.enhanceTitle')}</span>
-        </div>
-        <SettingToggle
-          icon="codicon-sparkle"
-          title={t('settings.behavior.enhanceEnabled.title')}
-          desc={t('settings.behavior.enhanceEnabled.desc')}
-          on={enhance.enhanceEnabled}
-          onToggle={() => updateEnhance({ enhanceEnabled: !enhance.enhanceEnabled })}
-          onHint={t('settings.behavior.enhanceEnabled.offHint')}
-          offHint={t('settings.behavior.enhanceEnabled.onHint')}
-        />
-        <small className="basic-settings__hint">
-          <span className="codicon codicon-info" />
-          <span>{t('settings.behavior.enhanceEnabled.hint')}</span>
-        </small>
-        {enhance.enhanceEnabled && (
-          <div className="selector-button-wrap behavior-enhance-model">
-            <span className="behavior-enhance-model__label">{t('settings.behavior.enhanceModel.title')}</span>
-            <button
-              type="button"
-              className="selector-button"
-              onClick={() => setModelOpen((v) => !v)}
-            >
-              {enhance.enhanceModel
-                ? models.find(
-                    (m) => m.providerId === enhance.enhanceModel!.providerId && m.modelId === enhance.enhanceModel!.modelId,
-                  )?.modelName ?? enhance.enhanceModel.modelId
-                : t('settings.behavior.enhanceModel.followSession')}
-              <span className="codicon codicon-chevron-down selector-button-chevron" />
-            </button>
-            {selectedInvalid && (
-              <small className="behavior-enhance-model__invalid">
-                <span className="codicon codicon-warning" />
-                <span>{t('settings.behavior.enhanceModel.invalidHint')}</span>
-              </small>
-            )}
-            {modelOpen && (
-              <div className="selector-dropdown behavior-enhance-model__dropdown">
-                <div className="selector-dropdown-group">
-                  <div
-                    className={`selector-dropdown-item ${enhance.enhanceModel == null ? 'is-selected' : ''}`}
-                    onClick={() => {
-                      updateEnhance({ enhanceModel: null })
-                      setModelOpen(false)
-                    }}
-                  >
-                    {t('settings.behavior.enhanceModel.followSession')}
-                  </div>
-                </div>
-                {groups.map(([providerId, items]) => (
-                  <div key={providerId} className="selector-dropdown-group">
-                    <div className="selector-dropdown-group-title">{items[0]?.providerName ?? providerId}
-                      <PlanBadge plan={items[0]?.plan} />
-                    </div>
-                    {items.map((m) => (
-                      <div
-                        key={`${m.providerId}/${m.modelId}`}
-                        className={`selector-dropdown-item ${
-                          enhance.enhanceModel?.providerId === m.providerId && enhance.enhanceModel?.modelId === m.modelId
-                            ? 'is-selected'
-                            : ''
-                        }`}
-                        onClick={() => {
-                          updateEnhance({ enhanceModel: { providerId: m.providerId, modelId: m.modelId } as EnhanceModel })
-                          setModelOpen(false)
-                        }}
-                      >
-                        {m.modelName}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-      <section className="basic-settings__section">
-        <div className="basic-settings__field-header">
-          <span className="codicon codicon-collapse-all" />
-          <span className="basic-settings__field-label">{t('settings.behavior.turnCollapseTitle')}</span>
-        </div>
-        <SettingToggle
-          icon="codicon-collapse-all"
-          title={t('settings.behavior.turnCollapseEnabled.title')}
-          desc={t('settings.behavior.turnCollapseEnabled.desc')}
-          on={collapse.autoCollapse}
-          onToggle={() => updateCollapse({ autoCollapse: !collapse.autoCollapse })}
-          onHint={t('settings.behavior.turnCollapseEnabled.offHint')}
-          offHint={t('settings.behavior.turnCollapseEnabled.onHint')}
-        />
-        <small className="basic-settings__hint">
-          <span className="codicon codicon-info" />
-          <span>{t('settings.behavior.turnCollapseEnabled.hint')}</span>
-        </small>
-      </section>
-      <section className="basic-settings__section">
-        <div className="basic-settings__field-header">
-          <span className="codicon codicon-comment-discussion" />
-          <span className="basic-settings__field-label">{t('settings.behavior.askUserAutoTitle')}</span>
-        </div>
-        <SettingToggle
-          icon="codicon-comment-discussion"
-          title={t('settings.behavior.askUserAuto.title')}
-          desc={t('settings.behavior.askUserAuto.desc')}
-          on={askUserAuto.autoContinueEnabled}
-          onToggle={() => updateAskUserAuto({ autoContinueEnabled: !askUserAuto.autoContinueEnabled })}
-          onHint={t('settings.behavior.askUserAuto.onHint')}
-          offHint={t('settings.behavior.askUserAuto.offHint')}
-        />
-        <small className="basic-settings__hint">
-          <span className="codicon codicon-info" />
-          <span>{t('settings.behavior.askUserAuto.hint')}</span>
-        </small>
-      </section>
-      <section className="basic-settings__section">
-        <div className="basic-settings__field-header">
           <span className="codicon codicon-git-commit" />
           <span className="basic-settings__field-label">{t('settings.behavior.commitPrompt.title')}</span>
           {commitPromptSaved && <span className="basic-settings__saved-hint">{t('settings.behavior.commitPrompt.saved')}</span>}
@@ -350,44 +389,6 @@ export function BehaviorSettings() {
         <small className="basic-settings__hint">
           <span className="codicon codicon-info" />
           <span>{t('settings.behavior.commitPrompt.hint')}</span>
-        </small>
-      </section>
-      <section className="basic-settings__section">
-        <div className="basic-settings__field-header">
-          <span className="codicon codicon-file-code" />
-          <span className="basic-settings__field-label">{t('settings.behavior.currentFileTitle')}</span>
-        </div>
-        <SettingToggle
-          icon="codicon-file-code"
-          title={t('settings.behavior.currentFileAuto.title')}
-          desc={t('settings.behavior.currentFileAuto.desc')}
-          on={currentFileAuto.autoOnNewSession}
-          onToggle={() => updateCurrentFileAuto({ autoOnNewSession: !currentFileAuto.autoOnNewSession })}
-          onHint={t('settings.behavior.currentFileAuto.onHint')}
-          offHint={t('settings.behavior.currentFileAuto.offHint')}
-        />
-        <small className="basic-settings__hint">
-          <span className="codicon codicon-info" />
-          <span>{t('settings.behavior.currentFileAuto.hint')}</span>
-        </small>
-      </section>
-      <section className="basic-settings__section">
-        <div className="basic-settings__field-header">
-          <span className="codicon codicon-add" />
-          <span className="basic-settings__field-label">{t('settings.behavior.newSessionTitle')}</span>
-        </div>
-        <SettingToggle
-          icon="codicon-add"
-          title={t('settings.behavior.newSessionDirect.title')}
-          desc={t('settings.behavior.newSessionDirect.desc')}
-          on={newSessionDirect.directOverwrite}
-          onToggle={() => updateNewSessionDirect({ directOverwrite: !newSessionDirect.directOverwrite })}
-          onHint={t('settings.behavior.newSessionDirect.onHint')}
-          offHint={t('settings.behavior.newSessionDirect.offHint')}
-        />
-        <small className="basic-settings__hint">
-          <span className="codicon codicon-info" />
-          <span>{t('settings.behavior.newSessionDirect.hint')}</span>
         </small>
       </section>
     </>

@@ -175,31 +175,27 @@
     }
   },
   "behavior": {
-    "notifyTitle": "任務系統通知",
-    "notifyEnabled": {
-      "title": "IDE 內氣泡通知",
-      "desc": "AI 完成一輪對話時始終彈出 IDE 內氣泡通知（含回覆預覽，點擊直達對話）",
-      "hint": "預設關閉；無提示音，手動停止的回合不通知",
-      "onHint": "點擊開啟氣泡通知",
-      "offHint": "點擊關閉氣泡通知"
+    "turnCollapseTitle": "對話摺疊",
+    "turnCollapseEnabled": {
+      "title": "自動摺疊執行過程",
+      "desc": "完成對話輪只顯示結論，點「執行過程」展開",
+      "hint": "會話內搜尋時摺疊的輪次暫時展開",
+      "onHint": "點擊開啟自動摺疊",
+      "offHint": "點擊關閉自動摺疊（完整展開）"
     },
-    "popupNotifyEnabled": {
-      "title": "系統通知",
-      "desc": "AI 提問、審批等待與任務完成時，在螢幕角落彈出置頂懸浮卡片（點擊直達對話）",
-      "hint": "預設關閉；全平台可用（Windows/macOS/Linux），僅在 IDE 視窗非啟用時彈",
-      "onHint": "點擊開啟系統通知",
-      "offHint": "點擊關閉系統通知",
-      "durationLabel": "彈窗時長（秒）",
-      "durationHint": "時長 0 = 常駐直到點擊或手動關閉",
-      "positionLabel": "彈窗位置",
-      "positionTopRight": "右上角",
-      "positionBottomRight": "右下角"
+    "askUserAutoTitle": "提問等待",
+    "askUserAuto": {
+      "title": "提問自動繼續",
+      "desc": "提問 5 分鐘未回答自動繼續；關閉則一直等待",
+      "hint": "計畫審核仍 5 分鐘逾時；與用戶端同名設定獨立",
+      "onHint": "點擊關閉提問自動繼續",
+      "offHint": "點擊開啟提問自動繼續"
     },
     "enhanceTitle": "提示詞潤色",
     "enhanceEnabled": {
       "title": "潤色按鈕（✨）",
-      "desc": "在輸入框顯示 AI 潤色按鈕：點擊讓 AI 最佳化目前輸入內容，對比確認後取代",
-      "hint": "預設關閉；潤色使用目前所選模型，走常駐通道（無額外會話記錄）",
+      "desc": "點擊讓 AI 最佳化目前輸入內容，對比確認後取代",
+      "hint": "使用目前所選模型，不產生會話記錄",
       "onHint": "點擊隱藏潤色按鈕",
       "offHint": "點擊在輸入框顯示潤色按鈕"
     },
@@ -208,43 +204,47 @@
       "followSession": "跟隨會話模型",
       "invalidHint": "所選模型已失效，潤色時將回退預設模型"
     },
-    "turnCollapseTitle": "對話摺疊",
-    "turnCollapseEnabled": {
-      "title": "自動摺疊執行過程",
-      "desc": "完成的對話輪預設只顯示最終結論，點「執行過程」摺疊列查看完整過程",
-      "hint": "預設開啟；會話內搜尋時摺疊的輪次會暫時展開以便定位",
-      "onHint": "點擊開啟自動摺疊",
-      "offHint": "點擊關閉自動摺疊（完整展開）"
-    },
-    "askUserAutoTitle": "提問等待",
-    "askUserAuto": {
-      "title": "提問自動繼續",
-      "desc": "開啟後，Agent 提問 5 分鐘未回答會自動繼續；關閉後（預設），目前和後續提問會一直等待你的回答",
-      "hint": "預設一直等待（提問彈窗不顯示倒數、不會自動關閉）；計畫審核等確認仍保留 5 分鐘逾時。僅插件本機生效，與 ZCode 用戶端的同名設定相互獨立",
-      "onHint": "點擊關閉提問自動繼續",
-      "offHint": "點擊開啟提問自動繼續"
-    },
-    "commitPrompt": {
-      "title": "AI 提交訊息附加要求",
-      "saved": "已儲存",
-      "placeholder": "例：類型標記用 feat#/fix# 風格（不帶 scope 括號）；正文先總結改了什麼再寫為什麼",
-      "hint": "IDE 提交框「AI 產生提交訊息」按鈕的附加要求，會追加在內建規約之後優先遵循；同時外掛會自動讀取本倉庫近期提交主題作為風格參照。留空只用預設風格。"
-    },
     "currentFileTitle": "檔案內容",
     "currentFileAuto": {
       "title": "新會話自動啟用",
-      "desc": "開啟後，新建會話或新開標籤頁會自動點亮輸入框的檔案內容 chip，首則訊息附上當前開啟的檔案",
-      "hint": "僅影響新會話的首則訊息：發送後勾選自動取消（發完即關），後續訊息不自動攜帶；切換會話不套用。預設關閉，高頻使用再開啟",
+      "desc": "新會話或新開標籤頁自動點亮檔案內容 chip",
+      "hint": "僅首則訊息附帶目前檔案，發送後自動關閉",
       "onHint": "點擊關閉新會話自動啟用",
       "offHint": "點擊開啟新會話自動啟用"
     },
     "newSessionTitle": "新建會話",
     "newSessionDirect": {
       "title": "直接覆蓋當前標籤頁",
-      "desc": "開啟後，點擊工具列「新會話」按鈕不再彈出確認，直接在當前標籤頁開啟新會話",
-      "hint": "僅影響工具列「新會話」按鈕；會話列表中開啟歷史會話的確認彈窗不受影響。原會話保留在歷史記錄中，可隨時切回。預設關閉",
+      "desc": "僅影響工具列「新會話」按鈕，跳過覆蓋確認",
+      "hint": "原會話保留在歷史記錄，可隨時切回",
       "onHint": "點擊關閉直接覆蓋",
       "offHint": "點擊開啟直接覆蓋"
+    },
+    "notifyTitle": "任務系統通知",
+    "notifyEnabled": {
+      "title": "IDE 內氣泡通知",
+      "desc": "AI 完成一輪對話時彈出氣泡通知，含回覆預覽",
+      "hint": "無提示音；手動停止的回合不通知",
+      "onHint": "點擊開啟氣泡通知",
+      "offHint": "點擊關閉氣泡通知"
+    },
+    "popupNotifyEnabled": {
+      "title": "系統通知",
+      "desc": "AI 提問、審核或完成時，角落彈置頂懸浮卡片",
+      "hint": "僅在 IDE 視窗未啟用時彈出",
+      "onHint": "點擊開啟系統通知",
+      "offHint": "點擊關閉系統通知",
+      "durationLabel": "彈窗時長（秒）",
+      "durationHint": "0 = 常駐，直到點擊或手動關閉",
+      "positionLabel": "彈窗位置",
+      "positionTopRight": "右上角",
+      "positionBottomRight": "右下角"
+    },
+    "commitPrompt": {
+      "title": "AI 提交訊息附加要求",
+      "saved": "已儲存",
+      "placeholder": "例：類型標記用 feat#/fix# 風格（不帶 scope 括號）；正文先總結改了什麼再寫為什麼",
+      "hint": "優先於內建規約，自動參照近期提交風格；留空用預設"
     }
   }
 }

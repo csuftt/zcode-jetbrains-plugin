@@ -20,7 +20,7 @@ export interface NotifyConfig {
   popupNotifyEnabled: boolean
   /** 悬浮弹窗时长（秒；0=常驻直到点击/关闭；默认 10）*/
   popupDurationSec: number
-  /** 悬浮弹窗位置（默认右上角）*/
+  /** 悬浮弹窗位置（默认右下角）*/
   popupPosition: PopupPosition
 }
 
@@ -30,7 +30,7 @@ export const DEFAULT_NOTIFY_CONFIG: NotifyConfig = {
   notifyEnabled: false,
   popupNotifyEnabled: false,
   popupDurationSec: 10,
-  popupPosition: 'TOP_RIGHT',
+  popupPosition: 'BOTTOM_RIGHT',
 }
 
 export function readNotifyConfig(): NotifyConfig {

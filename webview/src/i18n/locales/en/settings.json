@@ -194,7 +194,7 @@
     "turnCollapseTitle": "Conversation collapse",
     "turnCollapseEnabled": {
       "title": "Auto-collapse execution process",
-      "desc": "Completed turns show only the final answer; click the \"Execution process\" bar to expand the full process",
+      "desc": "Completed turns show only the final answer; click \"Execution process\" to expand",
       "hint": "Collapsed turns expand temporarily during in-session search",
       "onHint": "Enable auto-collapse",
       "offHint": "Disable auto-collapse (fully expand)"
@@ -202,15 +202,15 @@
     "askUserAutoTitle": "Question wait",
     "askUserAuto": {
       "title": "Auto-continue questions",
-      "desc": "When enabled, an unanswered question auto-continues after 5 minutes; when disabled, it waits for your reply indefinitely",
-      "hint": "Plan approvals keep the 5-minute timeout; plugin-local only, independent of the client setting",
+      "desc": "Unanswered questions auto-continue after 5 minutes; when disabled, they wait indefinitely",
+      "hint": "Plan approvals keep the 5-minute timeout; independent of the client setting",
       "onHint": "Click to disable auto-continue",
       "offHint": "Click to enable auto-continue"
     },
     "enhanceTitle": "Prompt Enhancer",
     "enhanceEnabled": {
       "title": "Enhance button (✨)",
-      "desc": "Show the enhance button in the input box; click to let AI polish your input, apply after review",
+      "desc": "Click to let AI polish your current input; apply after comparing and confirming",
       "hint": "Uses the currently selected model; creates no session records",
       "onHint": "Click to hide the enhance button",
       "offHint": "Click to show the enhance button in the input box"
@@ -223,7 +223,7 @@
     "currentFileTitle": "File context",
     "currentFileAuto": {
       "title": "Auto-enable for new sessions",
-      "desc": "New sessions and new tabs light up the file-context chip in the input box automatically",
+      "desc": "New sessions and new tabs light up the file-context chip automatically",
       "hint": "Attaches the current file to the first message only, then turns off",
       "onHint": "Click to disable auto-enable for new sessions",
       "offHint": "Click to enable auto-enable for new sessions"
@@ -231,7 +231,7 @@
     "newSessionTitle": "New session",
     "newSessionDirect": {
       "title": "Overwrite current tab directly",
-      "desc": "The toolbar \"New Session\" button skips confirmation and overwrites the current tab",
+      "desc": "Only the toolbar \"New Session\" button skips the overwrite confirmation",
       "hint": "The previous session stays in history and can be reopened anytime",
       "onHint": "Click to disable direct overwrite",
       "offHint": "Click to enable direct overwrite"
@@ -239,14 +239,14 @@
     "notifyTitle": "Task notifications",
     "notifyEnabled": {
       "title": "IDE balloon notification",
-      "desc": "Shows an IDE balloon with reply preview when the AI finishes a turn",
+      "desc": "Shows a balloon notification with a reply preview when the AI finishes a turn",
       "hint": "No sound; manually stopped turns are not notified",
       "onHint": "Click to enable notifications",
       "offHint": "Click to disable notifications"
     },
     "popupNotifyEnabled": {
       "title": "System notification",
-      "desc": "Shows an always-on-top floating card in a screen corner when the AI asks, waits for approval, or finishes a turn",
+      "desc": "Shows an always-on-top floating card in a screen corner when the AI asks, awaits approval, or finishes",
       "hint": "Only pops while the IDE window is inactive",
       "onHint": "Click to enable system notifications",
       "offHint": "Click to disable system notifications",
@@ -260,7 +260,7 @@
       "title": "AI Commit Message Extra Prompt",
       "saved": "Saved",
       "placeholder": "e.g. use feat#/fix# type markers (no scope parentheses); body summarizes what & why first",
-      "hint": "Extra requirements for the \"Generate Commit Message with AI\" button, appended after the built-in spec with priority; recent commit subjects are fed as style reference automatically. Leave empty for the default style."
+      "hint": "Takes priority over the built-in spec; recent commit subjects are auto-referenced for style. Leave empty for the default style."
     }
   }
 }
