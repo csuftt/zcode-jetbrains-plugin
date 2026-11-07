@@ -51,6 +51,11 @@
     "defaultOption": "字号 {{percent}}%（默认）",
     "hint": "缩放整个界面（含图标与间距），对所有会话标签生效"
   },
+  "wsDepth": {
+    "label": "色块颜色深度",
+    "hint": "拖动实时调整目录色块深浅（标签色块/目录徽标/历史页圆点）：越左越深、越右越亮；50% 为推荐默认值，箭头图标一键恢复",
+    "reset": "恢复默认"
+  },
   "language": {
     "label": "语言",
     "hint": "切换界面语言，对所有会话标签生效"
@@ -186,31 +191,27 @@
     }
   },
   "behavior": {
-    "notifyTitle": "任务系统通知",
-    "notifyEnabled": {
-      "title": "IDE 内气泡通知",
-      "desc": "AI 完成一轮对话时始终弹出 IDE 内气泡通知（含回复预览，点击直达对话）",
-      "hint": "默认关闭；无提示音，手动停止的回合不通知",
-      "onHint": "点击开启气泡通知",
-      "offHint": "点击关闭气泡通知"
+    "turnCollapseTitle": "对话折叠",
+    "turnCollapseEnabled": {
+      "title": "自动折叠执行过程",
+      "desc": "完成的对话轮只显示结论，点「执行过程」展开完整过程",
+      "hint": "会话内搜索时，折叠的轮次会自动临时展开",
+      "onHint": "点击开启自动折叠",
+      "offHint": "点击关闭自动折叠（完整展开）"
     },
-    "popupNotifyEnabled": {
-      "title": "系统通知",
-      "desc": "AI 提问、审批等待与任务完成时，在屏幕角落弹出置顶悬浮卡片（点击直达对话）",
-      "hint": "默认关闭；全平台可用（Windows/macOS/Linux），仅在 IDE 窗口非激活时弹",
-      "onHint": "点击开启系统通知",
-      "offHint": "点击关闭系统通知",
-      "durationLabel": "弹窗时长（秒）",
-      "durationHint": "时长 0 = 常驻直到点击或手动关闭",
-      "positionLabel": "弹窗位置",
-      "positionTopRight": "右上角",
-      "positionBottomRight": "右下角"
+    "askUserAutoTitle": "提问等待",
+    "askUserAuto": {
+      "title": "提问自动继续",
+      "desc": "开启后，提问 5 分钟未回答会自动继续；关闭则一直等待你的回答",
+      "hint": "计划审批等确认仍保留 5 分钟超时；仅插件本地生效，与客户端同名设置独立",
+      "onHint": "点击关闭提问自动继续",
+      "offHint": "点击开启提问自动继续"
     },
     "enhanceTitle": "提示词润色",
     "enhanceEnabled": {
       "title": "润色按钮（✨）",
-      "desc": "在输入框显示 AI 润色按钮：点击让 AI 优化当前输入内容，对比确认后替换",
-      "hint": "默认关闭；润色使用当前所选模型，走常驻通道（无额外会话记录）",
+      "desc": "在输入框显示润色按钮，点击让 AI 优化当前输入，确认后替换",
+      "hint": "润色使用当前所选模型，不产生会话记录",
       "onHint": "点击隐藏润色按钮",
       "offHint": "点击在输入框显示润色按钮"
     },
@@ -219,43 +220,47 @@
       "followSession": "跟随会话模型",
       "invalidHint": "所选模型已失效，润色时将回退默认模型"
     },
-    "turnCollapseTitle": "对话折叠",
-    "turnCollapseEnabled": {
-      "title": "自动折叠执行过程",
-      "desc": "完成的对话轮默认只显示最终结论，点「执行过程」折叠栏查看完整过程",
-      "hint": "默认开启；会话内搜索时折叠的轮次会临时展开以便定位",
-      "onHint": "点击开启自动折叠",
-      "offHint": "点击关闭自动折叠（完整展开）"
-    },
-    "askUserAutoTitle": "提问等待",
-    "askUserAuto": {
-      "title": "提问自动继续",
-      "desc": "开启后，Agent 提问 5 分钟未回答会自动继续；关闭后（默认），当前和后续提问会一直等待你的回答",
-      "hint": "默认一直等待（提问弹窗不显示倒计时、不会自动关闭）；计划审批等确认仍保留 5 分钟超时。仅插件本地生效，与 ZCode 客户端的同名设置相互独立",
-      "onHint": "点击关闭提问自动继续",
-      "offHint": "点击开启提问自动继续"
-    },
-    "commitPrompt": {
-      "title": "AI 提交信息附加要求",
-      "saved": "已保存",
-      "placeholder": "例：类型标记用 feat#/fix# 风格（不带 scope 括号）；正文先总结改了什么再写为什么",
-      "hint": "IDE 提交框「AI 生成提交信息」按钮的附加要求，会追加在内置规约之后优先遵循；同时插件会自动读取本仓库近期提交主题作为风格参照。留空只用默认风格。"
-    },
     "currentFileTitle": "文件上下文",
     "currentFileAuto": {
       "title": "新会话自动启用",
-      "desc": "开启后，新建会话或新开标签页会自动点亮输入框的文件上下文 chip，首条消息附上当前打开的文件",
-      "hint": "仅影响新会话的首条消息：发送后勾选自动取消（发完即关），后续消息不自动携带；切换会话不应用。默认关闭，高频使用再开启",
+      "desc": "新建会话或新开标签页时，自动点亮输入框的文件上下文 chip",
+      "hint": "仅首条消息携带当前文件，发完即关",
       "onHint": "点击关闭新会话自动启用",
       "offHint": "点击开启新会话自动启用"
     },
     "newSessionTitle": "新建会话",
     "newSessionDirect": {
       "title": "直接覆盖当前标签页",
-      "desc": "开启后，点击工具栏「新会话」按钮不再弹出确认，直接在当前标签页开启新会话",
-      "hint": "仅影响工具栏「新会话」按钮；会话列表中打开历史会话的确认弹窗不受影响。原会话保留在历史记录中，可随时切回。默认关闭",
+      "desc": "点工具栏「新会话」跳过确认，直接覆盖当前标签页",
+      "hint": "原会话保留在历史记录中，可随时切回",
       "onHint": "点击关闭直接覆盖",
       "offHint": "点击开启直接覆盖"
+    },
+    "notifyTitle": "任务系统通知",
+    "notifyEnabled": {
+      "title": "IDE 内气泡通知",
+      "desc": "AI 完成一轮对话时弹出 IDE 内气泡通知，含回复预览",
+      "hint": "无提示音；手动停止的回合不通知",
+      "onHint": "点击开启气泡通知",
+      "offHint": "点击关闭气泡通知"
+    },
+    "popupNotifyEnabled": {
+      "title": "系统通知",
+      "desc": "AI 提问、等待审批或完成时，在屏幕角落弹置顶悬浮卡片",
+      "hint": "仅在 IDE 窗口未激活时弹出",
+      "onHint": "点击开启系统通知",
+      "offHint": "点击关闭系统通知",
+      "durationLabel": "弹窗时长（秒）",
+      "durationHint": "0 = 常驻，直到点击或手动关闭",
+      "positionLabel": "弹窗位置",
+      "positionTopRight": "右上角",
+      "positionBottomRight": "右下角"
+    },
+    "commitPrompt": {
+      "title": "AI 提交信息附加要求",
+      "saved": "已保存",
+      "placeholder": "例：类型标记用 feat#/fix# 风格（不带 scope 括号）；正文先总结改了什么再写为什么",
+      "hint": "提交框「AI 生成提交信息」按钮的附加要求，追加在内置规约后优先遵循；自动参照仓库近期提交风格，留空用默认"
     }
   }
 }

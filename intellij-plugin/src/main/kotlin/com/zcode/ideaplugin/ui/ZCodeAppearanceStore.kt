@@ -24,6 +24,16 @@ object ZCodeAppearanceStore {
         PropertiesComponent.getInstance().getValue(KEY_APPEARANCE)
     } catch (_: Exception) { null }
 
+    /** 色块颜色深度原始值（外观设置页「色块颜色深度」；无配置/非法 null，消费方钳制默认）。
+     *  catch Throwable：非 IDE 单测环境 PropertiesComponent 初始化抛 Error 而非 Exception */
+    fun wsColorDepthRaw(): Int? = try {
+        rawJson()?.let {
+            Json.parseToJsonElement(it).jsonObject["wsColorDepth"]?.jsonPrimitive?.content?.toIntOrNull()
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
     /** 用户显式主题偏好：'light' / 'dark' / ''（空=跟随 IDE）*/
     fun themePref(): String = try {
         rawJson()?.let {

@@ -20,6 +20,9 @@ import {
   isValidHexColor,
   getCustomColor,
   setCustomColor,
+  getWsColorDepth,
+  setWsColorDepth,
+  DEFAULT_WS_DEPTH,
   type CustomColorKey,
   type FontScaleLevel,
 } from '@/utils/appearance'
@@ -273,6 +276,7 @@ export function BasicSettingsView() {
   const [chatBg, setChatBg] = useState(() => getCustomColor('chatBg'))
   const [chatBar, setChatBar] = useState(() => getCustomColor('chatBar'))
   const [userMsg, setUserMsg] = useState(() => getCustomColor('userMsg'))
+  const [wsDepth, setWsDepth] = useState(() => getWsColorDepth())
 
   // 下拉选中值 = 当前生效语言（手动选择即切换，广播同步时随 languageChanged 刷新）
   const currentLanguage = isSupportedLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE
@@ -415,6 +419,49 @@ export function BasicSettingsView() {
         <small className="basic-settings__hint">
           <span className="codicon codicon-info" />
           <span>{t('settings.font.hint')}</span>
+        </small>
+      </section>
+
+      {/* 色块颜色深度（2026-11-07 横向滑条）：拖动实时改色（webview 即时注入 CSS 变量，
+          持久化防抖 400ms），存外观配置（IDE 权威源+广播多标签），Java 标签图标随
+          appearanceSave 重挂——两端同公式同色；discard 图标一键恢复默认档 50% */}
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-symbol-color" />
+          <span className="basic-settings__field-label">{t('settings.wsDepth.label')}</span>
+        </div>
+        <div className="basic-settings__ws-depth-row">
+          <input
+            type="range"
+            className="basic-settings__ws-depth-slider"
+            min={0}
+            max={100}
+            step={1}
+            value={wsDepth}
+            aria-label={t('settings.wsDepth.label')}
+            onChange={(e) => {
+              const depth = Number(e.target.value)
+              setWsColorDepth(depth) // 拖动即时应用（视觉），持久化内部防抖
+              setWsDepth(depth)
+            }}
+          />
+          <span className="basic-settings__ws-depth-value">{wsDepth}%</span>
+          <button
+            type="button"
+            className="basic-settings__ws-depth-reset"
+            data-tooltip={t('settings.wsDepth.reset')}
+            aria-label={t('settings.wsDepth.reset')}
+            onClick={() => {
+              setWsColorDepth(DEFAULT_WS_DEPTH)
+              setWsDepth(DEFAULT_WS_DEPTH)
+            }}
+          >
+            <span className="codicon codicon-discard" />
+          </button>
+        </div>
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.wsDepth.hint')}</span>
         </small>
       </section>
 

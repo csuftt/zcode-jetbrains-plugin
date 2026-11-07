@@ -1664,12 +1664,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (themePref.isNotEmpty() && themePref !in setOf("light", "dark")) {
                 return errorResponse("themePref 非法")
             }
+            // 色块颜色深度（百分比 0..100，50=默认档）：缺省回默认档（旧前端不传不报错）
+            val wsColorDepth = c["wsColorDepth"]?.jsonPrimitive?.intOrNull ?: WsTabColors.DEPTH_DEFAULT_PERCENT
+            if (wsColorDepth !in 0..100) return errorResponse("wsColorDepth 越界")
             buildJsonObject {
                 put("fontScale", fontScale)
                 put("themePref", themePref)
                 put("chatBg", chatBg)
                 put("chatBar", chatBar)
                 put("userMsg", userMsg)
+                put("wsColorDepth", wsColorDepth)
             }.toString()
         } catch (e: Exception) {
             return errorResponse("appearanceSave 参数解析失败: ${e.message}")
@@ -1679,6 +1683,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 .setValue(ZCodeAppearanceStore.KEY_APPEARANCE, cfg)
             log.info("Appearance settings saved")
             broadcastAppearance(cfg)
+            // 色块深度等 Java 侧绘制的观感随存随刷：本标签 + 兄弟标签色块图标重挂
+            // （webview 侧徽标/chips 由 onAppearanceChanged → data-ws-depth 驱动 CSS 变量）
+            refreshTabColorIcon()
+            refreshSiblingColorIcons(this)
         } catch (e: Exception) {
             log.warn("Appearance settings save failed: ${e.message}")
         }

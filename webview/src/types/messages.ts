@@ -411,6 +411,8 @@ export interface AppearanceConfig {
   chatBg: string
   chatBar: string
   userMsg: string
+  /** 色块颜色深度百分比 0..100（50=默认档；缺省/旧 Java 包不回传该键不动本端）*/
+  wsColorDepth: number
 }
 
 /** askUserResponse 请求（AskUserDialog 提交用；accept 时 answer/answers 二选一）*/

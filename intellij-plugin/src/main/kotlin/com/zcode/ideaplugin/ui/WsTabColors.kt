@@ -26,27 +26,62 @@ import javax.swing.Icon
  */
 object WsTabColors {
 
-    /** 9 色板：JBColor(light, dark)，IDEA ProjectIconPalette Start 色对亮度定稿
-     *  （2026-11-06 五轮收敛：原亮版白字 1.95~4.4 洗白 → 压暗一档 ≥4.5 偏暗 →
-     *  回调半档 3.9~4.15 → 再亮半档 3.3~3.4 → **终稿再亮一档落 2.7~2.9 带**，HSL
-     *  亮度等比搜索、色相饱和度不动；中文粗字形在此带可读且鲜亮，暗条底可见性 5.1+、
-     *  选中标签蓝底 4.2+。空心待命块暗主题提亮由 [WsColorBlockIcon] 内部处理）。
-     *  顺序为用户定稿（2026-11-03 三轮修正）：橙 → 青 → 蓝…红 */
-    val PALETTE: List<JBColor> = listOf(
-        JBColor(0xF07500, 0xF07500), // 1 橙（3.3 带 DE6C00）
-        JBColor(0x10AB98, 0x12AB9A), // 2 青（3.3 带 0F9F8E/119D8E）
-        JBColor(0x549BEC, 0x539DE6), // 3 蓝（3.3 带 3D8DEA/3B8FE2）
-        JBColor(0x9C8EDA, 0x9C8CE7), // 4 紫（3.3 带 9081D6/8F7DE4）
-        JBColor(0xA98DCE, 0xA58DC8), // 5 深紫（3.3 带 9D7DC7/9A7FC1）
-        JBColor(0xD676C8, 0xC182C4), // 6 洋红（3.3 带 D062C0/B972BD）
-        JBColor(0xC67FC5, 0xD27AC7), // 7 紫红（3.3 带 BF6FBE/CB67BF）
-        JBColor(0xDA7C95, 0xD77D94), // 8 粉红（3.3 带 D56A87/D26B85）
-        JBColor(0xDD7D75, 0xDD7D76), // 9 红（3.3 带 D96B63/D86B64）
+    /** 色块颜色深度（外观设置页「色块颜色深度」横向滑条，2026-11-07）：存储/传输=百分比
+     *  0..100，50=默认档（2026-11-06 五轮调色终稿色板，白字 2.7~2.9）。滑条两端较五档制放开：
+     *  0%≈白字 5.5+（最深），100%≈1.9~2.1（贴近原金黄 1.95 洗白线，观感用户自担）。
+     *  实现=对基准色板做 HSL 亮度等比偏移（色相/饱和度不动，同调色轮 search 法），端点
+     *  ±[DEPTH_L_OFFSET_MAX]；webview 同公式现算注入 CSS 变量，两端逐位一致。 */
+    const val DEPTH_DEFAULT_PERCENT = 50
+
+    /** 滑条端点的 HSL 亮度偏移幅度（相对默认档：0%=−0.14 最深，100%=+0.14 最亮） */
+    private const val DEPTH_L_OFFSET_MAX = 0.14
+
+    /** 基准 9 色板（=默认档）(light, dark) 原始 RGB。顺序为用户定稿（2026-11-03）：橙 → 青 → 蓝…红 */
+    private val BASE_PALETTE: List<Pair<Int, Int>> = listOf(
+        0xF07500 to 0xF07500, 0x10AB98 to 0x12AB9A, 0x549BEC to 0x539DE6,
+        0x9C8EDA to 0x9C8CE7, 0xA98DCE to 0xA58DC8, 0xD676C8 to 0xC182C4,
+        0xC67FC5 to 0xD27AC7, 0xDA7C95 to 0xD77D94, 0xDD7D75 to 0xDD7D76,
     )
 
-    /** 本项目金黄（webview --ws-badge-gold 同值）：亮度随整板终稿一档
-     *  （原 A67708/E2B34E 洗白 → 压暗版 8F6400/976B00 → 回调版 A67400/A47400 → 3.3 带 BA8200/B88200） */
-    val PROJECT_GOLD: JBColor = JBColor(0xC98D00, 0xCA8F00)
+    /** 基准金黄 (light, dark)（webview --ws-badge-gold 同值） */
+    private val BASE_GOLD: Pair<Int, Int> = 0xC98D00 to 0xCA8F00
+
+    /** 百分比钳制（纯函数测试锚点）：null/越界收 0..100 */
+    fun clampPercent(v: Int?): Int = (v ?: DEPTH_DEFAULT_PERCENT).coerceIn(0, 100)
+
+    /** 百分比 → HSL 亮度偏移（纯函数测试锚点）：50%↔0，线性过渡到 ±[DEPTH_L_OFFSET_MAX] */
+    fun lightnessOffset(percent: Int): Double = (clampPercent(percent) - 50) / 50.0 * DEPTH_L_OFFSET_MAX
+
+    /** 单个 RGB 值的 HSL 亮度偏移：RGB→HSB→B+δ→RGB（HSB 的 B 即 HSL 的 L） */
+    private fun shiftRgb(rgb: Int, delta: Double): Int {
+        val hsb = FloatArray(3)
+        java.awt.Color.RGBtoHSB((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF, hsb)
+        hsb[2] = (hsb[2] + delta).toFloat().coerceIn(0f, 1f)
+        return java.awt.Color.HSBtoRGB(hsb[0], hsb[1], hsb[2]) and 0xFFFFFF
+    }
+
+    /** 按百分比取 9 色板（纯函数测试锚点）：δ=0 原样返回免浮点往返，其余现算 */
+    fun paletteAt(percent: Int): List<JBColor> {
+        val delta = lightnessOffset(percent)
+        if (delta == 0.0) return BASE_PALETTE.map { JBColor(it.first, it.second) }
+        return BASE_PALETTE.map { JBColor(shiftRgb(it.first, delta), shiftRgb(it.second, delta)) }
+    }
+
+    /** 按百分比取金黄（纯函数测试锚点） */
+    fun goldAt(percent: Int): JBColor {
+        val delta = lightnessOffset(percent)
+        return if (delta == 0.0) JBColor(BASE_GOLD.first, BASE_GOLD.second)
+        else JBColor(shiftRgb(BASE_GOLD.first, delta), shiftRgb(BASE_GOLD.second, delta))
+    }
+
+    /** 当前生效百分比（外观配置现读——色块绘制低频，PropertiesComponent 读是内存查找） */
+    fun depthPercent(): Int = clampPercent(ZCodeAppearanceStore.wsColorDepthRaw())
+
+    /** 当前百分比 9 色板（resolve 消费；每次读取现算，滑条拖动即时生效） */
+    val PALETTE: List<JBColor> get() = paletteAt(depthPercent())
+
+    /** 当前百分比金黄（resolve 消费） */
+    val PROJECT_GOLD: JBColor get() = goldAt(depthPercent())
 
     /**
      * 目录颜色解析：项目根=金黄（专属语义保留）；关联目录（及任何会话归属目录）=色板。

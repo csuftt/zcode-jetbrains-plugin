@@ -29,8 +29,11 @@ const CHAT_BG_COLOR_KEY = 'zcode.chatBgColor'
 const USER_MSG_COLOR_KEY = 'zcode.userMsgColor'
 const CHAT_BAR_COLOR_KEY = 'zcode.chatBarColor'
 
+/** 色块颜色深度 key（外观设置页「色块颜色深度」滑条，0..100 百分比）*/
+export const WS_DEPTH_KEY = 'zcode.wsColorDepth'
+
 /** 多标签同步监听的 key 集合（storage 事件过滤用） */
-const WATCHED_KEYS = [FONT_SCALE_KEY, CHAT_BG_COLOR_KEY, USER_MSG_COLOR_KEY, CHAT_BAR_COLOR_KEY]
+const WATCHED_KEYS = [FONT_SCALE_KEY, CHAT_BG_COLOR_KEY, USER_MSG_COLOR_KEY, CHAT_BAR_COLOR_KEY, WS_DEPTH_KEY]
 
 /* ============ 字号缩放（cc-gui：6 级 → --font-scale，global.less #root zoom） ============ */
 
@@ -199,6 +202,118 @@ export function setCustomColor(key: CustomColorKey, color: string): void {
   persistAppearance()
 }
 
+/* ============ 色块颜色深度（2026-11-07：横向滑条实时百分比，0..100）============ */
+
+/** 百分比范围与默认：50=默认档（2026-11-06 五轮调色终稿色板，白字 2.7~2.9）。滑条两端较
+ *  五档制放开：0%≈白字 5.5+（最深），100%≈1.9~2.1（贴近原金黄 1.95 洗白线，观感用户自担）。
+ *  实现=对基准色板做 HSL 亮度等比偏移（色相/饱和度不动，同 Kotlin WsTabColors 公式），
+ *  端点 ±0.14 与 WsTabColors.DEPTH_L_OFFSET_MAX 对齐，改动两处同步 */
+export const WS_DEPTH_MIN = 0
+export const WS_DEPTH_MAX = 100
+export const DEFAULT_WS_DEPTH = 50
+const WS_DEPTH_L_OFFSET_MAX = 0.14
+
+/** 深度样式注入点（<style> 双主题规则，见 applyWsColorDepth） */
+const WS_DEPTH_STYLE_ID = 'zcode-ws-depth-style'
+
+/** 基准色板（=默认档 50%，与 variables.less 基础值一致，改动两处同步）：
+ *  顺序=gold, dir1..dir9；[暗主题值, 浅主题值] */
+const WS_DEPTH_VARS = [
+  '--ws-badge-gold', '--ws-dir-1', '--ws-dir-2', '--ws-dir-3', '--ws-dir-4',
+  '--ws-dir-5', '--ws-dir-6', '--ws-dir-7', '--ws-dir-8', '--ws-dir-9',
+] as const
+const WS_DEPTH_BASE: [string, string][] = [
+  ['#ca8f00', '#c98d00'], // gold
+  ['#f07500', '#f07500'], // dir1 橙
+  ['#12ab9a', '#10ab98'], // dir2 青
+  ['#539de6', '#549bec'], // dir3 蓝
+  ['#9c8ce7', '#9c8eda'], // dir4 紫
+  ['#a58dc8', '#a98dce'], // dir5 深紫
+  ['#c182c4', '#d676c8'], // dir6 洋红
+  ['#d27ac7', '#c67fc5'], // dir7 紫红
+  ['#d77d94', '#da7c95'], // dir8 粉红
+  ['#dd7d76', '#dd7d75'], // dir9 红
+]
+
+function clampWsDepth(depth: number): number {
+  return Math.min(WS_DEPTH_MAX, Math.max(WS_DEPTH_MIN, Math.round(depth)))
+}
+
+/** 读取深度百分比（脏值/缺省回 50） */
+export function getWsColorDepth(): number {
+  const saved = parseInt(localStorage.getItem(WS_DEPTH_KEY) || '', 10)
+  return Number.isFinite(saved) && saved >= WS_DEPTH_MIN && saved <= WS_DEPTH_MAX ? saved : DEFAULT_WS_DEPTH
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  const d = max - min
+  if (d === 0) return [0, 0, l]
+  const s = d / (1 - Math.abs(2 * l - 1))
+  let h: number
+  if (max === r) h = ((g - b) / d) % 6
+  else if (max === g) h = (b - r) / d + 2
+  else h = (r - g) / d + 4
+  h *= 60
+  if (h < 0) h += 360
+  return [h, s, l]
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  let rgb: [number, number, number]
+  if (h < 60) rgb = [c, x, 0]
+  else if (h < 120) rgb = [x, c, 0]
+  else if (h < 180) rgb = [0, c, x]
+  else if (h < 240) rgb = [0, x, c]
+  else if (h < 300) rgb = [x, 0, c]
+  else rgb = [c, 0, x]
+  return `#${rgb.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** 十六进制色的 HSL 亮度偏移（色相/饱和度不动；δ=0 原样返回免浮点往返） */
+function shiftLightnessHex(hex: string, delta: number): string {
+  if (delta === 0) return hex
+  const r = Number.parseInt(hex.slice(1, 3), 16) / 255
+  const g = Number.parseInt(hex.slice(3, 5), 16) / 255
+  const b = Number.parseInt(hex.slice(5, 7), 16) / 255
+  const [h, s, l] = rgbToHsl(r, g, b)
+  return hslToHex(h, s, Math.min(1, Math.max(0, l + delta)))
+}
+
+/** 深度百分比 → 注入 <style> 双主题规则（:root 暗值 + :root[data-theme='light'] 浅值）。
+ *  不用 html 内联变量（会同时压过两主题）也不用静态覆盖块（盖不住连续值）：样式表
+ *  追加在 vite 产物之后，同特异性靠文档序取胜，data-theme 切主题自动跟随。
+ *  50% 时注入值与基础值恒等（往返无损），统一注入免分叉。 */
+function applyWsColorDepth(percent: number): void {
+  const delta = ((clampWsDepth(percent) - 50) / 50) * WS_DEPTH_L_OFFSET_MAX
+  let el = document.getElementById(WS_DEPTH_STYLE_ID) as HTMLStyleElement | null
+  if (!el) {
+    el = document.createElement('style')
+    el.id = WS_DEPTH_STYLE_ID
+    document.head.appendChild(el)
+  }
+  const rule = (themeIdx: 0 | 1) =>
+    WS_DEPTH_VARS.map((v, i) => `${v}: ${shiftLightnessHex(WS_DEPTH_BASE[i][themeIdx], delta)}`).join('; ')
+  el.textContent = `:root { ${rule(0)} }\n:root[data-theme='light'] { ${rule(1)} }`
+}
+
+let wsDepthPersistTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 设置深度百分比：视觉即时生效（滑条拖动每帧触发），持久化+广播防抖 400ms
+ *  （appearanceSave 全量回存会推所有标签与 Java 图标重挂，逐帧发太吵） */
+export function setWsColorDepth(depth: number): void {
+  const clamped = clampWsDepth(depth)
+  localStorage.setItem(WS_DEPTH_KEY, String(clamped))
+  applyWsColorDepth(clamped)
+  if (wsDepthPersistTimer) clearTimeout(wsDepthPersistTimer)
+  wsDepthPersistTimer = setTimeout(persistAppearance, 400)
+}
+
 /* ============ IDE 侧持久化（权威源） ============ */
 
 /** Java 注入的外观配置（buildBridgeJs 生成，无配置时为 null）*/
@@ -208,6 +323,8 @@ interface InjectedAppearance {
   chatBg?: string
   chatBar?: string
   userMsg?: string
+  /** 色块颜色深度百分比 0..100（旧包/缺省不动本端档位）*/
+  wsColorDepth?: number
 }
 
 declare global {
@@ -253,6 +370,11 @@ function applyInjectedAppearance(cfg: InjectedAppearance): void {
     else localStorage.removeItem(COLOR_KEYS[key])
     applyCustomColor(key, color)
   })
+  const depth = cfg.wsColorDepth
+  if (typeof depth === 'number' && depth >= WS_DEPTH_MIN && depth <= WS_DEPTH_MAX) {
+    localStorage.setItem(WS_DEPTH_KEY, String(depth))
+    applyWsColorDepth(depth)
+  }
 }
 
 /** 全量配置回存 IDE（PropertiesComponent）。localStorage 组装，JCEF 内才发送；
@@ -269,6 +391,7 @@ export function persistAppearance(): void {
         chatBg: getCustomColor('chatBg'),
         chatBar: getCustomColor('chatBar'),
         userMsg: getCustomColor('userMsg'),
+        wsColorDepth: getWsColorDepth(),
       },
     })
   } catch {
@@ -289,6 +412,7 @@ let storageListenerInstalled = false
  */
 export function initAppearance(): void {
   applyFontScale(getFontScaleLevel())
+  applyWsColorDepth(getWsColorDepth())
   applyCustomColor('chatBg', getCustomColor('chatBg'))
   applyCustomColor('userMsg', getCustomColor('userMsg'))
   applyCustomColor('chatBar', getCustomColor('chatBar'))
@@ -320,5 +444,6 @@ export function initAppearance(): void {
     applyCustomColor('chatBg', getCustomColor('chatBg'))
     applyCustomColor('userMsg', getCustomColor('userMsg'))
     applyCustomColor('chatBar', getCustomColor('chatBar'))
+    applyWsColorDepth(getWsColorDepth())
   })
 }

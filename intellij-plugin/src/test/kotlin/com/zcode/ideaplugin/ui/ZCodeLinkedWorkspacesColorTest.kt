@@ -82,6 +82,26 @@ class ZCodeLinkedWorkspacesColorTest {
     }
 
     @Test
+    fun `depth percent clamps and lightness axis monotonic`() {
+        assertEquals(50, WsTabColors.clampPercent(null), "缺省=默认档（2026-11-06 五轮调色终稿）")
+        assertEquals(0, WsTabColors.clampPercent(-2), "负值钳到最深")
+        assertEquals(100, WsTabColors.clampPercent(999), "超值钳到最亮")
+        assertEquals(0.0, WsTabColors.lightnessOffset(50), 1e-9, "默认档零偏移")
+        assertEquals(-0.14, WsTabColors.lightnessOffset(0), 1e-9)
+        assertEquals(0.14, WsTabColors.lightnessOffset(100), 1e-9)
+        assertEquals(9, WsTabColors.paletteAt(50).size, "默认档 9 色")
+        assertEquals(9, WsTabColors.paletteAt(50).toSet().size, "默认档色板无重复（防错位复制）")
+        // 亮度轴单调：0% 全色比默认档深、100% 全色比默认档亮（RGB 分量和）
+        fun brightness(c: java.awt.Color) = c.red + c.green + c.blue
+        val deep = WsTabColors.paletteAt(0).map(::brightness)
+        val base = WsTabColors.paletteAt(50).map(::brightness)
+        val bright = WsTabColors.paletteAt(100).map(::brightness)
+        deep.forEachIndexed { i, v -> assertTrue(v < base[i], "色$i 0% 应比默认档深") }
+        bright.forEachIndexed { i, v -> assertTrue(v > base[i], "色$i 100% 应比默认档亮") }
+        assertTrue(brightness(WsTabColors.goldAt(100)) > brightness(WsTabColors.goldAt(0)), "金黄亮度轴同单调")
+    }
+
+    @Test
     fun `tooltip html uses badge ratio tint over tooltip bg`() {
         // 红@14% 混黑底：36/255*255=36→#240000；红@75% 混白前景：191/255 红+64/255 白→#ff4040
         val html = WsTabColors.tooltipHtml(

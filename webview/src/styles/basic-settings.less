@@ -3,6 +3,8 @@
  * 命名转为项目 BEM 规范：.basic-settings__xxx）
  */
 
+@import './mixins.less';
+
 .basic-settings {
   height: 100%;
   overflow-y: auto;
@@ -565,4 +567,52 @@
   margin-left: auto;
   font-size: 11px;
   color: var(--status-success);
+}
+
+/* 色块颜色深度滑条（2026-11-07）：拖动实时调目录色块深浅，discard 一键回默认档 50% */
+.basic-settings__ws-depth-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  input[type='range'] {
+    flex: 1;
+    min-width: 0;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+  }
+}
+
+.basic-settings__ws-depth-value {
+  flex: none;
+  min-width: 36px;
+  text-align: right;
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.basic-settings__ws-depth-reset {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  .tooltip-bottom-center(20px);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .codicon {
+    font-size: 13px;
+  }
 }

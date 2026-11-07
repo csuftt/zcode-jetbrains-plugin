@@ -51,6 +51,11 @@
     "defaultOption": "Font {{percent}}% (default)",
     "hint": "Scales the entire UI (icons and spacing included); applies to all session tabs"
   },
+  "wsDepth": {
+    "label": "Color block depth",
+    "hint": "Drag to adjust directory color block shade (tab blocks, badges, history dots) in real time: darker to the left, brighter to the right. 50% is the recommended default; the arrow icon restores it.",
+    "reset": "Reset to default"
+  },
   "language": {
     "label": "Language",
     "hint": "Switch the UI language; applies to all session tabs"
@@ -186,31 +191,27 @@
     }
   },
   "behavior": {
-    "notifyTitle": "Task notifications",
-    "notifyEnabled": {
-      "title": "IDE balloon notification",
-      "desc": "Always shows an IDE balloon notification (with reply preview, click to open) when the AI finishes a turn",
-      "hint": "Off by default; no sound; manually stopped turns are not notified",
-      "onHint": "Click to enable notifications",
-      "offHint": "Click to disable notifications"
+    "turnCollapseTitle": "Conversation collapse",
+    "turnCollapseEnabled": {
+      "title": "Auto-collapse execution process",
+      "desc": "Completed turns show only the final answer; click the \"Execution process\" bar to expand the full process",
+      "hint": "Collapsed turns expand temporarily during in-session search",
+      "onHint": "Enable auto-collapse",
+      "offHint": "Disable auto-collapse (fully expand)"
     },
-    "popupNotifyEnabled": {
-      "title": "System notification",
-      "desc": "Shows an always-on-top floating card in a corner of the screen when the AI waits for input/approval or finishes a turn (click to jump back)",
-      "hint": "Off by default; works on Windows/macOS/Linux; only pops while the IDE window is inactive",
-      "onHint": "Click to enable system notifications",
-      "offHint": "Click to disable system notifications",
-      "durationLabel": "Popup duration (seconds)",
-      "durationHint": "Duration 0 = stays until clicked or closed",
-      "positionLabel": "Popup position",
-      "positionTopRight": "Top-right",
-      "positionBottomRight": "Bottom-right"
+    "askUserAutoTitle": "Question wait",
+    "askUserAuto": {
+      "title": "Auto-continue questions",
+      "desc": "When enabled, an unanswered question auto-continues after 5 minutes; when disabled, it waits for your reply indefinitely",
+      "hint": "Plan approvals keep the 5-minute timeout; plugin-local only, independent of the client setting",
+      "onHint": "Click to disable auto-continue",
+      "offHint": "Click to enable auto-continue"
     },
     "enhanceTitle": "Prompt Enhancer",
     "enhanceEnabled": {
       "title": "Enhance button (✨)",
-      "desc": "Show the AI enhance button in the input box: click to let AI polish your input, then apply after review",
-      "hint": "Off by default; enhancement uses the currently selected model via the resident channel (no extra session records)",
+      "desc": "Show the enhance button in the input box; click to let AI polish your input, apply after review",
+      "hint": "Uses the currently selected model; creates no session records",
       "onHint": "Click to hide the enhance button",
       "offHint": "Click to show the enhance button in the input box"
     },
@@ -219,43 +220,47 @@
       "followSession": "Follow session model",
       "invalidHint": "Selected model is unavailable; enhancement falls back to the default model"
     },
-    "turnCollapseTitle": "Conversation collapse",
-    "turnCollapseEnabled": {
-      "title": "Auto-collapse execution process",
-      "desc": "Completed turns show only the final answer; click the \"Execution process\" bar to view the full process",
-      "hint": "On by default; collapsed turns expand temporarily during in-session search",
-      "onHint": "Enable auto-collapse",
-      "offHint": "Disable auto-collapse (fully expand)"
-    },
-    "askUserAutoTitle": "Question wait",
-    "askUserAuto": {
-      "title": "Auto-continue questions",
-      "desc": "When enabled, an unanswered agent question auto-continues after 5 minutes; when disabled (default), the current and future questions wait for your reply indefinitely",
-      "hint": "Waits indefinitely by default (no countdown, never auto-closes); plan approvals keep the 5-minute timeout. Plugin-local only, independent of the ZCode client setting",
-      "onHint": "Click to disable auto-continue",
-      "offHint": "Click to enable auto-continue"
-    },
-    "commitPrompt": {
-      "title": "AI Commit Message Extra Prompt",
-      "saved": "Saved",
-      "placeholder": "e.g. use feat#/fix# type markers (no scope parentheses); body summarizes what & why first",
-      "hint": "Extra requirements for the \"Generate Commit Message with AI\" button in the IDE commit dialog, appended after the built-in spec with priority. Recent commit subjects of this repo are also fed as style reference automatically. Leave empty for the default style."
-    },
     "currentFileTitle": "File context",
     "currentFileAuto": {
       "title": "Auto-enable for new sessions",
-      "desc": "When enabled, starting a new session or opening a new tab lights up the file-context chip in the input box, attaching the currently open file to the first message",
-      "hint": "Affects only the first message of a new session: the chip auto-unchecks after sending (one-shot) and later messages carry nothing automatically; switching sessions is unaffected. Off by default — enable it if you use this constantly",
+      "desc": "New sessions and new tabs light up the file-context chip in the input box automatically",
+      "hint": "Attaches the current file to the first message only, then turns off",
       "onHint": "Click to disable auto-enable for new sessions",
       "offHint": "Click to enable auto-enable for new sessions"
     },
     "newSessionTitle": "New session",
     "newSessionDirect": {
       "title": "Overwrite current tab directly",
-      "desc": "When enabled, clicking the \"New Session\" button in the toolbar skips the confirmation and starts a new session in the current tab",
-      "hint": "Affects only the toolbar \"New Session\" button; the confirmation when opening a past session from the session list is unaffected. The previous session stays in history and can be switched back to anytime. Off by default",
+      "desc": "The toolbar \"New Session\" button skips confirmation and overwrites the current tab",
+      "hint": "The previous session stays in history and can be reopened anytime",
       "onHint": "Click to disable direct overwrite",
       "offHint": "Click to enable direct overwrite"
+    },
+    "notifyTitle": "Task notifications",
+    "notifyEnabled": {
+      "title": "IDE balloon notification",
+      "desc": "Shows an IDE balloon with reply preview when the AI finishes a turn",
+      "hint": "No sound; manually stopped turns are not notified",
+      "onHint": "Click to enable notifications",
+      "offHint": "Click to disable notifications"
+    },
+    "popupNotifyEnabled": {
+      "title": "System notification",
+      "desc": "Shows an always-on-top floating card in a screen corner when the AI asks, waits for approval, or finishes a turn",
+      "hint": "Only pops while the IDE window is inactive",
+      "onHint": "Click to enable system notifications",
+      "offHint": "Click to disable system notifications",
+      "durationLabel": "Popup duration (seconds)",
+      "durationHint": "0 = stays until clicked or closed",
+      "positionLabel": "Popup position",
+      "positionTopRight": "Top-right",
+      "positionBottomRight": "Bottom-right"
+    },
+    "commitPrompt": {
+      "title": "AI Commit Message Extra Prompt",
+      "saved": "Saved",
+      "placeholder": "e.g. use feat#/fix# type markers (no scope parentheses); body summarizes what & why first",
+      "hint": "Extra requirements for the \"Generate Commit Message with AI\" button, appended after the built-in spec with priority; recent commit subjects are fed as style reference automatically. Leave empty for the default style."
     }
   }
 }
