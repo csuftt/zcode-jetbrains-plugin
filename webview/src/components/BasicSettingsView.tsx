@@ -262,6 +262,25 @@ export function BasicSettingsView() {
   const pendingSection = useStore((s) => s.pendingSettingsSection)
   const setPendingSection = useStore((s) => s.setPendingSettingsSection)
   const [tab, setTab] = useState<BasicTab>(() => (pendingSection === 'env' ? 'environment' : 'appearance'))
+  // 色块深度滑条行宽 = 主题按钮组实际宽度（2026-11-07）：组宽是内容自适应（随语言变），
+  // 且 JCEF 有页面缩放（browser-zoom 特性），硬编码 px 在缩放/语言下必错位——运行时
+  // 经 offsetWidth（布局像素，不受 transform 缩放干扰）+ResizeObserver 同源对齐
+  const themeSelectorRef = useRef<HTMLDivElement>(null)
+  const wsDepthRowRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (tab !== 'appearance') return
+    const src = themeSelectorRef.current
+    const dst = wsDepthRowRef.current
+    if (!src || !dst) return
+    const sync = () => {
+      dst.style.maxWidth = `${src.offsetWidth}px`
+    }
+    sync()
+    const ro = new ResizeObserver(sync)
+    ro.observe(src)
+    return () => ro.disconnect()
+  }, [tab])
 
   useEffect(() => {
     if (pendingSection === 'env') {
@@ -357,7 +376,7 @@ export function BasicSettingsView() {
           <span className="codicon codicon-symbol-color" />
           <span className="basic-settings__field-label">{t('settings.theme.label')}</span>
         </div>
-        <div className="basic-settings__theme-selector">
+        <div ref={themeSelectorRef} className="basic-settings__theme-selector">
           <button
             type="button"
             className={cx('basic-settings__theme-option', themePref === 'system' && 'active')}
@@ -422,6 +441,30 @@ export function BasicSettingsView() {
         </small>
       </section>
 
+
+      {/* 语言（cc-gui 同款下拉；语言名固定以各自母语显示，首次未选择时默认取 IDE 注入语言） */}
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
+          <span className="codicon codicon-globe" />
+          <span className="basic-settings__field-label">{t('settings.language.label')}</span>
+        </div>
+        <select
+          className="basic-settings__select"
+          value={currentLanguage}
+          onChange={(e) => handleLanguageChange(e.target.value as SupportedLanguage)}
+        >
+          {SUPPORTED_LANGUAGES.map((lang) => (
+            <option key={lang} value={lang}>
+              {LANGUAGE_NATIVE_NAMES[lang]}
+            </option>
+          ))}
+        </select>
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.language.hint')}</span>
+        </small>
+      </section>
+
       {/* 色块颜色深度（2026-11-07 横向滑条）：拖动实时改色（webview 即时注入 CSS 变量，
           持久化防抖 400ms），存外观配置（IDE 权威源+广播多标签），Java 标签图标随
           appearanceSave 重挂——两端同公式同色；discard 图标一键恢复默认档 50% */}
@@ -430,7 +473,7 @@ export function BasicSettingsView() {
           <span className="codicon codicon-symbol-color" />
           <span className="basic-settings__field-label">{t('settings.wsDepth.label')}</span>
         </div>
-        <div className="basic-settings__ws-depth-row">
+        <div ref={wsDepthRowRef} className="basic-settings__ws-depth-row">
           <input
             type="range"
             className="basic-settings__ws-depth-slider"
@@ -439,6 +482,8 @@ export function BasicSettingsView() {
             step={1}
             value={wsDepth}
             aria-label={t('settings.wsDepth.label')}
+            /* 已填充段渐变变量（自绘细轨道用），拖动随 state 实时刷新 */
+            style={{ '--ws-depth-fill': `${wsDepth}%` } as React.CSSProperties}
             onChange={(e) => {
               const depth = Number(e.target.value)
               setWsColorDepth(depth) // 拖动即时应用（视觉），持久化内部防抖
@@ -462,29 +507,6 @@ export function BasicSettingsView() {
         <small className="basic-settings__hint">
           <span className="codicon codicon-info" />
           <span>{t('settings.wsDepth.hint')}</span>
-        </small>
-      </section>
-
-      {/* 语言（cc-gui 同款下拉；语言名固定以各自母语显示，首次未选择时默认取 IDE 注入语言） */}
-      <section className="basic-settings__section">
-        <div className="basic-settings__field-header">
-          <span className="codicon codicon-globe" />
-          <span className="basic-settings__field-label">{t('settings.language.label')}</span>
-        </div>
-        <select
-          className="basic-settings__select"
-          value={currentLanguage}
-          onChange={(e) => handleLanguageChange(e.target.value as SupportedLanguage)}
-        >
-          {SUPPORTED_LANGUAGES.map((lang) => (
-            <option key={lang} value={lang}>
-              {LANGUAGE_NATIVE_NAMES[lang]}
-            </option>
-          ))}
-        </select>
-        <small className="basic-settings__hint">
-          <span className="codicon codicon-info" />
-          <span>{t('settings.language.hint')}</span>
         </small>
       </section>
 

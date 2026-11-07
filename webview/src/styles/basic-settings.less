@@ -53,6 +53,8 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  /* 盒子贴住按钮内容宽（默认块级占满整行）：色块深度滑条行宽与其右缘对齐的测量源 */
+  width: fit-content;
 }
 
 .basic-settings__theme-option {
@@ -569,17 +571,43 @@
   color: var(--status-success);
 }
 
-/* 色块颜色深度滑条（2026-11-07）：拖动实时调目录色块深浅，discard 一键回默认档 50% */
+/* 色块颜色深度滑条（2026-11-07）：拖动实时调目录色块深浅，discard 一键回默认档 50%。
+   行宽运行时对齐主题按钮组实际宽度（组件 ResizeObserver 同步 offsetWidth，缩放/
+   字号/语言全适配），此处 540px 仅作首帧兜底；轨道自绘 4px 细条（native 轨道太粗），
+   已填充段用 --ws-depth-fill 渐变（组件随 state 写入），accent 蓝不变 */
 .basic-settings__ws-depth-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  max-width: 540px;
 
   input[type='range'] {
     flex: 1;
     min-width: 0;
-    accent-color: var(--accent-primary);
+    height: 14px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
     cursor: pointer;
+
+    &::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 2px;
+      background: linear-gradient(
+        to right,
+        var(--accent-primary) var(--ws-depth-fill, 50%),
+        var(--bg-active) var(--ws-depth-fill, 50%)
+      );
+    }
+
+    &::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      margin-top: -4px; /* (track 4px - thumb 12px) / 2，钉轨道竖直居中 */
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent-primary);
+    }
   }
 }
 
