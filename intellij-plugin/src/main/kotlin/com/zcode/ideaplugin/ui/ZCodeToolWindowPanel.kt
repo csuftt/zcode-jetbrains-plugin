@@ -1363,6 +1363,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "getProjectPath" -> handleGetProjectPath()
                         "addLinkedWorkspace" -> handleAddLinkedWorkspace(msg)
                         "removeLinkedWorkspace" -> handleRemoveLinkedWorkspace(msg)
+                        "reorderLinkedWorkspaces" -> handleReorderLinkedWorkspaces(msg)
                         "getUsage" -> handleGetUsage(msg)
                         "getSessionDebug" -> handleGetSessionDebug(msg)
                         "getQuota" -> handleGetQuota(msg)
@@ -5961,6 +5962,35 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 摘除 Project View 投影（幂等 reconcile，同添加口径）
         ZCodeWorkspaceMounter.reconcileAsync(project, list)
         broadcastLinkedWorkspaces(project) // 全标签同步：他标签移除的目录本标签也要消失（真机 2026-11-03）
+        return buildJsonObject {
+            put("op", "linkedWorkspaces")
+            put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))
+            put("colors", colorsJson(list))
+        }
+    }
+
+    /**
+     * 拖动排序关联目录 chips（2026-11-07 用户定稿：常驻可拖 + 全局同一顺序）。
+     * 前端发重排后的完整列表，按 wsKey 归一口径校验与现列表**同集合**才落盘：
+     * 拖拽提交撞上他端增删（另一标签正在加/删目录）时，旧顺序快照不得覆盖回去
+     * （写回已删目录 / 丢掉新加目录）——集合不一致即拒绝，广播权威列表让前端弹回。
+     * 纯重排不动集合：跳过 Project View reconcile（内容根与顺序无关）；色板序号按
+     * wsKey 记也不受影响；右键发送/手机 H5 读同一数组，顺序自动跟随（全局同一顺序）。
+     */
+    private fun handleReorderLinkedWorkspaces(msg: JsonObject): JsonObject {
+        val received = (msg["workspaces"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            .orEmpty()
+        var list = readLinkedWorkspaces()
+        if (received.isNotEmpty() &&
+            list.map { wsKey(it) }.toSet() == received.map { wsKey(it) }.toSet()
+        ) {
+            list = received
+            persistLinkedWorkspaces(list)
+            log.info("linked workspaces reordered: $list")
+        }
+        // 无条件广播：排序成功=全标签同步新顺序；校验拒绝=前端以权威列表弹回
+        broadcastLinkedWorkspaces(project)
         return buildJsonObject {
             put("op", "linkedWorkspaces")
             put("workspaces", JsonArray(list.map { JsonPrimitive(it) }))

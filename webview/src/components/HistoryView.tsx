@@ -18,7 +18,7 @@
  * - 点击已归档项不进入会话，操作走专属还原/删除按钮
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SessionInfo, OpenTabInfo } from '@/types/messages'
 import { SessionItem } from './SessionItem'
@@ -78,6 +78,8 @@ interface Props {
   onAddWorkspace: () => void
   /** 移除关联目录（chip hover ×；若移除的是激活目录由 store 回退本项目）*/
   onRemoveWorkspace: (path: string) => void
+  /** 拖动排序关联目录 chips（发重排后完整列表；Java 同集合校验落盘并广播）*/
+  onReorderWorkspaces: (workspaces: string[]) => void
   /** 新建会话（chips 行按钮）：进待命态并切回聊天视图，落位=当前浏览目录 */
   onNewSession: () => void
 }
@@ -133,6 +135,7 @@ export function HistoryView({
   onSwitchWorkspace = () => {},
   onAddWorkspace = () => {},
   onRemoveWorkspace = () => {},
+  onReorderWorkspaces = () => {},
   onNewSession = () => {},
 }: Props) {
   const { t } = useTranslation()
@@ -151,6 +154,99 @@ export function HistoryView({
   // 关联目录编辑模式（用户定稿 2026-10-28）：× 随 hover 显示会让 chip 宽度变化导致
   // 换行抖动，删除又是低频操作——加独立管理开关，编辑态下 × 才常显
   const [wsEditing, setWsEditing] = useState(false)
+  // 拖动排序关联目录 chips（2026-11-07 用户定稿：常驻可拖 + 全局同一顺序；项目 chip 恒
+  // 第一不参与）。自实现 Pointer 拖拽（mousedown→位移阈值→mousemove 实时预览→mouseup
+  // 提交）：HTML5 原生 DnD 在 JCEF 不可用（真机 2026-11-07：dragstart 生效但 dragover
+  // 链路被宿主 drop target 吞掉，松手即恢复）。dragWs=拖拽中的目录；previewOrder=预览
+  // 序（null=跟随 props）；previewOrderRef 为权威镜像（move 同步写、提交读，state 仅
+  // 驱动渲染）。插入式落位=指针落在目标 chip 左/右半区 before/after；无变化不提交。
+  const [dragWs, setDragWs] = useState<string | null>(null)
+  const [previewOrder, setPreviewOrder] = useState<string[] | null>(null)
+  const previewOrderRef = useRef<string[] | null>(null)
+  const flowRef = useRef<HTMLDivElement | null>(null)
+  /** 一次拖拽的瞬时状态（ref 持有：window 级 mousemove/mouseup 闭包读最新值）*/
+  const dragRef = useRef<{ ws: string; startX: number; startY: number; active: boolean } | null>(null)
+  /** 拖拽过后抑制紧随的 click（mouseup 会派发 click，误切目录）*/
+  const suppressClickRef = useRef(false)
+  /** 把 drag 插到 target 前/后，产出新预览序；无效落位或与当前序相同返回 null */
+  const computePreview = (drag: string, target: string, before: boolean): string[] | null => {
+    const order = previewOrderRef.current ?? linkedWorkspaces
+    if (!order.some((w) => wsSame(w, drag)) || wsSame(drag, target)) return null
+    const next = order.filter((w) => !wsSame(w, drag))
+    const idx = next.findIndex((w) => wsSame(w, target))
+    if (idx < 0) return null
+    next.splice(idx + (before ? 0 : 1), 0, drag)
+    return order.length === next.length && order.every((w, i) => wsSame(w, next[i])) ? null : next
+  }
+  /** 指针落点→命中的关联 chip（chip 上 data-ws 取原路径，无 basename 歧义）*/
+  const hitChip = (x: number, y: number): { ws: string; before: boolean } | null => {
+    const flow = flowRef.current
+    if (!flow) return null
+    for (const el of Array.from(
+      flow.querySelectorAll<HTMLElement>('.history-ws-chip:not(.history-ws-chip--project)'),
+    )) {
+      const r = el.getBoundingClientRect()
+      if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+        const ws = el.dataset.ws
+        return ws ? { ws, before: x < r.left + r.width / 2 } : null
+      }
+    }
+    return null
+  }
+  const handleChipMouseDown = (ws: string, e: ReactMouseEvent) => {
+    if (e.button !== 0) return
+    dragRef.current = { ws, startX: e.clientX, startY: e.clientY, active: false }
+  }
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const st = dragRef.current
+      if (!st) return
+      if (!st.active) {
+        // 位移阈值后才进入拖拽态：普通点击零干扰
+        if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) < 5) return
+        st.active = true
+        setDragWs(st.ws)
+        document.body.style.userSelect = 'none' // 拖拽期间防文本选择
+      }
+      const hit = hitChip(e.clientX, e.clientY)
+      if (!hit) return
+      const next = computePreview(st.ws, hit.ws, hit.before)
+      if (next) {
+        previewOrderRef.current = next
+        setPreviewOrder(next)
+      }
+    }
+    const onUp = () => {
+      const st = dragRef.current
+      dragRef.current = null
+      document.body.style.userSelect = ''
+      if (!st?.active) return // 位移未过阈值=普通点击，click 照常派发
+      // 拖拽过后抑制 click 误切目录：click 由 mouseup 派发且无落点变化也可能触发；
+      // setTimeout 兜底清位（松手在 chip 外时 click 不派发，防标志残留吞下次点击）
+      suppressClickRef.current = true
+      setTimeout(() => {
+        suppressClickRef.current = false
+      }, 0)
+      setDragWs(null)
+      const preview = previewOrderRef.current
+      if (
+        preview &&
+        (preview.length !== linkedWorkspaces.length ||
+          !preview.every((w, i) => wsSame(w, linkedWorkspaces[i])))
+      ) {
+        onReorderWorkspaces(preview)
+      }
+      previewOrderRef.current = null
+      setPreviewOrder(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+  }, [linkedWorkspaces, onReorderWorkspaces])
   // 切换确认 modal（当前标签有会话时的打开方式选择，null = 不显示）
   const [switchTarget, setSwitchTarget] = useState<SessionInfo | null>(null)
   // 跳转确认 modal（点击已在其他标签打开的会话：先确认再跳，防标题相似误点）
@@ -354,7 +450,7 @@ export function HistoryView({
           新建三钮位置稳定不随目录数量漂移。常驻渲染（含空态）——添加目录是关联第一个
           目录的唯一入口，空态藏行=功能不可达（首版真机踩坑）*/}
       <div className={`history-ws-chips ${wsEditing ? 'history-ws-chips--editing' : ''}`}>
-        <div className="history-ws-chips__flow">
+        <div className="history-ws-chips__flow" ref={flowRef}>
 
           <button
             type="button"
@@ -368,7 +464,7 @@ export function HistoryView({
               {wsBasename(projectWorkspacePath) || t('history.wsChips.project')}
             </span>
           </button>
-          {linkedWorkspaces.map((ws) => {
+          {(previewOrder ?? linkedWorkspaces).map((ws) => {
             const active = wsSame(activeWorkspacePath || projectWorkspacePath, ws)
             // 统一配色（2026-11-02）：chip 按目录色板着色，与徽标/标签色块同源；
             // 未命中映射（应答未达/旧包）无色类回落默认主题
@@ -380,12 +476,22 @@ export function HistoryView({
                 className={[
                   'history-ws-chip',
                   active ? 'history-ws-chip--active' : '',
+                  ws === dragWs ? 'history-ws-chip--dragging' : '',
                   colorIdx != null ? `history-ws-chip--dir${colorIdx + 1}` : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
                 data-tooltip={ws}
-                onClick={() => onSwitchWorkspace(ws)}
+                data-ws={ws}
+                onMouseDown={(e) => handleChipMouseDown(ws, e)}
+                onClick={() => {
+                  // 拖拽收场派发的 click 短路（mouseup 落在本 chip 上会触发），防误切目录
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false
+                    return
+                  }
+                  onSwitchWorkspace(ws)
+                }}
               >
                 {/* 圆点仅在有目录色类时渲染（colors 映射未达时无色可点，省出空隙）*/}
                 {colorIdx != null && <span className="history-ws-chip__dot" />}

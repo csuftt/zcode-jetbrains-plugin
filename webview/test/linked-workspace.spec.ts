@@ -101,6 +101,15 @@ describe('关联目录应答与激活目录切换', () => {
     expect(listReqs).toHaveLength(0) // 列表已在该目录，早退（仅落位对齐）
     expect(useStore.getState().activeWorkspacePath).toBe(WS_OTHER)
   })
+
+  it('reorderLinkedWorkspaces：发重排后完整列表（无乐观更新，广播回包即收敛）', () => {
+    const order = [WS_OTHER, WS_PROJECT]
+    useStore.getState().reorderLinkedWorkspaces(order)
+    const req = sentRequests.find((r) => r.op === 'reorderLinkedWorkspaces')
+    expect(req?.workspaces).toEqual(order)
+    // 本地列表未被乐观改写（等 Java 同集合校验落盘后的广播统一落 state）
+    expect(useStore.getState().linkedWorkspaces).toEqual([])
+  })
 })
 
 describe('projectPath 注入空串兜底（重启初期 basePath 未就绪）', () => {

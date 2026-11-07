@@ -1019,6 +1019,9 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       return { op: 'linkedWorkspaces', workspaces: ['G:/mock-linked/other-project', 'E:/mock-linked/lab-sdk'], added: 'E:/mock-linked/lab-sdk' }
     case 'removeLinkedWorkspace':
       return { op: 'linkedWorkspaces', workspaces: [] }
+    case 'reorderLinkedWorkspaces':
+      // mock：原样回显（dev 态拖动即时生效，与真实「校验落盘→广播」的收敛结果一致）
+      return { op: 'linkedWorkspaces', workspaces: req.workspaces }
     case 'scheduledList':
       // mock：空定时列表（形状对齐 Java buildListMessage；此前缺分支会在 dev/mock 态
       // 弹「mock 不支持 op」误报——init 的桥就绪分支每次都发它）

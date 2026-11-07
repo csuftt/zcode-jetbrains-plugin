@@ -493,6 +493,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'getProjectPath' }
   | { op: 'addLinkedWorkspace' }
   | { op: 'removeLinkedWorkspace'; path: string }
+  /** 拖动排序关联目录 chips：发重排后完整列表，Java 按 wsKey 同集合校验后落盘并全标签广播 */
+  | { op: 'reorderLinkedWorkspaces'; workspaces: string[] }
   /** 前端进入无会话待命态（「新建会话」延迟创建）→ Java 清 TabState 绑定与标签 tooltip */
   | { op: 'clearTabSession' }
   | { op: 'deleteSession'; sessionId: string }

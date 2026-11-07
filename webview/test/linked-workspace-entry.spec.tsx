@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, createEvent, cleanup } from '@testing-library/react'
 import { HistoryView } from '@/components/HistoryView'
 
 afterEach(cleanup)
@@ -195,5 +195,107 @@ describe('归档 tab 切目录跟随刷新', () => {
     // 切目录（activeWorkspacePath 变化）：跟随重拉
     rerender(<HistoryView {...archivedProps({ onLoadArchived, activeWorkspacePath: 'E:/work/other' })} />)
     expect(onLoadArchived).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('关联目录 chips 拖动排序（常驻可拖，2026-11-07 定稿）', () => {
+  const THREE = ['E:/a/alpha', 'E:/b/beta', 'E:/c/gamma']
+
+  /** chip 按目录名查找（getByText 命中 name span，回溯 button）*/
+  const chipOf = (name: string) => screen.getByText(name).closest('button') as HTMLElement
+
+  /** jsdom 的 getBoundingClientRect 恒零：指定 chip 的矩形（模拟换行行内几何）*/
+  const stubRect = (el: HTMLElement, left: number, width: number) => {
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+      left, width, top: 0, height: 24, right: left + width, bottom: 24, x: left, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+  }
+
+  /** flow 区 chip 名字序（含首位本项目 chip「mock-project」，校验它恒第一不动）*/
+  const flowNames = () =>
+    Array.from(document.querySelectorAll('.history-ws-chips__flow .history-ws-chip__name')).map(
+      (el) => el.textContent,
+    )
+
+  /**
+   * 派发带指针坐标的鼠标事件：jsdom/RTL 下 fireEvent init 的 clientX/Y 落不到事件上
+   * （坐标是原型只读 getter，RTL 的 Object.assign 静默失败——探针实测），须 createEvent
+   * 后 defineProperty 强写。仅测试基建缺口，真机 Chromium 坐标原生可用。
+   * mousedown 派发到 chip（handler 读坐标记起点）；mousemove 派发到 document（bubbles
+   * 冒到 window 级监听）；mouseup 派发到 window（同样冒到）。
+   */
+  const mouseAt = (kind: 'mouseDown' | 'mouseMove' | 'mouseUp', target: EventTarget, clientX: number, clientY = 12) => {
+    const ev = createEvent[kind](target as HTMLElement, { bubbles: true })
+    Object.defineProperty(ev, 'clientX', { value: clientX })
+    Object.defineProperty(ev, 'clientY', { value: clientY })
+    fireEvent(target, ev)
+  }
+
+  /** 一次「拖拽过」的 click 抑制序列用 mouseup 后紧跟 click 模拟（浏览器在同一手势内派发）*/
+  it('拖 gamma 到 alpha 左半区：预览即时重排，mouseup 提交新序（项目 chip 恒第一）', () => {
+    const onReorderWorkspaces = vi.fn()
+    renderHistory({ linkedWorkspaces: THREE, onReorderWorkspaces })
+    const gamma = chipOf('gamma')
+    const alpha = chipOf('alpha')
+    stubRect(alpha, 200, 120) // 中心 260
+    mouseAt('mouseDown', gamma, 500)
+    // 位移过阈值后命中 alpha 左半区（clientX=210 < 260）→ 插到 alpha 前
+    mouseAt('mouseMove', document, 210)
+    // 预览序即时生效：gamma 排到最前（本项目 chip 仍第一）
+    expect(flowNames()).toEqual(['mock-project', 'gamma', 'alpha', 'beta'])
+    mouseAt('mouseUp', window, 210)
+    expect(onReorderWorkspaces).toHaveBeenCalledTimes(1)
+    expect(onReorderWorkspaces).toHaveBeenCalledWith(['E:/c/gamma', 'E:/a/alpha', 'E:/b/beta'])
+  })
+
+  it('拖 alpha 到 beta 右半区：插到 beta 之后（alpha 原居首位，落位=夹在 beta/gamma 之间）', () => {
+    const onReorderWorkspaces = vi.fn()
+    renderHistory({ linkedWorkspaces: THREE, onReorderWorkspaces })
+    const alpha = chipOf('alpha')
+    const beta = chipOf('beta')
+    stubRect(beta, 320, 110) // 中心 375
+    mouseAt('mouseDown', alpha, 500)
+    // 指针在 beta 右半区（clientX=400 ≥ 375）→ 插到 beta 后（=移到末尾须拖到末位 chip 右半区）
+    mouseAt('mouseMove', document, 400)
+    expect(flowNames()).toEqual(['mock-project', 'beta', 'alpha', 'gamma'])
+    mouseAt('mouseUp', window, 400)
+    expect(onReorderWorkspaces).toHaveBeenCalledWith(['E:/b/beta', 'E:/a/alpha', 'E:/c/gamma'])
+  })
+
+  it('mousedown 后位移未过阈值松手（纯点击）：不提交且 click 不被抑制', () => {
+    const onReorderWorkspaces = vi.fn()
+    const onSwitchWorkspace = vi.fn()
+    renderHistory({ linkedWorkspaces: THREE, onReorderWorkspaces, onSwitchWorkspace })
+    const beta = chipOf('beta')
+    mouseAt('mouseDown', beta, 500)
+    mouseAt('mouseUp', window, 500)
+    expect(onReorderWorkspaces).not.toHaveBeenCalled()
+    fireEvent.click(beta)
+    expect(onSwitchWorkspace).toHaveBeenCalledWith('E:/b/beta')
+  })
+
+  it('拖拽过后 click 被抑制（mouseup 落在 chip 上派发 click，不得误切目录）', () => {
+    const onSwitchWorkspace = vi.fn()
+    renderHistory({ linkedWorkspaces: THREE, onSwitchWorkspace })
+    const gamma = chipOf('gamma')
+    const alpha = chipOf('alpha')
+    stubRect(alpha, 200, 120)
+    mouseAt('mouseDown', gamma, 500)
+    mouseAt('mouseMove', document, 210)
+    mouseAt('mouseUp', window, 210)
+    fireEvent.click(gamma)
+    expect(onSwitchWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('mousemove 高频重复命中同一位：预览序幂等（仅一次重排态，mouseup 仍只提交一次）', () => {
+    const onReorderWorkspaces = vi.fn()
+    renderHistory({ linkedWorkspaces: THREE, onReorderWorkspaces })
+    const gamma = chipOf('gamma')
+    const alpha = chipOf('alpha')
+    stubRect(alpha, 200, 120)
+    mouseAt('mouseDown', gamma, 500)
+    for (let i = 0; i < 5; i++) mouseAt('mouseMove', document, 210)
+    mouseAt('mouseUp', window, 210)
+    expect(onReorderWorkspaces).toHaveBeenCalledTimes(1)
   })
 })

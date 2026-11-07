@@ -82,6 +82,7 @@ export default function App() {
   const switchWorkspace = useStore((s) => s.setActiveWorkspace)
   const addLinkedWorkspace = useStore((s) => s.addLinkedWorkspace)
   const removeLinkedWorkspace = useStore((s) => s.removeLinkedWorkspace)
+  const reorderLinkedWorkspaces = useStore((s) => s.reorderLinkedWorkspaces)
   const selectSession = useStore((s) => s.selectSession)
   const resetToNewSession = useStore((s) => s.resetToNewSession)
   const stopStreaming = useStore((s) => s.stopStreaming)
@@ -443,6 +444,7 @@ export default function App() {
             onSwitchWorkspace={switchWorkspace}
             onAddWorkspace={addLinkedWorkspace}
             onRemoveWorkspace={removeLinkedWorkspace}
+            onReorderWorkspaces={reorderLinkedWorkspaces}
             onNewSession={() => {
               if (currentSessionId) {
                 // 当前标签有会话：开新标签落位到浏览目录，不覆盖现有会话

@@ -1,7 +1,7 @@
 {
   "legend": {
     "line1": "Tab block: solid = has session, hollow = empty tab; color = its directory",
-    "line2": "Letter: directory initial (session initial when single dir)"
+    "line2": "Letter: directory initial (single dir = session initial); chips draggable"
   },
   "openChoiceTitle": "Open Session",
   "openChoiceMessage": "The current tab already has a session. Where should \"{{title}}\" be opened?",
@@ -87,7 +87,7 @@
     "resetToProject": "Remove directory badge (new sessions back to this project; open sessions unaffected)",
     "removeConfirmTitle": "Remove linked directory",
     "removeConfirmMessage": "Remove linked directory \"{{name}}\"? Sessions in it are unaffected; you can re-link anytime.",
-    "editTitle": "Manage linked directories (show/hide remove buttons)",
+    "editTitle": "Manage linked directories (× to remove; drag chips to reorder)",
     "newSession": "New session",
     "badgePrefix": "Dir"
   }

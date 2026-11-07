@@ -92,10 +92,10 @@ export function ChatHeader({
             <button className="back-button" onClick={onBack} data-tooltip={t('chat.header.back')}>
               <BackIcon /> {t('chat.header.back')}
             </button>
-            {/* 色块图例（2026-11-03 用户定稿）：并入返回行右侧空白区，固定两行——
-                第一行到「颜色=所属目录」，「块内文字」起第二行；单行超宽省略号截断
-                （不自动换行，行高恒定不撑高 header）。标签色块是原生 Swing 图标无
-                tooltip 通道，说明统一收口在这条 */}
+            {/* 色块图例（2026-11-03 用户定稿）：并入返回行右侧空白区，固定两行，
+                单行超宽省略号截断（不自动换行）。第一行=形态/颜色轴，第二行=文字轴
+                + 目录 chips 可拖动排序提示（2026-11-07 拖拽上线并入，两行配平不扩高）。
+                标签色块是原生 Swing 图标无 tooltip 通道，说明统一收口在这条 */}
             <div className="header-legend">
               <span className="codicon codicon-info" aria-hidden />
               <span className="header-legend__lines">

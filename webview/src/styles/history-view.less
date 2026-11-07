@@ -94,6 +94,12 @@
     border-color: var(--accent-primary);
   }
 
+  /* 拖动排序（常驻可拖，2026-11-07 定稿）：拖拽中的 chip 半透明；落位预览由
+     React 本地重排即时呈现（previewOrder），落盘广播回来后自动对齐 */
+  &--dragging {
+    opacity: 0.45;
+  }
+
   &__icon {
     display: none; /* 图标已去（用户定稿 2026-10-27）：chips 纯文字更紧凑 */
   }
@@ -220,7 +226,8 @@
   color: var(--text-tertiary);
   opacity: 0.8;
   position: relative;
-  .tooltip-bottom-center(20px);
+  /* offset 28：须大于气泡自身高（≈21px），20px 时顶边压宿主（GT 同族，见 mixins 注释）*/
+  .tooltip-bottom-center(28px);
 
   &::after {
     left: 0;

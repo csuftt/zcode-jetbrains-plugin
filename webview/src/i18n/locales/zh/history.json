@@ -1,7 +1,7 @@
 {
   "legend": {
     "line1": "标签色块：实心=有会话，空心=空标签；颜色=所属目录",
-    "line2": "块内文字=目录首字符（单目录时会话名首字符）"
+    "line2": "文字=目录首字符（单目录=会话名首字符）；目录块可拖动"
   },
   "totalSessions": "共 {{count}} 个会话",
   "selectedSessions": "已选择 {{count}} 个会话",
@@ -46,7 +46,7 @@
     "resetToProject": "移除目录标识（新会话恢复在本项目创建；已打开的会话不受影响）",
     "removeConfirmTitle": "移除关联目录",
     "removeConfirmMessage": "确定移除关联目录「{{name}}」吗？该目录下的会话数据不受影响，可随时重新关联。",
-    "editTitle": "管理关联目录（显示/隐藏移除按钮）",
+    "editTitle": "管理关联目录（× 移除；目录块可拖动排序）",
     "newSession": "新建会话",
     "badgePrefix": "目录"
   },

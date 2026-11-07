@@ -1687,6 +1687,8 @@ interface StoreState {
   addLinkedWorkspace: () => void
   /** 移除关联目录（若移除的是激活目录自动回退本项目）*/
   removeLinkedWorkspace: (path: string) => void
+  /** 拖动排序关联目录：Java 按 wsKey 同集合校验后落盘并广播（无乐观更新，广播即状态） */
+  reorderLinkedWorkspaces: (workspaces: string[]) => void
   /** 拉取当前打开文件 ref（webview mount/重连时触发；Kotlin 同步回包，case 'currentFile' 落 state）*/
   requestCurrentFile: () => void
   /** 文件上下文 chip 勾选开关（用户点击 chip / doSend 发完即关 / resetToNewSession 按设置初始化）*/
@@ -2513,6 +2515,12 @@ export const useStore = create<StoreState>((set, get) => ({
 
   removeLinkedWorkspace: (path) => {
     sendToJava({ op: 'removeLinkedWorkspace', path })
+  },
+
+  reorderLinkedWorkspaces: (workspaces) => {
+    // 拖动排序：无乐观更新——Java 同集合校验后落盘，广播/应答落 linkedWorkspaces 即收敛
+    // （竞态窗口撞他端增删时集合不一致被拒，前端自动弹回权威顺序）
+    sendToJava({ op: 'reorderLinkedWorkspaces', workspaces })
   },
 
   toggleSessionPin: (sessionId, pinned) => {
