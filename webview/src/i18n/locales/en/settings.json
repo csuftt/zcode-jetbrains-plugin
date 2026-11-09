@@ -220,10 +220,11 @@
       "onHint": "Click to hide the enhance button",
       "offHint": "Click to show the enhance button in the input box"
     },
-    "enhanceModel": {
-      "title": "Enhance model",
+    "lightTaskModel": {
+      "title": "Light-task model",
       "followSession": "Follow session model",
-      "invalidHint": "Selected model is unavailable; enhancement falls back to the default model"
+      "invalidHint": "Selected model is unavailable; a fallback model will be used",
+      "hint": "Shared model for prompt enhancement, AI commit messages, and session title regeneration; defaults to the session's current model"
     },
     "currentFileTitle": "File context",
     "currentFileAuto": {

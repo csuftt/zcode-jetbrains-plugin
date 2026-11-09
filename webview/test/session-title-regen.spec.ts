@@ -28,6 +28,20 @@ vi.mock('@/ipc/bridge', () => ({
   sendToJava: (req: Record<string, unknown>) => { sentRequests.push(req) },
 }))
 
+// 轻任务专用模型（行为设置页「轻任务模型」，zcode.enhance.config）：node 环境无
+// localStorage，改内存桩（避免真实通道的 500ms kvSave 回存污染 sentRequests 断言）
+let mockEnhanceModel: { providerId: string; modelId: string } | null = null
+vi.mock('@/utils/enhanceConfig', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/enhanceConfig')>()
+  return {
+    ...actual,
+    readEnhanceConfig: () => ({ ...actual.readEnhanceConfig(), enhanceModel: mockEnhanceModel }),
+    writeEnhanceConfig: (config: { enhanceModel: { providerId: string; modelId: string } | null }) => {
+      mockEnhanceModel = config.enhanceModel
+    },
+  }
+})
+
 import { useStore } from '@/store/useStore'
 import {
   extractTitleExcerpt,
@@ -35,6 +49,7 @@ import {
   TITLE_EXCERPT_MSG_MAX,
   TITLE_EXCERPT_TOTAL_MAX,
 } from '@/utils/titleExcerpt'
+import { writeEnhanceConfig } from '@/utils/enhanceConfig'
 import type { ZCodeMessage, MessageInfo, MessagePart } from '@/types/messages'
 
 const SID = 'sess_regen-1111-2222-3333-444444444444'
@@ -56,6 +71,8 @@ function msg(role: 'user' | 'assistant', text: string, opts: { synthetic?: boole
 }
 
 beforeEach(() => {
+  // 轻任务专用模型默认不配置，测试按需单独写入
+  mockEnhanceModel = null
   sentRequests.length = 0
   useStore.getState().init()
   sentRequests.length = 0 // 清掉 init 触发的 listSessions/listModels
@@ -163,6 +180,22 @@ describe('regenerateSessionTitle 发起', () => {
       excerpt: 'User: 第一条',
       providerId: 'builtin:bigmodel-coding-plan',
       modelId: 'GLM-5.3',
+    })
+  })
+
+  it('轻任务专用模型优先于 currentModel（行为设置页统一配置，与润色同款）', () => {
+    writeEnhanceConfig({ enhanceEnabled: false, enhanceModel: { providerId: 'custom:prov', modelId: 'my-model' } })
+    useStore.setState({
+      messages: [msg('user', '第一条')],
+      currentModel: { providerId: 'builtin:bigmodel-coding-plan', modelId: 'GLM-5.3' },
+    })
+    useStore.getState().regenerateSessionTitle(SID)
+    expect(sentRequests[0]).toEqual({
+      op: 'regenerateSessionTitle',
+      sessionId: SID,
+      excerpt: 'User: 第一条',
+      providerId: 'custom:prov',
+      modelId: 'my-model',
     })
   })
 

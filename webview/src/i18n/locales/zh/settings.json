@@ -220,10 +220,11 @@
       "onHint": "点击隐藏润色按钮",
       "offHint": "点击在输入框显示润色按钮"
     },
-    "enhanceModel": {
-      "title": "润色模型",
+    "lightTaskModel": {
+      "title": "轻任务模型",
       "followSession": "跟随会话模型",
-      "invalidHint": "所选模型已失效，润色时将回退默认模型"
+      "invalidHint": "所选模型已失效，将回退默认模型",
+      "hint": "润色、AI 提交信息、会话标题重新生成共用的模型；默认跟随会话当前所选模型"
     },
     "currentFileTitle": "文件上下文",
     "currentFileAuto": {

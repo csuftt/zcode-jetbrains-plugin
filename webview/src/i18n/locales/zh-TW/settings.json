@@ -204,10 +204,11 @@
       "onHint": "點擊隱藏潤色按鈕",
       "offHint": "點擊在輸入框顯示潤色按鈕"
     },
-    "enhanceModel": {
-      "title": "潤色模型",
+    "lightTaskModel": {
+      "title": "輕任務模型",
       "followSession": "跟隨會話模型",
-      "invalidHint": "所選模型已失效，潤色時將回退預設模型"
+      "invalidHint": "所選模型已失效，將回退預設模型",
+      "hint": "潤色、AI 提交訊息、會話標題重新生成共用的模型；預設跟隨會話當前所選模型"
     },
     "currentFileTitle": "檔案內容",
     "currentFileAuto": {

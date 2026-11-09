@@ -13,9 +13,13 @@
  * 则当前和后续提问一直等待回答（弹窗无倒计时不自动关闭）。persist kv 通道存储，
  * Kotlin 侧（ZCodeAskUserConfig）即时读取，无消息往返。
  *
+ * 轻任务模型（独立设置卡片，utils/enhanceConfig.ts 的 enhanceModel 字段）：润色、
+ * AI 提交信息、会话标题重生成三个 generateText 轻任务统一的模型配置（Kotlin 侧
+ * LightTaskModels 同源解析），默认跟随会话当前所选模型，失效后端回退兜底链；
+ * 独立于润色开关——关闭润色不影响提交信息/标题使用该模型。
+ *
  * 提示词润色（默认关闭，utils/enhanceConfig.ts）：控制输入框润色按钮（✨）
- * 是否显示；可配润色专用模型（默认跟随会话当前所选模型，失效后端回退默认
- * provider）；思考深度不设——generateText 为裸 AI SDK 调用天然不思考。开启
+ * 是否显示；思考深度不设——generateText 为裸 AI SDK 调用天然不思考。开启
  * 即时生效（InputBox 监听变更事件重读）。
  *
  * 文件上下文新会话自动启用（默认关闭，utils/currentFileConfig.ts）：开启后
@@ -176,6 +180,73 @@ export function BehaviorSettings() {
       </section>
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">
+          <span className="basic-settings__field-label">{t('settings.behavior.lightTaskModel.title')}</span>
+        </div>
+        <div className="selector-button-wrap behavior-enhance-model">
+          <button
+            type="button"
+            className="selector-button"
+            onClick={() => setModelOpen((v) => !v)}
+          >
+            {enhance.enhanceModel
+              ? models.find(
+                  (m) => m.providerId === enhance.enhanceModel!.providerId && m.modelId === enhance.enhanceModel!.modelId,
+                )?.modelName ?? enhance.enhanceModel.modelId
+              : t('settings.behavior.lightTaskModel.followSession')}
+            <span className="codicon codicon-chevron-down selector-button-chevron" />
+          </button>
+          {selectedInvalid && (
+            <small className="behavior-enhance-model__invalid">
+              <span className="codicon codicon-warning" />
+              <span>{t('settings.behavior.lightTaskModel.invalidHint')}</span>
+            </small>
+          )}
+          {modelOpen && (
+            <div className="selector-dropdown behavior-enhance-model__dropdown">
+              <div className="selector-dropdown-group">
+                <div
+                  className={`selector-dropdown-item ${enhance.enhanceModel == null ? 'is-selected' : ''}`}
+                  onClick={() => {
+                    updateEnhance({ enhanceModel: null })
+                    setModelOpen(false)
+                  }}
+                >
+                  {t('settings.behavior.lightTaskModel.followSession')}
+                </div>
+              </div>
+              {groups.map(([providerId, items]) => (
+                <div key={providerId} className="selector-dropdown-group">
+                  <div className="selector-dropdown-group-title">{items[0]?.providerName ?? providerId}
+                    <PlanBadge plan={items[0]?.plan} />
+                  </div>
+                  {items.map((m) => (
+                    <div
+                      key={`${m.providerId}/${m.modelId}`}
+                      className={`selector-dropdown-item ${
+                        enhance.enhanceModel?.providerId === m.providerId && enhance.enhanceModel?.modelId === m.modelId
+                          ? 'is-selected'
+                          : ''
+                      }`}
+                      onClick={() => {
+                        updateEnhance({ enhanceModel: { providerId: m.providerId, modelId: m.modelId } as EnhanceModel })
+                        setModelOpen(false)
+                      }}
+                    >
+                      {m.modelName}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <small className="basic-settings__hint">
+          <span className="codicon codicon-info" />
+          <span>{t('settings.behavior.lightTaskModel.hint')}</span>
+        </small>
+      </section>
+      <section className="basic-settings__section">
+        <div className="basic-settings__field-header">
           <span className="basic-settings__field-label">{t('settings.behavior.enhanceTitle')}</span>
         </div>
         <SettingToggle
@@ -191,67 +262,6 @@ export function BehaviorSettings() {
           <span className="codicon codicon-info" />
           <span>{t('settings.behavior.enhanceEnabled.hint')}</span>
         </small>
-        {enhance.enhanceEnabled && (
-          <div className="selector-button-wrap behavior-enhance-model">
-            <span className="behavior-enhance-model__label">{t('settings.behavior.enhanceModel.title')}</span>
-            <button
-              type="button"
-              className="selector-button"
-              onClick={() => setModelOpen((v) => !v)}
-            >
-              {enhance.enhanceModel
-                ? models.find(
-                    (m) => m.providerId === enhance.enhanceModel!.providerId && m.modelId === enhance.enhanceModel!.modelId,
-                  )?.modelName ?? enhance.enhanceModel.modelId
-                : t('settings.behavior.enhanceModel.followSession')}
-              <span className="codicon codicon-chevron-down selector-button-chevron" />
-            </button>
-            {selectedInvalid && (
-              <small className="behavior-enhance-model__invalid">
-                <span className="codicon codicon-warning" />
-                <span>{t('settings.behavior.enhanceModel.invalidHint')}</span>
-              </small>
-            )}
-            {modelOpen && (
-              <div className="selector-dropdown behavior-enhance-model__dropdown">
-                <div className="selector-dropdown-group">
-                  <div
-                    className={`selector-dropdown-item ${enhance.enhanceModel == null ? 'is-selected' : ''}`}
-                    onClick={() => {
-                      updateEnhance({ enhanceModel: null })
-                      setModelOpen(false)
-                    }}
-                  >
-                    {t('settings.behavior.enhanceModel.followSession')}
-                  </div>
-                </div>
-                {groups.map(([providerId, items]) => (
-                  <div key={providerId} className="selector-dropdown-group">
-                    <div className="selector-dropdown-group-title">{items[0]?.providerName ?? providerId}
-                      <PlanBadge plan={items[0]?.plan} />
-                    </div>
-                    {items.map((m) => (
-                      <div
-                        key={`${m.providerId}/${m.modelId}`}
-                        className={`selector-dropdown-item ${
-                          enhance.enhanceModel?.providerId === m.providerId && enhance.enhanceModel?.modelId === m.modelId
-                            ? 'is-selected'
-                            : ''
-                        }`}
-                        onClick={() => {
-                          updateEnhance({ enhanceModel: { providerId: m.providerId, modelId: m.modelId } as EnhanceModel })
-                          setModelOpen(false)
-                        }}
-                      >
-                        {m.modelName}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </section>
       <section className="basic-settings__section">
         <div className="basic-settings__field-header">

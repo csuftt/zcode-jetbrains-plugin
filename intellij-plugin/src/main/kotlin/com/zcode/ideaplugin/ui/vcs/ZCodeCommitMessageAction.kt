@@ -19,7 +19,6 @@ import com.zcode.ideaplugin.zCodeService
 import com.zcode.ideaplugin.protocol.ProtocolGeneration
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.lang.reflect.Method
@@ -154,9 +153,9 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
                 // 仓库近期提交主题（风格参照）+ 设置页附加要求，两段都可空
                 val styleSubjects = ZCodeCommitDiffProvider.recentCommitSubjects(project, changesSnapshot)
                 val extraPrompt = com.zcode.ideaplugin.ui.ZCodeCommitPromptConfig.readPrompt()
-                // 模型：账号/启用渠道首个轻量模型（提交信息是轻任务，与会话模型解耦；
-                // 新代 registry 校验失败会让 generateText 直接 -32603，故自建目录链校验）
-                val model = resolveModel(project)
+                // 模型：统一轻任务链（轻任务专用模型 → 会话当前模型 → 首个启用渠道，
+                // 与润色/标题同源——此前硬挑账号渠道挤掉自定义渠道，issue #48）
+                val model = resolveModel()
                 if (model == null) {
                     failTo(project, panel, opId, savedDraft, ZCodeBundle.message("commit.noModel"), ticker)
                     return@executeOnPooledThread
@@ -222,7 +221,12 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
     }
 
     /** NEW 代：账号渠道置顶 → provider_config 启用渠道首个模型；OLD 代：config.json 默认模型 */
-    private fun resolveModel(project: Project): Pair<String, String>? {
+    /**
+     * 统一轻任务模型链（与润色/标题同源，issue #48 修复）：行为设置页「轻任务模型」
+     * 专用模型 → kv 会话当前模型 → 首个启用渠道首模型（账号渠道置顶），全空 null。
+     * 旧代 CLI：专用模型（config.json 构造校验）→ 默认 provider。
+     */
+    private fun resolveModel(): Pair<String, String>? {
         val generation = try {
             com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()?.let {
                 com.zcode.ideaplugin.protocol.ProtocolGenerations.detect(it)
@@ -230,43 +234,21 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
         } catch (_: Exception) {
             null
         }
+        val dedicated = com.zcode.ideaplugin.ui.LightTaskModels.dedicatedModel()
         if (generation != ProtocolGeneration.NEW) {
+            // 旧代：专用模型须能在 config.json 构造出 runtimeModel（v1 形态渠道 id 直接失效）
+            if (dedicated != null &&
+                com.zcode.ideaplugin.protocol.RuntimeModels.buildRuntimeModel(dedicated.first, dedicated.second) != null
+            ) {
+                return dedicated
+            }
             val fallback = com.zcode.ideaplugin.protocol.RuntimeModels.defaultRuntimeModel()
                 ?.get("model")?.jsonObject ?: return null
             val pid = fallback["providerId"]?.jsonPrimitive?.contentOrNull ?: return null
             val mid = fallback["modelId"]?.jsonPrimitive?.contentOrNull ?: return null
             return pid to mid
         }
-        val zcodePath = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps() ?: return null
-        // 账号渠道置顶（订阅套餐主用渠道，与润色回退链同向）
-        val channels = com.zcode.ideaplugin.protocol.AccountProviderBridge
-            .activatableAccountChannels(zcodePath)
-        channels.firstOrNull()?.builtinModelIds?.firstOrNull()?.let { mid ->
-            return channels.first().providerId to mid
-        }
-        // provider_config.json 启用渠道（追加序即可——只取首个可用模型）
-        val path = com.zcode.ideaplugin.protocol.Credentials.personalProviderConfigPath()
-        if (!java.nio.file.Files.isRegularFile(path)) return null
-        return try {
-            val root = kotlinx.serialization.json.Json.parseToJsonElement(path.toFile().readText()).jsonObject
-            val rules = root["config"]?.jsonObject?.get("providerConfigRules")?.jsonObject
-                ?.get("providerRules")?.jsonArray ?: return null
-            for (r in rules) {
-                val o = r as? kotlinx.serialization.json.JsonObject ?: continue
-                if (o["enabled"]?.jsonPrimitive?.contentOrNull == "false") continue
-                val pid = o["providerId"]?.jsonPrimitive?.contentOrNull ?: continue
-                val cfg = o["config"] as? kotlinx.serialization.json.JsonObject ?: continue
-                val mids = (cfg["modelOrder"]?.jsonArray ?: cfg["personalModelIds"]?.jsonArray)
-                    ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
-                    ?.filter { it.isNotBlank() } ?: continue
-                val mid = mids.firstOrNull() ?: continue
-                return pid to mid
-            }
-            null
-        } catch (e: Exception) {
-            log.info("[ai-commit] provider_config parse failed: ${e.message?.take(120)}")
-            null
-        }
+        return com.zcode.ideaplugin.ui.LightTaskModels.resolveNewCli()
     }
 
     /** 提交框面板（三级回退，cc-gui 同款：新 workflow handler → 旧 message control） */

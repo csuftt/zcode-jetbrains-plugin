@@ -2245,7 +2245,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                     !models.some((m) => m.providerId === scheduleModel.providerId && m.modelId === scheduleModel.modelId) && (
                       <small className="schedule-popover__model-invalid">
                         <span className="codicon codicon-warning" />
-                        <span>{t('settings.behavior.enhanceModel.invalidHint')}</span>
+                        <span>{t('settings.behavior.lightTaskModel.invalidHint')}</span>
                       </small>
                     )}
                   {!rescheduleTarget && (

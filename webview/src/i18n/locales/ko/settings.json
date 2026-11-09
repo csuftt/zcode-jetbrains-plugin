@@ -220,10 +220,11 @@
       "onHint": "클릭하면 개선 버튼 숨김",
       "offHint": "클릭하면 입력창에 개선 버튼 표시"
     },
-    "enhanceModel": {
-      "title": "개선 모델",
+    "lightTaskModel": {
+      "title": "경량 작업 모델",
       "followSession": "세션 모델 따르기",
-      "invalidHint": "선택한 모델이 더 이상 없어 개선 시 기본 모델로 대체됩니다"
+      "invalidHint": "선택한 모델이 더 이상 없어 기본 모델로 대체됩니다",
+      "hint": "프롬프트 개선·AI 커밋 메시지·세션 제목 재생성에 공통으로 사용되는 모델. 기본값은 세션의 현재 모델을 따릅니다"
     },
     "currentFileTitle": "파일 컨텍스트",
     "currentFileAuto": {

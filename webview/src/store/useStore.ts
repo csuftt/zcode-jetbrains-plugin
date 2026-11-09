@@ -3250,10 +3250,12 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     set({ titleRegeneratingSessionId: sessionId, sessionTitleRegenError: null })
-    // 附带 currentModel：generateText 跟随会话模型（会话能跑对话则模型必然已在
-    // workspace 目录注册，直调即成功）；缺陷实锤——落 config 默认会选中会话没用过的
-    // 渠道（如 builtin:bigmodel），app-server 重启后未注册即 -32603
-    const cm = get().currentModel
+    // 模型优先级与润色同款：轻任务专用模型（行为设置页「轻任务模型」）> 会话当前模型
+    // （会话能跑对话则模型必然已在 workspace 目录注册，直调即成功）；缺陷实锤——落
+    // config 默认会选中会话没用过的渠道（如 builtin:bigmodel），app-server 重启后
+    // 未注册即 -32603
+    const dedicated = readEnhanceConfig().enhanceModel
+    const cm = dedicated ?? get().currentModel
     sendToJava({
       op: 'regenerateSessionTitle',
       sessionId,

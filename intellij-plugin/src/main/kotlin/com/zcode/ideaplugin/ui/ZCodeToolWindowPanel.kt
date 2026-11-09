@@ -4245,65 +4245,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
 
     /** provider_config.json 的 providerRules（用户在客户端建的自定义供应商）；空/损坏返回空表 */
-    private fun readNewCliProviderRules(): List<JsonObject> {
-        val path = Credentials.personalProviderConfigPath()
-        if (!java.nio.file.Files.isRegularFile(path)) return emptyList()
-        return try {
-            val root = json.parseToJsonElement(path.toFile().readText()).jsonObject
-            val rules = root["config"]?.jsonObject?.get("providerConfigRules")?.jsonObject?.get("providerRules")?.jsonArray
-                ?.mapNotNull { it as? JsonObject } ?: emptyList()
-            if (rules.isEmpty()) return rules
-            // 客户端展示序 = providerOrder（权威，客户端 UI 拖拽写这里）；文件 rule 序只是
-            // 追加序。按 order 稳定重排，order 缺失/多余的渠道保持相对次序排尾部
-            val orderIdx = root["config"]?.jsonObject?.get("providerOrder")?.jsonArray
-                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }?.withIndex()
-                ?.associate { (i, id) -> id to i } ?: return rules
-            rules.sortedBy { rule ->
-                orderIdx[rule["providerId"]?.jsonPrimitive?.contentOrNull] ?: Int.MAX_VALUE
-            }
-        } catch (e: Exception) {
-            log.warn("Failed to parse provider_config.json: ${e.message}")
-            emptyList()
-        }
-    }
+    private fun readNewCliProviderRules(): List<JsonObject> = LightTaskModels.readProviderRules()
 
     /** provider_config.json 的 per-model contextWindow（modelConfigRules.providerModelRules） */
     private fun newCliContextWindows(): Map<Pair<String, String>, Long> =
         newCliModelRules().mapNotNull { (k, v) -> v.contextWindow?.let { k to it } }.toMap()
 
-    /** v2 启用渠道的模型清单（providerId to 模型 ids；激活账号渠道（overlay 合并序）置顶，
-     *  自定义渠道随后；modelOrder 优先 personalModelIds 兜底；渠道停用整组排除、
-     *  模型级 config.enabled:false 逐项排除——与 registry executable 口径对齐） */
-    private fun newCliEnabledProviderModels(): List<Pair<String, List<String>>> {
-        val modelRules = newCliModelRules()
-        val enabled = { pid: String, mid: String -> modelRules[pid to mid]?.modelEnabled != false }
-        // 账号渠道置顶（订阅套餐是主用渠道，与下拉 accountModelRows 置顶同序）：此前
-        // 本清单只读 provider_config.json 规则——渠道无 personal 覆盖规则时账号模型
-        // 全部判无效（newCliValidModel），generateText/标题透传被误回退；纯账号环境下
-        // 首选回退模型也与官方 defaultModelSelection（账号渠道首模型）同向
-        val account = newCliAccountChannelModels().map { (pid, mids) ->
-            pid to mids.filter { enabled(pid, it) }
-        }.filter { it.second.isNotEmpty() }
-        val self = readNewCliProviderRules()
-            .filter { it["enabled"]?.jsonPrimitive?.contentOrNull != "false" }
-            .mapNotNull { rule ->
-                val pid = rule["providerId"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                // account:* 规则是账号渠道的 personal 覆盖，模型集已并入上方账号渠道行
-                if (pid.startsWith(com.zcode.ideaplugin.protocol.AccountProviderBridge.ACCOUNT_RULE_PREFIX)) {
-                    return@mapNotNull null
-                }
-                val cfg = rule["config"]?.jsonObject
-                val mids = (cfg?.get("modelOrder")?.jsonArray ?: cfg?.get("personalModelIds")?.jsonArray)
-                    ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf { m -> m.isNotBlank() } }
-                    ?.distinct() ?: return@mapNotNull null
-                pid to mids.filter { enabled(pid, it) }
-            }.filter { it.second.isNotEmpty() }
-        return account + self
-    }
+    /** v2 启用渠道的模型清单（providerId to 模型 ids；账号渠道置顶+自定义渠道随后，
+     *  口径见 [LightTaskModels.enabledProviderModels]——轻任务统一解析器的同源委托） */
+    private fun newCliEnabledProviderModels(): List<Pair<String, List<String>>> = LightTaskModels.enabledProviderModels()
 
     /** (pid, mid) 是否为 v2 启用渠道的已登记模型（generateText/标题生成透传前的校验） */
-    private fun newCliValidModel(pid: String?, mid: String?): Boolean =
-        pid != null && mid != null && newCliEnabledProviderModels().any { it.first == pid && mid in it.second }
+    private fun newCliValidModel(pid: String?, mid: String?): Boolean = LightTaskModels.validModel(pid, mid)
 
     /** providerId 是否为可激活账号渠道（发送守卫用；判定与模型列表/推送同源） */
     private fun accountChannelKnown(providerId: String): Boolean =
@@ -4323,32 +4276,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * 激活账号渠道的最终模型集（官方 overlay 合并后）：pid to 完整模型序。
-     * 渠道行（mode/brand/凭证判定）与模型序的唯一共用入口——下拉、设置页、发送守卫
-     * 三方同源不漂移。
-     */
-    private fun newCliAccountChannelModels(): List<Pair<String, List<String>>> {
-        val zcodePath = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()
-        val overlay = readNewCliProviderRules().mapNotNull { rule ->
-            val pid = rule["providerId"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            if (!pid.startsWith(com.zcode.ideaplugin.protocol.AccountProviderBridge.ACCOUNT_RULE_PREFIX)) {
-                return@mapNotNull null
-            }
-            pid to rule["config"]?.jsonObject
-        }.toMap()
-        return com.zcode.ideaplugin.protocol.AccountProviderBridge
-            .activatableAccountChannels(zcodePath)
-            .map { e -> e.providerId to com.zcode.ideaplugin.protocol.AccountProviderBridge
-                .overlayModelIds(overlay[e.providerId], e.builtinModelIds) }
-    }
-
-    /**
      * 账号渠道的模型/渠道条目（listModels 下拉与 modelManage 设置页共用）。
      * 能力位 = 目录链 BuiltinModelCatalog.modelCaps ⊕ provider_config per-model 规则
      * 字段级覆盖（客户端编辑弹窗写入的 inputFormat/contextWindow 必须被尊重；未声明
-     * 保持目录值）。模型序走 [newCliAccountChannelModels]（官方 overlay 合并，含客户端
-     * 写入的 account:* 规则——此前规则被当独立自定义渠道二次输出，同 providerId 拼出
-     * 重复模型，2026-09-24 修复）。
+     * 保持目录值）。模型序走 [LightTaskModels.accountChannelModels]（官方 overlay 合并，
+     * 含客户端写入的 account:* 规则——此前规则被当独立自定义渠道二次输出，同
+     * providerId 拼出重复模型，2026-09-24 修复）。
      */
     private fun accountModelRows(
         zcodePath: java.nio.file.Path?,
@@ -4417,14 +4350,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * （历史专用配置是 v1 形态渠道 id 如 builtin:bigmodel-coding-plan、渠道已删）时
      * 依次回退；全空返回 null（调用方放弃该通道或报无可用模型）。
      */
-    private fun newCliFallbackModel(): Pair<String, String>? {
-        currentSessionModelRef()?.let { (pid, mid) ->
-            if (newCliValidModel(pid, mid)) return pid to mid
-        }
-        return newCliEnabledProviderModels().firstOrNull()?.let { (pid, mids) ->
-            mids.firstOrNull()?.let { pid to it }
-        }
-    }
+    private fun newCliFallbackModel(): Pair<String, String>? = LightTaskModels.fallbackModel()
 
     /** providerModelRules/manualProviderModelRules 条目的模型级覆盖
      *  （contextWindow + 输入能力位，编辑弹窗回填同源） */
@@ -6080,23 +6006,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 来源：webview kv（zcode.currentModel，用户在输入框显式切换时写入，跨重启持久）。
      * 无记录（新装/没切过）返回 null，保持服务端原值。
      */
-    private fun currentSessionModelRef(): Pair<String, String>? {
-        val raw = try {
-            readKvJson()?.let {
-                try { Json.parseToJsonElement(it).jsonObject["zcode.currentModel"]?.jsonPrimitive?.content } catch (_: Exception) { null }
-            }
-        } catch (e: Exception) {
-            null
-        } ?: return null
-        return try {
-            val o = Json.parseToJsonElement(raw).jsonObject
-            val mid = o["modelId"]?.jsonPrimitive?.contentOrNull ?: return null
-            val pid = o["providerId"]?.jsonPrimitive?.contentOrNull ?: return null
-            pid to mid
-        } catch (e: Exception) {
-            null
-        }
-    }
+    private fun currentSessionModelRef(): Pair<String, String>? = LightTaskModels.currentModelRef()
 
     /** 获取会话上下文用量（session/read → runtime.contextUsage）*/
     private fun handleGetUsage(msg: JsonObject): JsonObject {        val sessionId = msg["sessionId"]?.jsonPrimitive?.content
