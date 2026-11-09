@@ -188,11 +188,13 @@ export function BehaviorSettings() {
             className="selector-button"
             onClick={() => setModelOpen((v) => !v)}
           >
-            {enhance.enhanceModel
-              ? models.find(
-                  (m) => m.providerId === enhance.enhanceModel!.providerId && m.modelId === enhance.enhanceModel!.modelId,
-                )?.modelName ?? enhance.enhanceModel.modelId
-              : t('settings.behavior.lightTaskModel.followSession')}
+            <span className="selector-button-text">
+              {enhance.enhanceModel
+                ? models.find(
+                    (m) => m.providerId === enhance.enhanceModel!.providerId && m.modelId === enhance.enhanceModel!.modelId,
+                  )?.modelName ?? enhance.enhanceModel.modelId
+                : t('settings.behavior.lightTaskModel.followSession')}
+            </span>
             <span className="codicon codicon-chevron-down selector-button-chevron" />
           </button>
           {selectedInvalid && (

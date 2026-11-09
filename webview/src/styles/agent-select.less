@@ -175,11 +175,24 @@
   }
 
   .selector-button {
-    /* 输入框域的 selector 默认按 28px 控件设计，设置页文字型选择器放大到表单尺寸 */
+    /* 设置页表单化选择框：占满整行、文本不换行（超长省略）、强调色常显边框。
+       基础 .selector-button 的 max-width:140px 是输入框底栏三键聚拢口径，长模型
+       id（如 deepseek-v4.1-flash-1017）直接换行——2026-11-09 用户反馈 */
+    flex: 1;
+    justify-content: space-between;
+    max-width: none;
+    box-sizing: border-box;
     height: 26px;
-    padding: 0 8px;
+    padding: 0 10px;
     font-size: 12px;
-    gap: 4px;
+    gap: 8px;
+    border: 1px solid var(--accent-primary);
+    background: var(--bg-secondary, transparent);
+  }
+
+  /* 文本 span 在 flex 内要能收缩，ellipsis 才生效（min-width:auto 会顶破按钮） */
+  .selector-button-text {
+    min-width: 0;
   }
 
   &__dropdown {
