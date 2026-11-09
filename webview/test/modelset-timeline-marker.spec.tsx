@@ -43,6 +43,11 @@ function timelineCards() {
 }
 
 beforeEach(() => {
+  // 全文件统一 fake timers（仓库既有约定，37 个 store 重型 spec 同款）：本文件 22 个用例
+  // 各跑一次 init()，泄漏的 waitForBridge/轮询定时器会在渲染用例 await import 的窗口期
+  // 真实放炮（无堆栈的 STACK_TRACE_ERROR 归因到首个让出事件循环的用例，负载敏感复现）。
+  // 全部断言都是同步 store 逻辑，无定时器推进依赖，fake 安全。
+  vi.useFakeTimers()
   sentRequests.length = 0
   useStore.getState().init()
   sentRequests.length = 0
@@ -58,7 +63,10 @@ beforeEach(() => {
     ],
   })
 })
-afterEach(cleanup)
+afterEach(() => {
+  vi.useRealTimers()
+  cleanup()
+})
 
 describe('modelSet 合成切换分隔卡', () => {
   it('非流式切换成功：尾部插入 model_change 卡，from/to 正确', () => {
@@ -389,6 +397,7 @@ describe('model_change 供应商维度（2026-09-14：跨供应商切换带供�
   ]
 
   beforeEach(() => {
+    vi.useFakeTimers()
     sentRequests.length = 0
     useStore.getState().init()
     sentRequests.length = 0
@@ -404,7 +413,10 @@ describe('model_change 供应商维度（2026-09-14：跨供应商切换带供�
       ],
     })
   })
-  afterEach(cleanup)
+  afterEach(() => {
+    vi.useRealTimers()
+    cleanup()
+  })
 
   it('跨供应商切换：合成卡 from/to 带 providerID', () => {
     messageHandler!({
