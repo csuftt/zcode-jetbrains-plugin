@@ -23,6 +23,72 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    "version": "0.4.4-beta.1",
+    "date": "2026-11-09",
+    "zh": {
+      "sections": [
+        {
+          "title": "新增",
+          "items": [
+            "**轻任务模型统一设置**：行为设置页新增「轻任务模型」，输入框润色、AI 生成提交信息、会话标题重新生成共用同一份模型配置，默认跟随会话当前所选模型；AI 生成提交信息不再固定走账号渠道，自定义渠道用户不再遇到「余额不足」（issue #48）。",
+            "**钩子设置页支持编辑**：可在设置页直接新建、编辑、删除钩子（此前仅能查看），事件、匹配器与命令均可表单化配置。",
+            "**历史会话目录拖动排序**：历史会话页的目录 chips 支持拖动调整顺序，右键菜单与手机端自动跟随同一排序。",
+            "**带图消息复制粘贴还原**：复制带图的消息后粘贴回输入框，图片与文本一并还原。",
+            "**标签目录色块可定制**：新增色块颜色深度滑条与默认色块颜色选取；单一目录的标签以会话标题首字符标识；系统通知默认改为右下角弹出，行为设置页文案精简重排。"
+          ]
+        },
+        {
+          "title": "适配",
+          "items": [
+            "适配 ZCode CLI 3.17.x：MCP 注入带 scope 与 alwaysLoad 双保险，会话不可用错误判据收口。"
+          ]
+        },
+        {
+          "title": "修复",
+          "items": [
+            "修复中文用户名的 Windows 环境下插件无法启动的问题（PATH 环境变量被错误转码导致界面加载失败，issue #47）。",
+            "修复点击思考块、更新日志中的外部链接导致整个插件页面白屏。",
+            "修复目录 / 文件 chip 悬浮气泡遮挡宿主文字。",
+            "修复多条排队消息点击立即发送时连环全部发出的竞态问题。",
+            "修复会话记录丢失后发送永久报错的活锁（现给出明确指引，可新建会话继续）。",
+            "修复 MCP 工具弹窗超长描述把输入参数表压扁的问题。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "**Unified light-task model setting**: a new \"Light-task model\" card in Behavior Settings shared by prompt enhancement, AI commit messages and session title regeneration, defaulting to the session's current model; AI commit messages no longer force the account channel, so custom-channel users no longer hit \"insufficient balance\" (#48).",
+            "**Hook editing in settings**: hooks can now be created, edited and deleted directly in the settings page (previously view-only), with form-based configuration for events, matchers and commands.",
+            "**Drag-to-reorder directory chips**: directory chips on the history page support drag ordering; the context menu and the mobile client follow the same order.",
+            "**Copy-paste restoration for messages with images**: pasting a copied message back into the input box restores both images and text.",
+            "**Customizable directory color blocks**: a depth slider and a default color picker for tab color blocks; single-directory tabs show the first character of the session title; system notifications now pop up at the bottom-right by default and the Behavior Settings page was reworded and reorganized."
+          ]
+        },
+        {
+          "title": "Adapted",
+          "items": [
+            "Adapted to ZCode CLI 3.17.x: MCP injection now carries scope and alwaysLoad; session-unavailable error detection tightened."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "Fixed the plugin failing to start on Windows with a Chinese username (corrupted PATH encoding broke UI loading, #47).",
+            "Fixed a full-page blank-out when clicking external links in thinking blocks and the changelog dialog.",
+            "Fixed the directory / file chip hover tooltip covering the text underneath.",
+            "Fixed a race where clicking send-now on queued messages fired them all at once.",
+            "Fixed an endless error loop when sending to a session whose records were lost (clear guidance is shown now; a new session can continue).",
+            "Fixed MCP tool dialogs squashing the parameter table with overly long descriptions."
+          ]
+        }
+      ]
+    }
+  },
+  {
     "version": "0.4.3",
     "date": "2026-11-06",
     "zh": {
