@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ReasoningPart } from '@/types/messages'
 import { renderMarkdown } from '@/utils/markdown'
-import { openFileLinkFromEvent } from '@/utils/fileLink'
+import { handleMarkdownLinkClick } from '@/utils/externalLink'
 import { formatDuration } from '@/utils/time'
 import { useTick } from '@/hooks/useTick'
 import { useStore } from '@/store/useStore'
@@ -121,7 +121,7 @@ export function ThinkingBlock({ part, autoExpand = false, streaming = false }: P
           className="thinking-block__body markdown-body"
           onScroll={handleBodyScroll}
           onWheel={handleBodyWheel}
-          onClick={openFileLinkFromEvent}
+          onClick={handleMarkdownLinkClick}
           dangerouslySetInnerHTML={{ __html: renderMarkdown(part.text, false, workspaceRoot) }}
         />
       )}

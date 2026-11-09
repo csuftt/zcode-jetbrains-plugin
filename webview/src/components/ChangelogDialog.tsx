@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CHANGELOG_DATA, type ChangelogEntry, type ChangelogContent } from '@/version/changelog'
 import { openExternalUrl, GITHUB_REPO_URL } from '@/ipc/bridge'
+import { handleMarkdownLinkClick } from '@/utils/externalLink'
 import '../styles/changelog-dialog.less'
 
 /** 已读标记的 persist key（App 自动弹判定 + 关闭写回共用；IDE 侧 kvstore 持久） */
@@ -114,6 +115,7 @@ export function ChangelogDialog({ entries = CHANGELOG_DATA, onClose }: Props) {
       <div
         className="changelog-dialog"
         onClick={(e) => e.stopPropagation()}
+        onClickCapture={handleMarkdownLinkClick}
         role="dialog"
         aria-modal="true"
         aria-label={t('app.changelog.title')}

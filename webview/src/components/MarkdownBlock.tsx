@@ -15,8 +15,7 @@ import { BlockSection, splitMarkdownBlocks } from './BlockSection'
 import { VisualizeBlock } from './VisualizeBlock'
 import { splitVisualizeDirectives } from '@/utils/visualizeDirective'
 import { copyText } from '@/utils/clipboard'
-import { openExternalUrl } from '@/ipc/bridge'
-import { openFileLinkFromEvent } from '@/utils/fileLink'
+import { handleMarkdownLinkClick } from '@/utils/externalLink'
 import { useStore } from '@/store/useStore'
 import '../styles/markdown.less'
 
@@ -56,23 +55,16 @@ export function MarkdownBlock({ markdown, streaming = false }: Props) {
     }, COPY_DONE_MS)
   }, [t])
 
-  // 外链点击接管：renderMarkdown 产出 <a target=_blank>，但 JCEF 没挂
-  // onBeforePopup 拦截层，原生点击要么无反应要么把 webview 导航走——
-  // 事件委托 preventDefault 后走 openExternalUrl（协议白名单 + Java 侧二次校验）。
-  // 同委托还管 .md-file-link 文件路径链接（openFile op 在 IDE 打开并跳行）
-  const handleLink = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (openFileLinkFromEvent(e)) return
-    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href]')
-    if (!anchor) return
-    e.preventDefault()
-    const href = anchor.getAttribute('href') || ''
-    if (href) openExternalUrl(href)
-  }, [])
+  // 外链点击接管（与 ThinkingBlock / ChangelogDialog 共用委托，见 externalLink）：
+  // renderMarkdown 产出 <a target=_blank>，JCEF 没挂 onBeforePopup 拦截层，
+  // 原生点击要么无反应要么把 webview 导航走——事件委托 preventDefault 后走
+  // openExternalUrl（协议白名单 + Java 侧二次校验）；.md-file-link 优先短路
+  // 走 openFile op（IDE 打开并跳行）
 
   if (pieces.length === 0) return null
 
   return (
-    <div className="markdown-body" onClick={handleCopy} onClickCapture={handleLink}>
+    <div className="markdown-body" onClick={handleCopy} onClickCapture={handleMarkdownLinkClick}>
       {pieces.map((seg, i) => {
         if (seg.type === 'viz') {
           return <VisualizeBlock key={`viz-${i}`} directive={seg.directive} />
