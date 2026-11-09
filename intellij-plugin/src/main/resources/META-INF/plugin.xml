@@ -12,11 +12,12 @@
             <li>Session list &amp; history browsing</li>
             <li>Chat with streaming output</li>
             <li>Embedded JCEF browser (browser-use host)</li>
+            <li>Multi-workspace: mount other project directories, group sessions by directory chips, send files / selection across workspaces</li>
             <li>Send file / selection to input from context menu</li>
             <li>Model management with provider enable/disable</li>
         </ul>
         <h3>ZC GUI（中文）</h3>
-        <p>在 IDEA 里管理 ZCode 会话：列表、查看历史、对话、流式输出，基于 ZCode Protocol（app-server）实现，协议客户端独立可测。</p>
+        <p>在 IDEA 里管理 ZCode 会话：列表、查看历史、对话、流式输出，支持多工作区（挂载其他项目目录、会话按目录分组、跨工作区发送文件），基于 ZCode Protocol（app-server）实现，协议客户端独立可测。</p>
     ]]></description>
 
     <!-- 兼容的 IDE 版本范围：2023.3+ 全支持（含 2026.x EAP/正式版） -->
