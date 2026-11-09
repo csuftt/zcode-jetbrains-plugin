@@ -107,6 +107,12 @@ Header 地球按钮在聊天区右侧展开浏览器分栏（上图为完整 IDE
 | **电脑控制：AI 列窗口 → 开始菜单开记事本 → 输入文本，<br>动作卡附执行后截图缩略图，输入框「电脑操作」一键开启** | **点开动作卡缩略图：截图全屏预览（滚轮缩放 / 拖拽平移）** |
 | ![电脑控制](docs/screenshots/computer-use.png) | ![电脑控制截图预览](docs/screenshots/computer-use-preview.png) |
 
+**多工作区**
+
+| 多标签并行会话：目录色块标签（实心=有会话 / 空心=空标签），标题徽标同步目录配色 | 历史会话按目录 chips 分组：chips 常驻可拖动排序，配色一眼可辨 |
+| :---: | :---: |
+| ![多标签工作区](docs/screenshots/multi-workspace-tabs.png) | ![历史目录chips](docs/screenshots/history-directory-chips.png) |
+
 **输入增强与多任务**
 
 | `@` 引用文件补全 | `$` 技能提及（按来源折叠） | `/` 技能调用 |

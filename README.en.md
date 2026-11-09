@@ -109,6 +109,12 @@ It is more than a built-in browser — the plugin implements the ZCode app-serve
 | **Computer use: the AI lists windows → opens Notepad from the<br>Start menu → types text; action cards carry post-action<br>screenshot thumbnails, one-click entry in the input box** | **Click a thumbnail: fullscreen screenshot preview<br>(wheel zoom / drag pan)** |
 | ![Computer use](docs/screenshots/computer-use.png) | ![Computer use screenshot preview](docs/screenshots/computer-use-preview.png) |
 
+**Multi-workspace**
+
+| Parallel session tabs: directory color blocks (solid = has session / hollow = empty tab), title badges follow directory colors | History grouped by directory chips: persistent drag-to-reorder, colors tell directories apart at a glance |
+| :---: | :---: |
+| ![Multi-workspace tabs](docs/screenshots/multi-workspace-tabs.png) | ![History directory chips](docs/screenshots/history-directory-chips.png) |
+
 **Input enhancements & multi-tasking**
 
 | `@` file reference completion | `$` skill mentions (folded by source) | `/` skill invocation |
