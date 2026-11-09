@@ -821,6 +821,11 @@ class ZCodeToolWindowPanel(
                 log.warn("[initJcef] ZCode CLI unavailable, protocol handlers not registered (frontend will show env reminder): ${e.message}")
             } catch (e: java.io.IOException) {
                 log.warn("[initJcef] app-server failed to start, protocol handlers not registered (frontend will show env reminder): ${e.message}")
+            } catch (e: Exception) {
+                // issue#47 兜底：env 解析期任何未预期异常（如 PATH 段毒化炸 InvalidPathException）
+                // 同样不得穿透杀标签——catch 的目的是保住 webview 让前端渲染环境提醒，凡到达
+                // webview 之前的初始化异常一律按环境问题降级，用户仍可在前端环境设置里自救
+                log.warn("[initJcef] client init failed unexpectedly, protocol handlers not registered (frontend will show env reminder)", e)
             }
 
             // 开启 JCEF 外部链接（开发期）

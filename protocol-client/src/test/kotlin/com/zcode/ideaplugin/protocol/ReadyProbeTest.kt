@@ -30,6 +30,10 @@ class ReadyProbeTest {
 
     private fun fakeServerJs(delayMs: Long): String = """
         import readline from 'node:readline';
+        if (process.argv.includes('--version')) {
+            process.stdout.write('0.16.5\n');
+            process.exit(0);
+        }
         const rl = readline.createInterface({ input: process.stdin });
         rl.on('line', line => {
             let m; try { m = JSON.parse(line); } catch { return; }

@@ -30,6 +30,10 @@ class V4CommandSendQueuedNowTest {
 
     private fun newFakeServerJs(mode: String): String = """
         import readline from 'node:readline';
+        if (process.argv.includes('--version')) {
+            process.stdout.write('0.16.5\n');
+            process.exit(0);
+        }
         const rl = readline.createInterface({ input: process.stdin });
         const mode = '$mode';
         rl.on('line', line => {

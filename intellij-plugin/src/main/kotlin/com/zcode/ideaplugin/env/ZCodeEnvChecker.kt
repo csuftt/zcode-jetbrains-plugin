@@ -10,6 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
@@ -513,19 +514,13 @@ object ZCodeEnvChecker {
         return major in 1 until MIN_NODE_MAJOR_VERSION
     }
 
-    /** 从系统 PATH 找 node（ZCodeProtocolClient.findNode 的非抛异常版） */
+    /** 从系统 PATH 找 node（与 ZCodeProtocolClient.findNode 共用 PathEnvScan，坏段跳过——issue#47） */
     private fun findNodeOnPath(): String? {
         val os = System.getProperty("os.name").lowercase()
         val names = if (os.contains("win")) listOf("node.exe", "node") else listOf("node")
         val pathEnv = System.getenv("PATH") ?: return null
         val sep = if (os.contains("win")) ";" else ":"
-        for (name in names) {
-            val hit = pathEnv.split(sep)
-                .map { Path.of(it).resolve(name) }
-                .firstOrNull { it.toFile().exists() }
-            if (hit != null) return hit.toString()
-        }
-        return null
+        return com.zcode.ideaplugin.protocol.PathEnvScan.findExecutable(pathEnv, sep, names)
     }
 
     /**
@@ -607,10 +602,15 @@ object ZCodeEnvChecker {
             } catch (e: Exception) {
                 null
             }
+            // shell 输出逐行当路径解析：噪声行/非法行跳过不炸（与 PATH 扫描同型坑，issue#47）
             val hit = output?.lineSequence()
                 ?.map { it.trim() }
-                ?.firstOrNull { it.isNotEmpty() && Path.of(it).toFile().isFile }
-            if (hit != null) return hit
+                ?.mapNotNull { line ->
+                    if (line.isEmpty()) null
+                    else try { Path.of(line) } catch (_: InvalidPathException) { null }
+                }
+                ?.firstOrNull { it.toFile().isFile }
+            if (hit != null) return hit.toString()
         }
         return null
     }

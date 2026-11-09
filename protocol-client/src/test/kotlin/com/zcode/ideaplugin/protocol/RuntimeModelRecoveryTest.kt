@@ -26,6 +26,10 @@ class RuntimeModelRecoveryTest {
 
     private val fakeServerJs = """
         import readline from 'node:readline';
+        if (process.argv.includes('--version')) {
+            process.stdout.write('0.16.5\n');
+            process.exit(0);
+        }
         if (process.argv.includes('-p')) {
             process.stdout.write(JSON.stringify({ response: 'cli-ok' }) + '\n');
             process.exit(0);

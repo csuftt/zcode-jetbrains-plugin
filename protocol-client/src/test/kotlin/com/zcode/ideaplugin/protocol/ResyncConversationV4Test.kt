@@ -25,6 +25,10 @@ class ResyncConversationV4Test {
     private fun newFakeServerJs(echoFile: String): String = """
         import readline from 'node:readline';
         import fs from 'node:fs';
+        if (process.argv.includes('--version')) {
+            process.stdout.write('0.16.5\n');
+            process.exit(0);
+        }
         const echoPath = ${"\"$echoFile\""};
         const rl = readline.createInterface({ input: process.stdin });
         rl.on('line', line => {

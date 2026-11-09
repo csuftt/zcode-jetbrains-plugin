@@ -29,6 +29,10 @@ class V4ConversationStreamTest {
 
     private fun fakeServerJs(withSnapshot: Boolean = false): String = """
         import readline from 'node:readline';
+        if (process.argv.includes('--version')) {
+            process.stdout.write('0.16.5\n');
+            process.exit(0);
+        }
         let pushed = false;
         const rl = readline.createInterface({ input: process.stdin });
         const sid = '$childSid';

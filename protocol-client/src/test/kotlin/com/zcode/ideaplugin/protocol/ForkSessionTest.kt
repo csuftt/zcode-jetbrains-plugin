@@ -37,6 +37,10 @@ class ForkSessionTest {
     private fun newFakeServerJs(mode: String, echoFile: String): String = """
         import readline from 'node:readline';
         import fs from 'node:fs';
+        if (process.argv.includes('--version')) {
+            process.stdout.write('0.16.5\n');
+            process.exit(0);
+        }
         const mode = ${jsonPrimitive(mode)};
         const echoPath = ${jsonPrimitive(echoFile)};
         const rl = readline.createInterface({ input: process.stdin });

@@ -570,18 +570,13 @@ class ZCodeProtocolClient private constructor(
             return false // 恰好 0.17.0 也不支持
         }
 
-        /** 从 PATH 找 node */
+        /** 从 PATH 找 node（共用 PathEnvScan：坏段跳过，PATH 毒化不得炸启动——issue#47） */
         private fun findNode(): String {
             val os = System.getProperty("os.name").lowercase()
             val names = if (os.contains("win")) listOf("node.exe", "node") else listOf("node")
-            for (name in names) {
-                val path = System.getenv("PATH")
-                    ?.split(if (os.contains("win")) ";" else ":")
-                    ?.map { Path.of(it).resolve(name) }
-                    ?.firstOrNull { it.toFile().exists() }
-                if (path != null) return path.toString()
-            }
-            throw IllegalStateException("找不到 node，请确认 Node.js 已安装并在 PATH 中")
+            val sep = if (os.contains("win")) ";" else ":"
+            return PathEnvScan.findExecutable(System.getenv("PATH") ?: "", sep, names)
+                ?: throw IllegalStateException("找不到 node，请确认 Node.js 已安装并在 PATH 中")
         }
     }
 

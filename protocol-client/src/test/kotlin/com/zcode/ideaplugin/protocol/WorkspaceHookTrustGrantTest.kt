@@ -23,6 +23,10 @@ class WorkspaceHookTrustGrantTest {
 
     private val fakeServerJs = """
         import readline from 'node:readline';
+        if (process.argv.includes('--version')) {
+            process.stdout.write('0.16.5\n');
+            process.exit(0);
+        }
         const rl = readline.createInterface({ input: process.stdin });
         rl.on('line', line => {
             let m; try { m = JSON.parse(line); } catch { return; }
@@ -102,6 +106,10 @@ class WorkspaceHookTrustGrantTest {
         val script = tempDir.resolve("fake-hook-trust-reject.mjs").also {
             it.writeText("""
                 import readline from 'node:readline';
+                if (process.argv.includes('--version')) {
+                    process.stdout.write('0.16.5\n');
+                    process.exit(0);
+                }
                 const rl = readline.createInterface({ input: process.stdin });
                 rl.on('line', line => {
                     let m; try { m = JSON.parse(line); } catch { return; }
