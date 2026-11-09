@@ -5019,7 +5019,21 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun loadQuotaCredentialsV2(): Pair<QuotaCredentials?, String>? {
         val zcodePath = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()
-        com.zcode.ideaplugin.protocol.AccountProviderBridge.selectedAccountCredential(zcodePath)?.let { c ->
+        // PAT 换发链网络失败（VPN/代理切换是高频诱因）：直接给友好提示且不落回 v1 链——
+        // 账号渠道用户在 v1 链只会得到误导性的「未找到带 apiKey 的启用 provider」
+        val patFailStamp = com.zcode.ideaplugin.protocol.ProjectAccessTokenClient.lastNetworkFailureMillis
+        val accountCred = try {
+            com.zcode.ideaplugin.protocol.AccountProviderBridge.selectedAccountCredential(zcodePath)
+        } catch (e: Exception) {
+            log.warn("quota v2: account credential resolve error: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        if (accountCred == null) {
+            com.zcode.ideaplugin.protocol.ProjectAccessTokenClient.networkFailureSince(patFailStamp)?.let { reason ->
+                return null to friendlyNetworkMessage(reason)
+            }
+        }
+        accountCred?.let { c ->
             log.info("quota credentials: provider=${c.providerId} (${c.providerName}, account-channel) keyLen=${c.apiKey.length}")
             return quotaCredentialsOf(c.baseUrl, c.apiKey, c.providerId, c.providerName)?.let { it to "" }
                 ?: (null to "baseURL 格式非法: ${c.baseUrl}")
@@ -5126,6 +5140,23 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * 网络失败的友好文案（额度页口径）。rawReason 形如 "SSLHandshakeException: …"
+     * （PAT 链 [ProjectAccessTokenClient.networkFailureSince]）或异常拼接；已知类名
+     * 转中文简述，原文保留在括号里供诊断。
+     */
+    private fun friendlyNetworkMessage(rawReason: String): String {
+        val zh = when {
+            rawReason.startsWith("SSLHandshakeException") || rawReason.startsWith("SSLException") -> "SSL/TLS 握手被远端终止"
+            rawReason.startsWith("UnknownHostException") -> "域名解析失败"
+            rawReason.startsWith("ConnectException") -> "无法建立连接"
+            rawReason.startsWith("HttpTimeoutException") || rawReason.startsWith("SocketTimeoutException") -> "请求超时"
+            else -> null
+        }
+        val detail = if (zh != null) "$zh（$rawReason）" else rawReason
+        return "网络连接失败：$detail。若刚切换过 VPN/代理，请检查网络连通性后重试"
+    }
+
+    /**
      * 额度 monitor 三路 HTTP（quota/limit、model-usage、tool-usage）共用 client。
      *
      * 代理：这些请求由插件 Java 进程直接发出（不经 app-server，spawn env 注入对它
@@ -5172,7 +5203,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
-            usageErrorResponse(op, "查询异常: ${e.message}")
+            if (e is java.io.IOException) usageErrorResponse(op, friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: "网络不可达"}"))
+            else usageErrorResponse(op, "查询异常: ${e.message}")
         }
     }
 
@@ -5200,7 +5232,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
-            usageErrorResponse("quota", "额度查询异常: ${e.message}")
+            if (e is java.io.IOException) usageErrorResponse("quota", friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: "网络不可达"}"))
+            else usageErrorResponse("quota", "额度查询异常: ${e.message}")
         }
     }
 

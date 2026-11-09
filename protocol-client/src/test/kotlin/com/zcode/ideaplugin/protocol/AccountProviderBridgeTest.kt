@@ -171,6 +171,30 @@ class AccountProviderBridgeTest {
     }
 
     @Test
+    fun `PAT 换发网络失败返回 null 并记录 lastNetworkFailure（额度页友好提示依据）`() {
+        ProjectAccessTokenClient.resetForTest()
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val stampBefore = ProjectAccessTokenClient.lastNetworkFailureMillis
+        val brokenNet = ProjectAccessTokenClient.Http { _, _, _, _ ->
+            throw java.io.IOException("Remote host terminated the handshake")
+        }
+        // 契约：网络异常不外抛，按「材料缺失」同型返回 null（模型供给链 headersApplied:false 快速失败）
+        assertNull(
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+                patEntries(), sel, http = brokenNet,
+            ),
+        )
+        assertTrue(ProjectAccessTokenClient.lastNetworkFailureMillis > stampBefore)
+        assertEquals(
+            "IOException: Remote host terminated the handshake",
+            ProjectAccessTokenClient.networkFailureSince(stampBefore),
+        )
+        // 无新失败时不误报（UI 新鲜度判定口径）
+        assertNull(ProjectAccessTokenClient.networkFailureSince(ProjectAccessTokenClient.lastNetworkFailureMillis))
+    }
+
+    @Test
     fun `凭证缺失不供给`() {
         // 无 plan key
         assertNull(AccountProviderBridge.requestAuthApiKey("account:zai-individual-coding-plan", "individual-coding-plan", emptyMap()))

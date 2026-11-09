@@ -16,6 +16,8 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
+import java.io.IOException
 
 /**
  * 套餐项目访问令牌（PAT）换发客户端——coding-plan 账号渠道模型请求的官方正宗材料。
@@ -55,14 +57,39 @@ object ProjectAccessTokenClient {
 
     private val http: Http by lazy {
         Http { method, url, headers, body ->
-            val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
-            val rb = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15))
-            for ((k, v) in headers) rb.header(k, v)
-            if (method == "POST") rb.POST(HttpRequest.BodyPublishers.ofString(body ?: "", Charsets.UTF_8))
-            else rb.GET()
-            val resp = client.send(rb.build(), HttpResponse.BodyHandlers.ofString())
-            resp.statusCode() to resp.body()
+            try {
+                val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+                val rb = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15))
+                for ((k, v) in headers) rb.header(k, v)
+                if (method == "POST") rb.POST(HttpRequest.BodyPublishers.ofString(body ?: "", Charsets.UTF_8))
+                else rb.GET()
+                val resp = client.send(rb.build(), HttpResponse.BodyHandlers.ofString())
+                resp.statusCode() to resp.body()
+            } catch (e: IOException) {
+                // 网络族失败（SSL/连接/超时，VPN/代理切换是高频诱因）：合成 -1 响应走
+                // envelope null 路径，兑现 resolve「任一步失败返回 null」契约；
+                // 失败留档在 envelope/-1 判定处（对注入 Http 同样生效）
+                -1 to "network: ${e.javaClass.simpleName}: ${e.message}"
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                -1 to "network: ${e.javaClass.simpleName}"
+            }
         }
+    }
+
+    /** 最近一次管理面网络失败（时刻 to 简述）；任一次成功应答即清除 */
+    private val lastNetworkFailure = AtomicReference<Pair<Long, String>?>(null)
+
+    /** 供 UI 判定新鲜度：调用前快照，之后 [networkFailureSince] 非 null 即本次调用期间发生过网络失败 */
+    val lastNetworkFailureMillis: Long get() = lastNetworkFailure.get()?.first ?: 0L
+
+    /** [stamp] 之后发生的网络失败简述（如 "SSLHandshakeException: …"），无则 null */
+    fun networkFailureSince(stamp: Long): String? =
+        lastNetworkFailure.get()?.takeIf { it.first > stamp }?.second
+
+    private fun recordNetworkFailure(reason: String) {
+        lastNetworkFailure.set(System.currentTimeMillis() to reason)
+        println("[PAT] network failure: $reason")
     }
 
     data class Pat(val token: String, val expiresAtMs: Long)
@@ -84,7 +111,8 @@ object ProjectAccessTokenClient {
 
     /**
      * 取 PAT（内存缓存优先，提前 120s 刷新）。任一步失败返回 null——调用方
-     * headersApplied:false 快速失败，行为与材料缺失同型。
+     * headersApplied:false 快速失败，行为与材料缺失同型。网络异常由默认 Http 合成
+     * 为失败响应，此处兜底其余意外（异常响应形状等），保契约恒 null 不外抛。
      */
     fun resolve(
         family: String,
@@ -96,35 +124,49 @@ object ProjectAccessTokenClient {
     ): String? {
         if (family != "bigmodel") return null // zai 换发端点/鉴权形态不同，未实现
         val send = http ?: this.http
-        val ref = locateProject(mode, selection, accessToken, send)
-        if (ref == null) {
-            println("[PAT] locateProject failed (mode=$mode: getCustomerInfo bad/401 or no non-team project)")
-            return null
+        return try {
+            val ref = locateProject(mode, selection, accessToken, send)
+            if (ref == null) {
+                println("[PAT] locateProject failed (mode=$mode: getCustomerInfo bad/401 or no non-team project)")
+                return null
+            }
+            val cacheKey = "${family}:${mode}:${ref.organizationId}:${ref.projectId}"
+            val now = System.currentTimeMillis()
+            cache[cacheKey]?.let { if (now < it.expiresAtMs) return it.token }
+            // 负缓存：换发刚失败过，60s 内不再打管理面（CLI 每次 attempt 都会来要材料，
+            // 无负缓存时失败即重试风暴，会加剧管理面限流）
+            failedUntil[cacheKey]?.let { if (now < it) return null }
+            // 失败重试 1 次（跨瞬时抖动；间隔 800ms）
+            var pat = issueAccessToken(ref, accessToken, clientVersion, send)
+            if (pat == null) {
+                Thread.sleep(800)
+                pat = issueAccessToken(ref, accessToken, clientVersion, send)
+            }
+            if (pat == null) {
+                println("[PAT] issue failed twice (org=${ref.organizationId}, project=${ref.projectId}), negative-cache ${NEGATIVE_CACHE_MS / 1000}s")
+                failedUntil[cacheKey] = now + NEGATIVE_CACHE_MS
+                return null
+            }
+            failedUntil.remove(cacheKey)
+            cache[cacheKey] = pat
+            pat.token
+        } catch (e: Exception) {
+            if (e is InterruptedException) Thread.currentThread().interrupt()
+            // 兜底同样留档（注入 Http 抛异常/合成响应前的意外路径，UI 新鲜度判定依赖此处）
+            recordNetworkFailure("${e.javaClass.simpleName}: ${e.message ?: "网络不可达"}")
+            null
         }
-        val cacheKey = "${family}:${mode}:${ref.organizationId}:${ref.projectId}"
-        val now = System.currentTimeMillis()
-        cache[cacheKey]?.let { if (now < it.expiresAtMs) return it.token }
-        // 负缓存：换发刚失败过，60s 内不再打管理面（CLI 每次 attempt 都会来要材料，
-        // 无负缓存时失败即重试风暴，会加剧管理面限流）
-        failedUntil[cacheKey]?.let { if (now < it) return null }
-        // 失败重试 1 次（跨瞬时抖动；间隔 800ms）
-        var pat = issueAccessToken(ref, accessToken, clientVersion, send)
-        if (pat == null) {
-            Thread.sleep(800)
-            pat = issueAccessToken(ref, accessToken, clientVersion, send)
-        }
-        if (pat == null) {
-            println("[PAT] issue failed twice (org=${ref.organizationId}, project=${ref.projectId}), negative-cache ${NEGATIVE_CACHE_MS / 1000}s")
-            failedUntil[cacheKey] = now + NEGATIVE_CACHE_MS
-            return null
-        }
-        failedUntil.remove(cacheKey)
-        cache[cacheKey] = pat
-        return pat.token
     }
 
     /** 测试/换账号清理（换账号串号防御由 cacheKey 含 org/project 兜底，此处供主动废弃） */
     fun invalidate() = cache.clear()
+
+    /** 测试隔离：连负缓存与网络失败记录一起清（[invalidate] 只清正缓存） */
+    fun resetForTest() {
+        cache.clear()
+        failedUntil.clear()
+        lastNetworkFailure.set(null)
+    }
 
     private fun locateProject(mode: String, selection: Selection?, accessToken: String, http: Http): ProjectRef? {
         if (mode == "team-coding-plan") {
@@ -247,8 +289,14 @@ object ProjectAccessTokenClient {
 
     private fun get(url: String, headers: Map<String, String>, http: Http) = http.send("GET", url, headers, null)
 
-    /** 管理面 envelope：{code:200|0, data:{...}}；data 为数组等非对象形态时包一层 {"data":...} */
+    /** 管理面 envelope：{code:200|0, data:{...}}；data 为数组等非对象形态时包一层 {"data":...}。
+     *  附带网络失败留档副作用：-1 为默认 Http 的网络失败合成码，2xx 即清除（注入 fake 同样过此关口） */
     private fun envelope(resp: Pair<Int, String>): JsonObject? {
+        if (resp.first == -1) {
+            recordNetworkFailure(resp.second.removePrefix("network: "))
+            return null
+        }
+        if (resp.first in 200..299) lastNetworkFailure.set(null)
         if (resp.first !in 200..299) return null
         return try {
             val root = json.parseToJsonElement(resp.second).jsonObject
