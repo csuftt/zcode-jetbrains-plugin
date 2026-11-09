@@ -183,6 +183,9 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
                     failTo(project, panel, opId, savedDraft, ZCodeBundle.message("commit.emptyResult"), ticker)
                     return@executeOnPooledThread
                 }
+                // 成功路径也留一行（与 enhancePrompt done 同式）：此前成功零日志，
+                // 验证轻任务模型选取只能去 rollout 捞 model-io（2026-11-09 实踩）
+                log.info("[ai-commit] done (${text.length} chars, model=${model.first}/${model.second})")
                 // 代际守卫：生成期间用户再次点击（旧 opId 已被顶掉）→ 丢弃迟到结果
                 if (ACTIVE.remove(project, opId)) {
                     ticker.stop()
