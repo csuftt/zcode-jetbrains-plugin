@@ -29,7 +29,8 @@ import java.util.concurrent.ConcurrentHashMap
  * workspace/generateText（润色/标题同款的轻量一次性通道），结果写回提交框。
  *
  * 交互契约（cc-gui GenerateCommitMessageAction 同款）：
- *  - 生成中占位「AI 生成中…」，失败恢复用户原草稿（不丢用户手写内容）；
+ *  - 生成中占位「AI 生成中…」，模型解析就绪后 ticker 切「<模型名> 生成中…」；
+ *    失败恢复用户原草稿（不丢用户手写内容）；
  *  - 再次点击 = 取消在途生成（operationId → workspace/cancelGenerateText 插队旁路）；
  *  - 通道走 getEnhanceClient()（专用轻任务实例，不拖主 app-server 串行队列——
  *    缺陷 CZ 的根因教训；实例内含账号 overlay 推送竞态修复）。
@@ -129,14 +130,20 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
 
         // 进度感（generateText 无流式形态，用已等待秒数 ticker 表达进行中）：
         // Swing Timer 在 EDT 触发，setCommitMessage 本就要求 EDT；代际失配（重触发/
-        // 完成/失败）自动停表，不留常驻 timer
+        // 完成/失败）自动停表，不留常驻 timer。模型名由后台解析线程就绪后写入
+        // modelRef（初始占位时模型未定），下一秒 tick 自动切「<模型名> 生成中…」
         val startedAt = System.currentTimeMillis()
+        val modelRef = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val ticker = javax.swing.Timer(1000) {
             if (ACTIVE[project] !== opId) {
                 (it.source as? javax.swing.Timer)?.stop()
             } else {
                 val elapsed = (System.currentTimeMillis() - startedAt) / 1000
-                panel.setCommitMessage(ZCodeBundle.message("commit.generatingProgress", elapsed))
+                val modelName = modelRef.get()
+                panel.setCommitMessage(
+                    if (modelName != null) ZCodeBundle.message("commit.generatingModel", modelName, elapsed)
+                    else ZCodeBundle.message("commit.generatingProgress", elapsed),
+                )
             }
         }
         ticker.start()
@@ -160,6 +167,8 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
                     failTo(project, panel, opId, savedDraft, ZCodeBundle.message("commit.noModel"), ticker)
                     return@executeOnPooledThread
                 }
+                // 进度占位切模型名（ticker 下一秒 tick 生效；modelId 与成功日志同口径）
+                modelRef.set(model.second)
                 val ws = project.basePath ?: run {
                     failTo(project, panel, opId, savedDraft, ZCodeBundle.message("commit.noWorkspace"), ticker)
                     return@executeOnPooledThread
