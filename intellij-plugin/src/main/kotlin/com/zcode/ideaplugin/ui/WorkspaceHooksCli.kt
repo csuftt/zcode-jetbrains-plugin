@@ -3,10 +3,12 @@ package com.zcode.ideaplugin.ui
 import com.zcode.ideaplugin.env.ZCodeEnvChecker
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -150,7 +152,7 @@ object WorkspaceHooksCli {
     }
 
     /** reviewItemId 末三段定位：事件名 / 事件组序号 / 组内钩子序号 */
-    private data class HookLoc(val event: String, val groupIdx: Int, val hookIdx: Int)
+    internal data class HookLoc(val event: String, val groupIdx: Int, val hookIdx: Int)
 
     private fun parseHookLoc(reviewItemId: String): HookLoc {
         val parts = reviewItemId.split('-')
@@ -264,13 +266,262 @@ object WorkspaceHooksCli {
         return rewriteUserConfig(home, reviewItemId) { removeHookFromConfig(it, reviewItemId) }
     }
 
+    // ============ 钩子保存（设置页表单新建/编辑一体；2026-11-09 反转「不做编辑页」旧决策） ============
+    //
+    // 事件枚举与字段约束来自 CLI zod schema（3.17.2 bundle 内省）+ 官方 zcode-guide 文档：
+    //  - command 型：command(shell 串) + shell/timeout(秒)/timeoutMs(毫秒,优先)/async（后台运行）
+    //  - process 型：command(可执行文件) + args[] + timeoutMs
+    // matcher 属于事件组（组内钩子共享），编辑改 matcher 时单钩组直改、多钩组拆分。
+
+    /** 合法钩子事件（CLI zod enum 同款 7 个；保存校验与前端下拉共用语义） */
+    val HOOK_EVENTS = listOf(
+        "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest",
+        "PostToolUse", "PostToolUseFailure", "Stop",
+    )
+
+    /**
+     * 保存载荷校验 + 钩子对象构造（纯函数）：event ∈ HOOK_EVENTS、command 非空、
+     * type ∈ command|process；command 型不收 args，process 型不收 shell/async/timeout；
+     * 超时数值须 >0。返回 (event, matcher?, hook)——hook 不含 enabled：新建缺省启用，
+     * 编辑沿用原对象状态（upsertHookInConfig 处理）。
+     */
+    internal fun parseSavePayload(payload: JsonObject): Triple<String, String?, JsonObject> {
+        val event = payload["event"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("缺少事件名")
+        if (event !in HOOK_EVENTS) throw IllegalStateException("非法事件名：$event")
+        val matcher = payload["matcher"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val type = payload["type"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException("缺少运行方式")
+        if (type != "command" && type != "process") throw IllegalStateException("非法运行方式：$type")
+        val command = payload["command"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("命令不能为空")
+        val hook = buildJsonObject {
+            put("type", type)
+            put("command", command)
+            if (type == "process") {
+                if (payload.containsKey("shell") || payload.containsKey("async") || payload.containsKey("timeout")) {
+                    throw IllegalStateException("进程型钩子不支持 shell/async/timeout 字段")
+                }
+                (payload["args"] as? JsonArray)?.let { args ->
+                    // schema 要求是字符串数组，非字符串元素直接丢弃
+                    put("args", JsonArray(args.filter { it is JsonPrimitive && it.isString }))
+                }
+                payload["timeoutMs"]?.let { put("timeoutMs", positiveNumber(it, "timeoutMs")) }
+            } else {
+                if (payload.containsKey("args")) throw IllegalStateException("Shell 命令型钩子不支持 args 字段")
+                payload["shell"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { put("shell", it) }
+                if (payload["async"]?.jsonPrimitive?.contentOrNull == "true") put("async", true)
+                payload["timeout"]?.let { put("timeout", positiveNumber(it, "timeout")) }
+                payload["timeoutMs"]?.let { put("timeoutMs", positiveNumber(it, "timeoutMs")) }
+            }
+        }
+        return Triple(event, matcher, hook)
+    }
+
+    /** 正数数值字段（timeout/timeoutMs）：整数写出整数，小数原样；非法抛错 */
+    private fun positiveNumber(v: JsonElement, name: String): JsonPrimitive {
+        val d = v.jsonPrimitive.doubleOrNull ?: throw IllegalStateException("$name 必须是数字")
+        if (d <= 0) throw IllegalStateException("$name 必须大于 0")
+        return if (d == d.toLong().toDouble()) JsonPrimitive(d.toLong()) else JsonPrimitive(d)
+    }
+
+    /**
+     * 工作区钩子保存（新建/编辑一体）：只写 .zcode/config.json（官方同款约束）。
+     * reviewItemId=null 为新建——文件不存在时创建，且根开关 hooks.enabled 非 true
+     * 一律补写 true（官方默认禁用钩子系统，缺开关则新建的钩子永不生效；信任准入
+     * 仍会拦截执行，用户拍板 2026-11-09），否则按末三段定位更新。
+     * 返回变更后的权威 status（经 CLI，~1s，与 toggle 一致）。
+     */
+    fun save(
+        workspace: String,
+        payload: JsonObject,
+        reviewItemId: String?,
+        sourcePath: String?,
+        timeoutMs: Long = 20_000,
+    ): JsonObject = synchronized(lock) {
+        if (reviewItemId == null) {
+            saveToConfig(Path.of(workspace, ".zcode/config.json"), payload, null, ensureRootEnabled = true)
+        } else {
+            parseHookLoc(reviewItemId)
+            requireConfigSource(sourcePath ?: "")
+            saveToConfig(Path.of(workspace, sourcePath), payload, reviewItemId, ensureRootEnabled = false)
+        }
+        status(workspace, timeoutMs)
+    }
+
+    /** 用户级钩子保存（同构工作区；无根开关语义，文件不存在时创建最小结构） */
+    fun userSave(
+        payload: JsonObject,
+        reviewItemId: String?,
+        sourcePath: String?,
+        home: Path = Path.of(System.getProperty("user.home")),
+    ): JsonObject = synchronized(userLock) {
+        val path = userConfigPath(home)
+        if (reviewItemId != null) {
+            parseHookLoc(reviewItemId)
+            requireUserConfigSource(sourcePath ?: "", home)
+        }
+        saveToConfig(path, payload, reviewItemId, ensureRootEnabled = false)
+        userHooksList(home)
+    }
+
+    /**
+     * 落盘核心（工作区/用户级共用）：读-改-写，返回写盘后的完整 config；父目录不存在
+     * 时创建（新建路径 .zcode 目录可能还没有）。internal 供单测直测（工作区入口会走
+     * CLI status，单测跑不了子进程）。
+     */
+    internal fun saveToConfig(
+        configPath: Path,
+        payload: JsonObject,
+        reviewItemId: String?,
+        ensureRootEnabled: Boolean,
+    ): JsonObject {
+        val (event, matcher, hook) = parseSavePayload(payload)
+        val base = if (Files.isRegularFile(configPath)) {
+            json.parseToJsonElement(Files.readString(configPath)).jsonObject
+        } else {
+            if (reviewItemId != null) throw IllegalStateException("配置文件不存在：$configPath")
+            JsonObject(emptyMap())
+        }
+        val newConfig = upsertHookInConfig(base, reviewItemId?.let { parseHookLoc(it) }, event, matcher, hook, ensureRootEnabled)
+        configPath.parent?.let { Files.createDirectories(it) }
+        Files.writeString(configPath, jsonPretty(newConfig))
+        return newConfig
+    }
+
+    /** 编辑预填：按 reviewItemId 末三段直读 config 取钩子原始对象（含 args/shell/timeout
+     *  等列表接口没有的字段；不走 CLI，两域均瞬时） */
+    fun readRawHook(workspace: String, reviewItemId: String, sourcePath: String): JsonObject = synchronized(lock) {
+        parseHookLoc(reviewItemId)
+        requireConfigSource(sourcePath)
+        rawHookAt(Path.of(workspace, sourcePath), reviewItemId)
+    }
+
+    /** 编辑预填（用户级）：同构 readRawHook，相对基准与校验走用户配置 */
+    fun userReadRawHook(
+        reviewItemId: String,
+        sourcePath: String,
+        home: Path = Path.of(System.getProperty("user.home")),
+    ): JsonObject = synchronized(userLock) {
+        parseHookLoc(reviewItemId)
+        requireUserConfigSource(sourcePath, home)
+        rawHookAt(userConfigPath(home), reviewItemId)
+    }
+
+    private fun rawHookAt(configPath: Path, reviewItemId: String): JsonObject {
+        if (!Files.isRegularFile(configPath)) throw IllegalStateException("配置文件不存在：$configPath")
+        val config = json.parseToJsonElement(Files.readString(configPath)).jsonObject
+        return locateHook(config, parseHookLoc(reviewItemId)).hook
+    }
+
+    /**
+     * 保存树操作核心（纯函数）：target=null 为新建；更新时——同事件同 matcher 原位
+     * 替换（沿用原 enabled 状态）；同事件 matcher 变更：单钩组直改组 matcher、多钩组
+     * 拆出尾部新组；换事件先按删除语义剪枝移除再走新建插入。
+     * ensureRootEnabled=true 时把根开关 hooks.enabled 补写为 true（工作区新建路径专用）。
+     */
+    internal fun upsertHookInConfig(
+        config: JsonObject,
+        target: HookLoc?,
+        event: String,
+        matcher: String?,
+        hook: JsonObject,
+        ensureRootEnabled: Boolean = false,
+    ): JsonObject {
+        if (target == null || target.event != event) {
+            val base = if (target != null) removeHookAt(config, target) else config
+            return insertNewHook(base, event, matcher, hook, ensureRootEnabled)
+        }
+        val t = locateHook(config, target)
+        // 编辑不改启停：沿用原对象 enabled 状态（表单没有该字段，行上开关负责）
+        val newHook = if (t.hook["enabled"]?.jsonPrimitive?.contentOrNull == "false") {
+            JsonObject(hook + ("enabled" to JsonPrimitive(false)))
+        } else hook
+        return if (matcherNorm(matcher) == matcherNorm(t.group["matcher"]?.jsonPrimitive?.contentOrNull)) {
+            // 同事件同 matcher：原位替换
+            val newGroupHooks = JsonArray(t.groupHooks.toMutableList().also { it[t.hookIdx] = newHook })
+            val newEventArr = JsonArray(t.eventArr.toMutableList().also {
+                it[t.groupIdx] = JsonObject(t.group + ("hooks" to newGroupHooks))
+            })
+            replaceEventArr(config, event, newEventArr)
+        } else if (t.groupHooks.size == 1) {
+            // 单钩组：matcher 变更直接改组
+            val newGroup = buildJsonObject {
+                matcher?.let { put("matcher", JsonPrimitive(it)) }
+                t.group.filterKeys { it != "matcher" && it != "hooks" }.forEach { (k, v) -> put(k, v) }
+                put("hooks", JsonArray(listOf(newHook)))
+            }
+            replaceEventArr(config, event, JsonArray(t.eventArr.toMutableList().also { it[t.groupIdx] = newGroup }))
+        } else {
+            // 多钩组拆分：原组保留兄弟钩子，尾部追加新组
+            val remaining = JsonObject(t.group + ("hooks" to JsonArray(t.groupHooks.filterIndexed { i, _ -> i != t.hookIdx })))
+            val split = buildJsonObject {
+                matcher?.let { put("matcher", JsonPrimitive(it)) }
+                put("hooks", JsonArray(listOf(newHook)))
+            }
+            replaceEventArr(config, event, JsonArray(t.eventArr.toMutableList().also {
+                it[t.groupIdx] = remaining
+                it.add(split)
+            }))
+        }
+    }
+
+    /** 新建插入：事件数组内首个 matcher 等值组（null==null）追加，找不到尾部追加新组 */
+    private fun insertNewHook(
+        config: JsonObject,
+        event: String,
+        matcher: String?,
+        hook: JsonObject,
+        ensureRootEnabled: Boolean,
+    ): JsonObject {
+        val newGroup = buildJsonObject {
+            matcher?.let { put("matcher", JsonPrimitive(it)) }
+            put("hooks", JsonArray(listOf(hook)))
+        }
+        val hooksObj = config["hooks"]?.jsonObject
+        val events = hooksObj?.get("events")?.jsonObject
+        val eventArr = events?.get(event)?.jsonArray
+        val newEvents: JsonObject = if (eventArr == null) {
+            JsonObject((events ?: JsonObject(emptyMap())) + (event to JsonArray(listOf(newGroup))))
+        } else {
+            val mergeIdx = eventArr.withIndex().firstOrNull { (_, g) ->
+                matcherNorm((g as? JsonObject)?.get("matcher")?.jsonPrimitive?.contentOrNull) == matcherNorm(matcher)
+            }?.index
+            if (mergeIdx == null) {
+                JsonObject(events + (event to JsonArray(eventArr + newGroup)))
+            } else {
+                val g = eventArr[mergeIdx].jsonObject
+                val merged = JsonObject(g + ("hooks" to JsonArray((g["hooks"]?.jsonArray ?: JsonArray(emptyList())) + hook)))
+                JsonObject(events + (event to JsonArray(eventArr.toMutableList().also { it[mergeIdx] = merged })))
+            }
+        }
+        var hooksNew = JsonObject((hooksObj ?: JsonObject(emptyMap())) + ("events" to newEvents))
+        if (ensureRootEnabled) hooksNew = JsonObject(hooksNew + ("enabled" to JsonPrimitive(true)))
+        return JsonObject(config + ("hooks" to hooksNew))
+    }
+
+    /** 事件数组替换回整树（hooks.events.<event> 路径逐层重建，其余键保序） */
+    private fun replaceEventArr(config: JsonObject, event: String, newEventArr: JsonArray): JsonObject {
+        val hooksObj = config["hooks"]!!.jsonObject
+        val events = hooksObj["events"]!!.jsonObject
+        return JsonObject(config + ("hooks" to JsonObject(
+            hooksObj + ("events" to JsonObject(events + (event to newEventArr))),
+        )))
+    }
+
+    /** matcher 归一（空串视为无） */
+    private fun matcherNorm(m: String?): String? = m?.takeIf { it.isNotBlank() }
+
     /**
      * 从 config JSON 树移除指定钩子并逐级剪枝（纯函数，无文件/CLI 依赖）：
      * 组内 hooks 空 → 删事件组；事件数组空 → 删事件键；events 空 → 删 events；
      * hooks 对象空 → 删 hooks。其余字段（含根 hooks.enabled）原样保留。
      */
-    internal fun removeHookFromConfig(config: JsonObject, reviewItemId: String): JsonObject {
-        val t = locateHook(config, reviewItemId)
+    internal fun removeHookFromConfig(config: JsonObject, reviewItemId: String): JsonObject =
+        removeHookAt(config, parseHookLoc(reviewItemId))
+
+    private fun removeHookAt(config: JsonObject, loc: HookLoc): JsonObject {
+        val t = locateHook(config, loc)
         val events = config["hooks"]!!.jsonObject["events"]!!.jsonObject
 
         val remainingHooks = JsonArray(t.groupHooks.filterIndexed { i, _ -> i != t.hookIdx })
@@ -306,7 +557,7 @@ object WorkspaceHooksCli {
      * 逐层重建路径上的对象，其余字段不动。工作区/用户两份 config 共用。
      */
     internal fun setHookEnabledInConfig(config: JsonObject, reviewItemId: String, enabled: Boolean): JsonObject {
-        val t = locateHook(config, reviewItemId)
+        val t = locateHook(config, parseHookLoc(reviewItemId))
         val newHook: JsonObject = if (enabled) {
             JsonObject(t.hook.filterKeys { it != "enabled" })
         } else {
@@ -333,18 +584,18 @@ object WorkspaceHooksCli {
         val hook: JsonObject,
     )
 
-    private fun locateHook(config: JsonObject, reviewItemId: String): HookTarget {
-        val (event, groupIdx, hookIdx) = parseHookLoc(reviewItemId)
+    private fun locateHook(config: JsonObject, loc: HookLoc): HookTarget {
+        val (event, groupIdx, hookIdx) = loc
         val events = config["hooks"]?.jsonObject?.get("events")?.jsonObject
-            ?: throw IllegalStateException("配置中找不到钩子事件：$reviewItemId")
+            ?: throw IllegalStateException("配置中找不到钩子事件：$loc")
         val eventArr = events[event]?.jsonArray
-            ?: throw IllegalStateException("配置中找不到事件 $event：$reviewItemId")
+            ?: throw IllegalStateException("配置中找不到事件 $event：$loc")
         val group = eventArr.getOrNull(groupIdx)?.jsonObject
-            ?: throw IllegalStateException("配置中找不到事件组：$reviewItemId")
+            ?: throw IllegalStateException("配置中找不到事件组：$loc")
         val groupHooks = group["hooks"]?.jsonArray
-            ?: throw IllegalStateException("配置中找不到钩子数组：$reviewItemId")
+            ?: throw IllegalStateException("配置中找不到钩子数组：$loc")
         val hook = groupHooks.getOrNull(hookIdx)?.jsonObject
-            ?: throw IllegalStateException("配置中找不到该钩子：$reviewItemId")
+            ?: throw IllegalStateException("配置中找不到该钩子：$loc")
         return HookTarget(event, eventArr, groupIdx, group, groupHooks, hookIdx, hook)
     }
 

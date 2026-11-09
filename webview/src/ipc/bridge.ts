@@ -2300,6 +2300,18 @@ flowchart LR
       return req.scope === 'user'
         ? { op: 'workspaceHooksList', status: { scope: 'user', items: [], userConfigPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', rootEnabled: true } }
         : { op: 'workspaceHooksList', status: { scope: 'workspace', workspacePath: 'G:\\mock', items: [], rootEnabled: true } }
+    case 'workspaceHooksGet':
+      // mock：编辑预填样例（command 型；args/shell 字段在 process/command 各自形态里验）
+      return { op: 'workspaceHooksGet', hook: { type: 'command', command: "echo 'Hello from hook'" } }
+    case 'workspaceHooksSave':
+      // mock：保存成功回统一列表形态（编辑弹窗按 sourceOp 关闭）；落盘结果需真机验
+      return {
+        op: 'workspaceHooksList',
+        sourceOp: 'workspaceHooksSave',
+        status: req.scope === 'user'
+          ? { scope: 'user', items: [], userConfigPath: 'C:\\Users\\mock\\.zcode\\cli\\config.json', rootEnabled: true }
+          : { scope: 'workspace', workspacePath: 'G:\\mock', items: [], rootEnabled: true },
+      }
     case 'getMcpLogs':
       // mock：完整连接生命周期样例（started→connected / failed 带 stderr / 启动汇总）
       return {

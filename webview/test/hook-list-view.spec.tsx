@@ -625,3 +625,110 @@ describe('用户级作用域（~/.zcode/cli/config.json，无信任准入）', (
     expect(sendToJavaMock).toHaveBeenCalledWith({ op: 'openFile', filePath: USER_CONFIG })
   })
 })
+
+describe('新建/编辑弹窗入口（2026-11-09 反转「不做编辑页」决策）', () => {
+  it('工具行「新建钩子」按钮：直接渲染弹窗（新建态默认 PreToolUse），保存后对账回包关弹窗', () => {
+    render(<HookListView />)
+    pushStatus(makeStatus())
+    fireEvent.click(document.querySelector('.hook-list__new')!)
+
+    // 「新建钩子」文本与工具栏按钮同名，用弹窗标题类选择器
+    expect(document.querySelector('.hook-edit__title')!.textContent).toBe('新建钩子')
+    expect((screen.getByLabelText('事件') as HTMLSelectElement).value).toBe('PreToolUse')
+
+    fireEvent.change(screen.getByLabelText('命令'), { target: { value: 'echo hi' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(sendToJavaMock).toHaveBeenCalledWith({
+      op: 'workspaceHooksSave',
+      scope: 'workspace',
+      workspace: 'G:\\mock',
+      payload: { event: 'PreToolUse', type: 'command', command: 'echo hi' },
+    })
+
+    act(() => {
+      messageHandler!({
+        op: 'workspaceHooksList',
+        sourceOp: 'workspaceHooksSave',
+        status: makeStatus(),
+      })
+    })
+    // 弹窗已关（工具栏按钮同名文本仍在，查标题类）
+    expect(document.querySelector('.hook-edit__title')).toBeNull()
+  })
+
+  it('行编辑按钮：先发 workspaceHooksGet，预填回包到达才渲染弹窗并回显事件/命令', () => {
+    render(<HookListView />)
+    pushStatus(makeStatus())
+    fireEvent.click(document.querySelector('.hook-row__edit')!)
+
+    expect(sendToJavaMock).toHaveBeenCalledWith({
+      op: 'workspaceHooksGet',
+      workspace: 'G:\\mock',
+      scope: 'workspace',
+      reviewItemId: 'workspace-hook-0-UserPromptSubmit-0-0',
+      sourcePath: '.zcode/config.json',
+    })
+    // 预填未就绪：弹窗不渲染
+    expect(screen.queryByText('编辑钩子')).toBeNull()
+
+    act(() => {
+      messageHandler!({ op: 'workspaceHooksGet', hook: { type: 'command', command: 'bash hook.sh --x' } })
+    })
+    expect(screen.getByText('编辑钩子')).toBeTruthy()
+    expect((screen.getByLabelText('事件') as HTMLSelectElement).value).toBe('UserPromptSubmit')
+    expect((screen.getByLabelText('命令') as HTMLInputElement).value).toBe('bash hook.sh --x')
+  })
+
+  it('编辑 GET 失败（error sourceOp=workspaceHooksGet）：撤目标不渲染弹窗', () => {
+    render(<HookListView />)
+    pushStatus(makeStatus())
+    fireEvent.click(document.querySelector('.hook-row__edit')!)
+    act(() => {
+      messageHandler!({ op: 'error', message: '读取钩子详情失败：配置文件不存在', sourceOp: 'workspaceHooksGet' })
+    })
+    expect(screen.queryByText('编辑钩子')).toBeNull()
+  })
+
+  it('非 .zcode/config.json 来源的行编辑按钮禁用并给原因（删除不受限）', () => {
+    render(<HookListView />)
+    pushStatus(makeStatus({
+      items: [
+        makeItem(),
+        makeItem({
+          reviewItemId: 'workspace-hook-0-PreToolUse-1-0',
+          event: 'PreToolUse',
+          displayCommand: 'zcode.json 钩子',
+          sourcePath: 'zcode.json',
+        }),
+      ],
+    }))
+    const editBtns = Array.from(document.querySelectorAll('.hook-row__edit')) as HTMLButtonElement[]
+    expect(editBtns[0].disabled).toBe(false)
+    expect(editBtns[1].disabled).toBe(true)
+    expect(editBtns[1].title).toContain('.zcode/config.json')
+  })
+
+  it('弹窗内删除转交页面确认流程：关弹窗弹确认，确认后发既有 delete op', () => {
+    render(<HookListView />)
+    pushStatus(makeStatus())
+    fireEvent.click(document.querySelector('.hook-row__edit')!)
+    act(() => {
+      messageHandler!({ op: 'workspaceHooksGet', hook: { type: 'command', command: 'bash hook.sh' } })
+    })
+    // 编辑弹窗左下角删除（行删除钮是纯图标无文案，用类选择器防 accessible name 撞车）
+    fireEvent.click(document.querySelector('.hook-edit__delete')!)
+    // 编辑弹窗已关，删除确认弹窗出现
+    expect(screen.queryByText('编辑钩子')).toBeNull()
+    expect(screen.getByText('删除该钩子？')).toBeTruthy()
+    expect(sendToJavaMock).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'workspaceHooksDelete' }))
+
+    fireEvent.click(document.querySelector('.modal-btn-danger')!)
+    expect(sendToJavaMock).toHaveBeenCalledWith({
+      op: 'workspaceHooksDelete',
+      workspace: 'G:\\mock',
+      scope: 'workspace',
+      reviewItemId: 'workspace-hook-0-UserPromptSubmit-0-0',
+      sourcePath: '.zcode/config.json',
+    })
+  })
+})

@@ -1277,6 +1277,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "workspaceHooksRevoke" -> handleWorkspaceHooksRevoke(msg)
                         "workspaceHooksToggle" -> handleWorkspaceHooksToggle(msg)
                         "workspaceHooksDelete" -> handleWorkspaceHooksDelete(msg)
+                        "workspaceHooksSave" -> handleWorkspaceHooksSave(msg)
+                        "workspaceHooksGet" -> handleWorkspaceHooksGet(msg)
                         "workspaceHooksOpenScript" -> handleWorkspaceHooksOpenScript(msg)
                         "subscribe" -> handleSubscribe(msg)
                         "subscribeChild" -> handleSubscribeChild(msg)
@@ -3376,9 +3378,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 应答统一形态：{op, status:<status JSON 原文>}；所有变更类操作也回同一形态，
      * 前端只认 status 为权威。
      */
-    private fun hooksListResponse(status: JsonObject): JsonObject = buildJsonObject {
+    private fun hooksListResponse(status: JsonObject, sourceOp: String? = null): JsonObject = buildJsonObject {
         put("op", "workspaceHooksList")
         put("status", status)
+        if (sourceOp != null) put("sourceOp", sourceOp)
     }
 
     private fun requireWorkspace(msg: JsonObject): String =
@@ -3533,9 +3536,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /**
      * op=workspaceHooksOpenScript — 命令行点击：打开钩子脚本文件。
      *
-     * 钩子条目唯一入口（2026-10-12 拍板：不做内置新建/编辑页，钩子的新建与
-     * 登记项修改由 AI/用户在 IDE 直接操作 config.json；删除走管理页按钮）。
-     * 解析不出（bash -c 内联命令等）或文件已删除时回退打开来源配置文件。
+     * （2026-11-09 起设置页有了新建/编辑表单，命令行点击不再是条目唯一入口，
+     * 但仍是脚本文件的最快通道。）解析不出（bash -c 内联命令等）或文件已删除时
+     * 回退打开来源配置文件。
      */
     private fun handleWorkspaceHooksOpenScript(msg: JsonObject): JsonObject = try {
         val isUser = hookScope(msg) == "user"
@@ -3559,6 +3562,53 @@ if (!window.__ZCODE_LOG_HOOK__) {
     } catch (e: Exception) {
         log.warn("workspaceHooksOpenScript failed: ${e.message}")
         errorResponseFor(msg, "打开钩子文件失败：${e.message ?: ""}")
+    }
+
+    /**
+     * op=workspaceHooksSave — 设置页表单新建/编辑保存（2026-11-09 反转「不做编辑页」
+     * 旧决策）。reviewItemId 缺省=新建（工作区新建会把根开关 hooks.enabled 补写 true，
+     * 见 WorkspaceHooksCli.save）；编辑按末三段定位更新。校验（事件枚举/字段与 type
+     * 匹配/正数超时）在 WorkspaceHooksCli.parseSavePayload。
+     * 成功回统一列表形态并带 sourceOp=workspaceHooksSave（前端据此关弹窗）；
+     * 工作区保存后 digest 变化 → 条目回到待信任（官方机制，行上徽标呈现）。
+     */
+    private fun handleWorkspaceHooksSave(msg: JsonObject): JsonObject = try {
+        val payload = msg["payload"]?.jsonObject
+            ?: throw IllegalStateException("缺少保存载荷")
+        val reviewItemId = msg["reviewItemId"]?.jsonPrimitive?.contentOrNull
+        val sourcePath = msg["sourcePath"]?.jsonPrimitive?.contentOrNull
+        val status = if (hookScope(msg) == "user") {
+            WorkspaceHooksCli.userSave(payload, reviewItemId, sourcePath)
+        } else {
+            WorkspaceHooksCli.save(requireWorkspace(msg), payload, reviewItemId, sourcePath)
+        }
+        hooksListResponse(status, sourceOp = "workspaceHooksSave")
+    } catch (e: Exception) {
+        log.warn("workspaceHooksSave failed: ${e.message}")
+        errorResponseFor(msg, "钩子保存失败：${e.message ?: ""}")
+    }
+
+    /**
+     * op=workspaceHooksGet — 编辑预填：直读 config 取钩子原始对象（含 args/shell/
+     * timeout 等列表接口没有的字段；不走 CLI，两域均瞬时）。
+     */
+    private fun handleWorkspaceHooksGet(msg: JsonObject): JsonObject = try {
+        val reviewItemId = msg["reviewItemId"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException("缺少 reviewItemId")
+        val sourcePath = msg["sourcePath"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException("缺少 sourcePath")
+        val hook = if (hookScope(msg) == "user") {
+            WorkspaceHooksCli.userReadRawHook(reviewItemId, sourcePath)
+        } else {
+            WorkspaceHooksCli.readRawHook(requireWorkspace(msg), reviewItemId, sourcePath)
+        }
+        buildJsonObject {
+            put("op", "workspaceHooksGet")
+            put("hook", hook)
+        }
+    } catch (e: Exception) {
+        log.warn("workspaceHooksGet failed: ${e.message}")
+        errorResponseFor(msg, "读取钩子详情失败：${e.message ?: ""}")
     }
 
     /** 写库后广播全量置顶集；读集失败按空集广播（列表退回纯时间序，不炸 UI） */

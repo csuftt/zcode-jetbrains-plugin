@@ -190,6 +190,27 @@
     &:disabled { opacity: 0.5; cursor: not-allowed; }
   }
 
+  /* 新建钩子（工具行末尾）：带文案的描边按钮（圆形图标钮放不下文案） */
+  &__new {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    font-size: var(--fs-body);
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    .codicon { font-size: 13px; }
+
+    &:hover:not(:disabled) { border-color: var(--accent-primary); }
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
+  }
+
   &__header-row {
     display: flex;
     align-items: center;
@@ -379,6 +400,31 @@
 
     &:hover:not(:disabled) { background: rgba(111, 191, 115, 0.18); }
     &:disabled { opacity: 0.6; cursor: not-allowed; }
+  }
+
+  /* 编辑按钮：与删除同款低调图标钮，hover 转主题色；非 config 来源禁用 */
+  &__edit {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 13px;
+    color: var(--text-tertiary);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+
+    .codicon { font-size: 14px; }
+
+    &:hover:not(:disabled) {
+      color: var(--accent-primary);
+      background: rgba(128, 128, 128, 0.12);
+    }
+    &:disabled { opacity: 0.4; cursor: not-allowed; }
   }
 
   /* 删除按钮：默认低调，hover 转危险色 */

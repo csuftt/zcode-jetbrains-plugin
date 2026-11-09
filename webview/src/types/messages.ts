@@ -366,6 +366,8 @@ export interface WorkspaceHooksStatusItem {
   sourcePath: string
   configuredEnabled: boolean
   hookDeclarationDigest: string
+  /** CLI status 原样字段（用户级直读构造的条目没有）：command | process */
+  type?: 'command' | 'process'
   /** user_scope=用户级钩子（~/.zcode/cli/config.json，无信任准入，enabled 即生效） */
   trustState: HookTrustState | 'user_scope'
 }
@@ -382,6 +384,35 @@ export interface WorkspaceHooksStatus {
   /** 插件附加：`.zcode/config.json` 根开关 hooks.enabled（缺省 false=钩子系统未启用，条目照列但永不生效） */
   rootEnabled?: boolean
   items: WorkspaceHooksStatusItem[]
+}
+
+/** workspaceHooksSave 载荷（Kotlin parseSavePayload 校验）：type=command 支持
+ *  shell/async(后台运行)/timeout(秒)/timeoutMs(毫秒,优先)；process 支持 args/timeoutMs；
+ *  两者字段互斥由 Kotlin 兜底校验。enabled 不在载荷里（新建缺省启用，编辑沿用原状态） */
+export interface HookSavePayload {
+  event: string
+  type: 'command' | 'process'
+  command: string
+  matcher?: string
+  args?: string[]
+  shell?: string
+  async?: boolean
+  timeout?: number
+  timeoutMs?: number
+}
+
+/** config 中钩子条目原始对象（workspaceHooksGet 编辑预填；字段随版本演进宽松读取） */
+export interface HookRawEntry {
+  type?: 'command' | 'process'
+  command?: string
+  args?: string[]
+  shell?: string
+  async?: boolean
+  timeout?: number
+  timeoutMs?: number
+  statusMessage?: string
+  enabled?: boolean
+  [key: string]: unknown
 }
 
 /**
@@ -531,6 +562,13 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 删除单条钩子登记项（Kotlin 从 config 移除并逐级剪枝；脚本文件保留在磁盘；
    *  回统一形态 {op:'workspaceHooksList', status}）*/
   | { op: 'workspaceHooksDelete'; workspace?: string; reviewItemId: string; sourcePath: string; scope?: HookScope }
+  /** 新建/编辑保存（reviewItemId 缺省=新建）。工作区新建时 Kotlin 把根开关 hooks.enabled
+   *  补写 true（官方默认禁用钩子系统）；成功回 {op:'workspaceHooksList', status,
+   *  sourceOp:'workspaceHooksSave'}（弹窗据此关闭），失败 error.sourceOp 同名 */
+  | { op: 'workspaceHooksSave'; workspace?: string; scope?: HookScope; payload: HookSavePayload; reviewItemId?: string; sourcePath?: string }
+  /** 编辑预填：直读 config 取钩子原始对象（含 args/shell/timeout 等列表接口没有的字段；
+   *  不走 CLI 瞬时返回），回 {op:'workspaceHooksGet', hook} */
+  | { op: 'workspaceHooksGet'; workspace?: string; reviewItemId: string; sourcePath: string; scope?: HookScope }
   /** 命令行点击：在 IDE 打开钩子脚本文件（Kotlin 从 displayCommand 解析脚本路径，
    *  解析不到/文件不存在时回退打开来源配置 sourcePath；scope=user 相对路径基准 home）*/
   | { op: 'workspaceHooksOpenScript'; workspace?: string; displayCommand: string; sourcePath: string; scope?: HookScope }
@@ -1355,8 +1393,11 @@ export type JavaResponse =
   | { op: 'backgroundWorkCancelled'; sessionId: string; workId: string; status: string; reasonCode?: string }
   /** 后台工作投影缓存应答（打开会话对账；值=本进程最后已知投影）*/
   | { op: 'backgroundWorksList'; sessionId: string; works: BackgroundWorkSummary[] }
-  /** 钩子管理页统一应答：list/grant/revoke/toggle 都回最新权威 status */
-  | { op: 'workspaceHooksList'; status: WorkspaceHooksStatus }
+  /** 钩子管理页统一应答：list/grant/revoke/toggle/save 都回最新权威 status；
+   *  sourceOp 仅保存成功回包携带（'workspaceHooksSave'，编辑弹窗据此关闭） */
+  | { op: 'workspaceHooksList'; status: WorkspaceHooksStatus; sourceOp?: string }
+  /** 钩子编辑预填应答：config 中该条目的原始对象 */
+  | { op: 'workspaceHooksGet'; hook: HookRawEntry }
   | { op: 'sessionTurnPhase'; sessionId: string; phase: 'running' | 'ended' }
   /** 会话索引推送（sessions-index v4 订阅）：full=initial 快照全量；sessions 为官方 SessionSummary 过滤后的原样字段 */
   | { op: 'sessionIndexUpdate'; full: boolean; sessions: SessionIndexEntry[]; removed: string[] }

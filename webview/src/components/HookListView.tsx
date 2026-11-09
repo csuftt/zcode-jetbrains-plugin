@@ -15,11 +15,14 @@
  *   - 启停：toggle（Kotlin 写对应 config + 回读列表）
  *   - 删除：delete（Kotlin 从 config 移除登记项并逐级剪枝；脚本文件保留在磁盘；
  *     二次确认弹窗）
+ *   - 新建/编辑（2026-11-09 反转 2026-10-12「不做内置编辑页」决策）：表单弹窗
+ *     直写 config.json——新建走 workspaceHooksSave（工作区新建自动补根开关
+ *     hooks.enabled:true，信任准入仍生效）；编辑先 workspaceHooksGet 拉原始对象
+ *     预填（列表条目缺 args/shell/timeout 字段），保存成功按权威对账回包
+ *     （sourceOp=workspaceHooksSave）关弹窗。仅 .zcode/config.json 来源可编辑
+ *     （与删除同款约束），用户级恒可编辑。
  * 写操作乐观更新按作用域隔离——点击瞬间翻转/消行，权威列表到达后清该域覆盖，
  * error 响应回退到上一份权威数据并报错。
- *
- * 2026-10-12 拍板：不做内置新建/编辑页——钩子的新建与登记项修改由 AI/用户
- * 在 IDE 直接操作 config.json（工作区钩子经评审卡完成信任准入）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -27,7 +30,9 @@ import { useTranslation } from 'react-i18next'
 import { onMessage, sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { ConfirmDialog } from './ConfirmDialog'
+import { HookEditDialog, type HookEditTarget } from './HookEditDialog'
 import type {
+  HookRawEntry,
   HookScope,
   JavaResponse,
   WorkspaceHooksStatus,
@@ -91,6 +96,10 @@ export function HookListView() {
   const [removedOverride, setRemovedOverride] = useState<IdOverrides>(EMPTY_IDS)
   /** 待确认删除的钩子（ConfirmDialog）；null=弹窗关闭 */
   const [pendingDelete, setPendingDelete] = useState<WorkspaceHooksStatusItem | null>(null)
+  /** 新建/编辑弹窗目标；item=null=新建。编辑态先 workspaceHooksGet 预填，
+   *  editRaw 就绪（非 null）才渲染弹窗（新建直接给 {} 即就绪） */
+  const [editTarget, setEditTarget] = useState<HookEditTarget | null>(null)
+  const [editRaw, setEditRaw] = useState<HookRawEntry | null>(null)
 
   const isUser = scope === 'user'
 
@@ -120,6 +129,11 @@ export function HookListView() {
         setTrustOverride((prev) => ({ ...prev, [respondedScope]: new Set() }))
         setRevokeOverride((prev) => ({ ...prev, [respondedScope]: new Set() }))
         setRemovedOverride((prev) => ({ ...prev, [respondedScope]: new Set() }))
+        // 保存成功对账回包（弹窗自己也在听同一信号，这里只负责关弹窗清目标）
+        if (msg.sourceOp === 'workspaceHooksSave') setEditTarget(null)
+      } else if (msg.op === 'workspaceHooksGet') {
+        // 编辑预填就绪：弹窗从等待态转为表单
+        setEditRaw(msg.hook)
       } else if (msg.op === 'error' && typeof msg.sourceOp === 'string' && msg.sourceOp.startsWith('workspaceHooks')) {
         // 失败回退（仅钩子域错误，面板 errorResponseFor 带 sourceOp 归属）：丢弃乐观覆盖，
         // 界面回到上一份权威数据；其他操作的失败与本页无关，不误吞不清态
@@ -129,6 +143,8 @@ export function HookListView() {
         setRevokeOverride(EMPTY_IDS)
         setRemovedOverride(EMPTY_IDS)
         setError(msg.message)
+        // 预填失败（如配置被外部改坏）：撤掉等待中的编辑目标，不留挂起态
+        if (msg.sourceOp === 'workspaceHooksGet') setEditTarget(null)
       }
     })
     return off
@@ -253,6 +269,38 @@ export function HookListView() {
     setError('')
   }
 
+  /** 仅 .zcode/config.json 来源的登记项可编辑（与删除的 requireConfigSource 同款约束；
+   *  用户级直读直写恒可编辑） */
+  const editableSource = (it: WorkspaceHooksStatusItem) =>
+    isUser || it.sourcePath.replace(/\\/g, '/') === '.zcode/config.json'
+
+  /** 新建：当前作用域落盘（工作区=当前浏览目录；用户级无需工作区） */
+  const openCreate = () => {
+    setError('')
+    setEditRaw({})
+    setEditTarget({ scope, workspace: scope === 'workspace' ? workspace : undefined, item: null })
+  }
+
+  /** 编辑：先 workspaceHooksGet 拉原始对象（列表条目缺 args/shell/timeout 等字段），
+   *  到达后渲染弹窗预填；失败由 error 分支撤目标 */
+  const openEdit = (it: WorkspaceHooksStatusItem) => {
+    setError('')
+    setEditRaw(null)
+    setEditTarget({ scope, workspace, item: it })
+    sendToJava({
+      op: 'workspaceHooksGet',
+      ...(isUser ? { scope: 'user' as const } : { workspace, scope: 'workspace' as const }),
+      reviewItemId: it.reviewItemId,
+      sourcePath: it.sourcePath,
+    })
+  }
+
+  /** 弹窗内删除 → 复用页面既有 ConfirmDialog 流程（先关编辑弹窗再弹确认） */
+  const requestDeleteFromDialog = (it: WorkspaceHooksStatusItem) => {
+    setEditTarget(null)
+    setPendingDelete(it)
+  }
+
   /** 在 IDE 打开对应配置文件（工作区=.zcode/config.json；用户级=~/.zcode/cli/config.json） */
   const openConfig = () => {
     const path = isUser ? statusCache.user?.userConfigPath : `${workspace}/.zcode/config.json`
@@ -346,6 +394,16 @@ export function HookListView() {
           title={t('hooks.refresh')}
         >
           <span className="codicon codicon-refresh" />
+        </button>
+        <button
+          type="button"
+          className="hook-list__new"
+          onClick={openCreate}
+          disabled={busy || (!isUser && !workspace)}
+          title={t('hooks.newHook')}
+        >
+          <span className="codicon codicon-add" />
+          {t('hooks.newHook')}
         </button>
       </div>
 
@@ -458,6 +516,15 @@ export function HookListView() {
                 </button>
                 <button
                   type="button"
+                  className="hook-row__edit"
+                  title={editableSource(it) ? t('hooks.editHook') : t('hooks.editDisabledReason')}
+                  disabled={!editableSource(it)}
+                  onClick={() => openEdit(it)}
+                >
+                  <span className="codicon codicon-edit" />
+                </button>
+                <button
+                  type="button"
                   className="hook-row__delete"
                   title={t('hooks.delete')}
                   onClick={() => setPendingDelete(it)}
@@ -489,6 +556,16 @@ export function HookListView() {
               <span className="hook-delete-dialog__note">{t('hooks.deleteKeepScript')}</span>
             </>
           }
+        />
+      )}
+
+      {/* 新建/编辑弹窗：编辑态等 workspaceHooksGet 预填就绪（editRaw 非 null）才渲染 */}
+      {editTarget && editRaw !== null && (
+        <HookEditDialog
+          target={editTarget}
+          raw={editRaw}
+          onClose={() => setEditTarget(null)}
+          onRequestDelete={requestDeleteFromDialog}
         />
       )}
     </div>
