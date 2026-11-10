@@ -14,6 +14,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
@@ -44,6 +45,9 @@ import java.io.IOException
  *      body {clientType:"zcode", clientVersion} → data.accessToken 即 PAT。
  * - 模型请求头由 CLI 派生（x-api-key + Authorization 双发），不加 projectId 头；
  *   open.bigmodel.cn 的模型请求由 CLI 网关路由改写到 zcode.z.ai ultra（入口默认装配）。
+ * - 插件侧缓存（2026-11-10 加固）：PAT 内存缓存至锚点前 120s；项目定位结果
+ *   org/project 另缓存 30min——命中即整条换发链零 HTTP。旧实现每个模型请求都要先
+ *   GET getCustomerInfo（一次网络抖动就让当回合失败，且每请求多一次 TLS 往返）。
  */
 object ProjectAccessTokenClient {
 
@@ -55,20 +59,27 @@ object ProjectAccessTokenClient {
         fun send(method: String, url: String, headers: Map<String, String>, body: String?): Pair<Int, String>
     }
 
+    /**
+     * 共享 HttpClient：连接池复用。旧实现每次 send 都 new 一个 client，管理面小接口
+     * 白付一次 TCP+TLS 握手；CLI 每个 attempt 同步等材料，这笔开销直接叠在回合延迟上。
+     * 连接超时压到 5s（小 JSON 接口，10s 太久）；请求整体 10s。
+     */
+    private val sharedClient: HttpClient by lazy {
+        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+    }
+
     private val http: Http by lazy {
         Http { method, url, headers, body ->
             try {
-                val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
-                val rb = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15))
+                val rb = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10))
                 for ((k, v) in headers) rb.header(k, v)
                 if (method == "POST") rb.POST(HttpRequest.BodyPublishers.ofString(body ?: "", Charsets.UTF_8))
                 else rb.GET()
-                val resp = client.send(rb.build(), HttpResponse.BodyHandlers.ofString())
+                val resp = sharedClient.send(rb.build(), HttpResponse.BodyHandlers.ofString())
                 resp.statusCode() to resp.body()
             } catch (e: IOException) {
                 // 网络族失败（SSL/连接/超时，VPN/代理切换是高频诱因）：合成 -1 响应走
-                // envelope null 路径，兑现 resolve「任一步失败返回 null」契约；
-                // 失败留档在 envelope/-1 判定处（对注入 Http 同样生效）
+                // envelope 失败路径，兑现 resolve「任一步失败返回 Failed」契约
                 -1 to "network: ${e.javaClass.simpleName}: ${e.message}"
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
@@ -99,10 +110,56 @@ object ProjectAccessTokenClient {
 
     data class ProjectRef(val organizationId: String, val projectId: String, val team: Boolean)
 
+    /** 换发失败分类（上层出用户文案；detail 保留原始线索——异常类名/HTTP 状态/code） */
+    enum class FailKind {
+        NETWORK, UNAUTHORIZED, NOT_FOUND, SERVER, BAD_RESPONSE,
+        NO_PROJECT, EMPTY_TOKEN, SELECTION_MISSING, NEGATIVE_CACHE, UNSUPPORTED, UNEXPECTED,
+    }
+
+    data class Failure(val kind: FailKind, val detail: String) {
+        /** 用户可读单行原因：requestProviderRuntimeHeaders 的 errorMessage 追加此句 */
+        fun describe(): String = when (kind) {
+            FailKind.NETWORK -> "访问 bigmodel.cn 管理面网络失败（$detail），若刚切换过 VPN/代理请检查后重试"
+            FailKind.UNAUTHORIZED -> "bigmodel.cn 登录态失效（$detail），请在 ZCode 中重新登录账号"
+            FailKind.NOT_FOUND -> "管理面资源不存在（$detail），项目或 key 可能已变更"
+            FailKind.SERVER -> "管理面服务异常（$detail）"
+            FailKind.BAD_RESPONSE -> "管理面响应异常（$detail）"
+            FailKind.NO_PROJECT -> "账号下没有可用的个人项目（$detail）"
+            FailKind.EMPTY_TOKEN -> "管理面未返回 accessToken（$detail）"
+            FailKind.SELECTION_MISSING -> "团队连接缺少组织/项目（$detail）"
+            FailKind.NEGATIVE_CACHE -> "刚换发失败，短暂退避中（$detail）"
+            FailKind.UNSUPPORTED -> detail
+            FailKind.UNEXPECTED -> "凭证换发异常（$detail）"
+        }
+    }
+
+    sealed interface ResolveResult {
+        data class Ok(val token: String) : ResolveResult
+        data class Failed(val failure: Failure) : ResolveResult
+    }
+
+    /** 单次调用链的失败记录点：各步骤只在失败处 note，resolve 统一取"最后一个失败"作理由 */
+    private class Trail {
+        var failure: Failure? = null
+        fun note(kind: FailKind, detail: String) {
+            failure = Failure(kind, detail)
+        }
+    }
+
+    private data class CachedRef(val ref: ProjectRef, val expiresAtMs: Long)
+
     private const val ORIGIN = "https://bigmodel.cn"
     private const val REFRESH_AHEAD_MS = 120_000L
 
+    /** PAT 缓存（org/project → 令牌） */
     private val cache = ConcurrentHashMap<String, Pat>()
+
+    /**
+     * 项目定位缓存（access_token 摘要 → org/project，TTL 30min）。PAT 有效期内模型请求
+     * 完全不打管理面；PAT 过期也只多一次 getCustomerInfo，不再每请求一次。
+     */
+    private val projectRefs = ConcurrentHashMap<String, CachedRef>()
+    private const val REF_TTL_MS = 30L * 60_000L
 
     /** 换发失败负缓存（cacheKey → 失败屏蔽截止时刻）：防 attempt 风暴打爆管理面 */
     private val failedUntil = ConcurrentHashMap<String, Long>()
@@ -110,9 +167,9 @@ object ProjectAccessTokenClient {
     private const val NEGATIVE_CACHE_MS = 60_000L
 
     /**
-     * 取 PAT（内存缓存优先，提前 120s 刷新）。任一步失败返回 null——调用方
-     * headersApplied:false 快速失败，行为与材料缺失同型。网络异常由默认 Http 合成
-     * 为失败响应，此处兜底其余意外（异常响应形状等），保契约恒 null 不外抛。
+     * 取 PAT（项目定位缓存 + PAT 内存缓存优先，提前 120s 刷新）。
+     * 任一步失败返回 [ResolveResult.Failed]（带分类与原始线索，供 errorMessage 诊断），
+     * 恒不外抛；网络异常由默认 Http 合成 -1 响应/此处兜底异常，行为与材料缺失同型。
      */
     fun resolve(
         family: String,
@@ -121,63 +178,104 @@ object ProjectAccessTokenClient {
         selection: Selection?,
         clientVersion: String = "0.0.0",
         http: Http? = null,
-    ): String? {
-        if (family != "bigmodel") return null // zai 换发端点/鉴权形态不同，未实现
+    ): ResolveResult {
+        // zai 换发端点/鉴权形态不同，未实现
+        if (family != "bigmodel") return ResolveResult.Failed(Failure(FailKind.UNSUPPORTED, "渠道 $family 的 PAT 换发未实现"))
         val send = http ?: this.http
         return try {
-            val ref = locateProject(mode, selection, accessToken, send)
-            if (ref == null) {
-                println("[PAT] locateProject failed (mode=$mode: getCustomerInfo bad/401 or no non-team project)")
-                return null
-            }
-            val cacheKey = "${family}:${mode}:${ref.organizationId}:${ref.projectId}"
             val now = System.currentTimeMillis()
-            cache[cacheKey]?.let { if (now < it.expiresAtMs) return it.token }
+            val key = refKey(family, mode, accessToken)
+            val trail = Trail()
+            val cachedRef = projectRefs[key]?.takeIf { now < it.expiresAtMs }?.ref
+            val ref = cachedRef ?: locateProject(mode, selection, accessToken, send, trail)
+            if (ref == null) {
+                val f = trail.failure ?: Failure(FailKind.UNEXPECTED, "定位项目失败")
+                println("[PAT] locateProject failed (mode=$mode): ${f.kind} ${f.detail}")
+                return ResolveResult.Failed(f)
+            }
+            if (cachedRef == null) projectRefs[key] = CachedRef(ref, now + REF_TTL_MS)
+            val cacheKey = "${family}:${mode}:${ref.organizationId}:${ref.projectId}"
+            cache[cacheKey]?.let { if (now < it.expiresAtMs) return ResolveResult.Ok(it.token) }
             // 负缓存：换发刚失败过，60s 内不再打管理面（CLI 每次 attempt 都会来要材料，
             // 无负缓存时失败即重试风暴，会加剧管理面限流）
-            failedUntil[cacheKey]?.let { if (now < it) return null }
+            failedUntil[cacheKey]?.let {
+                if (now < it) {
+                    return ResolveResult.Failed(Failure(FailKind.NEGATIVE_CACHE, "剩余 ${(it - now) / 1000}s"))
+                }
+            }
             // 失败重试 1 次（跨瞬时抖动；间隔 800ms）
-            var pat = issueAccessToken(ref, accessToken, clientVersion, send)
+            var pat = issueAccessToken(ref, accessToken, clientVersion, send, trail)
             if (pat == null) {
                 Thread.sleep(800)
-                pat = issueAccessToken(ref, accessToken, clientVersion, send)
+                trail.failure = null
+                pat = issueAccessToken(ref, accessToken, clientVersion, send, trail)
             }
             if (pat == null) {
-                println("[PAT] issue failed twice (org=${ref.organizationId}, project=${ref.projectId}), negative-cache ${NEGATIVE_CACHE_MS / 1000}s")
-                failedUntil[cacheKey] = now + NEGATIVE_CACHE_MS
-                return null
+                val f = trail.failure ?: Failure(FailKind.UNEXPECTED, "签发失败")
+                println("[PAT] issue failed twice (org=${ref.organizationId}, project=${ref.projectId}): ${f.kind} ${f.detail}, negative-cache ${NEGATIVE_CACHE_MS / 1000}s")
+                failedUntil[cacheKey] = System.currentTimeMillis() + NEGATIVE_CACHE_MS
+                // 项目/key 已不存在：丢掉定位缓存，退避期后重新 getCustomerInfo 自愈
+                if (f.kind == FailKind.NOT_FOUND) projectRefs.remove(key)
+                return ResolveResult.Failed(f)
             }
             failedUntil.remove(cacheKey)
             cache[cacheKey] = pat
-            pat.token
+            ResolveResult.Ok(pat.token)
         } catch (e: Exception) {
             if (e is InterruptedException) Thread.currentThread().interrupt()
             // 兜底同样留档（注入 Http 抛异常/合成响应前的意外路径，UI 新鲜度判定依赖此处）
-            recordNetworkFailure("${e.javaClass.simpleName}: ${e.message ?: "网络不可达"}")
-            null
+            val detail = "${e.javaClass.simpleName}: ${e.message ?: "网络不可达"}"
+            recordNetworkFailure(detail)
+            ResolveResult.Failed(Failure(if (e is IOException) FailKind.NETWORK else FailKind.UNEXPECTED, detail))
         }
     }
 
-    /** 测试/换账号清理（换账号串号防御由 cacheKey 含 org/project 兜底，此处供主动废弃） */
-    fun invalidate() = cache.clear()
+    /** access_token 摘要做定位缓存键（换账号即换 key，串号防御与 PAT cacheKey 同口径） */
+    private fun refKey(family: String, mode: String, accessToken: String): String =
+        "$family:$mode:" + MessageDigest.getInstance("SHA-256")
+            .digest(accessToken.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+            .take(16)
 
-    /** 测试隔离：连负缓存与网络失败记录一起清（[invalidate] 只清正缓存） */
+    /** 测试/换账号清理（换账号串号防御由缓存键含 token 摘要兜底，此处供主动废弃） */
+    fun invalidate() {
+        cache.clear()
+        projectRefs.clear()
+    }
+
+    /** 测试隔离：连负缓存、定位缓存与网络失败记录一起清（[invalidate] 只清正缓存） */
     fun resetForTest() {
         cache.clear()
+        projectRefs.clear()
         failedUntil.clear()
         lastNetworkFailure.set(null)
     }
 
-    private fun locateProject(mode: String, selection: Selection?, accessToken: String, http: Http): ProjectRef? {
+    private fun locateProject(
+        mode: String,
+        selection: Selection?,
+        accessToken: String,
+        http: Http,
+        trail: Trail,
+    ): ProjectRef? {
         if (mode == "team-coding-plan") {
-            val org = selection?.organizationId?.takeIf { it.isNotBlank() } ?: return null
-            val project = selection.projectId?.takeIf { it.isNotBlank() } ?: return null
+            val org = selection?.organizationId?.takeIf { it.isNotBlank() }
+            val project = selection?.projectId?.takeIf { it.isNotBlank() }
+            if (org == null || project == null) {
+                trail.note(FailKind.SELECTION_MISSING, "setting.json 的团队连接缺少 organizationId/projectId")
+                return null
+            }
             return ProjectRef(org, project, team = true)
         }
         // individual：从非团队项目解析（projectType!=="2"，官方"个人 Key 只能从非团队项目解析"）；
         // org/project 均优先"默认机构/默认项目"命名（官方 pickOrgAndProject 同款偏好）
-        val data = envelope(get("$ORIGIN/api/biz/customer/getCustomerInfo", mapOf("Authorization" to accessToken), http)) ?: return null
-        val orgs = data["organizations"]?.jsonArray ?: return null
+        val data = envelope(get("$ORIGIN/api/biz/customer/getCustomerInfo", mapOf("Authorization" to accessToken), http), trail)
+            ?: return null
+        val orgs = data["organizations"]?.jsonArray
+        if (orgs == null) {
+            trail.note(FailKind.NO_PROJECT, "getCustomerInfo 响应无 organizations")
+            return null
+        }
         var fallback: ProjectRef? = null
         for (org in orgs) {
             val o = org as? JsonObject ?: continue
@@ -194,10 +292,11 @@ object ProjectAccessTokenClient {
                 if (fallback == null) fallback = ref
             }
         }
+        if (fallback == null) trail.note(FailKind.NO_PROJECT, "无非团队项目（projectType!=2）")
         return fallback
     }
 
-    private fun issueAccessToken(ref: ProjectRef, accessToken: String, clientVersion: String, http: Http): Pat? {
+    private fun issueAccessToken(ref: ProjectRef, accessToken: String, clientVersion: String, http: Http, trail: Trail): Pat? {
         val listBase = "$ORIGIN/api/biz/v1/organization/${ref.organizationId}/projects/${ref.projectId}/api_keys"
         val listHeaders = buildMap {
             put("Authorization", accessToken)
@@ -210,7 +309,7 @@ object ProjectAccessTokenClient {
         // 列表响应 envelope：{total, data:[...], code, msg}，data 直接是条目数组
         // （envelope 已取 data；再包一层防御 data 内含 api_keys 键的形态）
         val listResp = get(listBase, listHeaders, http)
-        val env = envelope(listResp)
+        val env = envelope(listResp, trail)
         if (env == null) {
             println("[PAT] list bad resp: ${describe(listResp)}")
             return null
@@ -218,6 +317,7 @@ object ProjectAccessTokenClient {
         val items = env["data"]?.jsonArray ?: env["api_keys"]?.jsonArray
         if (items == null) {
             println("[PAT] list no items: ${describe(200 to (env.toString()))}")
+            trail.note(FailKind.BAD_RESPONSE, "api_keys 列表响应无 data 数组")
             return null
         }
         // 条目主键实机为 apiKey 字段（无 id/apiKeyId，2026-10-23 探针实证）；
@@ -241,7 +341,7 @@ object ProjectAccessTokenClient {
             val createBody = if (ref.team) """{"name":"$wantName","keyType":2,"usageScene":1}"""
             else """{"name":"$wantName","usageScene":1}"""
             val createResp = http.send("POST", listBase, listHeaders + mapOf("Content-Type" to "application/json"), createBody)
-            val created = envelope(createResp)
+            val created = envelope(createResp, trail)
             if (created == null) {
                 println("[PAT] create bad resp: ${describe(createResp)}")
                 return null
@@ -249,14 +349,17 @@ object ProjectAccessTokenClient {
             keyId = created["apiKey"]?.jsonPrimitive?.contentOrNull
                 ?: created["id"]?.jsonPrimitive?.contentOrNull
                 ?: created["apiKeyId"]?.jsonPrimitive?.contentOrNull
-                ?: return null
+            if (keyId == null) {
+                trail.note(FailKind.BAD_RESPONSE, "创建 api_key 响应无 key 标识")
+                return null
+            }
         }
         val resp = http.send(
             "POST", "$listBase/$keyId/access_tokens",
             mapOf("Authorization" to "Bearer $accessToken", "Content-Type" to "application/json"),
             """{"clientType":"zcode","clientVersion":"$clientVersion"}""",
         )
-        val issueEnv = envelope(resp)
+        val issueEnv = envelope(resp, trail)
         if (issueEnv == null) {
             println("[PAT] issue bad resp (keyId tail=…${keyId.takeLast(6)}): ${describe(resp)}")
             return null
@@ -264,10 +367,14 @@ object ProjectAccessTokenClient {
         val token = issueEnv["accessToken"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         if (token == null) {
             println("[PAT] issue no accessToken: ${describe(200 to resp.second)}")
+            trail.note(FailKind.EMPTY_TOKEN, "签发响应无 accessToken")
             return null
         }
         val expiresInSec = issueEnv["expiresIn"]?.jsonPrimitive?.intOrNull ?: 18000
-        if (expiresInSec <= 0) return null
+        if (expiresInSec <= 0) {
+            trail.note(FailKind.BAD_RESPONSE, "签发响应 expiresIn=$expiresInSec")
+            return null
+        }
         // 过期时刻以服务端返回的绝对锚点 expiresAt（epoch 秒）为准——实机实证该锚点对
         // 同一 key 统一（多次签发 expiresIn 递减、expiresAt 不变）：PAT 锚点过期前
         // 120 秒内重签发时 expiresIn 剩余不足 120，若按 now+expiresIn-120s 相对计算
@@ -290,26 +397,54 @@ object ProjectAccessTokenClient {
     private fun get(url: String, headers: Map<String, String>, http: Http) = http.send("GET", url, headers, null)
 
     /** 管理面 envelope：{code:200|0, data:{...}}；data 为数组等非对象形态时包一层 {"data":...}。
-     *  附带网络失败留档副作用：-1 为默认 Http 的网络失败合成码，2xx 即清除（注入 fake 同样过此关口） */
-    private fun envelope(resp: Pair<Int, String>): JsonObject? {
+     *  失败时在 [trail] 记分类与线索；-1 为默认 Http 的网络失败合成码，2xx 即清网络失败记录
+     *  （注入 fake 同样过此关口） */
+    private fun envelope(resp: Pair<Int, String>, trail: Trail): JsonObject? {
         if (resp.first == -1) {
-            recordNetworkFailure(resp.second.removePrefix("network: "))
+            val detail = resp.second.removePrefix("network: ")
+            recordNetworkFailure(detail)
+            trail.note(FailKind.NETWORK, detail)
             return null
         }
-        if (resp.first in 200..299) lastNetworkFailure.set(null)
-        if (resp.first !in 200..299) return null
+        if (resp.first in 200..299) {
+            lastNetworkFailure.set(null)
+        } else {
+            trail.note(
+                when (resp.first) {
+                    401, 403 -> FailKind.UNAUTHORIZED
+                    404 -> FailKind.NOT_FOUND
+                    else -> FailKind.SERVER
+                },
+                "HTTP ${resp.first}",
+            )
+            return null
+        }
         return try {
             val root = json.parseToJsonElement(resp.second).jsonObject
             val code = root["code"]?.jsonPrimitive?.intOrNull
                 ?: root["code"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                ?: return null
-            if (code != 200 && code != 0) return null
+            if (code == null) {
+                trail.note(FailKind.BAD_RESPONSE, "HTTP ${resp.first} 响应缺少 code")
+                return null
+            }
+            if (code != 200 && code != 0) {
+                val msg = root["msg"]?.jsonPrimitive?.contentOrNull?.take(80)
+                trail.note(
+                    if (code == 401 || code == 403) FailKind.UNAUTHORIZED else FailKind.BAD_RESPONSE,
+                    "HTTP ${resp.first} code=$code" + (msg?.let { " msg=$it" } ?: ""),
+                )
+                return null
+            }
             when (val data = root["data"]) {
                 is JsonObject -> data
-                null -> null
+                null -> {
+                    trail.note(FailKind.BAD_RESPONSE, "HTTP ${resp.first} 响应无 data")
+                    null
+                }
                 else -> buildJsonObject { put("data", data) }
             }
         } catch (_: Exception) {
+            trail.note(FailKind.BAD_RESPONSE, "HTTP ${resp.first} 响应非 JSON")
             null
         }
     }

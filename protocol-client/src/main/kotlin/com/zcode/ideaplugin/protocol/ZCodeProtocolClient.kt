@@ -741,32 +741,38 @@ class ZCodeProtocolClient private constructor(
         // 模型请求前的运行时鉴权供给（Account 型渠道每次 attempt 都会来要，runner.ts
         // 仅 zhipu-account Model 挂此端口；普通 apiKey 渠道不进）。2026-09-21 开源源码
         // 升级：按 accountAccess.mode 从 credentials.json 供给 apiKey（官方同款判据
-        // AccountProviderBridge.requestAuthApiKey）——此前恒拒绝是 zcode-plan 滑块场景
+        // AccountProviderBridge.requestAuth）——此前恒拒绝是 zcode-plan 滑块场景
         // 的防御，但那同时把插件本可代答的登录型渠道也堵死了（fail-closed 总根因的
-        // 应答半边）。供给不了（team 需远端解析/凭证缺失/captcha 类）时快速失败：
-        // 服务端 prepare 阶段即抛 -32031，errorMessage 进 turn.failed detail，替代
-        // 旧版落入 -32601 兜底的 ZodError 校验崩溃（用户只见 "Model request failed."）
+        // 应答半边）。供给不了时快速失败：errorMessage 进 turn.failed detail（服务端
+        // prepare 阶段即抛 -32031），并带上具体原因（网络/登录态/材料缺失），替代旧版
+        // 泛化括号文案（2026-11-10 实机：PAT 换发 connect timeout 被误读为凭证缺失）。
         else if (method == "interaction/requestProviderRuntimeHeaders") {
             val providerId = params["providerId"]?.jsonPrimitive?.jsonStringOrNull ?: ""
             val mode = params["accountAccess"]?.jsonObject?.get("mode")?.jsonPrimitive?.jsonStringOrNull
-            val apiKey = try {
-                AccountProviderBridge.requestAuthApiKey(providerId, mode)
+            val auth = try {
+                AccountProviderBridge.requestAuth(providerId, mode)
             } catch (e: Exception) {
                 println("[ZCodeProtocolClient] providerRuntimeHeaders credential read error (${e.javaClass.simpleName}): ${e.message}")
-                null
+                AccountProviderBridge.AuthResult.Unavailable(
+                    "凭证读取异常（${e.javaClass.simpleName}: ${e.message ?: "unknown"}）",
+                )
             }
-            if (apiKey != null) {
-                println("[ZCodeProtocolClient] providerRuntimeHeaders: supplying apiKey for $providerId (mode=$mode)")
-                respondToServer(id, buildJsonObject {
-                    put("headersApplied", true)
-                    put("requestAuth", buildJsonObject { put("apiKey", apiKey) })
-                })
-            } else {
-                respondToServer(id, buildJsonObject {
-                    put("headersApplied", false)
-                    put("errorMessage", "host plugin cannot provide runtime auth for $providerId " +
-                        "(mode=$mode: credential missing, team-plan not supported, or captcha-gated gateway)")
-                })
+            when (auth) {
+                is AccountProviderBridge.AuthResult.Supplied -> {
+                    println("[ZCodeProtocolClient] providerRuntimeHeaders: supplying apiKey for $providerId (mode=$mode)")
+                    respondToServer(id, buildJsonObject {
+                        put("headersApplied", true)
+                        put("requestAuth", buildJsonObject { put("apiKey", auth.apiKey) })
+                    })
+                }
+                is AccountProviderBridge.AuthResult.Unavailable -> {
+                    println("[ZCodeProtocolClient] providerRuntimeHeaders unavailable for $providerId (mode=$mode): ${auth.reason}")
+                    respondToServer(id, buildJsonObject {
+                        put("headersApplied", false)
+                        put("errorMessage", "host plugin cannot provide runtime auth for $providerId " +
+                            "(mode=$mode): ${auth.reason}")
+                    })
+                }
             }
         }
         // 官方 MCP 鉴权头（interaction/requestOfficialMcpAuthHeaders）：官方插件 server

@@ -5148,6 +5148,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val zh = when {
             rawReason.startsWith("SSLHandshakeException") || rawReason.startsWith("SSLException") -> "SSL/TLS 握手被远端终止"
             rawReason.startsWith("UnknownHostException") -> "域名解析失败"
+            // HttpConnectTimeoutException 不是 HttpTimeoutException 的子类名前缀（实机 11-10）
+            rawReason.startsWith("HttpConnectTimeoutException") -> "连接超时"
             rawReason.startsWith("ConnectException") -> "无法建立连接"
             rawReason.startsWith("HttpTimeoutException") || rawReason.startsWith("SocketTimeoutException") -> "请求超时"
             else -> null

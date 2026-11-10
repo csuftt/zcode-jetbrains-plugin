@@ -173,9 +173,15 @@ object AccountProviderBridge {
 
     // ============ 反向请求应答：requestAuth 供给 ============
 
+    /** 运行时鉴权供给结果：Supplied 带材料；Unavailable 带用户可读原因（errorMessage 用） */
+    sealed interface AuthResult {
+        data class Supplied(val apiKey: String) : AuthResult
+        data class Unavailable(val reason: String) : AuthResult
+    }
+
     /**
-     * 按模型请求的 accountAccess 选 apiKey（官方 accountProviderRequestAuthService
-     * 材料选择判据的插件侧子集）。返回 null = 无法供给（调用方回 headersApplied:false）。
+     * 按模型请求的 accountAccess 供给运行时鉴权材料，并保留失败原因（诊断口径）：
+     * 反向请求应答用它拼 errorMessage；[requestAuthApiKey] 是只取材料的薄包装。
      *
      * 材料链（2026-10-23 源码勘查定案）：
      * - start-plan：credentials 的 zcodejwttoken（端点为 captcha 网关，实际不可激活）；
@@ -189,6 +195,38 @@ object AccountProviderBridge {
      * @param selection setting.json 连接选择（默认读真实文件；测试显式传）
      * @param http HTTP 可注入（测试 fake；默认生产 java.net.http）
      */
+    fun requestAuth(
+        providerId: String,
+        mode: String?,
+        entries: Map<String, String> = readCredentialEntries(),
+        selection: ProjectAccessTokenClient.Selection? = connectionSelection(),
+        clientVersion: String = "0.0.0",
+        http: ProjectAccessTokenClient.Http? = null,
+    ): AuthResult {
+        val family = FAMILY_BY_PROVIDER[providerId]
+            ?: return AuthResult.Unavailable("未知账号渠道 $providerId（内置目录未收录）")
+        return when (mode) {
+            "start-plan" -> entries["zcodejwttoken"]?.takeIf { it.isNotBlank() }
+                ?.let { AuthResult.Supplied(it) }
+                ?: AuthResult.Unavailable("credentials.json 缺少 zcodejwttoken（尚未登录）")
+            "individual-coding-plan" -> {
+                val identity = identityOf(entries, family)
+                    ?: return AuthResult.Unavailable("credentials.json 缺少账号身份 oauth:$family:user_info，请在 ZCode 中登录")
+                entries[individualPlanKey(providerId, identity)]?.takeIf { it.isNotBlank() }
+                    ?.let { AuthResult.Supplied(it) }
+                    ?: patKey(family, mode, entries, selection, clientVersion, http)
+            }
+            "team-coding-plan" -> {
+                if (identityOf(entries, family) == null) {
+                    return AuthResult.Unavailable("credentials.json 缺少账号身份 oauth:$family:user_info，请在 ZCode 中登录")
+                }
+                patKey(family, mode, entries, selection, clientVersion, http)
+            }
+            else -> AuthResult.Unavailable("不支持的账号模式 mode=$mode")
+        }
+    }
+
+    /** 材料选择薄包装：返回 null = 无法供给（额度链等只关心有无材料的调用方） */
     fun requestAuthApiKey(
         providerId: String,
         mode: String?,
@@ -196,22 +234,7 @@ object AccountProviderBridge {
         selection: ProjectAccessTokenClient.Selection? = connectionSelection(),
         clientVersion: String = "0.0.0",
         http: ProjectAccessTokenClient.Http? = null,
-    ): String? {
-        val family = FAMILY_BY_PROVIDER[providerId] ?: return null
-        return when (mode) {
-            "start-plan" -> entries["zcodejwttoken"]?.takeIf { it.isNotBlank() }
-            "individual-coding-plan" -> {
-                val identity = identityOf(entries, family) ?: return null
-                entries[individualPlanKey(providerId, identity)]?.takeIf { it.isNotBlank() }
-                    ?: patKey(family, mode, entries, selection, clientVersion, http)
-            }
-            "team-coding-plan" -> {
-                identityOf(entries, family) ?: return null
-                patKey(family, mode, entries, selection, clientVersion, http)
-            }
-            else -> null
-        }
-    }
+    ): String? = (requestAuth(providerId, mode, entries, selection, clientVersion, http) as? AuthResult.Supplied)?.apiKey
 
     /** PAT 材料解析：oauth access_token（防御性拒绝误存的 zcode JWT，官方同款守卫）→ 换发 */
     private fun patKey(
@@ -221,14 +244,17 @@ object AccountProviderBridge {
         selection: ProjectAccessTokenClient.Selection?,
         clientVersion: String,
         http: ProjectAccessTokenClient.Http?,
-    ): String? {
+    ): AuthResult {
         val accessToken = entries["oauth:$family:access_token"]
             ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] }
         if (accessToken == null) {
             println("[AccountProviderBridge] PAT skipped: oauth:$family:access_token missing or equals zcodejwttoken (entries=${entries.size})")
-            return null
+            return AuthResult.Unavailable("credentials.json 缺少 oauth:$family:access_token（或误存为 zcode JWT），请在 ZCode 中重新登录")
         }
-        return ProjectAccessTokenClient.resolve(family, mode, accessToken, selection, clientVersion, http)
+        return when (val r = ProjectAccessTokenClient.resolve(family, mode, accessToken, selection, clientVersion, http)) {
+            is ProjectAccessTokenClient.ResolveResult.Ok -> AuthResult.Supplied(r.token)
+            is ProjectAccessTokenClient.ResolveResult.Failed -> AuthResult.Unavailable(r.failure.describe())
+        }
     }
 
     /** coding-plan 套餐凭证 key，individual/team 键模板同构（官方 accountProviderCredentialKey.ts L20-36；identity 走 JS encodeURIComponent 同款转义） */
