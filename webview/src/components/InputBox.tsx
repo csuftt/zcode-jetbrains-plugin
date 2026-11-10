@@ -45,6 +45,7 @@ import { sendToJava, onMessage } from '@/ipc/bridge'
 import type { JavaResponse, SlashCommand, AgentDef, ImageAttachmentInput, SendAttachmentInput, CurrentFileAttachmentInput } from '@/types/messages'
 import { insertChipAtCursor, insertCommandChipAtCursor, insertSessionChipAtCursor, insertSkillChipAtCursor, insertPasteChipAtCursor, convertCompletedPaths, convertCompletedSessionRefs, convertCompletedSkillRefs, matchSessionRefTrigger, serializeEditor, hasAnyInlineChip, pinCaretAfterChip, type CmdChipKind } from '@/utils/inlineFileTags'
 import { matchSkillRefTrigger } from '@/utils/skillRefPattern'
+import { fuzzyRank } from '@/utils/fuzzyMatch'
 import { relativeTime } from '@/utils/time'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
@@ -1248,25 +1249,21 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         source: 'builtin' as const,
         ...(b.icon ? { icon: b.icon } : {}),
       }))
-    const base: SlashItem[] = [...builtin, ...injected].filter(
-      (c) =>
-        !q ||
-        c.name.toLowerCase().includes(q) ||
-        (c.description ?? '').toLowerCase().includes(q),
-    )
+    // 模糊打分过滤（对齐 @ 文件补全的 FileMentionMatcher 算法，见 utils/fuzzyMatch）：
+    // q 为空全收且不参与组内重排，保留原注入顺序
+    const rankOf = (item: { name: string; description?: string }): number | null =>
+      q ? fuzzyRank(q, item.name, item.description) : 0
+    const base: SlashItem[] = [...builtin, ...injected].filter((c) => rankOf(c) !== null)
     const agentItems: SlashItem[] = (agents ?? [])
-      .filter(
-        (a) =>
-          !q ||
-          a.name.toLowerCase().includes(q) ||
-          a.description.toLowerCase().includes(q),
-      )
+      .filter((a) => rankOf(a) !== null)
       .map((a) => ({ name: a.name, description: a.description, kind: 'agent' as const, agent: a }))
-    // 用户拍板：子智能体组排最前，命令次之，技能最后
+    // 用户拍板：子智能体组排最前，命令次之，技能最后；有查询时组内按档位升序（同档短名优先）
     const order: Record<string, number> = { agent: 0, command: 1, skill: 2 }
-    return [...base, ...agentItems].sort(
-      (a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9),
-    )
+    return [...base, ...agentItems].sort((a, b) => {
+      const byKind = (order[a.kind] ?? 9) - (order[b.kind] ?? 9)
+      if (byKind !== 0 || !q) return byKind
+      return (rankOf(a) ?? 0) - (rankOf(b) ?? 0) || a.name.localeCompare(b.name)
+    })
   }, [slashItems, slashQuery, agents, t])
 
   // / 下拉打开时懒加载子智能体清单（首次；ZCode 客户端可能改过文件，每次打开刷新）
@@ -1446,11 +1443,12 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   /**
    * $ 下拉候选：slashItems 的技能子集（kind='skill'），同名按 scope 折叠
    * （官方 skillsMentionProvider 同策：workspace > plugin > user，$ 面板是执行入口
-   * 不是来源管理页），query 匹配 name/description，名称升序。
+   * 不是来源管理页），模糊打分匹配 name/description（utils/fuzzyMatch），
+   * 档位升序、名称升序兜底；空 query 全收纯名称升序（与旧行为一致）。
    */
   const filteredSkillItems = useMemo<SlashCommand[]>(() => {
     if (skillQuery === null) return []
-    const q = skillQuery.toLowerCase()
+    const q = skillQuery
     const scopePriority: Record<string, number> = { workspace: 0, plugin: 1, user: 2 }
     const byName = new Map<string, SlashCommand>()
     for (const c of slashItems) {
@@ -1462,13 +1460,12 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       }
     }
     return [...byName.values()]
-      .filter(
-        (c) =>
-          !q ||
-          c.name.toLowerCase().includes(q) ||
-          (c.description ?? '').toLowerCase().includes(q),
-      )
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap((c) => {
+        const rank = q ? fuzzyRank(q, c.name, c.description) : 0
+        return rank === null ? [] : [{ c, rank }]
+      })
+      .sort((a, b) => a.rank - b.rank || a.c.name.localeCompare(b.c.name))
+      .map((e) => e.c)
   }, [skillQuery, slashItems])
 
   /** 技能名 → 路径反查（裸 token 回显成 chip 时补路径；ref 转发同 sessionTitleResolverRef）*/
