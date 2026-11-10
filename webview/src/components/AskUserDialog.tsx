@@ -197,8 +197,8 @@ export function AskUserDialog({ requestId, toolName, questions, deadlineMs, aske
                 left: dockPos.x,
                 top: dockPos.top - 8,
                 transform: 'translate(-50%, -100%)',
-                // 横条只有 header 一行，全宽太压消息区，适度收窄居中悬浮
-                width: 'min(calc(100vw - 24px), 640px)',
+                // 横条宽度跟随主界面：与展开 dock 态同口径（overlay 左右 12px 边距内撑满）
+                width: 'calc(100vw - 24px)',
               }
             : undefined
         }
