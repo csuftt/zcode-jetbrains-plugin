@@ -335,13 +335,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 } else {
                     message("dialog.closeTab.normal", tabName)
                 }
-                val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
-                    project,
-                    dialogMessage,
-                    message("dialog.closeTab.title"),
-                    com.intellij.openapi.ui.Messages.getQuestionIcon(),
-                )
-                if (result != com.intellij.openapi.ui.Messages.YES) {
+                // 自建对话框替代平台 Messages.showYesNoDialog（恒居中）：定位到点击处附近（见类注释）
+                val dialog = CloseTabConfirmDialog(project, dialogMessage, message("dialog.closeTab.title"))
+                if (!dialog.showAndGet()) {
                     event.consume()
                 }
             }
