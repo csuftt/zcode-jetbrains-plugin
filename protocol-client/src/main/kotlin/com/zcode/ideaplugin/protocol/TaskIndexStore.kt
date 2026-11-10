@@ -182,7 +182,9 @@ class TaskIndexStore(
      *
      * 1. tasks 已有行：客户端 archiveStaleTasks 同款判据——deleted=0/archived=0/pinned=0/
      *    unread_at IS NULL/updated_at < 保留期/task_status='completed'，逐行置 archived=1
-     *    （不动 updated_at，对齐客户端 UPDATE 语义）
+     *    （不动 updated_at，对齐客户端 UPDATE 语义）。**判活双源**：命中行再对照 cli 库
+     *    session.time_updated 取 MAX——updated_at 对客户端未索引、插件补行的会话是静态
+     *    快照（缺陷GX，活跃会话被误归档），双源任一新鲜即豁免
      * 2. tasks 无行的超期根会话（插件创建、客户端未索引——客户端扫描看不见它们）：
      *    从 db.sqlite 按 path 双形态 + time_updated 超期 + parent_id IS NULL（排除子代理）
      *    捞出后补行 archived=1。补行 task_status='completed'/unread_at=NULL，天然满足客户端
@@ -287,6 +289,8 @@ private val TASKS_LIST_JS = """
  * pin/unpin 仅动 pinned（updated_at 保持——置顶不改变会话活动时序）。
  * 无行补 INSERT：archive=归档1/删除0，restore=0/0，delete=0/1（老机制归档会话删除场景，
  * time_archived 同步清除后 archived=0 语义最干净），pin/unpin=置顶位按目标值。
+ * 补行 updated_at 取 session.time_updated 真实活动时间（写操作时刻的快照会掩盖陈旧行，
+ * 缺陷GX）；restore 例外保 now——恢复后旧会话不应在下一轮扫描被立即扫回。
  */
 private val TASKS_UPSERT_JS = """
     const {DatabaseSync} = require('node:sqlite');
@@ -312,9 +316,12 @@ private val TASKS_UPSERT_JS = """
     else if (mode === 'pin' || mode === 'unpin') conflictUpdate = 'pinned = excluded.pinned';
     else conflictUpdate = 'archived = excluded.archived, updated_at = excluded.updated_at';
     const sql = 'INSERT INTO tasks (workspace_key, workspace_path, task_id, title, task_status, mode, created_at, updated_at, last_unread_at, pinned, archived, deleted, title_overridden, searchable_text, meta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?) ON CONFLICT(workspace_key, task_id) DO UPDATE SET ' + conflictUpdate;
+    // 补行 updated_at 用会话真实活动时间（缺陷GX：写操作时刻会凭空「续命」，掩盖陈旧行）；
+    // restore 例外保 now——恢复即用户意图，旧会话若沿用真实时间会在下一轮扫描被立刻扫回归档页
+    const updatedAtIns = mode === 'restore' ? Date.now() : (s.time_updated ?? Date.now());
     tdb.exec('BEGIN IMMEDIATE');
     try {
-      tdb.prepare(sql).run(wsKey, s.path, sid, s.title || '(未命名会话)', 'completed', 'build', s.time_created ?? Date.now(), Date.now(), pinIns, archIns, delIns, '', JSON.stringify({taskId: sid}));
+      tdb.prepare(sql).run(wsKey, s.path, sid, s.title || '(未命名会话)', 'completed', 'build', s.time_created ?? Date.now(), updatedAtIns, pinIns, archIns, delIns, '', JSON.stringify({taskId: sid}));
       tdb.exec('COMMIT');
       // restore 清旧插件机制归档位（恢复到正常列表）；delete 同样必须清——不清则
       // listArchivedSessions 双源合并的旧机制分支（session.time_archived）仍会命中。
@@ -416,11 +423,23 @@ private val AUTO_ARCHIVE_JS = """
     const archived = [];
     tdb.exec('BEGIN IMMEDIATE');
     try {
-      const rows = tdb.prepare(`SELECT workspace_key, task_id, title FROM tasks
+      const rows = tdb.prepare(`SELECT workspace_key, task_id, title, updated_at FROM tasks
         WHERE workspace_key IN (?, ?) AND deleted = 0 AND archived = 0 AND pinned = 0
           AND unread_at IS NULL AND updated_at < ? AND task_status = 'completed'`).all(wsNative, wsAlt, cutoff);
       const upd = tdb.prepare('UPDATE tasks SET archived = 1 WHERE workspace_key = ? AND task_id = ?');
-      for (const r of rows) { upd.run(r.workspace_key, r.task_id); archived.push({id: r.task_id, title: r.title}); }
+      const sessMeta = sessDb.prepare('SELECT time_updated FROM session WHERE id = ?');
+      for (const r of rows) {
+        // 判活双源（缺陷GX，2026-11-10 实锤）：updated_at 对客户端未索引、插件补行的会话
+        // 是最后一次插件操作时刻的静态快照——会话此后持续活跃也不刷新，纯插件重度使用
+        // 的会话会在「updated_at+7天」被误归档。与 cli 库 session.time_updated 取 MAX，
+        // 任一新鲜即豁免；session 行缺失（索引行孤儿）维持旧行为
+        let last = r.updated_at;
+        const s = sessMeta.get(r.task_id);
+        if (s && typeof s.time_updated === 'number' && s.time_updated > last) last = s.time_updated;
+        if (last >= cutoff) continue;
+        upd.run(r.workspace_key, r.task_id);
+        archived.push({id: r.task_id, title: r.title});
+      }
       tdb.exec('COMMIT');
     } catch (e) {
       try { tdb.exec('ROLLBACK'); } catch(_){}
