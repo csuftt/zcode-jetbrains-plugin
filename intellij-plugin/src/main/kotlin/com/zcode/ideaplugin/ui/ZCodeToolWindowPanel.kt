@@ -1401,6 +1401,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "remoteStatus" -> handleRemote { it.statusJson() }
                         "remoteUnpair" -> handleRemote { it.unpair() }
                         "checkEnv" -> handleCheckEnv()
+                        "getPathEnv" -> handleGetPathEnv()
                         "envSave" -> handleEnvSave(msg)
                         "getCurrentFile" -> handleGetCurrentFile(msg)
                         else -> errorResponse("未知 op: $op")
@@ -1897,6 +1898,17 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("op", "envStatus")
             put("status", com.zcode.ideaplugin.env.ZCodeEnvChecker.statusJson(status))
         }
+    }
+
+    /** 路径类环境变量白名单下发（缺陷 GZ）：webview 正文 chip 解析与产物卡门控匹配在
+     *  纯前端同步展开 %TEMP% 等占位符，需一次性拿到真实值；只发路径语义白名单，不整包 env */
+    private fun handleGetPathEnv(): JsonObject = buildJsonObject {
+        put("op", "getPathEnvResult")
+        put("vars", buildJsonObject {
+            for ((key, value) in com.zcode.ideaplugin.env.PathEnvExpansion.pathEnvVars()) {
+                put(key, value)
+            }
+        })
     }
 
     /** 环境校验失败响应：error 消息 + 当前 envStatus（前端刷新提醒条） */
@@ -5308,8 +5320,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 效果不进 IDE 编辑器；Desktop.open 走文件关联可能落到编辑器，browse 不受影响）。
      */
     private fun handleOpenFileSystem(msg: JsonObject): JsonObject {
-        val filePath = msg["filePath"]?.jsonPrimitive?.content
+        val rawPath = msg["filePath"]?.jsonPrimitive?.content
             ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("turnfile.error.missingFilePath"))
+        // 环境变量占位符路径兜底展开（缺陷 GZ，同 handleOpenFile）
+        val filePath = com.zcode.ideaplugin.env.PathEnvExpansion.expand(rawPath)
         val allowedExtensions = setOf(
             "docx", "xlsx", "pptx", "pdf", "html", "htm",
             "mp4", "mov", "webm", "m4v", "mp3", "wav", "m4a", "ogg", "opus", "flac", "weba",
@@ -5343,8 +5357,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * live preview 高亮全部命中）；会话启动失败退化为定位并选中首个命中。
      */
     private fun handleOpenFile(msg: JsonObject): JsonObject {
-        val filePath = msg["filePath"]?.jsonPrimitive?.content
+        val rawPath = msg["filePath"]?.jsonPrimitive?.content
             ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("turnfile.error.missingFilePath"))
+        // 环境变量占位符路径兜底展开（缺陷 GZ）：webview 白名单变量缺失时不下发死链，
+        // 这里用全量 env 查任意变量名（%TEMP%\x.md / $TMPDIR/x.md / ~/x.md）
+        val filePath = com.zcode.ideaplugin.env.PathEnvExpansion.expand(rawPath)
         val line = msg["line"]?.jsonPrimitive?.content?.toIntOrNull()
         val findText = msg["findText"]?.jsonPrimitive?.content
         com.intellij.openapi.application.invokeLater {

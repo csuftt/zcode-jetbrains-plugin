@@ -3,8 +3,10 @@
  * + ui/assistantPreviewCards，开源仓库可直接对照）。
  *
  * 产品规则（与官方对齐）：
- *  - 轮末把本轮 assistant 文本拼接后做五源正则提取（优先级即保护区顺序）：
- *    zcode-file-citation 指令 > markdown 链接 > file:// URL > 引号/反引号定界 > 裸路径
+ *  - 轮末把本轮 assistant 文本拼接后做六源正则提取（优先级即保护区顺序）：
+ *    zcode-file-citation 指令 > md链接 > file:// > 反引号定界 > 环境变量占位符路径 > 裸路径
+ *  - 占位符路径（%TEMP%\a.md 等，缺陷 GZ）先经 store.pathEnv 白名单展开再判定；
+ *    白名单未到/变量查不到 → 解析失败不产引用（死链不如不卡）
  *  - md/html 必须命中本轮 fileChanges 路径集才出卡（AI 光提路径不出卡，防幻觉）；
  *    docx/xlsx/pptx/pdf/音视频 提及即候选（渲染前批量 stat 过滤已删除文件）
  *  - 网站卡 = 文本里的 localhost/127.0.0.1 http(s) URL（无门控）；
@@ -18,6 +20,7 @@
  */
 
 import { maskVisualizeDirectives } from '@/utils/visualizeDirective'
+import { expandPathPlaceholders, hasPathPlaceholder } from '@/utils/pathEnv'
 
 export type PreviewFileKind =
   | 'markdown'
@@ -103,6 +106,16 @@ const FILE_PATH_RE = new RegExp(
     "(?=$|[\\s)\"`'.,;:!?，。！？；：、])",
   'giu',
 )
+// 环境变量占位符根路径（缺陷 GZ）：%TEMP%\a\b.md / $TMPDIR/a.md / ${HOME}/a.md。
+// 裸路径正则的起始字符类不含 %/$，占位符形态进不了候选——占位符+分隔符本身是
+// 强文件指代信号，独立成第六源；能否成卡仍由 resolvePreviewPath 展开成功与否决定
+// （白名单未到/变量查不到 → 解析 null → 不出引用）
+const ENV_PATH_RE = new RegExp(
+  "(?<![\\w.$%])(?:%[A-Za-z0-9_()]+%|\\$\\{[A-Za-z0-9_]+\\}|\\$[A-Za-z0-9_]+)[\\\\/]" +
+    "[\\p{L}\\p{N}\\p{M}\\p{S}_.@()\\\\/ -]+?\\.(?:" + EXTENSION_ALT + ")(?::\\d+(?::\\d+)?)?" +
+    "(?=$|[\\s)\"`'.,;:!?，。！？；：、])",
+  'giu',
+)
 
 const LOCALHOST_URL_RE =
   /\bhttps?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:[/?#][^\s<>()\]`"'*，。！？；：、]*)?/gi
@@ -180,9 +193,19 @@ function normalizeAbsolutePath(path: string): string {
  * 文本里的路径引用 → 绝对路径。相对路径锚 workspace；`~/` 是 shell 展示语义
  * 不是稳定引用，一律拒绝（官方同规则，防把正文 `~/x.md` 当 workspace 文件出卡）。
  */
-export function resolvePreviewPath(workspacePath: string, rawPath: string): string | null {
-  const cleaned = cleanPath(rawPath)
+export function resolvePreviewPath(
+  workspacePath: string,
+  rawPath: string,
+  pathEnv?: Record<string, string> | null,
+): string | null {
+  let cleaned = cleanPath(rawPath)
   if (!cleaned) return null
+  // 占位符路径先展开（缺陷 GZ）：白名单未到/变量查不到 → 不可解析返回 null，
+  // 绝不落到下面的 workspace 相对分支（%TEMP% 会被当字面量目录名，门控必失败）
+  if (hasPathPlaceholder(cleaned)) {
+    cleaned = expandPathPlaceholders(cleaned, pathEnv ?? null)
+    if (hasPathPlaceholder(cleaned)) return null
+  }
   if (/^~[\\/]/u.test(cleaned)) return null
   const filePath = /^file:\/\//iu.test(cleaned) ? parseFileUrlPath(cleaned) : cleaned
   if (!filePath) return null
@@ -234,21 +257,23 @@ const CITATION_ALLOWED_KINDS: ReadonlySet<PreviewFileKind> = new Set([
 export function extractPreviewFileReferences(
   content: string,
   workspacePath: string,
+  pathEnv?: Record<string, string> | null,
 ): PreviewFileReference[] {
   // ::visualize 指令行先等长掩码：指令 JSON 里的 html 路径会被裸路径源抽成候选、
   // 与内嵌可视化卡双出（掩码保 offset，position 排序语义不变）
-  return extractPreviewFileReferencesMasked(maskVisualizeDirectives(content), workspacePath)
+  return extractPreviewFileReferencesMasked(maskVisualizeDirectives(content), workspacePath, pathEnv)
 }
 
 function extractPreviewFileReferencesMasked(
   content: string,
   workspacePath: string,
+  pathEnv?: Record<string, string> | null,
 ): PreviewFileReference[] {
   if (!content.trim()) return []
   const references: PreviewFileReference[] = []
   const protectedRanges: Array<[number, number]> = []
   const addReference = (raw: string, start: number, end: number) => {
-    const path = resolvePreviewPath(workspacePath, raw)
+    const path = resolvePreviewPath(workspacePath, raw, pathEnv)
     const kind = path ? getPreviewFileKind(path) : null
     if (!path || !kind) return
     references.push({ start, end, kind, path, raw })
@@ -262,7 +287,7 @@ function extractPreviewFileReferencesMasked(
     const rawPath = readDirectiveParameter(match[1] ?? '', 'path')
     if (!rawPath) continue
     const artifactKind = readDirectiveParameter(match[1] ?? '', 'artifact_kind')?.toLowerCase()
-    const path = resolvePreviewPath(workspacePath, rawPath)
+    const path = resolvePreviewPath(workspacePath, rawPath, pathEnv)
     const kind = path ? getPreviewFileKind(path) : null
     const citationKind = kind && CITATION_ALLOWED_KINDS.has(kind) ? kind : null
     const expectedKind =
@@ -303,6 +328,14 @@ function extractPreviewFileReferencesMasked(
     const innerEnd = innerStart + raw.length
     protectedRanges.push([fullStart, fullEnd])
     addReference(raw, innerStart, innerEnd)
+  }
+  for (const match of content.matchAll(ENV_PATH_RE)) {
+    const raw = (match[0] ?? '').trim()
+    const start = match.index ?? 0
+    const end = start + raw.length
+    if (!raw || rangesOverlap(start, end, protectedRanges)) continue
+    protectedRanges.push([start, end])
+    addReference(raw, start, end)
   }
   for (const match of content.matchAll(FILE_PATH_RE)) {
     const raw = match[1] ?? ''
@@ -415,6 +448,7 @@ export function buildPreviewCards(
   content: string,
   workspacePath: string,
   changedPaths: readonly string[] | null,
+  pathEnv?: Record<string, string> | null,
 ): PreviewCard[] {
   if (!content.trim()) return []
 
@@ -428,7 +462,7 @@ export function buildPreviewCards(
     })
   }
 
-  const references = extractPreviewFileReferences(content, workspacePath)
+  const references = extractPreviewFileReferences(content, workspacePath, pathEnv)
   for (const reference of references) {
     let path = reference.path
     if (reference.kind === 'markdown' || reference.kind === 'html') {

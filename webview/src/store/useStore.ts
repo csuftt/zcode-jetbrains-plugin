@@ -134,6 +134,10 @@ let streamWatchTimer: ReturnType<typeof setInterval> | null = null
 const EDIT_ACK_TIMEOUT_MS = 90_000
 let editAckTimer: ReturnType<typeof setTimeout> | null = null
 
+// 占位符路径展开白名单（缺陷 GZ）请求节流：应答丢失不粘滞（缺陷 FM 教训），超窗允许重发
+const PATH_ENV_RETRY_MS = 10_000
+let pathEnvRequestedAt = 0
+
 function cancelEditAckTimeout(): void {
   if (editAckTimer) {
     clearTimeout(editAckTimer)
@@ -1138,6 +1142,8 @@ interface StoreState {
   envStatus: EnvStatus | null
   /** envSave 请求进行中（设置页环境 tab 保存按钮禁用/转圈）*/
   envSaving: boolean
+  /** 路径类环境变量白名单（getPathEnvResult 落位；null=尚未到达，占位符路径暂不展开）。缺陷 GZ */
+  pathEnv: Record<string, string> | null
   /** EnvBanner「去设置」的跳转意图：App 切 settings 视图同时置位，BasicSettingsView 消费后清除 */
   pendingSettingsSection: 'env' | 'agents' | 'models' | 'hooks' | null
 
@@ -1921,6 +1927,8 @@ interface StoreState {
   setPendingSettingsSection: (section: 'env' | 'agents' | 'models' | 'hooks' | null) => void
   /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
   checkEnv: () => void
+  /** 拉取路径类环境变量白名单（占位符路径展开，缺陷 GZ；幂等单飞+超窗重发） */
+  fetchPathEnv: () => void
   /**
    * 保存环境路径配置：undefined=不改该项，''=清除（回退自动探测）。
    * 后端验证（node spawn --version、cli 文件存在）失败不落盘，回 error（带 envStatus）。
@@ -2056,6 +2064,7 @@ export const useStore = create<StoreState>((set, get) => ({
   sessionStatsReady: false,
   envStatus: null,
   envSaving: false,
+  pathEnv: null,
   pendingSettingsSection: null,
   proxyConfig: null,
   proxySaving: false,
@@ -2385,6 +2394,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // 后续变化由 EditorContextTracker 200ms 防抖主动推送覆盖
       get().requestCurrentFile()
       get().checkEnv()
+      get().fetchPathEnv()
       get().loadSessions()
       get().loadModels()
       startQuotaPolling()
@@ -2402,6 +2412,7 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ connectionStatus: 'mock' })
       console.log(`[store] 测试环境，连接=mock，workspace=${getWorkspacePath() || '(空)'}`)
       get().checkEnv()
+      get().fetchPathEnv()
       get().loadSessions()
       get().loadModels()
       startQuotaPolling()
@@ -2427,6 +2438,7 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ connectionStatus: 'mock' })
       console.log(`[store] 桥等待超时，回退 mock（低频恢复轮询已挂），workspace=${getWorkspacePath() || '(空)'}`)
       get().checkEnv()
+      get().fetchPathEnv()
       get().loadSessions()
       get().loadModels()
       // 关联目录（mock 表非空）：技能/MCP/钩子页的浏览目录下拉数据源，纯 mock 态也要有
@@ -3968,6 +3980,14 @@ export const useStore = create<StoreState>((set, get) => ({
 
   checkEnv: () => {
     sendToJava({ op: 'checkEnv' })
+  },
+
+  fetchPathEnv: () => {
+    if (get().pathEnv !== null) return
+    const now = Date.now()
+    if (pathEnvRequestedAt && now - pathEnvRequestedAt < PATH_ENV_RETRY_MS) return
+    pathEnvRequestedAt = now
+    sendToJava({ op: 'getPathEnv' })
   },
 
   saveEnvConfig: (nodePath?: string, cliPath?: string, cdpPortFile?: string) => {
@@ -5539,6 +5559,12 @@ export function handleResponse(
     case 'envStatus':
       // checkEnv 查询 / envSave 保存成功重检的返回
       set({ envStatus: msg.status, envSaving: false })
+      break
+
+    case 'getPathEnvResult':
+      // 路径类环境变量白名单（缺陷 GZ）：正文 chip 解析与产物卡门控用它同步展开占位符。
+      // 到达后引用了 pathEnv 的组件经订阅自动重算（历史消息 chip / 产物卡二段补出）
+      set({ pathEnv: msg.vars ?? {} })
       break
 
     case 'proxyConfig':

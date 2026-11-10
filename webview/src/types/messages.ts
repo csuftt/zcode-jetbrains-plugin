@@ -729,6 +729,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'zoomReset' }
   /** 环境三件套检测（node/zcode.cjs/凭证），启动时与主界面「重新检测」触发 */
   | { op: 'checkEnv' }
+  /** 路径类环境变量白名单（TEMP/TMP/HOME/USERPROFILE…），占位符路径展开用（缺陷 GZ） */
+  | { op: 'getPathEnv' }
   /** 保存环境路径配置：字段缺席=不改该项，空串=清除（回退自动探测）；后端验证通过才落盘 */
   | { op: 'envSave'; nodePath?: string; cliPath?: string; cdpPortFile?: string }
   /** 拉取当前打开文件 ref（webview mount/重连时用；Kotlin 同步回包，对应 EditorContextTracker.snapshot）*/
@@ -1489,6 +1491,8 @@ export type JavaResponse =
   | { op: 'zoomLevel'; percent: number }
   /** 环境状态（checkEnv 查询 / envSave 保存成功后的重检结果 / IDE 广播同构体）*/
   | { op: 'envStatus'; status: EnvStatus }
+  /** 路径类环境变量白名单（getPathEnv 响应；值为 canonical 化后的真实长路径，缺陷 GZ）*/
+  | { op: 'getPathEnvResult'; vars: Record<string, string> }
   /** 网络代理回显（getProxyConfig 响应；restartPending=app-server 在跑需重启生效）*/
   | { op: 'proxyConfig'; httpProxy: string; noProxy: string; caCertPath: string; restartPending: boolean }
   /** 网络代理保存成功（setProxyConfig 响应，载荷同 proxyConfig）*/
