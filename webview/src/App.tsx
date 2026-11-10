@@ -265,6 +265,17 @@ export default function App() {
     setConfirmNewSession(true)
   }
 
+  // 新标签页落位（忠于激活标签）：预期目录两态与 wsBadge/色块同口径——有会话=会话
+  // 归属目录，待命=落位目录（chips 演进）。显式携带给 createTab（Kotlin 缺省本项目
+  // 语义保留作兜底）。「非本项目弹窗二选」曾上真机（2026-11-10），用户拍板去掉，
+  // 直接按激活标签目录开
+  const handleNewTab = () => {
+    const expected = currentSessionId
+      ? currentWorkspacePath || projectPath
+      : linkedActiveWorkspacePath || projectPath
+    sendToJava({ op: 'createTab', workspacePath: expected })
+  }
+
   // 标题：列表里的标题（CLI 会随对话更新）→ 会话 id 前缀（列表尚未刷新时）→ 空
   // 标题 fallback 链：列表内标题 > 手动改名持久化 > 最后已知标题缓存（跨目录浏览，
   // 多目录会话切目录后当前会话不在列表里）> sessionId 前缀。
@@ -347,7 +358,7 @@ export default function App() {
         onBack={() => setCurrentView('chat')}
         newSessionDisabled={currentSessionEmpty}
         onNewSession={handleNewSession}
-        onNewTab={() => sendToJava({ op: 'createTab' })}
+        onNewTab={handleNewTab}
         onOpenBrowser={() => sendToJava({ op: 'toggleBrowserPane' })}
         onOpenTrajectory={() => setTrajectoryOpen(true)}
         trajectoryDisabled={!currentSessionId}
@@ -507,21 +518,18 @@ export default function App() {
         </div>
       )}
 
-      {/* 新建会话确认（issue #21）：当前标签已有会话时三选——覆盖当前标签 / 新标签页打开 / 取消。
-          新标签页与 Header 新标签按钮同路径（op:createTab → Java 新 Content，原标签不动）*/}
+      {/* 新建会话确认（issue #21，2026-11-10 收口为二选）：当前标签已有会话时确认覆盖。
+          原第三选「新标签页打开」与 Header 新标签按钮重复，移除；落位忠于覆盖前会话目录
+          （resetToNewSession 内同步）*/}
       {confirmNewSession && (
         <ConfirmDialog
+          topAligned
           title={t('app.newSession.title')}
           message={t('app.newSession.message')}
           confirmText={t('app.newSession.confirm')}
-          extraText={t('app.newSession.newTab')}
           onConfirm={() => {
             setConfirmNewSession(false)
             resetToNewSession() // 延迟创建：先重置为待命态，首条消息触发建会话
-          }}
-          onExtra={() => {
-            setConfirmNewSession(false)
-            sendToJava({ op: 'createTab' })
           }}
           onCancel={() => setConfirmNewSession(false)}
         />

@@ -33,9 +33,8 @@
   },
   "newSession": {
     "title": "New Session",
-    "message": "A new blank session will be started (created only when the first message is sent). The current session will be kept in history and can be switched back to at any time. Where should it open?",
-    "confirm": "Replace current tab",
-    "newTab": "Open in new tab"
+    "message": "A new blank session will be started in the current tab (created only when the first message is sent). The current session will be kept in history and can be switched back to at any time.",
+    "confirm": "Replace current tab"
   },
   "askUser": {
     "title": "Answer the question",

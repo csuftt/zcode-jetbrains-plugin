@@ -57,8 +57,8 @@
     "reset": "Reset to default"
   },
   "wsProject": {
-    "label": "Default block color (this project)",
-    "hint": "Dedicated color of this project's tab block: gold by default. Picking another color moves it to the front of the directory color rotation and shifts the rest back.",
+    "label": "Default block color (project root)",
+    "hint": "Dedicated color of the project root's tab block: gold by default. Picking another color moves it to the front of the directory color rotation and shifts the rest back.",
     "default": "Default (gold)"
   },
   "language": {

@@ -28,7 +28,7 @@
  * （均调用时取值），无变更事件。
  *
  * 新会话按钮直接覆盖当前标签页（默认关闭，utils/newSessionConfig.ts）：开启后
- * 工具栏「新会话」按钮跳过「覆盖 / 新标签页」三选确认直接 resetToNewSession；
+ * 工具栏「新会话」按钮跳过覆盖确认直接 resetToNewSession；
  * 读取方 = App.tsx handleNewSession（调用时取值），历史列表的确认弹窗不受影响。
  *
  * 任务系统通知（IDE 内气泡通知 + 系统通知悬浮弹窗，两通道收进同一张卡片，均默认关闭）：

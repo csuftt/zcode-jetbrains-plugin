@@ -2963,9 +2963,17 @@ export const useStore = create<StoreState>((set, get) => ({
     // 旧会话的流式事件被 handleStreamBatch/Event 的 currentSessionId 过滤拦截，
     // 不会串扰待命态。clearTabSession 让 Java 侧同步清 TabState 绑定 + 标签 tooltip
     //（否则重启恢复会绑回旧会话）
-    get().requeueScheduledQueuesFor(get().currentSessionId)
+    // 落位忠于覆盖前会话目录（2026-11-10）：有会话时把落位同步为当前会话目录——
+    // selectSession 覆盖打开别目录会话不回写落位（设计如此，切回不漂移），若不同步，
+    // 新会话落回 chips 遗留的旧落位目录而非激活标签会话目录。同步后待命列表过滤/
+    // chips 高亮/首条消息 createSession 全链跟随。历史页待命态调用（无会话）与
+    // boot 恢复标签（currentWorkspacePath 空、落位已是会话目录）条件不满足，行为不变
+    const prevSessionId = get().currentSessionId
+    const prevWorkspacePath = get().currentWorkspacePath
+    get().requeueScheduledQueuesFor(prevSessionId)
     set({
       currentSessionId: null,
+      ...(prevSessionId && prevWorkspacePath ? { activeWorkspacePath: prevWorkspacePath } : {}),
       // 切换会话置位的首拉标志必须在此解除：首拉快照回来会被 case 'messages' 的
       // sessionId 守卫整包丢弃（currentSessionId 已是 null），applyMessagesSnapshot
       // 永不执行，「加载消息中」永久卡死（缺陷FH：加载中点 + 覆盖当前标签 → 标签假死）
