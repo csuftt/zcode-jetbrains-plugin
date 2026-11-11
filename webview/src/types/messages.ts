@@ -200,8 +200,8 @@ export interface MessageInfo {
   agent?: string
   /** 定时消息标记（fireAt）：定时到点发出的乐观 user 消息携带（历史重拉不带，预期）*/
   scheduledFireAt?: number
-  // user 消息用嵌套 model
-  model?: { providerID: string; modelID: string }
+  // user 消息用嵌套 model（v1 大写 D；3.18.0 起嵌套键也改小写驼峰，双命名兼容读取）
+  model?: { providerID?: string; modelID?: string; providerId?: string; modelId?: string }
   // assistant 消息用扁平字段（v1 大写 D）；v2 服务端改小写驼峰 modelId/providerId
   //（2026-09-17 db.sqlite 实测：值都在，仅字段名变了），双命名兼容读取
   modelID?: string
@@ -213,6 +213,8 @@ export interface MessageInfo {
   cost?: number
   finish?: string
   parentID?: string
+  /** 触发 user 消息 id（3.18.0 改名形态；同轮全部 step 行指向同一条，mergeTurnMessages 分组键兜底）*/
+  parentMessageId?: string
   id: string
   sessionID: string
   semantics?: Record<string, unknown>

@@ -62,9 +62,13 @@ object AccountProviderBridge {
         "account:zai-individual-coding-plan" to "zai",
         "account:zai-team-coding-plan" to "zai",
         "account:zai-start-plan" to "zai",
+        "account:zai-offpeak-idle-plan" to "zai",
+        "account:zai-highspeed-card" to "zai",
         "account:bigmodel-individual-coding-plan" to "bigmodel",
         "account:bigmodel-team-coding-plan" to "bigmodel",
         "account:bigmodel-start-plan" to "bigmodel",
+        "account:bigmodel-offpeak-idle-plan" to "bigmodel",
+        "account:bigmodel-highspeed-card" to "bigmodel",
     )
 
     /** 凭证文件：config.json 同目录口径（跟随 dataBaseDir 迁移，与 [Credentials.familyOAuthToken] 一致） */
@@ -147,7 +151,8 @@ object AccountProviderBridge {
                     root.forEach { (k, v) ->
                         val raw = (v as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@forEach
                         this[k] = try {
-                            CredentialCipher.decrypt(raw)
+                            // credPath 透传：v2:os 密钥环条目的 user hash 由凭证文件路径派生
+                            CredentialCipher.decrypt(raw, credPath)
                         } catch (_: CredentialCipher.CredentialDecryptException) {
                             return@forEach
                         }

@@ -587,6 +587,59 @@ class ZCodeProtocolClient private constructor(
             return PathEnvScan.findExecutable(System.getenv("PATH") ?: "", sep, names)
                 ?: throw IllegalStateException("找不到 node，请确认 Node.js 已安装并在 PATH 中")
         }
+
+        /**
+         * session/messages 消息形态归一（2026-11-11 桌面端 3.18.0 / CLI 0.17.1 适配）：
+         * 新版把转录消息 info 的 `id`/`sessionID` 改名为 `messageId`/`sessionId`
+         * （assistant `parentID`→`parentMessageId`，webview 无运行时读取不补），tool
+         * part 的 `callID`→`callId`；嵌套 model 键名不变仍是大写 D。webview 全线按旧
+         * 契约读 `info.id`（editHistory findEditableUserMessage 无保护直调 startsWith）
+         * 与 `info.sessionID`（fork 门控/定时历史匹配），id 缺失即未捕获 TypeError →
+         * React 树整体卸载 → 会话内容区黑屏；callID 缺失则后台任务匹配/CUA 截图回填
+         * （Kotlin 按 part["callID"] 查）静默失效。
+         *
+         * 在协议边界把新键回填为旧键别名：**只补缺不覆盖**（真身带旧键的旧形态原样
+         * 透传，本函数对旧形态是零开销直通）。v4 快照→事件通道不受影响——
+         * turn.userInput 的 messageId 由 V4FrameMapper 显式映射。手机远程桥
+         * readSessionFull 不走此处：H5 端 zod schema 以官方新版形态为准，勿归一。
+         *
+         * 已知不补（有意）：file part 丢了 `filename`、url 变内联 data:（metadata
+         * .artifactUri 承接 zcode-artifact://）——webview 直接渲染 data URL 不受影响，
+         * 丢名字仅外观层；编辑附件 filename 匹配链失效属可接受降级，随上游对齐再收。
+         *
+         * @return 归一后的消息数组（无 info 对象的元素原样保留）
+         */
+        internal fun normalizeLegacyMessageShape(messages: JsonArray): JsonArray {
+            var changed = false
+            val out = messages.map { element ->
+                val obj = element as? JsonObject ?: return@map element
+                val info = obj["info"] as? JsonObject ?: return@map element
+                val patch = buildMap<String, JsonElement> {
+                    val mid = info["messageId"]?.jsonPrimitive?.contentOrNull
+                    if (mid != null && info["id"]?.jsonPrimitive?.contentOrNull == null) put("id", JsonPrimitive(mid))
+                    val sid = info["sessionId"]?.jsonPrimitive?.contentOrNull
+                    if (sid != null && info["sessionID"]?.jsonPrimitive?.contentOrNull == null) put("sessionID", JsonPrimitive(sid))
+                }
+                // tool part：callId → callID（webview 后台任务匹配/分组键、Kotlin CUA 回填按旧键读）
+                val parts = obj["parts"] as? JsonArray
+                var partsChanged = false
+                val patchedParts: List<JsonElement>? = parts?.map { p ->
+                    val po = p as? JsonObject ?: return@map p
+                    val cid = po["callId"]?.jsonPrimitive?.contentOrNull
+                    if (cid != null && po["callID"]?.jsonPrimitive?.contentOrNull == null) {
+                        partsChanged = true
+                        JsonObject(po + mapOf("callID" to JsonPrimitive(cid)))
+                    } else p
+                }
+                if (patch.isEmpty() && !partsChanged) return@map element
+                changed = true
+                val updates = LinkedHashMap(obj)
+                if (patch.isNotEmpty()) updates["info"] = JsonObject(info + patch)
+                if (partsChanged && parts != null) updates["parts"] = JsonArray(patchedParts!!)
+                JsonObject(updates)
+            }
+            return if (changed) JsonArray(out) else messages
+        }
     }
 
     // ============ Reader 线程：按行读 stdout 并分发 ============
@@ -2587,7 +2640,8 @@ class ZCodeProtocolClient private constructor(
         val params = buildJsonObject { put("sessionId", sessionId) }
         val r = request("session/messages", params, timeoutMs)
         requireOk(r)
-        return r["result"]?.jsonObject?.get("messages")?.jsonArray ?: JsonArray(emptyList())
+        val raw = r["result"]?.jsonObject?.get("messages")?.jsonArray ?: JsonArray(emptyList())
+        return normalizeLegacyMessageShape(raw)
     }
 
     /**

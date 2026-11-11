@@ -4366,10 +4366,11 @@ function loadBreakdownCache(sessionId: string, used: number): ContextBreakdownIt
 function inferCurrentModel(messages: ZCodeMessage[], models: ModelOption[]): { modelId: string; providerId: string } | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const info = messages[i].info
-    // v1 大写 modelID/providerID、user 嵌套 model；v2 小写驼峰 modelId/providerId
-    const modelId = info.modelID ?? info.modelId ?? info.model?.modelID
+    // v1 大写 modelID/providerID、user 嵌套 model；v2 小写驼峰 modelId/providerId；
+    // 3.18.0 起嵌套 model 也改小写（model.modelId/model.providerId）
+    const modelId = info.modelID ?? info.modelId ?? info.model?.modelID ?? info.model?.modelId
     if (modelId) {
-      const providerId = info.providerID ?? info.providerId ?? info.model?.providerID ?? models.find((m) => m.modelId === modelId)?.providerId
+      const providerId = info.providerID ?? info.providerId ?? info.model?.providerID ?? info.model?.providerId ?? models.find((m) => m.modelId === modelId)?.providerId
       return providerId ? { modelId, providerId } : null
     }
   }
