@@ -52,14 +52,19 @@ internal object RecentErrorExtractor {
     /**
      * 从控制台全文提取最近错误段；输入为空/全空白返回空串。
      * 不假设换行风格：CRLF/LF 归一处理。
+     *
+     * 截断标记由调用方注入（[truncationSuffix]，非空时换行缀在超长段尾）——纯函数
+     * 不引资源束，用户可读文案走 ZCodeBundle（console.recentError.truncated，
+     * 2026-11-11 评审收口）。
      */
-    fun extract(consoleText: String): String {
+    fun extract(consoleText: String, truncationSuffix: String = ""): String {
         if (consoleText.isBlank()) return ""
         val tail = consoleText.replace("\r\n", "\n").split('\n').takeLast(MAX_TAIL_LINES)
         val anchorIdx = tail.indexOfLast { ANCHOR.containsMatchIn(it) }
         val from = if (anchorIdx >= 0) anchorIdx else (tail.size - DEFAULT_NO_ANCHOR_LINES).coerceAtLeast(0)
         val segment = tail.drop(from).take(MAX_ERROR_LINES).joinToString("\n")
-        return if (segment.length <= MAX_ERROR_CHARS) segment
-        else segment.take(MAX_ERROR_CHARS) + "\n... (输出过长已截断)"
+        if (segment.length <= MAX_ERROR_CHARS) return segment
+        val capped = segment.take(MAX_ERROR_CHARS)
+        return if (truncationSuffix.isEmpty()) capped else "$capped\n$truncationSuffix"
     }
 }

@@ -136,7 +136,7 @@ let streamWatchTimer: ReturnType<typeof setInterval> | null = null
 const EDIT_ACK_TIMEOUT_MS = 90_000
 let editAckTimer: ReturnType<typeof setTimeout> | null = null
 
-// 占位符路径展开白名单（缺陷 GZ）请求节流：应答丢失不粘滞（缺陷 FM 教训），超窗允许重发
+// 占位符路径展开白名单（缺陷 GY）请求节流：应答丢失不粘滞（缺陷 FM 教训），超窗允许重发
 const PATH_ENV_RETRY_MS = 10_000
 let pathEnvRequestedAt = 0
 
@@ -1147,7 +1147,7 @@ interface StoreState {
   envStatus: EnvStatus | null
   /** envSave 请求进行中（设置页环境 tab 保存按钮禁用/转圈）*/
   envSaving: boolean
-  /** 路径类环境变量白名单（getPathEnvResult 落位；null=尚未到达，占位符路径暂不展开）。缺陷 GZ */
+  /** 路径类环境变量白名单（getPathEnvResult 落位；null=尚未到达，占位符路径暂不展开）。缺陷 GY */
   pathEnv: Record<string, string> | null
   /** EnvBanner「去设置」的跳转意图：App 切 settings 视图同时置位，BasicSettingsView 消费后清除 */
   pendingSettingsSection: 'env' | 'agents' | 'models' | 'hooks' | null
@@ -1950,7 +1950,7 @@ interface StoreState {
   setPendingSettingsSection: (section: 'env' | 'agents' | 'models' | 'hooks' | null) => void
   /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
   checkEnv: () => void
-  /** 拉取路径类环境变量白名单（占位符路径展开，缺陷 GZ；幂等单飞+超窗重发） */
+  /** 拉取路径类环境变量白名单（占位符路径展开，缺陷 GY；幂等单飞+超窗重发） */
   fetchPathEnv: () => void
   /**
    * 保存环境路径配置：undefined=不改该项，''=清除（回退自动探测）。
@@ -5614,7 +5614,7 @@ export function handleResponse(
       break
 
     case 'getPathEnvResult':
-      // 路径类环境变量白名单（缺陷 GZ）：正文 chip 解析与产物卡门控用它同步展开占位符。
+      // 路径类环境变量白名单（缺陷 GY）：正文 chip 解析与产物卡门控用它同步展开占位符。
       // 到达后引用了 pathEnv 的组件经订阅自动重算（历史消息 chip / 产物卡二段补出）
       set({ pathEnv: msg.vars ?? {} })
       break

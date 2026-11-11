@@ -119,9 +119,10 @@ class RecentErrorExtractorTest {
     fun `超长堆栈按行数与字符预算截断`() {
         val stack = (1..300).joinToString("\n") { i -> "\tat com.example.Frame$i(Frame.java:$i)" }
         val text = "java.lang.Exception: deep\n$stack\n"
-        val seg = RecentErrorExtractor.extract(text)
+        // 截断标记由调用方注入（用户文案走 ZCodeBundle），测试用哨兵验证缀尾与预算
+        val seg = RecentErrorExtractor.extract(text, "... (TRUNCATED)")
         val lines = seg.split('\n')
-        val markerIdx = lines.indexOfFirst { it.startsWith("... (输出过长已截断)") }
+        val markerIdx = lines.indexOfFirst { it.startsWith("... (TRUNCATED)") }
         val bodyLines = if (markerIdx >= 0) markerIdx else lines.size
         assertTrue(bodyLines <= RecentErrorExtractor.MAX_ERROR_LINES, "行数钳制: $bodyLines")
         assertTrue(seg.length <= RecentErrorExtractor.MAX_ERROR_CHARS + 64, "字符预算: ${seg.length}")

@@ -1904,7 +1904,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 路径类环境变量白名单下发（缺陷 GZ）：webview 正文 chip 解析与产物卡门控匹配在
+    /** 路径类环境变量白名单下发（缺陷 GY）：webview 正文 chip 解析与产物卡门控匹配在
      *  纯前端同步展开 %TEMP% 等占位符，需一次性拿到真实值；只发路径语义白名单，不整包 env */
     private fun handleGetPathEnv(): JsonObject = buildJsonObject {
         put("op", "getPathEnvResult")
@@ -5174,17 +5174,22 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 转中文简述，原文保留在括号里供诊断。
      */
     private fun friendlyNetworkMessage(rawReason: String): String {
-        val zh = when {
-            rawReason.startsWith("SSLHandshakeException") || rawReason.startsWith("SSLException") -> "SSL/TLS 握手被远端终止"
-            rawReason.startsWith("UnknownHostException") -> "域名解析失败"
+        val brief = when {
+            rawReason.startsWith("SSLHandshakeException") || rawReason.startsWith("SSLException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.ssl")
+            rawReason.startsWith("UnknownHostException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.dns")
             // HttpConnectTimeoutException 不是 HttpTimeoutException 的子类名前缀（实机 11-10）
-            rawReason.startsWith("HttpConnectTimeoutException") -> "连接超时"
-            rawReason.startsWith("ConnectException") -> "无法建立连接"
-            rawReason.startsWith("HttpTimeoutException") || rawReason.startsWith("SocketTimeoutException") -> "请求超时"
+            rawReason.startsWith("HttpConnectTimeoutException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.connectTimeout")
+            rawReason.startsWith("ConnectException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.connect")
+            rawReason.startsWith("HttpTimeoutException") || rawReason.startsWith("SocketTimeoutException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.timeout")
             else -> null
         }
-        val detail = if (zh != null) "$zh（$rawReason）" else rawReason
-        return "网络连接失败：$detail。若刚切换过 VPN/代理，请检查网络连通性后重试"
+        val detail = if (brief != null) "$brief（$rawReason）" else rawReason
+        return com.zcode.ideaplugin.ZCodeBundle.message("quota.network.failed", detail)
     }
 
     /**
@@ -5234,7 +5239,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
-            if (e is java.io.IOException) usageErrorResponse(op, friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: "网络不可达"}"))
+            if (e is java.io.IOException) usageErrorResponse(op, friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: com.zcode.ideaplugin.ZCodeBundle.message("quota.network.unreachable")}"))
             else usageErrorResponse(op, "查询异常: ${e.message}")
         }
     }
@@ -5263,7 +5268,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
-            if (e is java.io.IOException) usageErrorResponse("quota", friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: "网络不可达"}"))
+            if (e is java.io.IOException) usageErrorResponse("quota", friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: com.zcode.ideaplugin.ZCodeBundle.message("quota.network.unreachable")}"))
             else usageErrorResponse("quota", "额度查询异常: ${e.message}")
         }
     }
@@ -5339,7 +5344,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun handleOpenFileSystem(msg: JsonObject): JsonObject {
         val rawPath = msg["filePath"]?.jsonPrimitive?.content
             ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("turnfile.error.missingFilePath"))
-        // 环境变量占位符路径兜底展开（缺陷 GZ，同 handleOpenFile）
+        // 环境变量占位符路径兜底展开（缺陷 GY，同 handleOpenFile）
         val filePath = com.zcode.ideaplugin.env.PathEnvExpansion.expand(rawPath)
         val allowedExtensions = setOf(
             "docx", "xlsx", "pptx", "pdf", "html", "htm",
@@ -5376,7 +5381,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
     private fun handleOpenFile(msg: JsonObject): JsonObject {
         val rawPath = msg["filePath"]?.jsonPrimitive?.content
             ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("turnfile.error.missingFilePath"))
-        // 环境变量占位符路径兜底展开（缺陷 GZ）：webview 白名单变量缺失时不下发死链，
+        // 环境变量占位符路径兜底展开（缺陷 GY）：webview 白名单变量缺失时不下发死链，
         // 这里用全量 env 查任意变量名（%TEMP%\x.md / $TMPDIR/x.md / ~/x.md）
         val filePath = com.zcode.ideaplugin.env.PathEnvExpansion.expand(rawPath)
         val line = msg["line"]?.jsonPrimitive?.content?.toIntOrNull()
@@ -7606,7 +7611,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 前端 case 'detachWindowState' 双源等价消费。
      */
     private fun handleToggleDetachPin(): JsonObject {
-        val window = SessionDetachWindow.activeWindow(project) ?: return errorResponse("没有独立窗口")
+        val window = SessionDetachWindow.activeWindow(project) ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("session.detach.noWindow"))
         window.togglePin()
         return buildJsonObject {
             put("op", "detachWindowState")

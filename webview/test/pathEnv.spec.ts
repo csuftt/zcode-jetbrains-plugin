@@ -1,5 +1,5 @@
 /**
- * 占位符路径展开纯函数测试（缺陷 GZ）
+ * 占位符路径展开纯函数测试（缺陷 GY）
  */
 import { describe, expect, it } from 'vitest'
 import { expandPathPlaceholders, hasPathPlaceholder } from '@/utils/pathEnv'

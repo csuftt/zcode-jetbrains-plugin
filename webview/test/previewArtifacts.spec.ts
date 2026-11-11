@@ -166,7 +166,7 @@ describe('getPreviewCardFilePath', () => {
   })
 })
 
-describe('占位符路径展开（缺陷 GZ）', () => {
+describe('占位符路径展开（缺陷 GY）', () => {
   const ENV = { TEMP: 'C:/Users/demo/AppData/Local/Temp', TMPDIR: '/tmp' }
 
   it('resolvePreviewPath：%VAR% 展开为绝对路径', () => {

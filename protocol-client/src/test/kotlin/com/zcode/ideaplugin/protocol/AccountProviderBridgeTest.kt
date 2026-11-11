@@ -223,7 +223,7 @@ class AccountProviderBridgeTest {
     }
 
     @Test
-    fun `供给失败带可读原因（网络失败）——errorMessage 追加依据`() {
+    fun `供给失败带结构化原因（网络失败）——errorMessage 追加依据`() {
         val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
         val brokenNet = ProjectAccessTokenClient.Http { _, _, _, _ ->
             throw java.io.IOException("Remote host terminated the handshake")
@@ -232,11 +232,14 @@ class AccountProviderBridgeTest {
             "account:bigmodel-individual-coding-plan", "individual-coding-plan",
             patEntries(), sel, http = brokenNet,
         )
-        assertTrue(r is AccountProviderBridge.AuthResult.Unavailable)
-        val reason = (r as AccountProviderBridge.AuthResult.Unavailable).reason
-        assertTrue(reason.contains("网络失败"), reason)
-        assertTrue(reason.contains("bigmodel.cn"), reason)
-        assertTrue(reason.contains("IOException"), reason)
+        val cause = (r as AccountProviderBridge.AuthResult.Unavailable).cause
+        val pat = cause as AccountProviderBridge.UnavailableCause.PatFailed
+        assertEquals(ProjectAccessTokenClient.FailKind.NETWORK, pat.failure.kind)
+        assertTrue(pat.failure.detail.contains("IOException"), pat.failure.detail)
+        // 英文诊断兜底也须带原始线索（协议层未注入文案渲染器时的 errorMessage 口径）
+        val diag = AccountProviderBridge.diagnosticText(cause)
+        assertTrue(diag.contains("NETWORK"), diag)
+        assertTrue(diag.contains("IOException"), diag)
     }
 
     @Test
@@ -249,21 +252,21 @@ class AccountProviderBridgeTest {
             "account:bigmodel-individual-coding-plan", "individual-coding-plan",
             patEntries(), sel, http = expired,
         )
-        assertTrue(r is AccountProviderBridge.AuthResult.Unavailable)
-        val reason = (r as AccountProviderBridge.AuthResult.Unavailable).reason
-        assertTrue(reason.contains("登录态失效"), reason)
-        assertTrue(reason.contains("401"), reason)
+        val cause = (r as AccountProviderBridge.AuthResult.Unavailable).cause
+        val pat = cause as AccountProviderBridge.UnavailableCause.PatFailed
+        assertEquals(ProjectAccessTokenClient.FailKind.UNAUTHORIZED, pat.failure.kind)
+        assertTrue(pat.failure.detail.contains("401"), pat.failure.detail)
     }
 
     @Test
-    fun `access_token 缺失的失败原因指向重新登录`() {
+    fun `access_token 缺失映射为 NoAccessToken 结构化原因`() {
         val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
         val r = AccountProviderBridge.requestAuth(
             "account:bigmodel-individual-coding-plan", "individual-coding-plan",
             mapOf("oauth:bigmodel:user_info" to """{"id":"u1"}"""), sel, http = patHttp(team = false),
         )
-        assertTrue(r is AccountProviderBridge.AuthResult.Unavailable)
-        assertTrue((r as AccountProviderBridge.AuthResult.Unavailable).reason.contains("access_token"))
+        val cause = (r as AccountProviderBridge.AuthResult.Unavailable).cause
+        assertEquals("bigmodel", (cause as AccountProviderBridge.UnavailableCause.NoAccessToken).family)
     }
 
     @Test

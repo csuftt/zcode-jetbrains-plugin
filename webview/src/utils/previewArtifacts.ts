@@ -5,7 +5,7 @@
  * 产品规则（与官方对齐）：
  *  - 轮末把本轮 assistant 文本拼接后做六源正则提取（优先级即保护区顺序）：
  *    zcode-file-citation 指令 > md链接 > file:// > 反引号定界 > 环境变量占位符路径 > 裸路径
- *  - 占位符路径（%TEMP%\a.md 等，缺陷 GZ）先经 store.pathEnv 白名单展开再判定；
+ *  - 占位符路径（%TEMP%\a.md 等，缺陷 GY）先经 store.pathEnv 白名单展开再判定；
  *    白名单未到/变量查不到 → 解析失败不产引用（死链不如不卡）
  *  - md/html 必须命中本轮 fileChanges 路径集才出卡（AI 光提路径不出卡，防幻觉）；
  *    docx/xlsx/pptx/pdf/音视频 提及即候选（渲染前批量 stat 过滤已删除文件）
@@ -106,7 +106,7 @@ const FILE_PATH_RE = new RegExp(
     "(?=$|[\\s)\"`'.,;:!?，。！？；：、])",
   'giu',
 )
-// 环境变量占位符根路径（缺陷 GZ）：%TEMP%\a\b.md / $TMPDIR/a.md / ${HOME}/a.md。
+// 环境变量占位符根路径（缺陷 GY）：%TEMP%\a\b.md / $TMPDIR/a.md / ${HOME}/a.md。
 // 裸路径正则的起始字符类不含 %/$，占位符形态进不了候选——占位符+分隔符本身是
 // 强文件指代信号，独立成第六源；能否成卡仍由 resolvePreviewPath 展开成功与否决定
 // （白名单未到/变量查不到 → 解析 null → 不出引用）
@@ -200,7 +200,7 @@ export function resolvePreviewPath(
 ): string | null {
   let cleaned = cleanPath(rawPath)
   if (!cleaned) return null
-  // 占位符路径先展开（缺陷 GZ）：白名单未到/变量查不到 → 不可解析返回 null，
+  // 占位符路径先展开（缺陷 GY）：白名单未到/变量查不到 → 不可解析返回 null，
   // 绝不落到下面的 workspace 相对分支（%TEMP% 会被当字面量目录名，门控必失败）
   if (hasPathPlaceholder(cleaned)) {
     cleaned = expandPathPlaceholders(cleaned, pathEnv ?? null)

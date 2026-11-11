@@ -24,7 +24,7 @@
  *   - 目录路径（结尾 / 的显式形态，如 /docs/internal/、webview/src/）放行，
  *     无行号；打开方式=IDE Project View 定位选中并聚焦（系统文件管理器通道
  *     经实测弃用），前导 / 路径不存在时 Kotlin 侧剥前导拼项目根回退
- * 2026-11-10 缺陷 GZ：环境变量占位符路径（%TEMP%\a.md / $TMPDIR/a.md）重新放开——
+ * 2026-11-10 缺陷 GY：环境变量占位符路径（%TEMP%\a.md / $TMPDIR/a.md）重新放开——
  *   经 store.pathEnv 白名单展开后按绝对路径走；不可展开（白名单未到/变量查不到）
  *   维持不链，且不再旧拼 workspace 相对死链（死 chip 点击无反应比不链更糟）；
  *   打开时 Kotlin 侧还有全量 env 兜底展开（PathEnvExpansion）
@@ -108,7 +108,7 @@ const LINE_SUFFIX = /(?::|#L)L?(\d{1,6})(?:-L?\d{1,6})?$/
 /**
  * 候选文本 → 链接目标。返回 null = 不链接（误报闸门全在这里）。
  * 纯函数，workspaceRoot 为空时相对路径一律不解析。
- * 占位符路径（%TEMP%\a.md 等，缺陷 GZ）经 pathEnv 白名单展开后按绝对路径走；
+ * 占位符路径（%TEMP%\a.md 等，缺陷 GY）经 pathEnv 白名单展开后按绝对路径走；
  * 白名单未到/变量查不到 → 返回 null 不链接（替代旧「拼成 workspace 相对死链」
  * ——死 chip 点击无反应比不链更糟）。
  */
@@ -141,7 +141,7 @@ export function resolveFileLink(
   if (p.startsWith('./')) p = p.slice(2)
   if (!p || p.includes('/../') || p.includes('/./')) return null
 
-  // 占位符路径展开（缺陷 GZ）：展开成功按绝对路径走后续分支；失败不链接。
+  // 占位符路径展开（缺陷 GY）：展开成功按绝对路径走后续分支；失败不链接。
   // 展开值是字面拼接，canonical 值自带反斜杠——展开后须再归一正斜杠，否则
   // C:\ 形态过不了下面的盘符判定、被当相对路径拼回 workspace（真机实锤：
   // E:/ws/C:\Users\... 死链；产物卡链的 isAbsolutePath 双斜杠都认所以没踩）

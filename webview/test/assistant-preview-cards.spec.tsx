@@ -293,10 +293,10 @@ describe('AssistantPreviewCards 空结果退避重试（实时轮落库竞态）
 })
 
 /**
- * 占位符路径展开（缺陷 GZ）：store.pathEnv 白名单未到时 %TEMP% 引用解析不出
+ * 占位符路径展开（缺陷 GY）：store.pathEnv 白名单未到时 %TEMP% 引用解析不出
  * （无门控查询、无卡）；到达后组件经订阅二段补出（与 changedPaths 二段出卡同构）
  */
-describe('AssistantPreviewCards 占位符路径展开（缺陷 GZ）', () => {
+describe('AssistantPreviewCards 占位符路径展开（缺陷 GY）', () => {
   const ENV = { TEMP: 'C:/Users/demo/AppData/Local/Temp' }
 
   beforeEach(() => {

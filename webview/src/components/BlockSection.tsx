@@ -24,7 +24,7 @@ interface BlockSectionProps {
   isStreaming: boolean
   /** 工作区根：文件路径链接化解析相对路径用（空 = 仅绝对路径可点）*/
   workspaceRoot?: string
-  /** 路径类环境变量白名单：占位符路径（%TEMP%\a.md）展开用，缺陷 GZ（null=未到）*/
+  /** 路径类环境变量白名单：占位符路径（%TEMP%\a.md）展开用，缺陷 GY（null=未到）*/
   pathEnv?: Record<string, string> | null
 }
 

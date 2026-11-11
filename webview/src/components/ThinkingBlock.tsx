@@ -35,7 +35,7 @@ export function ThinkingBlock({ part, autoExpand = false, streaming = false }: P
   const [expanded, setExpanded] = useState(autoExpand)
   // 工作区根：文件路径链接化解析相对路径用（与 MarkdownBlock 同源）
   const workspaceRoot = useStore((s) => s.currentWorkspacePath || s.projectPath)
-  // 占位符路径 chip 展开白名单（缺陷 GZ），与 MarkdownBlock 同款接线
+  // 占位符路径 chip 展开白名单（缺陷 GY），与 MarkdownBlock 同款接线
   const pathEnv = useStore((s) => s.pathEnv)
   // 用户是否手动操作过（操作过后不再受 autoExpand 影响）
   const manuallyToggled = useRef(false)

@@ -84,7 +84,7 @@ describe('resolveFileLink 解析与从严校验', () => {
   })
 })
 
-describe('resolveFileLink 占位符路径展开（缺陷 GZ）', () => {
+describe('resolveFileLink 占位符路径展开（缺陷 GY）', () => {
   const ENV = { TEMP: 'C:/Users/demo/AppData/Local/Temp', TMPDIR: '/tmp', HOME: 'C:/Users/demo' }
 
   it.each([

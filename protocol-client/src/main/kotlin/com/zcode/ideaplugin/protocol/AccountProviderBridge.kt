@@ -173,10 +173,36 @@ object AccountProviderBridge {
 
     // ============ 反向请求应答：requestAuth 供给 ============
 
-    /** 运行时鉴权供给结果：Supplied 带材料；Unavailable 带用户可读原因（errorMessage 用） */
+    /** 运行时鉴权供给结果：Supplied 带材料；Unavailable 带结构化原因（文案渲染上移 UI 层） */
     sealed interface AuthResult {
         data class Supplied(val apiKey: String) : AuthResult
-        data class Unavailable(val reason: String) : AuthResult
+        data class Unavailable(val cause: UnavailableCause) : AuthResult
+    }
+
+    /**
+     * 供给失败结构化原因。本模块（protocol-client）是纯 Kotlin、不可依赖 UI 资源束，
+     * 中文/多语言文案由宿主按类型映射（ZCodeProtocolClient.authUnavailableMessage 注入，
+     * ZCodeBundle 渲染）；[diagnosticText] 是未注入时的英文诊断兜底（兼日志口径）。
+     */
+    sealed interface UnavailableCause {
+        data class UnknownProvider(val providerId: String) : UnavailableCause
+        data object NoJwt : UnavailableCause
+        data class NoIdentity(val family: String) : UnavailableCause
+        data class UnsupportedMode(val mode: String?) : UnavailableCause
+        data class NoAccessToken(val family: String) : UnavailableCause
+        data class CredentialReadError(val type: String, val message: String?) : UnavailableCause
+        data class PatFailed(val failure: ProjectAccessTokenClient.Failure) : UnavailableCause
+    }
+
+    /** 英文诊断单行（无宿主注入时的 errorMessage 兜底；日志同口径） */
+    fun diagnosticText(cause: UnavailableCause): String = when (cause) {
+        is UnavailableCause.UnknownProvider -> "unknown account provider ${cause.providerId} (not in builtin catalog)"
+        UnavailableCause.NoJwt -> "credentials.json missing zcodejwttoken (not logged in)"
+        is UnavailableCause.NoIdentity -> "credentials.json missing oauth:${cause.family}:user_info (please sign in via ZCode)"
+        is UnavailableCause.UnsupportedMode -> "unsupported account mode mode=${cause.mode}"
+        is UnavailableCause.NoAccessToken -> "credentials.json missing oauth:${cause.family}:access_token (please sign in again via ZCode)"
+        is UnavailableCause.CredentialReadError -> "credential read error (${cause.type}: ${cause.message ?: "unknown"})"
+        is UnavailableCause.PatFailed -> "PAT resolve failed (${cause.failure.kind}: ${cause.failure.detail})"
     }
 
     /**
@@ -204,25 +230,25 @@ object AccountProviderBridge {
         http: ProjectAccessTokenClient.Http? = null,
     ): AuthResult {
         val family = FAMILY_BY_PROVIDER[providerId]
-            ?: return AuthResult.Unavailable("未知账号渠道 $providerId（内置目录未收录）")
+            ?: return AuthResult.Unavailable(UnavailableCause.UnknownProvider(providerId))
         return when (mode) {
             "start-plan" -> entries["zcodejwttoken"]?.takeIf { it.isNotBlank() }
                 ?.let { AuthResult.Supplied(it) }
-                ?: AuthResult.Unavailable("credentials.json 缺少 zcodejwttoken（尚未登录）")
+                ?: AuthResult.Unavailable(UnavailableCause.NoJwt)
             "individual-coding-plan" -> {
                 val identity = identityOf(entries, family)
-                    ?: return AuthResult.Unavailable("credentials.json 缺少账号身份 oauth:$family:user_info，请在 ZCode 中登录")
+                    ?: return AuthResult.Unavailable(UnavailableCause.NoIdentity(family))
                 entries[individualPlanKey(providerId, identity)]?.takeIf { it.isNotBlank() }
                     ?.let { AuthResult.Supplied(it) }
                     ?: patKey(family, mode, entries, selection, clientVersion, http)
             }
             "team-coding-plan" -> {
                 if (identityOf(entries, family) == null) {
-                    return AuthResult.Unavailable("credentials.json 缺少账号身份 oauth:$family:user_info，请在 ZCode 中登录")
+                    return AuthResult.Unavailable(UnavailableCause.NoIdentity(family))
                 }
                 patKey(family, mode, entries, selection, clientVersion, http)
             }
-            else -> AuthResult.Unavailable("不支持的账号模式 mode=$mode")
+            else -> AuthResult.Unavailable(UnavailableCause.UnsupportedMode(mode))
         }
     }
 
@@ -249,11 +275,11 @@ object AccountProviderBridge {
             ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] }
         if (accessToken == null) {
             println("[AccountProviderBridge] PAT skipped: oauth:$family:access_token missing or equals zcodejwttoken (entries=${entries.size})")
-            return AuthResult.Unavailable("credentials.json 缺少 oauth:$family:access_token（或误存为 zcode JWT），请在 ZCode 中重新登录")
+            return AuthResult.Unavailable(UnavailableCause.NoAccessToken(family))
         }
         return when (val r = ProjectAccessTokenClient.resolve(family, mode, accessToken, selection, clientVersion, http)) {
             is ProjectAccessTokenClient.ResolveResult.Ok -> AuthResult.Supplied(r.token)
-            is ProjectAccessTokenClient.ResolveResult.Failed -> AuthResult.Unavailable(r.failure.describe())
+            is ProjectAccessTokenClient.ResolveResult.Failed -> AuthResult.Unavailable(UnavailableCause.PatFailed(r.failure))
         }
     }
 

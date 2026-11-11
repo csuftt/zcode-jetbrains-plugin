@@ -1,5 +1,5 @@
 /**
- * 环境变量占位符路径展开（缺陷 GZ，纯函数）
+ * 环境变量占位符路径展开（缺陷 GY，纯函数）
  *
  * AI 正文常写 `%TEMP%\x.md`、`$TMPDIR/x.md`、`${HOME}/x.md` 这类占位符路径
  * （workspace 本身挂在临时目录下时尤其常见）。linkify 的 PATH_TOKEN 段字符类

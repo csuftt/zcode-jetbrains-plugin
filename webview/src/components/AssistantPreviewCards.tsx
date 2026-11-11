@@ -2,7 +2,7 @@
  * 产物预览卡（B2 二期，对齐官方客户端「回合重要产物」）
  *
  * 数据链：轮文本六源提取（utils/previewArtifacts，纯函数已单测；六源=五源+环境变量
- * 占位符路径源，缺陷 GZ）→ md/html 必须命中
+ * 占位符路径源，缺陷 GY）→ md/html 必须命中
  * 本轮 fileChanges 路径集才出卡（复用 B2 turnFileChanges 查询懒拉明细，模块级缓存
  * 去重，重挂载不重发）→ 渲染前批量 checkFilesExist（防闪卡：settled 前不渲染，
  * 已删除文件直接滤掉）→ 轮尾渲染（后提及优先，候选 15 / 渲染 10 上限）。
@@ -65,7 +65,7 @@ export const AssistantPreviewCards = memo(function AssistantPreviewCards({
   const { t } = useTranslation()
   const workspacePath = useStore((s) => s.projectPath)
   const sessionId = useStore((s) => s.currentSessionId)
-  // 占位符路径展开白名单（缺陷 GZ）：null=未到达，占位符引用暂解析不出（env 到达后本
+  // 占位符路径展开白名单（缺陷 GY）：null=未到达，占位符引用暂解析不出（env 到达后本
   // 组件经依赖重算二段补出，与 changedPaths 的二段出卡同构）
   const pathEnv = useStore((s) => s.pathEnv)
   // reverted 由服务端事件权威回推（撤销后 md/html 立即抑制，不等查询）

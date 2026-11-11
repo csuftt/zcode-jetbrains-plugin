@@ -7,7 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * 环境变量占位符路径展开（缺陷 GZ）单元测试。
+ * 环境变量占位符路径展开（缺陷 GY）单元测试。
  *
  * System.getenv 测试进程内不可注入，真实变量用例按平台条件断言（TEMP/TMP Windows、
  * TMPDIR/HOME Unix）；~ 展开走 System.getProperty("user.home")，测试内可注入。

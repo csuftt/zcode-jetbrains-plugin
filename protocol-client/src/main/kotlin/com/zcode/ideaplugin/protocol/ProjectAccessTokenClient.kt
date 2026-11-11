@@ -110,28 +110,13 @@ object ProjectAccessTokenClient {
 
     data class ProjectRef(val organizationId: String, val projectId: String, val team: Boolean)
 
-    /** 换发失败分类（上层出用户文案；detail 保留原始线索——异常类名/HTTP 状态/code） */
+    /** 换发失败分类（文案渲染上移 UI 层：宿主按 kind 映射资源束；detail 保留原始线索——异常类名/HTTP 状态/code） */
     enum class FailKind {
         NETWORK, UNAUTHORIZED, NOT_FOUND, SERVER, BAD_RESPONSE,
         NO_PROJECT, EMPTY_TOKEN, SELECTION_MISSING, NEGATIVE_CACHE, UNSUPPORTED, UNEXPECTED,
     }
 
-    data class Failure(val kind: FailKind, val detail: String) {
-        /** 用户可读单行原因：requestProviderRuntimeHeaders 的 errorMessage 追加此句 */
-        fun describe(): String = when (kind) {
-            FailKind.NETWORK -> "访问 bigmodel.cn 管理面网络失败（$detail），若刚切换过 VPN/代理请检查后重试"
-            FailKind.UNAUTHORIZED -> "bigmodel.cn 登录态失效（$detail），请在 ZCode 中重新登录账号"
-            FailKind.NOT_FOUND -> "管理面资源不存在（$detail），项目或 key 可能已变更"
-            FailKind.SERVER -> "管理面服务异常（$detail）"
-            FailKind.BAD_RESPONSE -> "管理面响应异常（$detail）"
-            FailKind.NO_PROJECT -> "账号下没有可用的个人项目（$detail）"
-            FailKind.EMPTY_TOKEN -> "管理面未返回 accessToken（$detail）"
-            FailKind.SELECTION_MISSING -> "团队连接缺少组织/项目（$detail）"
-            FailKind.NEGATIVE_CACHE -> "刚换发失败，短暂退避中（$detail）"
-            FailKind.UNSUPPORTED -> detail
-            FailKind.UNEXPECTED -> "凭证换发异常（$detail）"
-        }
-    }
+    data class Failure(val kind: FailKind, val detail: String)
 
     sealed interface ResolveResult {
         data class Ok(val token: String) : ResolveResult

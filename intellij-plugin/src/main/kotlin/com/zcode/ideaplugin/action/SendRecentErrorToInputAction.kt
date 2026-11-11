@@ -36,7 +36,7 @@ class SendRecentErrorToInputAction : AnAction(
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
-        val segment = RecentErrorExtractor.extract(editor.document.text)
+        val segment = RecentErrorExtractor.extract(editor.document.text, message("console.recentError.truncated"))
         if (segment.isBlank()) {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("ZCode")

@@ -182,6 +182,15 @@ class ZCodeProtocolClient private constructor(
     var permissionRequestHandler: ((serverRequestId: String, params: JsonObject) -> JsonObject)? = null
 
     /**
+     * 凭证供给失败的用户文案渲染（interaction/requestProviderRuntimeHeaders 的
+     * errorMessage 用）。协议层只产结构化原因（[AccountProviderBridge.UnavailableCause]），
+     * 多语言文案由宿主映射（ZCodeBundle 资源束在本纯模块不可引用——2026-11-11 评审收口）；
+     * null/未注入时落 [AccountProviderBridge.diagnosticText] 英文诊断兜底。
+     */
+    @Volatile
+    var authUnavailableMessage: ((cause: AccountProviderBridge.UnavailableCause) -> String)? = null
+
+    /**
      * 宿主浏览器清单（interaction/browserList）：返回 {browsers:[...]}；
      * null / 未注册时自动应答空列表（app-server 侧 browser-use 优雅降级为不可用）。
      * 详见 docs/设计与调研/browser-use宿主协议接入设计.md
@@ -754,7 +763,7 @@ class ZCodeProtocolClient private constructor(
             } catch (e: Exception) {
                 println("[ZCodeProtocolClient] providerRuntimeHeaders credential read error (${e.javaClass.simpleName}): ${e.message}")
                 AccountProviderBridge.AuthResult.Unavailable(
-                    "凭证读取异常（${e.javaClass.simpleName}: ${e.message ?: "unknown"}）",
+                    AccountProviderBridge.UnavailableCause.CredentialReadError(e.javaClass.simpleName, e.message),
                 )
             }
             when (auth) {
@@ -766,11 +775,13 @@ class ZCodeProtocolClient private constructor(
                     })
                 }
                 is AccountProviderBridge.AuthResult.Unavailable -> {
-                    println("[ZCodeProtocolClient] providerRuntimeHeaders unavailable for $providerId (mode=$mode): ${auth.reason}")
+                    val reasonText = authUnavailableMessage?.invoke(auth.cause)
+                        ?: AccountProviderBridge.diagnosticText(auth.cause)
+                    println("[ZCodeProtocolClient] providerRuntimeHeaders unavailable for $providerId (mode=$mode): $reasonText")
                     respondToServer(id, buildJsonObject {
                         put("headersApplied", false)
                         put("errorMessage", "host plugin cannot provide runtime auth for $providerId " +
-                            "(mode=$mode): ${auth.reason}")
+                            "(mode=$mode): $reasonText")
                     })
                 }
             }

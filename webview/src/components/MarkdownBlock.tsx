@@ -36,7 +36,7 @@ export function MarkdownBlock({ markdown, streaming = false }: Props) {
   // 工作区根：文件路径链接化解析相对路径用（currentWorkspacePath 优先——
   // worktree 场景以当前会话工作区为准）
   const workspaceRoot = useStore((s) => s.currentWorkspacePath || s.projectPath)
-  // 路径类环境变量白名单：占位符路径（%TEMP%\a.md）chip 展开用（缺陷 GZ；
+  // 路径类环境变量白名单：占位符路径（%TEMP%\a.md）chip 展开用（缺陷 GY；
   // 到达后各块经 memo 依赖自动重渲，历史消息 chip 亦补链）
   const pathEnv = useStore((s) => s.pathEnv)
 

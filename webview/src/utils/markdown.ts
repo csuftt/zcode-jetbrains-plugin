@@ -191,7 +191,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  * @param md markdown 文本
  * @param isStreaming 是否在流式中（true 时先做 streamSafe 补全）
  * @param workspaceRoot 工作区根（文件路径链接化解析相对路径用；空 = 仅绝对路径可点）
- * @param pathEnv 路径类环境变量白名单（占位符路径展开用，缺陷 GZ；null=未到达，
+ * @param pathEnv 路径类环境变量白名单（占位符路径展开用，缺陷 GY；null=未到达，
  *   占位符不链接）
  */
 export function renderMarkdown(

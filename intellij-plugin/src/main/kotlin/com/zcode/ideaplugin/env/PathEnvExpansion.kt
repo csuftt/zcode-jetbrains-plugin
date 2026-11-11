@@ -3,7 +3,7 @@ package com.zcode.ideaplugin.env
 import java.io.File
 
 /**
- * 环境变量占位符路径展开（缺陷 GZ，2026-11-10）
+ * 环境变量占位符路径展开（缺陷 GY，2026-11-10）
  *
  * AI 正文常写 `%TEMP%\x.md`、`$TMPDIR/x.md`、`~/x.md` 这类占位符路径（workspace
  * 本身挂在临时目录下时尤其常见）。两条消费链：
