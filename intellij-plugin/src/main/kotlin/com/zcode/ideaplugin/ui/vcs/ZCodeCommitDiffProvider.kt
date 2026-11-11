@@ -103,6 +103,44 @@ object ZCodeCommitDiffProvider {
         }
     }
 
+    /**
+     * 单提交 diff（VCS Log 右键「解释提交」用，调研 ⑥）：`git show <rev>` 带提交元信息头
+     * （作者/日期/提交说明，解释场景正需要），预算总量收口同族。合并提交 `git show`
+     * 输出 combined diff 常为空，调用方按空串提示兜底。
+     */
+    fun generateForCommit(project: Project, root: VirtualFile, revision: String): String {
+        return try {
+            val handler = GitLineHandler(project, root, GitCommand.SHOW)
+            handler.addParameters("--unified=3", "--no-color", "-M", "--no-ext-diff")
+            handler.addParameters(revision)
+            val out = Git.getInstance().runCommand(handler).output.joinToString("\n")
+            if (out.length <= MAX_TOTAL_LENGTH) out
+            else out.take(MAX_TOTAL_LENGTH) + "\n... (diff truncated to fit context budget)\n"
+        } catch (t: Throwable) {
+            log.warn("[ai-commit] git show $revision failed: ${t.message}")
+            ""
+        }
+    }
+
+    /**
+     * 提交头信息（短 id + 主题行，`git log -1 --format=%h %s`）：解释弹窗头部展示用。
+     * 失败返回 null（不阻断解释流程，弹窗只是少一行头）。
+     */
+    fun commitHeading(project: Project, root: VirtualFile, revision: String): Pair<String, String>? {
+        return try {
+            val handler = GitLineHandler(project, root, GitCommand.LOG)
+            handler.addParameters("-1", "--format=%h %s", "--no-color")
+            handler.endOptions()
+            handler.addParameters(revision)
+            val line = Git.getInstance().runCommand(handler).output.joinToString("\n").trim()
+            val idx = line.indexOf(' ')
+            if (idx > 0) line.take(idx) to line.substring(idx + 1) else null
+        } catch (t: Throwable) {
+            log.warn("[commit-explain] heading read failed: ${t.message}")
+            null
+        }
+    }
+
     /** 预算内追加片段；装不下计一个 omitted（防超长 diff 把 generateText 拖过超时） */
     private fun appendSegment(out: StringBuilder, segment: String): Int {
         if (segment.isEmpty()) return 0

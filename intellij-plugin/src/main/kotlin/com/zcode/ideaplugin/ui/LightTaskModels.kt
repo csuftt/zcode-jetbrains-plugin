@@ -94,6 +94,36 @@ object LightTaskModels {
     fun validModel(pid: String?, mid: String?): Boolean =
         pid != null && mid != null && enabledProviderModels().any { it.first == pid && mid in it.second }
 
+    /**
+     * 统一轻任务模型选取（含 CLI 代际分支，AI 提交信息/提交解释等轻任务动作共用）：
+     * NEW 代走 [resolveNewCli]（专用 → 会话当前 → 首个启用渠道）；旧代专用模型须能在
+     * config.json 构造出 runtimeModel（v1 形态渠道 id 直接失效），失效落 defaultRuntimeModel。
+     * 全空返回 null（调用方报「无可用模型」）。
+     */
+    fun resolveForGeneration(): Pair<String, String>? {
+        val generation = try {
+            com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()?.let {
+                com.zcode.ideaplugin.protocol.ProtocolGenerations.detect(it)
+            }
+        } catch (_: Exception) {
+            null
+        }
+        val dedicated = dedicatedModel()
+        if (generation != com.zcode.ideaplugin.protocol.ProtocolGeneration.NEW) {
+            if (dedicated != null &&
+                com.zcode.ideaplugin.protocol.RuntimeModels.buildRuntimeModel(dedicated.first, dedicated.second) != null
+            ) {
+                return dedicated
+            }
+            val fallback = com.zcode.ideaplugin.protocol.RuntimeModels.defaultRuntimeModel()
+                ?.get("model")?.jsonObject ?: return null
+            val pid = fallback["providerId"]?.jsonPrimitive?.contentOrNull ?: return null
+            val mid = fallback["modelId"]?.jsonPrimitive?.contentOrNull ?: return null
+            return pid to mid
+        }
+        return resolveNewCli()
+    }
+
     /** kv 会话当前模型（webview 每次切模型写 zcode.currentModel）；缺失/损坏返回 null */
     fun currentModelRef(): Pair<String, String>? {
         val raw = readKvStore()?.let {
