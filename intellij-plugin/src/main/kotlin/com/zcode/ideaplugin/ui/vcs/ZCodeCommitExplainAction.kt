@@ -10,8 +10,10 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.EditorFontType
 import com.intellij.openapi.project.DumbAware
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.util.Disposer
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBFont
 import com.intellij.vcs.log.CommitId
@@ -94,10 +96,10 @@ class ZCodeCommitExplainAction : AnAction(
         val dialog = ExplainDialog(project, opId) { ACTIVE.remove(project) }
         ACTIVE[project] = dialog
 
-        // **先派后台任务，最后才 show()**：模态 DialogWrapper.show() 阻塞当前 EDT
-        // 直到关窗——调度写在 show() 之后的代码永远执行不到（真机 2026-11-11 实锤：
-        // 弹窗「生成中」干等 152s 连模型名都不出，生成链根本没启动）。模态泵事件
-        // 期间后台完成走 invokeLater(ModalityState.any()) 照常送达弹窗。
+        // 先派后台任务再 show()：模态时代 show() 阻塞 EDT 直到关窗，调度写在后面
+        // 永远执行不到（真机 2026-11-11 实锤：弹窗「生成中」干等 152s 连模型名都不出）；
+        // 改非模态后 show() 不再阻塞，顺序保留无害且保证弹窗弹出时生成已在跑。
+        // 后台完成走 invokeLater(ModalityState.any()) 照常送达弹窗。
         // EDT 上只留快照，git 与 RPC 全在后台
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
@@ -169,15 +171,22 @@ class ZCodeCommitExplainAction : AnAction(
 }
 
 /**
- * 解释弹窗：即点即弹的模态窗，头部=提交短 id+主题；占位（进行中）→ markdown 结果/
- * 失败原地切换。关窗（含 OK/取消/标题栏 X）= 取消在途生成（cancelGenerateText 旁路，
- * 后台线程发）。
+ * 解释弹窗：即点即弹的**非模态**窗（2026-11-11 用户反馈：生成要等几十秒，模态窗
+ * 阻塞整个 IDE 输入且 Windows 对有模态窗按 OS 惯例不给最小化钮——真非模态后标题栏
+ * 自带最小化，生成期间可自由切走干其他活），头部=提交短 id+主题；占位（进行中）→
+ * markdown 结果/失败原地切换。关窗（含 OK/取消/标题栏 X）= 取消在途生成
+ * （cancelGenerateText 旁路，后台线程发）。
+ *
+ * ⚠️ 必须用 [DialogWrapper.IdeModalityType.MODELESS] 三参枚举构造：首版用
+ * `DialogWrapper(project, true, false)` 真机验证仍阻塞——反汇编 233 平台实锤，
+ * 该布尔构造把 isModal=false 映射成 IdeModalityType.PROJECT（项目级模态，单项目
+ * 窗口下体验≈全模态，Windows 也不给最小化钮）；MODELESS 才映射 AWT MODELESS。
  */
 private class ExplainDialog(
     private val project: Project,
     private val opId: String,
     private val onClosed: () -> Unit,
-) : DialogWrapper(project, true) {
+) : DialogWrapper(project, true, DialogWrapper.IdeModalityType.MODELESS) {
 
     private val log = Logger.getInstance("ZCodePlugin")
 
@@ -257,6 +266,9 @@ private class ExplainDialog(
 
     init {
         title = message("commit.explain.dialogTitle")
+        // 非模态后弹窗生命周期与 project 解耦（模态时代用户关不掉 project，天然无此
+        // 路径）：project 关闭时自动取消在途生成并收掉弹窗，防孤儿窗+迟到结果写死窗
+        Disposer.register(project, Disposable { cancel() })
         ticker.start()
         init()
     }
@@ -318,8 +330,9 @@ private class ExplainDialog(
         }, ModalityState.any())
     }
 
-    /** 重触发路径：取消在途 + 关窗 */
+    /** 重触发/project 关闭路径：取消在途 + 关窗（幂等——多入口可撞，只放第一进） */
     fun cancel() {
+        if (cancelled) return
         cancelled = true
         ticker.stop()
         cancelInFlight()

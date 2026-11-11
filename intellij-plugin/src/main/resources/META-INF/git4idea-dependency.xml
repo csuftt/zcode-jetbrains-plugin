@@ -14,7 +14,10 @@
         <action id="ZCode.CommitExplain"
                 class="com.zcode.ideaplugin.ui.vcs.ZCodeCommitExplainAction"
                 icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
-            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="last"/>
+            <!-- 2026-11-11 用户反馈：anchor=last 垫底（GoToChild/浏览器组之后）不好找，
+                 提前到「Compare with Local / Show Diff」簇之前——查看类动作同区；与
+                 git4idea CheckoutBrowse 组同款挂点。anchor 丢失时平台降级加组尾，安全。 -->
+            <add-to-group group-id="Vcs.Log.ContextMenu" relative-to-action="Vcs.Log.CompareRevisions" anchor="before"/>
         </action>
     </actions>
 </idea-plugin>
