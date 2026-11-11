@@ -24,6 +24,8 @@ interface BlockSectionProps {
   isStreaming: boolean
   /** 工作区根：文件路径链接化解析相对路径用（空 = 仅绝对路径可点）*/
   workspaceRoot?: string
+  /** 路径类环境变量白名单：占位符路径（%TEMP%\a.md）展开用，缺陷 GY（null=未到）*/
+  pathEnv?: Record<string, string> | null
 }
 
 /**
@@ -44,14 +46,14 @@ function extractMermaid(block: string): { code: string } | null {
  * - 其他块 → renderMarkdown 输出 HTML（dangerouslySetInnerHTML 是必须的——marked 输出
  *   HTML，安全性由 renderMarkdown 里的 DOMPurify 保证）
  */
-export const BlockSection = memo(function BlockSection({ markdown, isStreaming, workspaceRoot = '' }: BlockSectionProps) {
+export const BlockSection = memo(function BlockSection({ markdown, isStreaming, workspaceRoot = '', pathEnv = null }: BlockSectionProps) {
   // 两个 hook 必须无条件调用：mermaid/普通形态在流式中会互相切换
   // （围栏闭合后、空行切块前的 delta 会把后续文本追加进同一块），
   // 条件 hooks 会让同一实例的 hooks 数量变化 → React #300 整树卸载（黑屏）
   const mermaidBlock = useMemo(() => extractMermaid(markdown), [markdown])
   const html = useMemo(
-    () => (mermaidBlock ? null : renderMarkdown(markdown, isStreaming, workspaceRoot)),
-    [markdown, isStreaming, mermaidBlock, workspaceRoot],
+    () => (mermaidBlock ? null : renderMarkdown(markdown, isStreaming, workspaceRoot, pathEnv)),
+    [markdown, isStreaming, mermaidBlock, workspaceRoot, pathEnv],
   )
 
   if (mermaidBlock) {

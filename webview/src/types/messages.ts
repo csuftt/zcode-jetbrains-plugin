@@ -520,6 +520,8 @@ export type JavaEditAttachment =
 export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 前端诊断日志直落 idea.log（Java handleJsMessage 的 [webview-console] 通道） */
   | { op: '__jsLog'; level: string; text: string }
+  /** 弹窗置顶切换（⑧ 会话弹窗 Header 置顶按钮）：Java 侧 AWT setAlwaysOnTop 权威 */
+  | { op: 'toggleDetachPin' }
   | { op: 'listSessions'; workspacePath?: string }
   | { op: 'createSession'; workspacePath?: string; thoughtLevel?: string }
   /** 关联目录三件套（多目录会话·变体A）：拉列表 / 弹系统目录选择框添加 / 按路径移除 */
@@ -729,6 +731,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'zoomReset' }
   /** 环境三件套检测（node/zcode.cjs/凭证），启动时与主界面「重新检测」触发 */
   | { op: 'checkEnv' }
+  /** 路径类环境变量白名单（TEMP/TMP/HOME/USERPROFILE…），占位符路径展开用（缺陷 GY） */
+  | { op: 'getPathEnv' }
   /** 保存环境路径配置：字段缺席=不改该项，空串=清除（回退自动探测）；后端验证通过才落盘 */
   | { op: 'envSave'; nodePath?: string; cliPath?: string; cdpPortFile?: string }
   /** 拉取当前打开文件 ref（webview mount/重连时用；Kotlin 同步回包，对应 EditorContextTracker.snapshot）*/
@@ -1489,6 +1493,8 @@ export type JavaResponse =
   | { op: 'zoomLevel'; percent: number }
   /** 环境状态（checkEnv 查询 / envSave 保存成功后的重检结果 / IDE 广播同构体）*/
   | { op: 'envStatus'; status: EnvStatus }
+  /** 路径类环境变量白名单（getPathEnv 响应；值为 canonical 化后的真实长路径，缺陷 GY）*/
+  | { op: 'getPathEnvResult'; vars: Record<string, string> }
   /** 网络代理回显（getProxyConfig 响应；restartPending=app-server 在跑需重启生效）*/
   | { op: 'proxyConfig'; httpProxy: string; noProxy: string; caCertPath: string; restartPending: boolean }
   /** 网络代理保存成功（setProxyConfig 响应，载荷同 proxyConfig）*/
@@ -1616,6 +1622,9 @@ export type JavaResponse =
   /** app-server stderr 解析出的后端模型 API 错误（APICallError 兜底通道）：
    *  429 配额超限等被服务端按可重试分类退避重试，turn 终止帧迟迟不发时的第一现场 */
   | { op: 'backendError'; statusCode?: number; code?: string; message: string }
+  /** 会话弹窗态（⑧）：detached=本面板是否在独立窗口（Header 置顶按钮显隐），pinned=置顶态。
+   *  Java 推送（弹出/搬回/切换/就绪补推）与 toggleDetachPin 应答同形，双源等价消费 */
+  | { op: 'detachWindowState'; detached: boolean; pinned: boolean }
   /** 当前打开文件 ref（@path / @path#L10 / @path#L10-20 / null = 无打开编辑器）。
    *  Kotlin→webview 推送：getCurrentFile 响应 / EditorContextTracker 200ms 防抖推送。
    *  当前只驱动 CurrentFileChip 显示（topbar 当前文件 chip），不参与发送。 */

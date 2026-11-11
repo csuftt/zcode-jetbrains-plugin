@@ -14,6 +14,7 @@ import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
 import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.action.CloseEmptyTabsAction
+import com.zcode.ideaplugin.action.DetachTabAction
 import com.zcode.ideaplugin.action.RenameTabAction
 import com.zcode.ideaplugin.action.pushRefs
 import com.zcode.ideaplugin.zCodeService
@@ -50,6 +51,20 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
 
         /**
+         * 标题栏独立按钮清单（唯一出处）：只剩「批量关闭空标签」——它有自己的显影逻辑
+         * （有空白标签才显示），2026-11-12 用户定稿保持独立不并入菜单。
+         *
+         * 重命名 + 弹出独立窗口已收进平台标题栏 ⋮ 菜单（[buildGearActions]，曾为独立
+         * 按钮三连排布，用户嫌挤折叠）。各挂载点一律走这两个唯一清单——曾因清单四处
+         * 手写互不一致，refreshTitleToolbar 漏挂弹出按钮把它顶掉（2026-11-11 真机）。
+         */
+        fun buildTitleActions(project: Project) = listOf(CloseEmptyTabsAction(project))
+
+        /** 平台标题栏 ⋮（Options）菜单的追加动作组：重命名 + 弹出独立窗口（无参构造，现取选中标签） */
+        fun buildGearActions(project: Project) =
+            DefaultActionGroup(RenameTabAction(), DetachTabAction(project))
+
+        /**
          * 强制刷新工具窗标题栏（「关闭全部空标签」按钮的显隐依赖它）。
          * action update 只由 IDE 事件驱动：重启恢复后无事件时按钮冻结在初始 presentation，
          * 出现「存在空标签但按钮不显示，点一下标签才恢复」的体感（2026-11-02 真机）。
@@ -67,10 +82,14 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             SwingUtilities.invokeLater {
                 if (project.isDisposed || toolWindow.isDisposed) return@invokeLater
                 val cm = toolWindow.contentManager
-                val panel = cm.selectedContent?.component as? ZCodeToolWindowPanel ?: return@invokeLater
+                val content = cm.selectedContent ?: return@invokeLater
+                val panel = content.component as? ZCodeToolWindowPanel ?: return@invokeLater
                 // 全新实例重设：旧实例 presentation 已被上轮 update 污染（visible=false 冻结），
                 // 新实例默认 visible，header 重建按钮后立即重跑 update 按实时状态收敛
-                toolWindow.setTitleActions(listOf(RenameTabAction(panel), CloseEmptyTabsAction(project)))
+                toolWindow.setTitleActions(buildTitleActions(project))
+                // ⋮ 菜单的动作组是工具窗级（无标签实例绑定，菜单弹出时现取选中标签），
+                // 重复 set 幂等；放同一汇点保证初始化/恢复/搬回各路径都有
+                toolWindow.setAdditionalGearActions(buildGearActions(project))
             }
         }
 
@@ -90,6 +109,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
          */
         fun activateSessionTab(project: Project, sessionId: String): Boolean {
             if (sessionId.isBlank()) return false
+            // 该会话已在弹出独立窗口：聚焦窗口本身，不在主窗开第二个面板（搬运式语义，
+            // 同会话双面板=双订阅是要避免的形态）
+            if (SessionDetachWindow.focusDetachedSession(project, sessionId)) return true
             val toolWindow = getToolWindow(project) ?: return false
             val cm = toolWindow.contentManager
             val existing = cm.contents.firstOrNull {
@@ -194,8 +216,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 // 标签右键菜单：重命名标签（issue #18/#21；改名与持久化封装在 panel.renameTab）
                 // + 批量关闭无会话空标签（判据 panel.isStandbyUnbound；新 UI 下此菜单不渲染，
                 // 可靠入口是上面 setTitleActions 的标题栏按钮——同 RenameTabAction 双入口原因）
+                // + 弹出独立窗口（搬运式标签弹窗 ⑧：双屏监督，关窗自动搬回）
                 content.setActions(
-                    DefaultActionGroup(RenameTabAction(panel), CloseEmptyTabsAction(project)),
+                    DefaultActionGroup(RenameTabAction(panel), CloseEmptyTabsAction(project), DetachTabAction(project, content)),
                     ActionPlaces.TOOLWINDOW_CONTENT,
                     panel,
                 )
@@ -310,8 +333,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 // 标题栏按钮随选中标签切换实例（Run 面板 Stop 同机制；右键菜单无插件扩展点，见 #18/#21）。
                 // 两动作保持独立按钮（曾试合并单「⋮」popup：平台标题栏本就有 ⋮，重复不适合，真机否决）；
                 // 平台标题栏按钮尺寸不受插件 icon 控制（12px 缩图标真机无效），大小随平台默认。
-                // 批量关闭空标签不随标签切换（全局动作，持 project 遍历全部标签）
-                toolWindow.setTitleActions(listOf(RenameTabAction(panel), CloseEmptyTabsAction(project)))
+                // 批量关闭空标签不随标签切换（全局动作，持 project 遍历全部标签）；
+                // 重命名/弹出在 ⋮ 菜单（现取选中标签，不随切换重挂）
+                toolWindow.setTitleActions(buildTitleActions(project))
                 panel.ensureJcefCreated() // 懒加载标签激活（已激活时为 no-op）
                 panel.clearTabTurnFinished() // 点进标签即清「回合结束待查看」标记
                 project.zCodeService().setActivePanel(panel)
@@ -322,12 +346,14 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             }
 
             /** 关闭二次确认：移除前弹确认框，取消则拦截关闭（event.consume）；浏览器标签直接关；
-             *  无会话空标签（待命态）也无东西可丢，直接关（CloseEmptyTabsAction 批量关闭同依赖此豁免） */
+             *  无会话空标签（待命态）也无东西可丢，直接关（CloseEmptyTabsAction 批量关闭同依赖此豁免）；
+             *  弹出独立窗口的搬运式 removeContent 也豁免（那是搬走不是关闭，弹确认框就错了） */
             override fun contentRemoveQuery(event: ContentManagerEvent) {
                 val content = event.content
                 if (content.component is ZCodeBrowserPanel) return
                 val panel = content.component as? ZCodeToolWindowPanel
                 if (panel?.isStandbyUnbound() == true) return
+                if (panel?.isDetachedToWindow() == true) return
                 val tabName = content.displayName ?: message("tab.fallbackName")
                 val streaming = panel?.isTabStreaming() == true
                 val dialogMessage = if (streaming) {
@@ -335,13 +361,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 } else {
                     message("dialog.closeTab.normal", tabName)
                 }
-                val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
-                    project,
-                    dialogMessage,
-                    message("dialog.closeTab.title"),
-                    com.intellij.openapi.ui.Messages.getQuestionIcon(),
-                )
-                if (result != com.intellij.openapi.ui.Messages.YES) {
+                // 自建对话框替代平台 Messages.showYesNoDialog（恒居中）：定位到点击处附近（见类注释）
+                val dialog = CloseTabConfirmDialog(project, dialogMessage, message("dialog.closeTab.title"))
+                if (!dialog.showAndGet()) {
                     event.consume()
                 }
             }
@@ -349,7 +371,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             override fun contentRemoved(event: ContentManagerEvent) {
                 updateCloseable(cm)
                 val panel = event.content.component as? ZCodeToolWindowPanel
-                if (panel != null) project.zCodeService().unregisterPanel(panel)
+                // 弹出独立窗口的搬运式移除不反注册：面板仍在独立窗口收事件流、
+                // 继续作为 pushToWebview 目标（注册表去留由弹窗关闭路径接管）
+                if (panel != null && !panel.isDetachedToWindow()) project.zCodeService().unregisterPanel(panel)
                 // 聊天标签全部关闭后（含「只剩浏览器标签又关掉浏览器」）自动补一个，保证会话入口常在
                 if (cm.contents.none { it.component is ZCodeToolWindowPanel }) {
                     addTabContent(project, toolWindow, null, getNextTabName(cm))
@@ -367,8 +391,12 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
         (cm.selectedContent?.component as? ZCodeToolWindowPanel)?.let {
             it.ensureJcefCreated() // 兜底：选中项若为懒加载则激活（正常路径激活标签已立即创建）
             project.zCodeService().setActivePanel(it)
-            // 标题栏重命名按钮初始挂载（后续随 selectionChanged 切换）
-            toolWindow.setTitleActions(listOf(RenameTabAction(it)))
+            // 标题栏按钮初始挂载（清单统一走 buildTitleActions；⋮ 菜单组随 refreshTitleToolbar 挂）
+            cm.selectedContent?.let { content ->
+                (content.component as? ZCodeToolWindowPanel)?.let {
+                    toolWindow.setTitleActions(buildTitleActions(project))
+                }
+            }
         }
 
         // 恢复完成后延时补刷一次标题栏：header 懒构建时序不可控（真机三连——恢复期的

@@ -45,6 +45,7 @@ import { sendToJava, onMessage } from '@/ipc/bridge'
 import type { JavaResponse, SlashCommand, AgentDef, ImageAttachmentInput, SendAttachmentInput, CurrentFileAttachmentInput } from '@/types/messages'
 import { insertChipAtCursor, insertCommandChipAtCursor, insertSessionChipAtCursor, insertSkillChipAtCursor, insertPasteChipAtCursor, convertCompletedPaths, convertCompletedSessionRefs, convertCompletedSkillRefs, matchSessionRefTrigger, serializeEditor, hasAnyInlineChip, pinCaretAfterChip, type CmdChipKind } from '@/utils/inlineFileTags'
 import { matchSkillRefTrigger } from '@/utils/skillRefPattern'
+import { fuzzyRank } from '@/utils/fuzzyMatch'
 import { relativeTime } from '@/utils/time'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
@@ -55,9 +56,12 @@ import { PastedTextPreview, type PastedTextItem } from './PastedTextRef'
 import { readImageFile, decodeBase64Size, type ImageAttachmentResult } from '@/utils/imageAttachment'
 import { matchCopiedMessageImages } from '@/utils/copiedMessageClipboard'
 import { ImagePreview } from './ImagePreview'
+import { appendSelectionBlock } from '@/utils/conversationSelections'
+import { SelectionRefChip } from './SelectionRefChip'
 import '../styles/input-box.less'
 import '../styles/agent-select.less'
 import '../styles/cua-entry.less'
+import '../styles/conversation-selection.less'
 
 /** 内联 chip hover tooltip 的 DOM 节点 id（挂 document.body）*/
 const INLINE_CHIP_TIP_ID = 'zcode-inline-chip-tip'
@@ -168,6 +172,10 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
    */
   const currentFileEnabled = useStore((s) => s.currentFileEnabled)
   const setCurrentFileEnabled = useStore((s) => s.setCurrentFileEnabled)
+  // 划词引用（调研 ⑩）：输入框引用条 pill（独立组件，popover 自持状态）+ 发送拼块 + 发送后清空
+  const conversationSelections = useStore((s) => s.conversationSelections)
+  const removeConversationSelection = useStore((s) => s.removeConversationSelection)
+  const clearConversationSelections = useStore((s) => s.clearConversationSelections)
   /** 工作区路径（CurrentFileChip tooltip 显示相对路径用）*/
   const projectPath = useStore((s) => s.projectPath)
   // 多目录会话·变体A：目录标识已迁移至 ChatHeader 标题下方（用户定稿 2026-10-28），
@@ -592,7 +600,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     const text = serializeEditor(editorRef.current ?? document.createElement('div'), {
       pasteText: pasteTextResolver,
     }).replace(/\s+$/, '')
-    if (!text.trim() && fileRefs.length === 0 && skillRefs.length === 0 && images.length === 0) return
+    // 纯引用无正文可发送（划词引用挂了但正文为空 = 只追问引用内容）
+    if (!text.trim() && fileRefs.length === 0 && skillRefs.length === 0 && images.length === 0 && conversationSelections.length === 0) return
 
     const fullText = assembleRefsText(text)
     // 目标模式拦截（/goal）：goal 命令 chip（序列化成 /goal 前缀文本）或直接键入
@@ -625,6 +634,11 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     if (images.length > 0 && !currentModelSupportsImages) {
       finalText += `\n\n[附图说明：本消息附带 ${images.length} 张图片。若你无法直接看到图片内容（当前模型配置可能未启用图像直输），图片已由服务端缓存（路径见消息附件标注），请用 Read 工具读取图片文件或调用识图工具查看图片内容后再回答。]`
     }
+    // 划词引用拼块（调研 ⑩，官方 Ofe）：**最末**拼 # userselect: 围栏——展示剥离
+    // 正则锚整条消息末尾（\s*$），必须排在图片占位引导之后（方案 §6.1 拼装顺序）；
+    // 记录输入历史用不含块的干净文本（历史回填不把协议块带回编辑器）
+    const cleanText = finalText
+    const finalWithSelections = appendSelectionBlock(finalText, conversationSelections)
     // 当前文件上下文（《当前文件chip-发送链路实现.md》）：发送取值表达式 = chip
     // 显示表达式（enabled && currentFileRef，与 CurrentFileChip renderLabel 同一
     // 份 state 同一个式子）——任何时刻 chip 显示了什么，下一条消息就带什么。
@@ -636,7 +650,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     // 消息，不携带上下文。
     const currentFileCtx = currentFileEnabled && currentFileRef ? currentFileRef : null
     onSend(
-      finalText,
+      finalWithSelections,
       fileRefs,
       [
         ...(currentFileCtx ? [parseCurrentFileAttachment(currentFileCtx)] : []),
@@ -649,7 +663,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         })),
       ],
     )
-    record(finalText)
+    record(cleanText)
 
     // 清空
     clearEditor()
@@ -657,6 +671,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     setSkillRefs([])
     setImages([])
     setSlashQuery(null)
+    // 引用已随消息组装发出，清空（官方：发送组装后同样清）
+    clearConversationSelections()
     // 发完即关：勾选只管下一条消息，发送成功即取消（勾选灭掉 = 附件已带走的
     // 回执）。goal 早退路径不经过这里——控制意图不算消息，勾选留给真正的下一条；
     // 排队消息入队时已把附件快照进参数，这里取消只影响后续发送
@@ -1248,25 +1264,21 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         source: 'builtin' as const,
         ...(b.icon ? { icon: b.icon } : {}),
       }))
-    const base: SlashItem[] = [...builtin, ...injected].filter(
-      (c) =>
-        !q ||
-        c.name.toLowerCase().includes(q) ||
-        (c.description ?? '').toLowerCase().includes(q),
-    )
+    // 模糊打分过滤（对齐 @ 文件补全的 FileMentionMatcher 算法，见 utils/fuzzyMatch）：
+    // q 为空全收且不参与组内重排，保留原注入顺序
+    const rankOf = (item: { name: string; description?: string }): number | null =>
+      q ? fuzzyRank(q, item.name, item.description) : 0
+    const base: SlashItem[] = [...builtin, ...injected].filter((c) => rankOf(c) !== null)
     const agentItems: SlashItem[] = (agents ?? [])
-      .filter(
-        (a) =>
-          !q ||
-          a.name.toLowerCase().includes(q) ||
-          a.description.toLowerCase().includes(q),
-      )
+      .filter((a) => rankOf(a) !== null)
       .map((a) => ({ name: a.name, description: a.description, kind: 'agent' as const, agent: a }))
-    // 用户拍板：子智能体组排最前，命令次之，技能最后
+    // 用户拍板：子智能体组排最前，命令次之，技能最后；有查询时组内按档位升序（同档短名优先）
     const order: Record<string, number> = { agent: 0, command: 1, skill: 2 }
-    return [...base, ...agentItems].sort(
-      (a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9),
-    )
+    return [...base, ...agentItems].sort((a, b) => {
+      const byKind = (order[a.kind] ?? 9) - (order[b.kind] ?? 9)
+      if (byKind !== 0 || !q) return byKind
+      return (rankOf(a) ?? 0) - (rankOf(b) ?? 0) || a.name.localeCompare(b.name)
+    })
   }, [slashItems, slashQuery, agents, t])
 
   // / 下拉打开时懒加载子智能体清单（首次；ZCode 客户端可能改过文件，每次打开刷新）
@@ -1446,11 +1458,12 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   /**
    * $ 下拉候选：slashItems 的技能子集（kind='skill'），同名按 scope 折叠
    * （官方 skillsMentionProvider 同策：workspace > plugin > user，$ 面板是执行入口
-   * 不是来源管理页），query 匹配 name/description，名称升序。
+   * 不是来源管理页），模糊打分匹配 name/description（utils/fuzzyMatch），
+   * 档位升序、名称升序兜底；空 query 全收纯名称升序（与旧行为一致）。
    */
   const filteredSkillItems = useMemo<SlashCommand[]>(() => {
     if (skillQuery === null) return []
-    const q = skillQuery.toLowerCase()
+    const q = skillQuery
     const scopePriority: Record<string, number> = { workspace: 0, plugin: 1, user: 2 }
     const byName = new Map<string, SlashCommand>()
     for (const c of slashItems) {
@@ -1462,13 +1475,12 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       }
     }
     return [...byName.values()]
-      .filter(
-        (c) =>
-          !q ||
-          c.name.toLowerCase().includes(q) ||
-          (c.description ?? '').toLowerCase().includes(q),
-      )
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap((c) => {
+        const rank = q ? fuzzyRank(q, c.name, c.description) : 0
+        return rank === null ? [] : [{ c, rank }]
+      })
+      .sort((a, b) => a.rank - b.rank || a.c.name.localeCompare(b.c.name))
+      .map((e) => e.c)
   }, [skillQuery, slashItems])
 
   /** 技能名 → 路径反查（裸 token 回显成 chip 时补路径；ref 转发同 sessionTitleResolverRef）*/
@@ -1946,8 +1958,16 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         {/* 选中子智能体 chip + 文件引用 chips（蓝色）+ 粘贴文本（灰色）+ 粘贴图片缩略图。
             技能/命令/goal chip 已内联进输入框（0.3.2 真机反馈）。对齐 cc-gui ChatInputBoxHeader：
             AttachmentList 在 ContextBar 之上，不贴输入框 */}
-        {(selectedAgent || skillRefs.length > 0 || fileRefs.length > 0 || images.length > 0) && (
+        {(selectedAgent || skillRefs.length > 0 || fileRefs.length > 0 || images.length > 0 || conversationSelections.length > 0) && (
           <div className="input-box__refs">
+            {/* 划词引用条 pill（调研 ⑩）：N 条对话引用 + popover 逐条预览/移除 */}
+            {conversationSelections.length > 0 && (
+              <SelectionRefChip
+                selections={conversationSelections}
+                onRemove={removeConversationSelection}
+                onClear={clearConversationSelections}
+              />
+            )}
             {/* 模型不支持图片提示（附件带图时）：图片会随消息保存，但发给模型前被服务端剥离 */}
             {images.length > 0 && !currentModelSupportsImages && (
               <div className="img-unsupported-tip" role="alert">
@@ -2274,6 +2294,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
           ref={wrapperRef}
           className="input-editable-wrapper"
           style={inputHeight ? { height: inputHeight, maxHeight: inputHeight } : undefined}
+          // 划词浮条黑名单标记（调研 ⑩）：输入坞内划选不出引用浮条
+          data-composer-dock="1"
         >
           <div
             ref={editorRef}

@@ -36,6 +36,9 @@ export function MarkdownBlock({ markdown, streaming = false }: Props) {
   // 工作区根：文件路径链接化解析相对路径用（currentWorkspacePath 优先——
   // worktree 场景以当前会话工作区为准）
   const workspaceRoot = useStore((s) => s.currentWorkspacePath || s.projectPath)
+  // 路径类环境变量白名单：占位符路径（%TEMP%\a.md）chip 展开用（缺陷 GY；
+  // 到达后各块经 memo 依赖自动重渲，历史消息 chip 亦补链）
+  const pathEnv = useStore((s) => s.pathEnv)
 
   // 代码块复制按钮活在 dangerouslySetInnerHTML 里，React 管不到，
   // 统一在容器上事件委托；成功反馈直接改 classList（memo 块不受影响）
@@ -81,6 +84,7 @@ export function MarkdownBlock({ markdown, streaming = false }: Props) {
             // 只有最后一段的最后一块可能是流式中（在增长），前面的块都是完整的
             isStreaming={streaming && i === pieces.length - 1 && j === blocks.length - 1}
             workspaceRoot={workspaceRoot}
+            pathEnv={pathEnv}
           />
         ))
       })}

@@ -522,6 +522,13 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                 handlePermissionRequest(serverRequestId, params)
             }
             permissionHandlerRegistered = true
+            // 凭证供给失败的用户文案（interaction/requestProviderRuntimeHeaders 的
+            // errorMessage）：协议层只产结构化原因，多语言文案在 UI 层渲染
+            // （protocol-client 纯模块不可引 ZCodeBundle——2026-11-11 评审收口）；
+            // 未注入时协议层落英文诊断兜底
+            c.authUnavailableMessage = { cause ->
+                com.zcode.ideaplugin.ui.AuthUnavailableMessages.render(cause)
+            }
             // 回合终止联动废弃待应答弹窗：挂起的反向请求随回合而生，回合死了弹窗即死
             // （服务端对未应答权限请求重试到头会自行放弃并 failed 收尾，插件此前无感知，
             // 死弹窗留到 5 分钟超时批量 decline——迟到应答风暴即 P3/P4 污染源）。

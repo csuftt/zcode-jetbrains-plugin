@@ -16,10 +16,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.zcode.ideaplugin.ZCodeBundle
 import com.zcode.ideaplugin.zCodeService
-import com.zcode.ideaplugin.protocol.ProtocolGeneration
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
@@ -29,7 +26,8 @@ import java.util.concurrent.ConcurrentHashMap
  * workspace/generateText（润色/标题同款的轻量一次性通道），结果写回提交框。
  *
  * 交互契约（cc-gui GenerateCommitMessageAction 同款）：
- *  - 生成中占位「AI 生成中…」，失败恢复用户原草稿（不丢用户手写内容）；
+ *  - 生成中占位「AI 生成中…」，模型解析就绪后 ticker 切「<模型名> 生成中…」；
+ *    失败恢复用户原草稿（不丢用户手写内容）；
  *  - 再次点击 = 取消在途生成（operationId → workspace/cancelGenerateText 插队旁路）；
  *  - 通道走 getEnhanceClient()（专用轻任务实例，不拖主 app-server 串行队列——
  *    缺陷 CZ 的根因教训；实例内含账号 overlay 推送竞态修复）。
@@ -129,14 +127,20 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
 
         // 进度感（generateText 无流式形态，用已等待秒数 ticker 表达进行中）：
         // Swing Timer 在 EDT 触发，setCommitMessage 本就要求 EDT；代际失配（重触发/
-        // 完成/失败）自动停表，不留常驻 timer
+        // 完成/失败）自动停表，不留常驻 timer。模型名由后台解析线程就绪后写入
+        // modelRef（初始占位时模型未定），下一秒 tick 自动切「<模型名> 生成中…」
         val startedAt = System.currentTimeMillis()
+        val modelRef = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val ticker = javax.swing.Timer(1000) {
             if (ACTIVE[project] !== opId) {
                 (it.source as? javax.swing.Timer)?.stop()
             } else {
                 val elapsed = (System.currentTimeMillis() - startedAt) / 1000
-                panel.setCommitMessage(ZCodeBundle.message("commit.generatingProgress", elapsed))
+                val modelName = modelRef.get()
+                panel.setCommitMessage(
+                    if (modelName != null) ZCodeBundle.message("commit.generatingModel", modelName, elapsed)
+                    else ZCodeBundle.message("commit.generatingProgress", elapsed),
+                )
             }
         }
         ticker.start()
@@ -155,11 +159,13 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
                 val extraPrompt = com.zcode.ideaplugin.ui.ZCodeCommitPromptConfig.readPrompt()
                 // 模型：统一轻任务链（轻任务专用模型 → 会话当前模型 → 首个启用渠道，
                 // 与润色/标题同源——此前硬挑账号渠道挤掉自定义渠道，issue #48）
-                val model = resolveModel()
+                val model = com.zcode.ideaplugin.ui.LightTaskModels.resolveForGeneration()
                 if (model == null) {
                     failTo(project, panel, opId, savedDraft, ZCodeBundle.message("commit.noModel"), ticker)
                     return@executeOnPooledThread
                 }
+                // 进度占位切模型名（ticker 下一秒 tick 生效；modelId 与成功日志同口径）
+                modelRef.set(model.second)
                 val ws = project.basePath ?: run {
                     failTo(project, panel, opId, savedDraft, ZCodeBundle.message("commit.noWorkspace"), ticker)
                     return@executeOnPooledThread
@@ -223,66 +229,15 @@ class ZCodeCommitMessageAction : AnAction(ZCodeBundle.message("action.commitMess
         project.zCodeService().getClient()
     }
 
-    /** NEW 代：账号渠道置顶 → provider_config 启用渠道首个模型；OLD 代：config.json 默认模型 */
-    /**
-     * 统一轻任务模型链（与润色/标题同源，issue #48 修复）：行为设置页「轻任务模型」
-     * 专用模型 → kv 会话当前模型 → 首个启用渠道首模型（账号渠道置顶），全空 null。
-     * 旧代 CLI：专用模型（config.json 构造校验）→ 默认 provider。
-     */
-    private fun resolveModel(): Pair<String, String>? {
-        val generation = try {
-            com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()?.let {
-                com.zcode.ideaplugin.protocol.ProtocolGenerations.detect(it)
-            }
-        } catch (_: Exception) {
-            null
-        }
-        val dedicated = com.zcode.ideaplugin.ui.LightTaskModels.dedicatedModel()
-        if (generation != ProtocolGeneration.NEW) {
-            // 旧代：专用模型须能在 config.json 构造出 runtimeModel（v1 形态渠道 id 直接失效）
-            if (dedicated != null &&
-                com.zcode.ideaplugin.protocol.RuntimeModels.buildRuntimeModel(dedicated.first, dedicated.second) != null
-            ) {
-                return dedicated
-            }
-            val fallback = com.zcode.ideaplugin.protocol.RuntimeModels.defaultRuntimeModel()
-                ?.get("model")?.jsonObject ?: return null
-            val pid = fallback["providerId"]?.jsonPrimitive?.contentOrNull ?: return null
-            val mid = fallback["modelId"]?.jsonPrimitive?.contentOrNull ?: return null
-            return pid to mid
-        }
-        return com.zcode.ideaplugin.ui.LightTaskModels.resolveNewCli()
-    }
-
     /** 提交框面板（三级回退，cc-gui 同款：新 workflow handler → 旧 message control） */
     private fun commitMessagePanel(e: AnActionEvent): CommitMessageI? {
         (e.getData(VcsDataKeys.COMMIT_WORKFLOW_HANDLER) as? CommitMessageI)?.let { return it }
         return e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL)
     }
 
-    /** 勾选变更集（四级回退，cc-gui 同款）：workflow UI → CheckinProjectPanel → VcsDataKeys → 全部变更 */
-    private fun userSelectedChanges(e: AnActionEvent, project: Project): Collection<Change>? {
-        e.getData(VcsDataKeys.COMMIT_WORKFLOW_HANDLER)?.let { handler ->
-            includedChangesViaReflection(handler)?.takeIf { it.isNotEmpty() }?.let { return it }
-        }
-        (e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL) as? CheckinProjectPanel)?.let { p ->
-            p.selectedChanges.takeIf { it.isNotEmpty() }?.let { return it }
-        }
-        e.getData(VcsDataKeys.CHANGES)?.takeIf { it.isNotEmpty() }?.let { return it.toList() }
-        return com.intellij.openapi.vcs.changes.ChangeListManager.getInstance(project)
-            .allChanges.takeIf { it.isNotEmpty() }
-    }
-
-    /** AbstractCommitWorkflowHandler.getUi().getIncludedChanges() 反射读取（旧版 IDE 无此 API 静默降级） */
-    private fun includedChangesViaReflection(handler: Any): Collection<Change>? {
-        return try {
-            val ui = handler.javaClass.getMethod("getUi").invoke(handler) ?: return null
-            val included = ui.javaClass.getMethod("getIncludedChanges").invoke(ui) as? Collection<*>
-            included?.filterIsInstance<Change>()
-        } catch (t: Throwable) {
-            null
-        }
-    }
+    /** 勾选变更集（四级回退，cc-gui 同款）：收集逻辑独立成 ZCodeCommitChanges 便于复用 */
+    private fun userSelectedChanges(e: AnActionEvent, project: Project): Collection<Change>? =
+        ZCodeCommitChanges.userSelectedChanges(e, project)
 
     /** 反射读当前提交框草稿（CommitMessageI 无 getter 声明） */
     private fun readCurrentDraft(panel: CommitMessageI): String = try {

@@ -25,6 +25,12 @@ import java.nio.file.Path
  */
 class AccountProviderBridgeTest {
 
+    /** PAT 缓存/定位缓存/负缓存/网络失败记录是进程级单例状态，逐用例复位保证隔离 */
+    @BeforeTest
+    fun resetPatState() {
+        ProjectAccessTokenClient.resetForTest()
+    }
+
     /** 官方 zcode-builtin.json 同构样本：6 个 zhipu-account 条目（zai/bigmodel 各三档 + off-peak） */
     private fun builtinFile(revision: Any = 30): Path {
         fun acc(pid: String, mode: String, url: String) =
@@ -96,11 +102,12 @@ class AccountProviderBridgeTest {
     // ===== PAT 换发链（2026-10-23 材料链对齐官方）=====
 
     /** PAT 全链 fake：getCustomerInfo → api_keys 列表 → access_tokens 三段响应 */
-    private fun patHttp(team: Boolean): ProjectAccessTokenClient.Http {
+    private fun patHttp(team: Boolean, onCall: () -> Unit = {}): ProjectAccessTokenClient.Http {
         fun env(data: String) = """{"code":200,"data":$data}"""
         val listBody = if (team) """{"api_keys":[{"apiKey":"key-9","name":"zcode-team-api-key","keyType":2}]}"""
         else """{"api_keys":[{"apiKey":"key-1","name":"zcode-api-key"}]}"""
         return ProjectAccessTokenClient.Http { method, url, _, _ ->
+            onCall()
             when {
                 url.endsWith("/getCustomerInfo") -> 200 to env(
                     """{"organizations":[{"organizationId":"org-1","projects":[{"projectId":"proj-1","projectType":"1"}]}]}""",
@@ -168,6 +175,98 @@ class AccountProviderBridgeTest {
                 http = patHttp(team = true),
             ),
         )
+    }
+
+    @Test
+    fun `PAT 换发网络失败返回 null 并记录 lastNetworkFailure（额度页友好提示依据）`() {
+        ProjectAccessTokenClient.resetForTest()
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val stampBefore = ProjectAccessTokenClient.lastNetworkFailureMillis
+        val brokenNet = ProjectAccessTokenClient.Http { _, _, _, _ ->
+            throw java.io.IOException("Remote host terminated the handshake")
+        }
+        // 契约：网络异常不外抛，按「材料缺失」同型返回 null（模型供给链 headersApplied:false 快速失败）
+        assertNull(
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+                patEntries(), sel, http = brokenNet,
+            ),
+        )
+        assertTrue(ProjectAccessTokenClient.lastNetworkFailureMillis > stampBefore)
+        assertEquals(
+            "IOException: Remote host terminated the handshake",
+            ProjectAccessTokenClient.networkFailureSince(stampBefore),
+        )
+        // 无新失败时不误报（UI 新鲜度判定口径）
+        assertNull(ProjectAccessTokenClient.networkFailureSince(ProjectAccessTokenClient.lastNetworkFailureMillis))
+    }
+
+    @Test
+    fun `PAT 与项目定位缓存命中后二次供给零 HTTP（旧实现每个请求都 getCustomerInfo）`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        var calls = 0
+        val http = patHttp(team = false) { calls++ }
+        val first = AccountProviderBridge.requestAuth(
+            "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+            patEntries(), sel, http = http,
+        )
+        assertEquals("pat-token", (first as AccountProviderBridge.AuthResult.Supplied).apiKey)
+        // getCustomerInfo + api_keys 列表 + access_tokens 签发
+        assertEquals(3, calls)
+        val second = AccountProviderBridge.requestAuth(
+            "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+            patEntries(), sel, http = http,
+        )
+        assertEquals("pat-token", (second as AccountProviderBridge.AuthResult.Supplied).apiKey)
+        // 定位缓存 + PAT 缓存命中：整条链零 HTTP
+        assertEquals(3, calls)
+    }
+
+    @Test
+    fun `供给失败带结构化原因（网络失败）——errorMessage 追加依据`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val brokenNet = ProjectAccessTokenClient.Http { _, _, _, _ ->
+            throw java.io.IOException("Remote host terminated the handshake")
+        }
+        val r = AccountProviderBridge.requestAuth(
+            "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+            patEntries(), sel, http = brokenNet,
+        )
+        val cause = (r as AccountProviderBridge.AuthResult.Unavailable).cause
+        val pat = cause as AccountProviderBridge.UnavailableCause.PatFailed
+        assertEquals(ProjectAccessTokenClient.FailKind.NETWORK, pat.failure.kind)
+        assertTrue(pat.failure.detail.contains("IOException"), pat.failure.detail)
+        // 英文诊断兜底也须带原始线索（协议层未注入文案渲染器时的 errorMessage 口径）
+        val diag = AccountProviderBridge.diagnosticText(cause)
+        assertTrue(diag.contains("NETWORK"), diag)
+        assertTrue(diag.contains("IOException"), diag)
+    }
+
+    @Test
+    fun `管理面 401 映射为登录态失效原因`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val expired = ProjectAccessTokenClient.Http { _, _, _, _ ->
+            401 to """{"code":401,"msg":"token expired"}"""
+        }
+        val r = AccountProviderBridge.requestAuth(
+            "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+            patEntries(), sel, http = expired,
+        )
+        val cause = (r as AccountProviderBridge.AuthResult.Unavailable).cause
+        val pat = cause as AccountProviderBridge.UnavailableCause.PatFailed
+        assertEquals(ProjectAccessTokenClient.FailKind.UNAUTHORIZED, pat.failure.kind)
+        assertTrue(pat.failure.detail.contains("401"), pat.failure.detail)
+    }
+
+    @Test
+    fun `access_token 缺失映射为 NoAccessToken 结构化原因`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val r = AccountProviderBridge.requestAuth(
+            "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+            mapOf("oauth:bigmodel:user_info" to """{"id":"u1"}"""), sel, http = patHttp(team = false),
+        )
+        val cause = (r as AccountProviderBridge.AuthResult.Unavailable).cause
+        assertEquals("bigmodel", (cause as AccountProviderBridge.UnavailableCause.NoAccessToken).family)
     }
 
     @Test

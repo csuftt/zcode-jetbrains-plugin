@@ -13,6 +13,8 @@
     "searchSession": "搜索会话",
     "history": "历史记录",
     "settings": "设置",
+    "detachPin": "窗口置顶",
+    "detachPinOff": "取消置顶",
     "sessionTitleAria": "会话标题",
     "saveTitleAria": "保存标题",
     "cancelEditAria": "取消编辑",
@@ -251,5 +253,23 @@
     "confirmTitle": "重发这条消息？",
     "confirmMessage": "将按原文重新发送并重新生成回复，当前这轮回复会被裁掉。",
     "confirmOk": "重发"
+  },
+  "selections": {
+    "addToTask": "添加到当前任务",
+    "copy": "复制",
+    "count": "{{count}} 条对话引用",
+    "remove": "移除全部引用",
+    "removeOne": "移除这条引用",
+    "type": {
+      "user": "用户消息",
+      "assistant": "助手消息",
+      "reasoning": "推理内容",
+      "tool": "工具结果"
+    },
+    "limit": {
+      "single": "单条引用最多 8,000 个字符。",
+      "count": "最多可添加 8 条对话引用。",
+      "total": "对话引用总计最多 16,000 个字符。"
+    }
   }
 }

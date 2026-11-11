@@ -191,13 +191,20 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  * @param md markdown 文本
  * @param isStreaming 是否在流式中（true 时先做 streamSafe 补全）
  * @param workspaceRoot 工作区根（文件路径链接化解析相对路径用；空 = 仅绝对路径可点）
+ * @param pathEnv 路径类环境变量白名单（占位符路径展开用，缺陷 GY；null=未到达，
+ *   占位符不链接）
  */
-export function renderMarkdown(md: string, isStreaming: boolean = false, workspaceRoot: string = ''): string {
+export function renderMarkdown(
+  md: string,
+  isStreaming: boolean = false,
+  workspaceRoot: string = '',
+  pathEnv?: Record<string, string> | null,
+): string {
   const safe = isStreaming ? makeStreamSafe(md) : md
   const rawHtml = marked.parse(safe, { async: false }) as string
   // linkify 在 DOMPurify 之后：.md-file-link 的 span/data-* 由我们自己注入，
   // 用 DOM API 构造（textContent/setAttribute），安全性不依赖清洗
-  return linkifyFilePaths(DOMPurify.sanitize(rawHtml, PURIFY_CONFIG), workspaceRoot)
+  return linkifyFilePaths(DOMPurify.sanitize(rawHtml, PURIFY_CONFIG), workspaceRoot, pathEnv)
 }
 
 /** 从代码块提取语言标签（用于显示）*/

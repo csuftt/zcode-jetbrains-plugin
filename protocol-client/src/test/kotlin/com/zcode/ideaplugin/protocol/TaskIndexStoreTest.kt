@@ -288,6 +288,58 @@ class TaskIndexStoreTest {
     }
 
     @Test
+    fun `autoArchive skips stale index row when session still active in cli db`() {
+        createDbs()
+        // 缺陷GX 回归：tasks 索引行 updated_at 停在远古（插件补行是操作时刻的静态快照，
+        // 会话活跃不刷新），但会话在 cli 库持续活跃到未来——单源判据必误归档，
+        // 双源 MAX 判据应豁免
+        node("-e", """
+            const {DatabaseSync} = require('node:sqlite');
+            const t = new DatabaseSync(process.env.T);
+            t.prepare(`INSERT INTO tasks (workspace_key, workspace_path, task_id, title, task_status, created_at, updated_at, pinned, meta_json)
+              VALUES ('G:/proj/demo', 'G:/proj/demo', 'sess_gx', '活跃会话', 'completed', 1000, 1000, 0, '{}')`).run();
+            const s = new DatabaseSync(process.env.S);
+            // 基线行推到未来避免混入段2补归档；sess_gx 在 cli 库活跃到未来
+            s.prepare('UPDATE session SET time_updated = ? WHERE id = ?').run(Date.now() + 999999, 'sess_test-1');
+            s.prepare('INSERT INTO session (id, path, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?)')
+              .run('sess_gx', 'G:/proj/demo', '活跃会话', 1000, Date.now() + 999999);
+        """.trimIndent(), env = mapOf("T" to tasksDb.toString(), "S" to sessDb.toString()))
+
+        val archived = store.autoArchiveStale(sessDb, "G:/proj/demo", 7)
+
+        assertTrue(archived.isEmpty(), "索引行 stale 但会话真实活跃，不应归档: $archived")
+        assertTrue("\"archived\":0" in taskRow("sess_gx")!!, "活跃会话的索引行不应被置归档")
+    }
+
+    @Test
+    fun `upsert stamps real session time except restore keeps now`() {
+        createDbs()
+        // 手动归档补行：updated_at 取会话真实活动时间（2000），非写操作时刻
+        store.setArchived("sess_test-1", sessDb, archive = true)
+        assertTrue("\"updated_at\":2000," in taskRow("sess_test-1")!!, "补行 updated_at 应用 session.time_updated: ${taskRow("sess_test-1")}")
+        // 已有行恢复（UPDATE 分支）：updated_at 刷成恢复时刻——恢复即用户意图，
+        // 旧会话若沿用真实时间会在下一轮扫描被立即扫回归档页
+        val beforeRestore = System.currentTimeMillis()
+        store.setArchived("sess_test-1", sessDb, archive = false)
+        val restored = taskRow("sess_test-1")!!
+        assertTrue("\"archived\":0" in restored)
+        val restoredAt = restored.substringAfter("\"updated_at\":").substringBefore(",").toLong()
+        assertTrue(restoredAt >= beforeRestore, "恢复应把 updated_at 刷成恢复时刻: $restoredAt")
+
+        // 无行直接恢复（INSERT 分支）：同样保 now
+        node("-e", """
+            const {DatabaseSync} = require('node:sqlite');
+            const s = new DatabaseSync(process.env.S);
+            s.prepare('INSERT INTO session (id, path, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?)')
+              .run('sess_r', 'G:/proj/demo', '恢复会话', 1000, 2000);
+        """.trimIndent(), env = mapOf("S" to sessDb.toString()))
+        store.setArchived("sess_r", sessDb, archive = false)
+        val r = taskRow("sess_r")!!
+        val rAt = r.substringAfter("\"updated_at\":").substringBefore(",").toLong()
+        assertTrue(rAt >= System.currentTimeMillis() - 60_000, "无行恢复补行 updated_at 应为 now: $r")
+    }
+
+    @Test
     fun `listTasks reads back rows and caches by fingerprint`() {
         createDbs()
         assertTrue(store.listTasks().isEmpty(), "初始空")

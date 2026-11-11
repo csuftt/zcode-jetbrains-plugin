@@ -23,6 +23,8 @@ interface Props {
   danger?: boolean
   /** 纯提示模式：不渲染取消按钮（信息提醒弹窗，确认即关闭）*/
   cancelable?: boolean
+  /** 顶部锚定（Header 工具排按钮触发的确认弹窗）：贴顶栏下方渲染，缩短与触发按钮的距离 */
+  topAligned?: boolean
   onConfirm: () => void
   onExtra?: () => void
   onCancel: () => void
@@ -36,13 +38,18 @@ export function ConfirmDialog({
   extraText,
   danger = false,
   cancelable = true,
+  topAligned = false,
   onConfirm,
   onExtra,
   onCancel,
 }: Props) {
   const { t } = useTranslation()
   return (
-    <div className="modal-overlay" onClick={cancelable ? onCancel : onConfirm} role="presentation">
+    <div
+      className={`modal-overlay${topAligned ? ' modal-overlay--top' : ''}`}
+      onClick={cancelable ? onCancel : onConfirm}
+      role="presentation"
+    >
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
         <p>{message}</p>

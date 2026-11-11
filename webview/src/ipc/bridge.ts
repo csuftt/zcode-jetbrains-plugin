@@ -2426,6 +2426,12 @@ flowchart LR
         requestId: req.requestId,
         results: req.paths.map((path) => ({ path, exists: true })),
       }
+    case 'getPathEnv':
+      // mock：占位符展开白名单（dev 用假值形态占位，展开语义的验收须真机）
+      return {
+        op: 'getPathEnvResult',
+        vars: { TEMP: 'C:/Users/demo/AppData/Local/Temp', TMP: 'C:/Users/demo/AppData/Local/Temp', HOME: 'C:/Users/demo' },
+      }
     case 'openFileSystem':
       // mock：生产走 Java Desktop.open 调系统默认程序，dev 无真实产物文件仅记日志
       console.info('[mock] openFileSystem', req.filePath)

@@ -24,6 +24,8 @@ import type { QuotaBannerTrigger } from '@/utils/quotaWindows'
 import { isDefaultSessionTitle } from '@/utils/format'
 import { mergeSessionsIndex } from '@/utils/sessionIndexMerge'
 import type { SessionIndexEntry } from '@/types/messages'
+import { validateAddSelection } from '@/utils/conversationSelections'
+import type { ConversationSelection, SelectionAddError, SelectionContentType } from '@/utils/conversationSelections'
 import i18n from '@/i18n/config'
 
 /** 渠道/模型启停变更（modelToggled 应答与 onModelsChanged 广播同源）合并进管理页清单。
@@ -133,6 +135,10 @@ let streamWatchTimer: ReturnType<typeof setInterval> | null = null
 // 防「正在按编辑后的消息重新生成」指示器永久悬挂、队列 flush 被无限抑制
 const EDIT_ACK_TIMEOUT_MS = 90_000
 let editAckTimer: ReturnType<typeof setTimeout> | null = null
+
+// 占位符路径展开白名单（缺陷 GY）请求节流：应答丢失不粘滞（缺陷 FM 教训），超窗允许重发
+const PATH_ENV_RETRY_MS = 10_000
+let pathEnvRequestedAt = 0
 
 function cancelEditAckTimeout(): void {
   if (editAckTimer) {
@@ -930,6 +936,9 @@ function sessionResetBase(): Partial<StoreState> {
     turnFileChangesDialogFor: null,
     turnFileChangesDialogPath: null,
     turnFileChangesDialogRewind: false,
+    // 划词引用挂的是当前会话时间线的行（rowId 按会话消息 id 生成），切会话必须清空
+    // ——带着旧会话的引用发到新会话会让 AI 读到无从解析的上下文
+    conversationSelections: [],
     subagentActivities: [],
     subagents: [],
     subagentDetail: null,
@@ -1138,6 +1147,8 @@ interface StoreState {
   envStatus: EnvStatus | null
   /** envSave 请求进行中（设置页环境 tab 保存按钮禁用/转圈）*/
   envSaving: boolean
+  /** 路径类环境变量白名单（getPathEnvResult 落位；null=尚未到达，占位符路径暂不展开）。缺陷 GY */
+  pathEnv: Record<string, string> | null
   /** EnvBanner「去设置」的跳转意图：App 切 settings 视图同时置位，BasicSettingsView 消费后清除 */
   pendingSettingsSection: 'env' | 'agents' | 'models' | 'hooks' | null
 
@@ -1676,6 +1687,24 @@ interface StoreState {
   // 切会话/删当前会话/Java 自动 newSession/createSession 响应均不动它
   currentFileEnabled: boolean
 
+  // ============ 划词引用（conversation selections，调研 ⑩）============
+  // 时间线划选文字 → 浮条「添加到当前任务」挂到输入框；发送时以 # userselect:
+  // 围栏块拼在消息末尾（纯 prompt 约定，官方客户端双向互认）。限额三件套与
+  // 去重判定在 validateAddSelection（纯函数）；会话切换随 sessionResetBase 清空
+  conversationSelections: ConversationSelection[]
+  /** 追加一条引用（校验失败返回原因：single/count/total；duplicate 静默返回 null 的上层约定见实现） */
+  addConversationSelection: (candidate: { rowId: string; contentType: SelectionContentType; text: string }) => SelectionAddError | null
+  removeConversationSelection: (id: string) => void
+  clearConversationSelections: () => void
+
+  // ============ 会话弹窗态（调研 ⑧）============
+  // detached=本面板在独立窗口（Header 置顶按钮的显隐权威），pinned=窗口置顶态。
+  // Java 推送（弹出默认置顶/搬回/切换）与 toggleDetachPin 应答同形，case 双源等价消费。
+  // 面板级态：不随切会话清空（sessionResetBase 不含），搬回主窗由 Java 推 detached=false 收按钮
+  detachWindow: { detached: boolean; pinned: boolean }
+  /** 切换弹窗置顶（Java AWT setAlwaysOnTop 是权威，新态经 detachWindowState 推送回流） */
+  toggleDetachPin: () => void
+
   // actions
   init: () => void
   loadSessions: () => void
@@ -1921,6 +1950,8 @@ interface StoreState {
   setPendingSettingsSection: (section: 'env' | 'agents' | 'models' | 'hooks' | null) => void
   /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
   checkEnv: () => void
+  /** 拉取路径类环境变量白名单（占位符路径展开，缺陷 GY；幂等单飞+超窗重发） */
+  fetchPathEnv: () => void
   /**
    * 保存环境路径配置：undefined=不改该项，''=清除（回退自动探测）。
    * 后端验证（node spawn --version、cli 文件存在）失败不落盘，回 error（带 envStatus）。
@@ -2056,6 +2087,7 @@ export const useStore = create<StoreState>((set, get) => ({
   sessionStatsReady: false,
   envStatus: null,
   envSaving: false,
+  pathEnv: null,
   pendingSettingsSection: null,
   proxyConfig: null,
   proxySaving: false,
@@ -2139,6 +2171,8 @@ export const useStore = create<StoreState>((set, get) => ({
   askUserPendingActive: false,
   currentFileRef: null,
   currentFileEnabled: false,
+  conversationSelections: [],
+  detachWindow: { detached: false, pinned: false },
 
   models: [],
   modelsRefreshing: false,
@@ -2385,6 +2419,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // 后续变化由 EditorContextTracker 200ms 防抖主动推送覆盖
       get().requestCurrentFile()
       get().checkEnv()
+      get().fetchPathEnv()
       get().loadSessions()
       get().loadModels()
       startQuotaPolling()
@@ -2402,6 +2437,7 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ connectionStatus: 'mock' })
       console.log(`[store] 测试环境，连接=mock，workspace=${getWorkspacePath() || '(空)'}`)
       get().checkEnv()
+      get().fetchPathEnv()
       get().loadSessions()
       get().loadModels()
       startQuotaPolling()
@@ -2427,6 +2463,7 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ connectionStatus: 'mock' })
       console.log(`[store] 桥等待超时，回退 mock（低频恢复轮询已挂），workspace=${getWorkspacePath() || '(空)'}`)
       get().checkEnv()
+      get().fetchPathEnv()
       get().loadSessions()
       get().loadModels()
       // 关联目录（mock 表非空）：技能/MCP/钩子页的浏览目录下拉数据源，纯 mock 态也要有
@@ -2543,6 +2580,28 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setCurrentFileEnabled: (enabled) => {
     set({ currentFileEnabled: enabled })
+  },
+
+  addConversationSelection: (candidate) => {
+    // 校验/去重/限额全在纯函数（官方 Dfe 同序）：single/count/total 返回原因给浮条
+    // 内联提示；duplicate 按官方语义静默（返回 null 且不改动——浮条保留但无反馈）
+    const { list, error } = validateAddSelection(get().conversationSelections, candidate)
+    if (error) return error === 'duplicate' ? null : error
+    set({ conversationSelections: list })
+    return null
+  },
+
+  removeConversationSelection: (id) => {
+    set({ conversationSelections: get().conversationSelections.filter((s) => s.id !== id) })
+  },
+
+  clearConversationSelections: () => {
+    set({ conversationSelections: [] })
+  },
+
+  toggleDetachPin: () => {
+    // 置顶权威在 Java（AWT Window.setAlwaysOnTop）；新态经 detachWindowState 推送回流
+    sendToJava({ op: 'toggleDetachPin' })
   },
 
   selectSession: (session) => {
@@ -2963,9 +3022,17 @@ export const useStore = create<StoreState>((set, get) => ({
     // 旧会话的流式事件被 handleStreamBatch/Event 的 currentSessionId 过滤拦截，
     // 不会串扰待命态。clearTabSession 让 Java 侧同步清 TabState 绑定 + 标签 tooltip
     //（否则重启恢复会绑回旧会话）
-    get().requeueScheduledQueuesFor(get().currentSessionId)
+    // 落位忠于覆盖前会话目录（2026-11-10）：有会话时把落位同步为当前会话目录——
+    // selectSession 覆盖打开别目录会话不回写落位（设计如此，切回不漂移），若不同步，
+    // 新会话落回 chips 遗留的旧落位目录而非激活标签会话目录。同步后待命列表过滤/
+    // chips 高亮/首条消息 createSession 全链跟随。历史页待命态调用（无会话）与
+    // boot 恢复标签（currentWorkspacePath 空、落位已是会话目录）条件不满足，行为不变
+    const prevSessionId = get().currentSessionId
+    const prevWorkspacePath = get().currentWorkspacePath
+    get().requeueScheduledQueuesFor(prevSessionId)
     set({
       currentSessionId: null,
+      ...(prevSessionId && prevWorkspacePath ? { activeWorkspacePath: prevWorkspacePath } : {}),
       // 切换会话置位的首拉标志必须在此解除：首拉快照回来会被 case 'messages' 的
       // sessionId 守卫整包丢弃（currentSessionId 已是 null），applyMessagesSnapshot
       // 永不执行，「加载消息中」永久卡死（缺陷FH：加载中点 + 覆盖当前标签 → 标签假死）
@@ -3962,6 +4029,14 @@ export const useStore = create<StoreState>((set, get) => ({
     sendToJava({ op: 'checkEnv' })
   },
 
+  fetchPathEnv: () => {
+    if (get().pathEnv !== null) return
+    const now = Date.now()
+    if (pathEnvRequestedAt && now - pathEnvRequestedAt < PATH_ENV_RETRY_MS) return
+    pathEnvRequestedAt = now
+    sendToJava({ op: 'getPathEnv' })
+  },
+
   saveEnvConfig: (nodePath?: string, cliPath?: string, cdpPortFile?: string) => {
     set({ envSaving: true })
     // undefined 字段 JSON.stringify 自动省略 = 后端"不改该项"约定；'' = 清除
@@ -4520,6 +4595,11 @@ export function handleResponse(
     case 'projectPath':
       // 启动兜底应答：写回注入失败的 projectPath（该字段仅 init 与此处两处写入）
       if (msg.workspacePath) set({ projectPath: msg.workspacePath })
+      break
+    case 'detachWindowState':
+      // 会话弹窗态（⑧）：Java 推送（弹出默认置顶/搬回/切换/就绪补推）与 toggleDetachPin
+      // 应答同形，双源等价消费；面板级态不随切会话清空
+      set({ detachWindow: { detached: msg.detached, pinned: msg.pinned } })
       break
     case 'linkedWorkspaces': {
       // 关联目录全量快照（get/add/remove 三 op 共用应答）
@@ -5531,6 +5611,12 @@ export function handleResponse(
     case 'envStatus':
       // checkEnv 查询 / envSave 保存成功重检的返回
       set({ envStatus: msg.status, envSaving: false })
+      break
+
+    case 'getPathEnvResult':
+      // 路径类环境变量白名单（缺陷 GY）：正文 chip 解析与产物卡门控用它同步展开占位符。
+      // 到达后引用了 pathEnv 的组件经订阅自动重算（历史消息 chip / 产物卡二段补出）
+      set({ pathEnv: msg.vars ?? {} })
       break
 
     case 'proxyConfig':

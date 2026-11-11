@@ -50,6 +50,9 @@
         <notificationGroup id="ZCode" displayType="BALLOON"/>
         <!-- 项目启动即预热自动归档调度器（缺陷BH：懒加载导致重启后不碰归档 tab 就静默不跑） -->
         <postStartupActivity implementation="com.zcode.ideaplugin.ZCodeProjectActivity"/>
+        <!-- 状态栏 Widget（监督面入口前移：运行态 + 点击聚焦 + 双击新会话，调研 ③） -->
+        <statusBarWidgetFactory id="ZCode.StatusBarWidget"
+                                implementation="com.zcode.ideaplugin.ui.statusbar.ZCodeStatusBarWidgetFactory"/>
     </extensions>
 
     <actions>
@@ -88,6 +91,27 @@
                 class="com.zcode.ideaplugin.action.SendConsoleTextToInputAction"
                 icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
             <add-to-group group-id="ConsoleEditorPopupMenu" anchor="first"/>
+        </action>
+        <!-- 控制台右键「发送最近错误」（无选区版，调研 ④）：锚点提取最近错误段送输入框诊断 -->
+        <action id="ZCode.SendRecentErrorToInput"
+                class="com.zcode.ideaplugin.action.SendRecentErrorToInputAction"
+                icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
+            <add-to-group group-id="ConsoleEditorPopupMenu" anchor="after" relative-to-action="ZCode.SendConsoleTextToInput"/>
+        </action>
+        <!-- 测试树右键「让 ZC GUI 解释此次失败」（调研 ④ 加分项）：
+             TestTreePopupMenu 是 SM 树共用组（2023.3 常量池探针实证），testProxy 按名取 -->
+        <action id="ZCode.ExplainTestFailure"
+                class="com.zcode.ideaplugin.action.ExplainTestFailureAction"
+                icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
+            <add-to-group group-id="TestTreePopupMenu" anchor="last"/>
+        </action>
+        <!-- diff 视图右键「就选中改动问 ZC GUI」（验收对话桥，调研 ⑯）：
+             必须挂 Diff.EditorPopupMenu——diff 编辑器右键非标准 EditorPopupMenu
+             （TextDiffViewerUtil 后装 handler 先赢，标准组不可达，2023.3 反汇编实证） -->
+        <action id="ZCode.DiffSelectionToInput"
+                class="com.zcode.ideaplugin.action.DiffSelectionToInputAction"
+                icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
+            <add-to-group group-id="Diff.EditorPopupMenu" anchor="last"/>
         </action>
         <!-- 右键复制选中代码的路径+行号引用到剪贴板（对齐 cc-gui CopySelectionReferenceAction） -->
         <action id="ZCode.CopySelectionReference"

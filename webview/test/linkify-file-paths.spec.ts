@@ -84,6 +84,59 @@ describe('resolveFileLink 解析与从严校验', () => {
   })
 })
 
+describe('resolveFileLink 占位符路径展开（缺陷 GY）', () => {
+  const ENV = { TEMP: 'C:/Users/demo/AppData/Local/Temp', TMPDIR: '/tmp', HOME: 'C:/Users/demo' }
+
+  it.each([
+    ['Windows %VAR%', '%TEMP%\\handoff-db-adapt-guides.md', 'C:/Users/demo/AppData/Local/Temp/handoff-db-adapt-guides.md'],
+    ['Windows %VAR% 正斜杠', '%TEMP%/a/b.md', 'C:/Users/demo/AppData/Local/Temp/a/b.md'],
+    ['Unix $VAR', '$TMPDIR/out.md', '/tmp/out.md'],
+    ['Unix ${VAR}', '${TMPDIR}/out.md', '/tmp/out.md'],
+    ['小写变量名兜底大写键', '%temp%/a.md', 'C:/Users/demo/AppData/Local/Temp/a.md'],
+    ['占位符+行号后缀', '%TEMP%/a.md:7', 'C:/Users/demo/AppData/Local/Temp/a.md'],
+  ])('展开后按绝对路径：%s', (_name, raw, absPath) => {
+    const target = resolveFileLink(raw, ROOT, ENV)
+    expect(target).not.toBeNull()
+    expect(target!.absPath).toBe(absPath)
+    // 显示文本保留 AI 原文（含占位符与行号后缀）
+    expect(target!.display).toBe(raw)
+  })
+
+  it.each([
+    ['白名单未到达（null）', '%TEMP%/a.md', null],
+    ['变量不在白名单', '%UNKNOWN_VAR%/a.md', ENV],
+  ])('不可展开不链接：%s', (_name, raw, vars) => {
+    expect(resolveFileLink(raw, ROOT, vars)).toBeNull()
+  })
+
+  it('~ 开头维持拒绝（展开器不负责 ~，官方对齐）', () => {
+    expect(resolveFileLink('~/.zcode/v2/setting.json', ROOT, ENV)).toBeNull()
+  })
+
+  it('展开后的目录形态按目录下发', () => {
+    expect(resolveFileLink('%TEMP%/sub/', ROOT, ENV)!.absPath).toBe('C:/Users/demo/AppData/Local/Temp/sub/')
+  })
+
+  it('HTML 后处理：占位符 chip 带真实路径，不可展开时不产生 chip', () => {
+    const ok = linkifyFilePaths('<p><code>%TEMP%/a.md</code></p>', ROOT, ENV)
+    expect(ok).toContain('md-file-link')
+    expect(ok).toContain('data-file-path="C:/Users/demo/AppData/Local/Temp/a.md"')
+    const bad = linkifyFilePaths('<p><code>%UNKNOWN_VAR%/a.md</code></p>', ROOT, ENV)
+    expect(bad).not.toContain('md-file-link')
+  })
+
+  it('真实形态回归：Java canonical 值自带反斜杠，展开后仍按绝对路径（2026-11-10 真机实锤）', () => {
+    // pathEnv 实际下发值是 canonicalPath 原生形态（反斜杠），非理想化正斜杠——
+    // 展开字面拼接引入反斜杠后若不再归一，C:\ 过不了盘符判定被当相对路径拼回 workspace
+    const winEnv = { TEMP: 'C:\\Users\\Administrator\\AppData\\Local\\Temp' }
+    const target = resolveFileLink('%TEMP%\\handoff-db-adapt-guides.md', ROOT, winEnv)
+    expect(target).not.toBeNull()
+    expect(target!.absPath).toBe('C:/Users/Administrator/AppData/Local/Temp/handoff-db-adapt-guides.md')
+    const ok = linkifyFilePaths('<p><code>%TEMP%\\handoff-db-adapt-guides.md</code></p>', ROOT, winEnv)
+    expect(ok).toContain('data-file-path="C:/Users/Administrator/AppData/Local/Temp/handoff-db-adapt-guides.md"')
+  })
+})
+
 describe('linkifyFilePaths HTML 后处理', () => {
   it('行内 code 里的路径链接化（span 属性 + 原文显示）', () => {
     const out = linkifyFilePaths('<p>改动在 <code>webview/src/a.ts:12</code> 完成</p>', ROOT)

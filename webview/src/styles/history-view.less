@@ -468,6 +468,16 @@
   z-index: 1000;
 }
 
+/* 顶部锚定变体（ConfirmDialog topAligned，Header 工具排按钮触发的确认弹窗）：
+   弹窗贴顶栏下方渲染，缩短与触发按钮的距离（用户反馈 2026-11-10：弹窗居中离按钮太远） */
+.modal-overlay--top {
+  align-items: flex-start;
+}
+
+.modal-overlay--top .modal-content {
+  margin-top: 52px; /* ChatHeader（padding 8px×2 + 内容 ≈48px）+ 4px 呼吸空隙 */
+}
+
 .modal-content {
   background: var(--bg-elevated);
   border: 1px solid var(--border-primary);

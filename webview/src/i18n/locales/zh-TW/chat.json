@@ -13,6 +13,8 @@
     "searchSession": "搜尋會話",
     "history": "歷史記錄",
     "settings": "設定",
+    "detachPin": "視窗置頂",
+    "detachPinOff": "取消置頂",
     "sessionTitleAria": "會話標題",
     "saveTitleAria": "儲存標題",
     "cancelEditAria": "取消編輯",
@@ -241,5 +243,23 @@
     "confirmTitle": "重發這條訊息？",
     "confirmMessage": "將按原文重新發送並重新生成回覆，目前這輪回覆會被裁掉。",
     "confirmOk": "重發"
+  },
+  "selections": {
+    "addToTask": "加入目前任務",
+    "copy": "複製",
+    "count": "{{count}} 條對話引用",
+    "remove": "移除全部引用",
+    "removeOne": "移除這條引用",
+    "type": {
+      "user": "使用者訊息",
+      "assistant": "助理訊息",
+      "reasoning": "推理內容",
+      "tool": "工具結果"
+    },
+    "limit": {
+      "single": "單條引用最多 8,000 個字元。",
+      "count": "最多可加入 8 條對話引用。",
+      "total": "對話引用總計最多 16,000 個字元。"
+    }
   }
 }

@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import '../styles/header.less'
+import { useStore } from '@/store/useStore'
 import { ConfirmDialog } from './ConfirmDialog'
 
 /** 返回箭头（cc-gui Icons.tsx BackIcon 简化版）*/
@@ -81,6 +82,10 @@ export function ChatHeader({
   wsBadge = null,
 }: Props) {
   const { t } = useTranslation()
+  // 会话弹窗态（调研 ⑧）：弹窗期 Header 挂置顶按钮（默认置顶，Java 弹出时已开），
+  // 搬回主窗由 Java 推 detached=false 收起；面板级 store 态，切会话不清
+  const detachWindow = useStore((s) => s.detachWindow)
+  const toggleDetachPin = useStore((s) => s.toggleDetachPin)
   // settings 视图不渲染（SettingsView 自带关闭入口）
   if (currentView === 'settings') return null
 
@@ -144,6 +149,18 @@ export function ChatHeader({
       <div className="header-right">
         {currentView === 'chat' && (
           <>
+            {/* 弹窗置顶（调研 ⑧，2026-11-11 用户定稿默认置顶）：仅弹窗态渲染；
+                态样式区分钉住/未钉，点击切 Java 侧 setAlwaysOnTop */}
+            {detachWindow.detached && (
+              <button
+                className={`icon-button${detachWindow.pinned ? ' icon-button--pinned' : ''}`}
+                onClick={toggleDetachPin}
+                data-tooltip={detachWindow.pinned ? t('chat.header.detachPinOff') : t('chat.header.detachPin')}
+                aria-label={detachWindow.pinned ? t('chat.header.detachPinOff') : t('chat.header.detachPin')}
+              >
+                <span className="codicon codicon-pin" />
+              </button>
+            )}
             <button
               className="icon-button"
               onClick={onNewSession}

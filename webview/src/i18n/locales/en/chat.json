@@ -13,6 +13,8 @@
     "searchSession": "Search conversation",
     "history": "History",
     "settings": "Settings",
+    "detachPin": "Keep window on top",
+    "detachPinOff": "Unpin window",
     "sessionTitleAria": "Session title",
     "saveTitleAria": "Save title",
     "cancelEditAria": "Cancel editing",
@@ -251,5 +253,23 @@
     "confirmTitle": "Resend this message?",
     "confirmMessage": "The message will be resent as-is to regenerate the reply. The current reply will be discarded.",
     "confirmOk": "Resend"
+  },
+  "selections": {
+    "addToTask": "Add to current task",
+    "copy": "Copy",
+    "count": "{{count}} conversation selections",
+    "remove": "Remove all selections",
+    "removeOne": "Remove this selection",
+    "type": {
+      "user": "User message",
+      "assistant": "Assistant message",
+      "reasoning": "Reasoning",
+      "tool": "Tool result"
+    },
+    "limit": {
+      "single": "A single selection can be at most 8,000 characters.",
+      "count": "You can add at most 8 conversation selections.",
+      "total": "Conversation selections can total at most 16,000 characters."
+    }
   }
 }

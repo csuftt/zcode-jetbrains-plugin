@@ -793,6 +793,9 @@ class ZCodeToolWindowPanel(
                         // store init（InputBox 的监听注册先于 App init effect），此刻推送必达
                         val pending = drainPendingInputRefs()
                         if (pending.isNotEmpty()) pushFilesToInput(pending)
+                        // 弹窗态补推（⑧）：webview 在弹窗期重载丢 detachWindowState，
+                        // 就绪信号补推恢复 Header 置顶按钮显隐/态
+                        SessionDetachWindow.pushDetachStateIfActive(project, this)
                     }
                 }
                 log.info("JS message received: ${LogRedactor.redact(request.take(600)).take(200)}")
@@ -1388,6 +1391,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "createTab" -> handleCreateTab(msg)
                         "openExternal" -> handleOpenExternal(msg)
                         "toggleBrowserPane" -> handleToggleBrowserPane()
+                        "toggleDetachPin" -> handleToggleDetachPin()
                         "setTabTitle" -> handleSetTabTitle(msg)
                         "clearTabSession" -> handleClearTabSession()
                         "appearanceSave" -> handleAppearanceSave(msg)
@@ -1401,6 +1405,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "remoteStatus" -> handleRemote { it.statusJson() }
                         "remoteUnpair" -> handleRemote { it.unpair() }
                         "checkEnv" -> handleCheckEnv()
+                        "getPathEnv" -> handleGetPathEnv()
                         "envSave" -> handleEnvSave(msg)
                         "getCurrentFile" -> handleGetCurrentFile(msg)
                         else -> errorResponse("未知 op: $op")
@@ -1899,6 +1904,17 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
+    /** 路径类环境变量白名单下发（缺陷 GY）：webview 正文 chip 解析与产物卡门控匹配在
+     *  纯前端同步展开 %TEMP% 等占位符，需一次性拿到真实值；只发路径语义白名单，不整包 env */
+    private fun handleGetPathEnv(): JsonObject = buildJsonObject {
+        put("op", "getPathEnvResult")
+        put("vars", buildJsonObject {
+            for ((key, value) in com.zcode.ideaplugin.env.PathEnvExpansion.pathEnvVars()) {
+                put(key, value)
+            }
+        })
+    }
+
     /** 环境校验失败响应：error 消息 + 当前 envStatus（前端刷新提醒条） */
     private fun envErrorResponse(msg: String): JsonObject = buildJsonObject {
         put("op", "error")
@@ -2037,6 +2053,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 待命↔落位迁移瞬间清/设，平时不覆盖 handleSetTabTitle 的会话标题。EDT。
      */
     private fun applyTabDisplayName() {
+        // 状态栏 Widget 与标签 ● 同源同拍刷新（监督面入口前移，调研 ③）；invokeLater 内部自行排队
+        com.zcode.ideaplugin.ui.statusbar.ZCodeStatusBarWidget.refreshFor(project)
         val content = attachedContent ?: return
         val standby = isStandbyUnbound()
         val wasStandby = lastAppliedStandby
@@ -2068,6 +2086,17 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /** 本标签当前是否为无会话空标签（空心色块标识 + 批量关闭 + 关闭免确认共用判据）*/
     fun isStandbyUnbound(): Boolean =
         isStandbyUnbound(currentSessionId, initialSessionId, frontendReady)
+
+    /** 面板所属 project（状态栏 Widget / 标签弹窗等外部监督面按项目过滤用；字段本身 private）*/
+    internal fun getOwningProject(): Project = project
+
+    /** 是否已弹出独立窗口（搬运式标签弹窗 ⑧；ContentManager 事件守卫按它豁免）*/
+    @Volatile
+    private var detachedToWindow = false
+    fun markDetachedToWindow(detached: Boolean) {
+        detachedToWindow = detached
+    }
+    fun isDetachedToWindow(): Boolean = detachedToWindow
 
     /** 本标签生成中状态变化（turn.started/completed/failed 驱动）*/
     private fun setTabStreaming(active: Boolean) {
@@ -5019,7 +5048,21 @@ if (!window.__ZCODE_LOG_HOOK__) {
      */
     private fun loadQuotaCredentialsV2(): Pair<QuotaCredentials?, String>? {
         val zcodePath = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()
-        com.zcode.ideaplugin.protocol.AccountProviderBridge.selectedAccountCredential(zcodePath)?.let { c ->
+        // PAT 换发链网络失败（VPN/代理切换是高频诱因）：直接给友好提示且不落回 v1 链——
+        // 账号渠道用户在 v1 链只会得到误导性的「未找到带 apiKey 的启用 provider」
+        val patFailStamp = com.zcode.ideaplugin.protocol.ProjectAccessTokenClient.lastNetworkFailureMillis
+        val accountCred = try {
+            com.zcode.ideaplugin.protocol.AccountProviderBridge.selectedAccountCredential(zcodePath)
+        } catch (e: Exception) {
+            log.warn("quota v2: account credential resolve error: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        if (accountCred == null) {
+            com.zcode.ideaplugin.protocol.ProjectAccessTokenClient.networkFailureSince(patFailStamp)?.let { reason ->
+                return null to friendlyNetworkMessage(reason)
+            }
+        }
+        accountCred?.let { c ->
             log.info("quota credentials: provider=${c.providerId} (${c.providerName}, account-channel) keyLen=${c.apiKey.length}")
             return quotaCredentialsOf(c.baseUrl, c.apiKey, c.providerId, c.providerName)?.let { it to "" }
                 ?: (null to "baseURL 格式非法: ${c.baseUrl}")
@@ -5126,6 +5169,30 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * 网络失败的友好文案（额度页口径）。rawReason 形如 "SSLHandshakeException: …"
+     * （PAT 链 [ProjectAccessTokenClient.networkFailureSince]）或异常拼接；已知类名
+     * 转中文简述，原文保留在括号里供诊断。
+     */
+    private fun friendlyNetworkMessage(rawReason: String): String {
+        val brief = when {
+            rawReason.startsWith("SSLHandshakeException") || rawReason.startsWith("SSLException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.ssl")
+            rawReason.startsWith("UnknownHostException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.dns")
+            // HttpConnectTimeoutException 不是 HttpTimeoutException 的子类名前缀（实机 11-10）
+            rawReason.startsWith("HttpConnectTimeoutException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.connectTimeout")
+            rawReason.startsWith("ConnectException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.connect")
+            rawReason.startsWith("HttpTimeoutException") || rawReason.startsWith("SocketTimeoutException") ->
+                com.zcode.ideaplugin.ZCodeBundle.message("quota.network.brief.timeout")
+            else -> null
+        }
+        val detail = if (brief != null) "$brief（$rawReason）" else rawReason
+        return com.zcode.ideaplugin.ZCodeBundle.message("quota.network.failed", detail)
+    }
+
+    /**
      * 额度 monitor 三路 HTTP（quota/limit、model-usage、tool-usage）共用 client。
      *
      * 代理：这些请求由插件 Java 进程直接发出（不经 app-server，spawn env 注入对它
@@ -5172,7 +5239,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
-            usageErrorResponse(op, "查询异常: ${e.message}")
+            if (e is java.io.IOException) usageErrorResponse(op, friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: com.zcode.ideaplugin.ZCodeBundle.message("quota.network.unreachable")}"))
+            else usageErrorResponse(op, "查询异常: ${e.message}")
         }
     }
 
@@ -5200,7 +5268,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
-            usageErrorResponse("quota", "额度查询异常: ${e.message}")
+            if (e is java.io.IOException) usageErrorResponse("quota", friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: com.zcode.ideaplugin.ZCodeBundle.message("quota.network.unreachable")}"))
+            else usageErrorResponse("quota", "额度查询异常: ${e.message}")
         }
     }
 
@@ -5273,8 +5342,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 效果不进 IDE 编辑器；Desktop.open 走文件关联可能落到编辑器，browse 不受影响）。
      */
     private fun handleOpenFileSystem(msg: JsonObject): JsonObject {
-        val filePath = msg["filePath"]?.jsonPrimitive?.content
+        val rawPath = msg["filePath"]?.jsonPrimitive?.content
             ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("turnfile.error.missingFilePath"))
+        // 环境变量占位符路径兜底展开（缺陷 GY，同 handleOpenFile）
+        val filePath = com.zcode.ideaplugin.env.PathEnvExpansion.expand(rawPath)
         val allowedExtensions = setOf(
             "docx", "xlsx", "pptx", "pdf", "html", "htm",
             "mp4", "mov", "webm", "m4v", "mp3", "wav", "m4a", "ogg", "opus", "flac", "weba",
@@ -5308,8 +5379,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * live preview 高亮全部命中）；会话启动失败退化为定位并选中首个命中。
      */
     private fun handleOpenFile(msg: JsonObject): JsonObject {
-        val filePath = msg["filePath"]?.jsonPrimitive?.content
+        val rawPath = msg["filePath"]?.jsonPrimitive?.content
             ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("turnfile.error.missingFilePath"))
+        // 环境变量占位符路径兜底展开（缺陷 GY）：webview 白名单变量缺失时不下发死链，
+        // 这里用全量 env 查任意变量名（%TEMP%\x.md / $TMPDIR/x.md / ~/x.md）
+        val filePath = com.zcode.ideaplugin.env.PathEnvExpansion.expand(rawPath)
         val line = msg["line"]?.jsonPrimitive?.content?.toIntOrNull()
         val findText = msg["findText"]?.jsonPrimitive?.content
         com.intellij.openapi.application.invokeLater {
@@ -7528,6 +7602,21 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject {
             put("op", "browserPaneToggled")
             put("visible", visible)
+        }
+    }
+
+    /**
+     * 弹窗置顶切换（Header 置顶按钮，仅弹窗态显示）：权威在 SessionDetachWindow
+     * （AWT Window.setAlwaysOnTop），其内部会 pushToWebview 同步态；应答同形，
+     * 前端 case 'detachWindowState' 双源等价消费。
+     */
+    private fun handleToggleDetachPin(): JsonObject {
+        val window = SessionDetachWindow.activeWindow(project) ?: return errorResponse(com.zcode.ideaplugin.ZCodeBundle.message("session.detach.noWindow"))
+        window.togglePin()
+        return buildJsonObject {
+            put("op", "detachWindowState")
+            put("detached", true)
+            put("pinned", window.isPinned())
         }
     }
 

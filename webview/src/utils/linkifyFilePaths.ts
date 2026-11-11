@@ -24,7 +24,13 @@
  *   - 目录路径（结尾 / 的显式形态，如 /docs/internal/、webview/src/）放行，
  *     无行号；打开方式=IDE Project View 定位选中并聚焦（系统文件管理器通道
  *     经实测弃用），前导 / 路径不存在时 Kotlin 侧剥前导拼项目根回退
+ * 2026-11-10 缺陷 GY：环境变量占位符路径（%TEMP%\a.md / $TMPDIR/a.md）重新放开——
+ *   经 store.pathEnv 白名单展开后按绝对路径走；不可展开（白名单未到/变量查不到）
+ *   维持不链，且不再旧拼 workspace 相对死链（死 chip 点击无反应比不链更糟）；
+ *   打开时 Kotlin 侧还有全量 env 兜底展开（PathEnvExpansion）
  */
+
+import { expandPathPlaceholders, hasPathPlaceholder } from '@/utils/pathEnv'
 
 export interface FileLinkTarget {
   /** 解析后的绝对路径（统一正斜杠，IntelliJ system-independent 格式）*/
@@ -102,8 +108,15 @@ const LINE_SUFFIX = /(?::|#L)L?(\d{1,6})(?:-L?\d{1,6})?$/
 /**
  * 候选文本 → 链接目标。返回 null = 不链接（误报闸门全在这里）。
  * 纯函数，workspaceRoot 为空时相对路径一律不解析。
+ * 占位符路径（%TEMP%\a.md 等，缺陷 GY）经 pathEnv 白名单展开后按绝对路径走；
+ * 白名单未到/变量查不到 → 返回 null 不链接（替代旧「拼成 workspace 相对死链」
+ * ——死 chip 点击无反应比不链更糟）。
  */
-export function resolveFileLink(raw: string, workspaceRoot: string): FileLinkTarget | null {
+export function resolveFileLink(
+  raw: string,
+  workspaceRoot: string,
+  pathEnv?: Record<string, string> | null,
+): FileLinkTarget | null {
   const text = raw
     .replace(LEADING_TRIM, '')
     .replace(TRAILING_TRIM, '')
@@ -127,6 +140,16 @@ export function resolveFileLink(raw: string, workspaceRoot: string): FileLinkTar
   let p = path.replace(/\\/g, '/')
   if (p.startsWith('./')) p = p.slice(2)
   if (!p || p.includes('/../') || p.includes('/./')) return null
+
+  // 占位符路径展开（缺陷 GY）：展开成功按绝对路径走后续分支；失败不链接。
+  // 展开值是字面拼接，canonical 值自带反斜杠——展开后须再归一正斜杠，否则
+  // C:\ 形态过不了下面的盘符判定、被当相对路径拼回 workspace（真机实锤：
+  // E:/ws/C:\Users\... 死链；产物卡链的 isAbsolutePath 双斜杠都认所以没踩）
+  if (hasPathPlaceholder(p)) {
+    p = expandPathPlaceholders(p, pathEnv ?? null)
+    if (hasPathPlaceholder(p)) return null
+    p = p.replace(/\\/g, '/')
+  }
 
   // 目录形态（只认结尾 / 的显式目录，无扩展名目录名与版本号串难区分不猜）：
   // 跳过扩展名闸门；行号对目录无意义强制丢弃；前导 / 原样下发
@@ -158,7 +181,12 @@ export function resolveFileLink(raw: string, workspaceRoot: string): FileLinkTar
 }
 
 /** 单文本节点内的路径全部包 span；有替换返回 true */
-function linkifyTextNode(doc: Document, node: Text, workspaceRoot: string): boolean {
+function linkifyTextNode(
+  doc: Document,
+  node: Text,
+  workspaceRoot: string,
+  pathEnv?: Record<string, string> | null,
+): boolean {
   const text = node.nodeValue ?? ''
   if (!text) return false
   const frag = doc.createDocumentFragment()
@@ -166,7 +194,7 @@ function linkifyTextNode(doc: Document, node: Text, workspaceRoot: string): bool
   let changed = false
   for (const m of text.matchAll(PATH_TOKEN)) {
     const raw = m[0]
-    const target = resolveFileLink(raw, workspaceRoot)
+    const target = resolveFileLink(raw, workspaceRoot, pathEnv)
     if (!target) continue
     const start = (m.index ?? 0) + raw.indexOf(target.display)
     const end = start + target.display.length
@@ -197,7 +225,11 @@ function linkifyTextNode(doc: Document, node: Text, workspaceRoot: string): bool
  * pre/a/button 子树不碰（围栏代码块是误报重灾区；链接文字不动；
  * 已有 .md-file-link 跳过保证幂等）。无替换时返回原字符串（免序列化漂移）。
  */
-export function linkifyFilePaths(html: string, workspaceRoot: string): string {
+export function linkifyFilePaths(
+  html: string,
+  workspaceRoot: string,
+  pathEnv?: Record<string, string> | null,
+): string {
   if (!html || !PATH_GATE.test(html)) return html
   const doc = new DOMParser().parseFromString(html, 'text/html')
   // 先收集再改写：TreeWalker 遍历中改 DOM 会丢节点
@@ -211,7 +243,7 @@ export function linkifyFilePaths(html: string, workspaceRoot: string): string {
   }
   let changed = false
   for (const node of textNodes) {
-    if (linkifyTextNode(doc, node, workspaceRoot)) changed = true
+    if (linkifyTextNode(doc, node, workspaceRoot, pathEnv)) changed = true
   }
   return changed ? doc.body.innerHTML : html
 }

@@ -24,8 +24,10 @@ import { isAgentNotification } from '@/utils/parseNotification'
 import { buildTurnChains, isNotificationBridgedChain } from '@/utils/turnChains'
 import { useStore } from '@/store/useStore'
 import { findEditableUserMessage } from '@/utils/editHistory'
+import { useConversationSelections } from '@/hooks/useConversationSelections'
 import '../styles/chat-view.less'
 import '../styles/compaction.less'
+import '../styles/conversation-selection.less'
 
 interface Props {
   messages: ZCodeMessage[]
@@ -95,6 +97,10 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
   const [scrollBtnVisible, setScrollBtnVisible] = useState(false)
   const [scrollBtnDirection, setScrollBtnDirection] = useState<'up' | 'down'>('down')
   const scrollHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 划词引用浮条（调研 ⑩）：时间线选区评估 → 「添加到当前任务」挂输入框。
+  // enabled=!streaming（官方同款：流式重渲染期间 DOM 变动密集，禁用评估）
+  const selectionBar = useConversationSelections({ containerRef, enabled: !streaming })
 
   // 卸载时清理隐藏定时器
   useEffect(() => () => {
@@ -295,6 +301,8 @@ export function ChatView({ messages, loading, waiting, waitingSince, streamingMe
       >
         <span className={`codicon ${scrollBtnDirection === 'up' ? 'codicon-arrow-up' : 'codicon-arrow-down'}`} />
       </button>
+      {/* 划词引用浮条（portal 到 body，位置随选区矩形） */}
+      {selectionBar}
     </div>
   )
 }

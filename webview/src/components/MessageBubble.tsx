@@ -55,6 +55,8 @@ import {
 } from './PartUnits'
 import { ImagePreview } from './ImagePreview'
 import { groupParts } from '@/utils/groupParts'
+import { splitSelectionBlock, selectionMark } from '@/utils/conversationSelections'
+import { SelectionRefChip } from './SelectionRefChip'
 import type { EditAttachmentInput } from '@/utils/editHistory'
 import '../styles/message-bubble.less'
 
@@ -191,8 +193,16 @@ function UserBubble({
   const [confirmResend, setConfirmResend] = useState(false)
   const sessions = useStore((s) => s.sessions)
   const slashCommands = useStore((s) => s.slashCommands)
-  const lines = useMemo(() => text.split('\n').length, [text])
-  const collapsible = lines >= USER_COLLAPSE_LINES || text.length >= USER_COLLAPSE_CHARS
+  // 划词引用剥块（官方 kfe，fail-open）：引用块拼在消息末尾，展示/复制/编辑一律用
+  // 块前正文；原文完整落库完整发模型，模型直接读围栏 JSON（方案 §5）。
+  // references 回读成引用 pill 渲染在气泡下方（点击弹 popover 看原文，官方同款）
+  const { visibleContent: displayText, references: selectionRefs } = useMemo(
+    () => splitSelectionBlock(text),
+    [text],
+  )
+  const lines = useMemo(() => displayText.split('\n').length, [displayText])
+  // 折叠阈值统一用剥块后正文（引用块是协议噪声，不该计入折叠判定）
+  const collapsible = lines >= USER_COLLAPSE_LINES || displayText.length >= USER_COLLAPSE_CHARS
   // 搜索面板激活时强制展开：高亮 mark 与 scrollIntoView 定位需要全文可见
   const collapsed = collapsible && !searchActive
   const hasImages = imageParts.length > 0
@@ -217,10 +227,10 @@ function UserBubble({
     return map
   }, [slashCommands])
   const refChips = useMemo(
-    () => (showRaw ? null : renderUserRefChips(text, titleResolver, cmdNames)),
-    [text, titleResolver, cmdNames, showRaw],
+    () => (showRaw ? null : renderUserRefChips(displayText, titleResolver, cmdNames)),
+    [displayText, titleResolver, cmdNames, showRaw],
   )
-  const hasRefChips = useMemo(() => hasUserRefChips(text, cmdNames), [text, cmdNames])
+  const hasRefChips = useMemo(() => hasUserRefChips(displayText, cmdNames), [displayText, cmdNames])
   const images = useMemo(
     () =>
       imageParts
@@ -238,18 +248,18 @@ function UserBubble({
   const imageSrcs = useMemo(() => images.map((img) => img.src), [images])
   const onCopy = () => {
     void showResult(() => {
-      if (imageSrcs.length === 0) return copyText(text)
+      if (imageSrcs.length === 0) return copyText(displayText)
       // 带图消息：系统剪贴板写 文本+首图（外部应用粘贴可用）；webview 内同步备份
       // 全量图片（多图完整还原 + 绕开 JCEF 剪贴板图片可见性），粘贴侧按文本命中
-      stashCopiedMessage(text, imageSrcs)
-      return copyTextWithImages(text, imageSrcs)
+      stashCopiedMessage(displayText, imageSrcs)
+      return copyTextWithImages(displayText, imageSrcs)
     })
   }
 
   if (editing) {
     return (
       <EditComposer
-        initialText={text}
+        initialText={displayText}
         lines={lines}
         initialImages={imageParts.filter(
           (p): p is FilePart | ImagePart =>
@@ -279,7 +289,12 @@ function UserBubble({
           </span>
         )}
       </div>
-      <div className={`msg__bubble${collapsed ? ' msg__bubble--collapsed' : ''}`}>
+      <div
+        className={`msg__bubble${collapsed ? ' msg__bubble--collapsed' : ''}`}
+        // 划词引用行标记（调研 ⑩）：整条用户消息 = 一行（type=user）；无 id 的
+        // 极端壳消息不打标。按钮（显示原文/展开全文等）在黑名单内不触发浮条
+        {...(messageId ? selectionMark(`${messageId}-0`, 'user') : {})}
+      >
         {hasImages && (
           <div className="msg__images">
             {images.map((img, i) => (
@@ -287,14 +302,25 @@ function UserBubble({
             ))}
           </div>
         )}
-        {text ? (refChips ?? text) : hasImages ? null : t('chat.message.emptyText')}
+        {displayText ? (refChips ?? displayText) : hasImages ? null : t('chat.message.emptyText')}
         {collapsed && (
           <button type="button" className="msg__expand" onClick={() => setShowFull(true)}>
             <span className="codicon codicon-unfold" />
-            {t('chat.message.viewFull', { lines, count: text.length })}
+            {t('chat.message.viewFull', { lines, count: displayText.length })}
           </button>
         )}
       </div>
+      {/* 划词引用 pill（块回读渲染）：气泡外右对齐——引用常伴随长正文，放气泡内会被
+          长文折叠渐隐遮盖（fileCtxChips 同款取舍）。只出「N 条对话引用」pill（与输入
+          框引用条同款组件），点击弹 popover 逐条看原文；序列化只保留 {text}，只读态
+          无来源脚注/移除钮。fail-open 下 references=[] 零渲染 */}
+      {selectionRefs.length > 0 && (
+        <div className="msg__selrefs">
+          <SelectionRefChip
+            selections={selectionRefs.map((r, i) => ({ id: `selref-${i}`, text: r.text }))}
+          />
+        </div>
+      )}
       {/* 当前文件上下文注脚（隐式通道回显）：气泡外右对齐，不占正文、不被长文
           折叠渐隐遮盖——长消息恰是常带上下文的场景，折叠态也要看到带了什么 */}
       {fileCtxChips.length > 0 && (
@@ -336,7 +362,7 @@ function UserBubble({
           type="button"
           className="msg__action-btn"
           onClick={onCopy}
-          disabled={!text && imageSrcs.length === 0}
+          disabled={!displayText && imageSrcs.length === 0}
           title={copyState === 'ok' ? t('chat.message.copyCopied') : t('chat.message.copy')}
           aria-label={t('chat.message.copy')}
         >
@@ -805,8 +831,12 @@ function AssistantBubble({
   // 分组保留原始 part 下标，reasoning 自动展开/流式判定的 index 语义不变
   const units = useMemo(() => groupParts(parts), [parts])
   // 单元渲染走共享管线（与子代理弹窗共用，含组卡/单卡/reasoning 自动展开推导）；
-  // 折叠态只渲染尾部单元（结论后的收尾动作），推导仍基于完整 parts
-  const renderedUnits = useMemo(() => renderPartUnits(units, parts, streaming), [units, parts, streaming])
+  // 折叠态只渲染尾部单元（结论后的收尾动作），推导仍基于完整 parts。
+  // selectionCtx：划词引用行标记（调研 ⑩）随管线双路径下发
+  const renderedUnits = useMemo(
+    () => renderPartUnits(units, parts, streaming, undefined, { messageId: info.id }),
+    [units, parts, streaming, info.id],
+  )
 
   // 完成轮折叠（流式期间全渲染，turn 结束起默认只留结论）；
   // 「自动折叠执行过程」设置控制默认态，手动点折叠栏的意图优先于设置；
@@ -837,14 +867,18 @@ function AssistantBubble({
         lUnits.filter((u) => (u.kind === 'toolGroup' ? u.startIndex : u.index) > lLastTextIdx),
         lp,
         streaming && streamingId === lastSeg.msg.info.id,
+        undefined,
+        { messageId: lastSeg.msg.info.id },
       )
     }
     return renderPartUnits(
       units.filter((u) => (u.kind === 'toolGroup' ? u.startIndex : u.index) > lastTextIdx),
       parts,
       streaming,
+      undefined,
+      { messageId: info.id },
     )
-  }, [collapsible, segments, lastSeg, streamingId, units, parts, streaming, lastTextIdx])
+  }, [collapsible, segments, lastSeg, streamingId, units, parts, streaming, lastTextIdx, info.id])
   // 折叠栏概览的轮次耗时：服务端权威值（completed - created）；重拉窗口缺 completed 就不显示
   const processMs =
     collapsible && info.time?.created && info.time.completed
@@ -866,7 +900,11 @@ function AssistantBubble({
         )}
         {collapsed ? (
           <>
-            <MarkdownBlock markdown={(allParts[lastTextIdx] as TextPart).text} />
+            {/* 折叠态只留最终结论：同样打划词行标记（c 前缀区分于展开态的单元序号，
+                rowId 只做归属/去重锚点，不要求与展开态一致） */}
+            <div style={{ display: 'contents' }} {...selectionMark(`${info.id}-c${lastTextIdx}`, 'assistant')}>
+              <MarkdownBlock markdown={(allParts[lastTextIdx] as TextPart).text} />
+            </div>
             {renderedTailUnits}
           </>
         ) : segments ? (
@@ -875,6 +913,7 @@ function AssistantBubble({
               <SegmentUnits
                 parts={seg.msg.parts}
                 streaming={streaming && seg.msg.info.id === streamingId}
+                messageId={seg.msg.info.id}
               />
               {/* 通知卡在本段消息内容之后（时序位）：通知发生在该段完成之后、
                   下一段开始之前——渲染在前会顶到组首（历史轮时序倒挂，2026-09-30） */}
@@ -1104,9 +1143,13 @@ export function TurnFileChangesBar({ fc, messageId }: { fc: TurnFileChangeSummar
 }
 
 /** 合并轮组的分段过程渲染：独立组件化（groupParts/renderPartUnits 内部有 useMemo）*/
-function SegmentUnits({ parts, streaming }: { parts: MessagePart[]; streaming?: boolean }) {
+function SegmentUnits({ parts, streaming, messageId }: { parts: MessagePart[]; streaming?: boolean; messageId?: string }) {
   const units = useMemo(() => groupParts(parts), [parts])
-  return <>{renderPartUnits(units, parts, streaming)}</>
+  return (
+    <>
+      {renderPartUnits(units, parts, streaming, undefined, messageId ? { messageId } : undefined)}
+    </>
+  )
 }
 
 /**

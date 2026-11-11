@@ -55,7 +55,7 @@ describe('getPreviewFileKind', () => {
   })
 })
 
-describe('extractPreviewFileReferences 五源', () => {
+describe('extractPreviewFileReferences 基础源', () => {
   it('裸路径（相对+带目录）', () => {
     const refs = extractPreviewFileReferences('见 docs/report.md 和 README.md。', WS)
     expect(refs.map((r) => r.kind)).toEqual(['markdown', 'markdown'])
@@ -163,5 +163,63 @@ describe('getPreviewCardFilePath', () => {
   it('文件卡有路径、网站卡无', () => {
     expect(getPreviewCardFilePath({ type: 'file', kind: 'pdf', title: 'a', path: '/x/a.pdf' })).toBe('/x/a.pdf')
     expect(getPreviewCardFilePath({ type: 'website', title: 'w', url: 'http://localhost:1' })).toBeNull()
+  })
+})
+
+describe('占位符路径展开（缺陷 GY）', () => {
+  const ENV = { TEMP: 'C:/Users/demo/AppData/Local/Temp', TMPDIR: '/tmp' }
+
+  it('resolvePreviewPath：%VAR% 展开为绝对路径', () => {
+    expect(resolvePreviewPath(WS, '%TEMP%\\report.md', ENV)).toBe('C:/Users/demo/AppData/Local/Temp/report.md')
+    expect(resolvePreviewPath(WS, '$TMPDIR/a.md', ENV)).toBe('/tmp/a.md')
+    expect(resolvePreviewPath(WS, '${TMPDIR}/a.md', ENV)).toBe('/tmp/a.md')
+  })
+  it('resolvePreviewPath：白名单未到（null）→ 不可解析，绝不按 workspace 相对拼接', () => {
+    expect(resolvePreviewPath(WS, '%TEMP%\\report.md', null)).toBeNull()
+    expect(resolvePreviewPath(WS, '%TEMP%\\report.md')).not.toBe('G:/demo/%TEMP%/report.md')
+  })
+  it('resolvePreviewPath：变量查不到 → 不可解析', () => {
+    expect(resolvePreviewPath(WS, '%UNKNOWN_VAR%\\report.md', ENV)).toBeNull()
+  })
+  it('resolvePreviewPath：~/ 仍拒绝（官方对齐，不受展开影响）', () => {
+    expect(resolvePreviewPath(WS, '~/notes.md', ENV)).toBeNull()
+  })
+
+  it('ENV 源：无反引号裸占位符路径可提取（FILE_PATH_RE 起始类不含 % 的缺口）', () => {
+    const refs = extractPreviewFileReferences('文档已写好：%TEMP%\\handoff-db-adapt-guides.md 请查收', WS, ENV)
+    expect(refs).toHaveLength(1)
+    expect(refs[0]!.kind).toBe('markdown')
+    expect(refs[0]!.path).toBe('C:/Users/demo/AppData/Local/Temp/handoff-db-adapt-guides.md')
+  })
+  it('ENV 源与反引号定界源不双出', () => {
+    const refs = extractPreviewFileReferences('文档已写好：`%TEMP%\\handoff.md` 请查收', WS, ENV)
+    expect(refs).toHaveLength(1)
+  })
+  it('白名单未到时占位符引用不产（env 到达后组件二段补出）', () => {
+    expect(extractPreviewFileReferences('%TEMP%\\handoff.md', WS, null)).toHaveLength(0)
+  })
+
+  it('md 占位符卡：展开后命中 fileChanges 账本出卡', () => {
+    const cards = buildPreviewCards(
+      '文档已写好：%TEMP%\\handoff-db-adapt-guides.md',
+      WS,
+      ['C:\\Users\\demo\\AppData\\Local\\Temp\\handoff-db-adapt-guides.md'],
+      ENV,
+    )
+    expect(cards).toHaveLength(1)
+    // 命中后卡片路径取账本原始形态（既有设计：组件 stat/openFile 两侧都做斜杠归一）
+    expect(cards[0]).toMatchObject({
+      type: 'file',
+      kind: 'markdown',
+      path: 'C:\\Users\\demo\\AppData\\Local\\Temp\\handoff-db-adapt-guides.md',
+    })
+  })
+  it('md 占位符卡：账本无该路径不出（防幻觉门控不放松）', () => {
+    expect(buildPreviewCards('%TEMP%\\handoff.md', WS, ['other.md'], ENV)).toHaveLength(0)
+  })
+  it('Office 占位符卡：无门控直出（展开后 stat 存在性由组件层保证）', () => {
+    const cards = buildPreviewCards('报告 %TEMP%\\demo.pdf 已生成', WS, [], ENV)
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toMatchObject({ type: 'file', kind: 'pdf', title: 'demo.pdf' })
   })
 })

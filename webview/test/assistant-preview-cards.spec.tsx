@@ -291,3 +291,47 @@ describe('AssistantPreviewCards 空结果退避重试（实时轮落库竞态）
     expect(card()).toBeNull()
   })
 })
+
+/**
+ * 占位符路径展开（缺陷 GY）：store.pathEnv 白名单未到时 %TEMP% 引用解析不出
+ * （无门控查询、无卡）；到达后组件经订阅二段补出（与 changedPaths 二段出卡同构）
+ */
+describe('AssistantPreviewCards 占位符路径展开（缺陷 GY）', () => {
+  const ENV = { TEMP: 'C:/Users/demo/AppData/Local/Temp' }
+
+  beforeEach(() => {
+    useStore.setState({ pathEnv: null })
+  })
+
+  it('pathEnv 到达前不查询不出卡；到达后二段补出 md 卡', async () => {
+    render(
+      <AssistantPreviewCards
+        messageId="msg_env1"
+        text="文档已写好：%TEMP%\\handoff-db-adapt-guides.md"
+      />,
+    )
+    await new Promise((r) => setTimeout(r, 10))
+    expect(sentRequests.every((r) => r.op !== 'turnFileChanges')).toBe(true)
+
+    useStore.setState({ pathEnv: ENV })
+    await waitFor(() => {
+      expect(sentRequests.some((r) => r.op === 'turnFileChanges')).toBe(true)
+    })
+    respond({
+      op: 'turnFileChangesResult',
+      sessionId: 'sess1',
+      messageId: 'msg_env1',
+      data: {
+        state: 'active',
+        items: [
+          { path: 'C:/Users/demo/AppData/Local/Temp/handoff-db-adapt-guides.md', additions: 75, deletions: 0 },
+        ],
+      },
+    })
+    await waitFor(() => {
+      expect(sentRequests.some((r) => r.op === 'checkFilesExist')).toBe(true)
+    })
+    statResultFor(sentRequests.find((r) => r.op === 'checkFilesExist')!, () => true)
+    expect(await screen.findByText('handoff-db-adapt-guides.md')).toBeTruthy()
+  })
+})
