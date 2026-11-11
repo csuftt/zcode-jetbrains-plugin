@@ -51,7 +51,8 @@ export const CHANGELOG_DATA: ChangelogEntry[] = [
             "修复目录 / 文件 chip 悬浮气泡遮挡宿主文字。",
             "修复多条排队消息点击立即发送时连环全部发出的竞态问题。",
             "修复会话记录丢失后发送永久报错的活锁（现给出明确指引，可新建会话继续）。",
-            "修复 MCP 工具弹窗超长描述把输入参数表压扁的问题。"
+            "修复 MCP 工具弹窗超长描述把输入参数表压扁的问题。",
+            "修复回复正文中 %TEMP% 等环境变量形式的文件路径点击无反应、对应产物卡片不显示的问题（现自动按真实路径展开）。"
           ]
         }
       ]
@@ -82,7 +83,8 @@ export const CHANGELOG_DATA: ChangelogEntry[] = [
             "Fixed the directory / file chip hover tooltip covering the text underneath.",
             "Fixed a race where clicking send-now on queued messages fired them all at once.",
             "Fixed an endless error loop when sending to a session whose records were lost (clear guidance is shown now; a new session can continue).",
-            "Fixed MCP tool dialogs squashing the parameter table with overly long descriptions."
+            "Fixed MCP tool dialogs squashing the parameter table with overly long descriptions.",
+            "Fixed file paths written as environment variables (e.g. %TEMP%) not responding to clicks and their artifact preview cards not showing; they are now expanded to real paths."
           ]
         }
       ]
