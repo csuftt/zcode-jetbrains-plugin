@@ -1,0 +1,251 @@
+/**
+ * 划词引用（conversation selections，调研 ⑩）：时间线选区浮条 + 输入框引用条 pill。
+ * 全部走 CSS 变量主题体系（variables.less 由 main.tsx 全局引入：:root 暗色默认 +
+ * [data-theme='light'] 覆盖），无硬编码色值，暗色适配自动生效。
+ */
+
+// ============ 选区浮条（portal 到 body，fixed 定位浮在选区上方） ============
+.convsel-bar {
+  position: fixed;
+  // translate(-50%,-100%)：left/top 由 JS 内联设置（选区矩形上方居中）
+  transform: translate(-50%, -100%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: var(--bg-elevated, var(--bg-secondary, #252526));
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+
+  &__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary, #cccccc);
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    .codicon {
+      font-size: 13px;
+    }
+
+    &:hover {
+      background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    }
+
+    &--primary {
+      color: var(--accent-primary, #4a9eff);
+      font-weight: 500;
+    }
+  }
+
+  &__limit {
+    font-size: 12px;
+    color: var(--status-warning, #cca700);
+    padding: 2px 4px;
+    white-space: nowrap;
+  }
+
+  &__error {
+    font-size: 11px;
+    color: var(--status-warning, #cca700);
+    padding: 2px 4px;
+    white-space: nowrap;
+  }
+
+  // 警示态（单条超限）：边框转警示色
+  &--warn {
+    border-color: var(--status-warning, #cca700);
+  }
+}
+
+// ============ 输入框引用条 pill ============
+.convsel-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+
+  &__main {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+    background: var(--bg-secondary, #252526);
+    color: var(--text-primary, #cccccc);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    max-width: 220px;
+
+    .codicon {
+      font-size: 12px;
+      color: var(--accent-primary, #4a9eff);
+    }
+
+    &:hover {
+      background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    }
+
+    &--open {
+      border-color: var(--accent-primary, #4a9eff);
+    }
+  }
+
+  &__count {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__caret {
+    color: var(--text-tertiary, #888) !important;
+    font-size: 10px !important;
+  }
+
+  // 移除全部圆钮：默认透明，hover pill 显影（官方 KO 同款交互）
+  &__clear {
+    width: 14px;
+    height: 14px;
+    margin-left: -4px;
+    margin-top: -10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: var(--bg-tertiary, #333);
+    color: var(--text-primary, #cccccc);
+    font-size: 9px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+
+    &:hover {
+      background: var(--status-error, #e06c75);
+      color: #fff;
+    }
+  }
+
+  &:hover &__clear {
+    opacity: 1;
+  }
+}
+
+// ============ 发送后用户气泡的引用 pill（MessageBubble UserBubble 渲染） ============
+// userselect 块回读（splitSelectionBlock.references）：块剥掉不进正文，只出「N 条
+// 对话引用」pill（SelectionRefChip 同款组件/样式），点击弹 popover 逐条看原文
+// （与输入框引用条同一交互）。气泡外右对齐（长正文折叠渐隐不遮 chip，filectx
+// 注脚同款取舍）；pill/pop 本体样式复用上方 .convsel-chip / .convsel-pop。
+.msg__selrefs {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+  max-width: 85%;
+}
+
+// ============ 引用条 popover（绝对定位在 pill 下方，视口下部自动翻转向下改向上） ============
+.convsel-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 900;
+  width: 320px;
+  // 窄面板兜底：视口快贴边时弹层收缩，自身仍可内部滚动
+  max-width: calc(100vw - 24px);
+  border-radius: 8px;
+  background: var(--bg-elevated, var(--bg-secondary, #252526));
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  // 上弹态（JS 翻转：pill 下方剩余空间不足）：挂在 pill 上方
+  &--up {
+    top: auto;
+    bottom: calc(100% + 6px);
+  }
+
+  // 右对齐态（JS 翻转：右侧剩余空间不足 320px，消息 pill 右对齐场景）：
+  // 弹层右缘贴 pill 右缘向左展开
+  &--right {
+    left: auto;
+    right: 0;
+  }
+
+  &__list {
+    max-height: 256px;
+    overflow-y: auto;
+    padding: 6px;
+  }
+
+  &__item {
+    padding: 8px;
+    border-radius: 6px;
+
+    &:hover {
+      background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    }
+
+    & + & {
+      margin-top: 2px;
+    }
+  }
+
+  &__text {
+    font-size: 12px;
+    color: var(--text-primary, #cccccc);
+    line-height: 1.5;
+    // line-clamp-3（官方同款）：三行截断预览
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  &__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 6px;
+  }
+
+  &__meta {
+    font-size: 10px;
+    color: var(--text-tertiary, #888);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__remove {
+    flex: none;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary, #888);
+    cursor: pointer;
+    padding: 2px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+
+    .codicon {
+      font-size: 12px;
+    }
+
+    &:hover {
+      color: var(--status-error, #e06c75);
+    }
+  }
+
+  &__item:hover &__remove {
+    opacity: 1;
+  }
+}

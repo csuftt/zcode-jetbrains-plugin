@@ -56,9 +56,12 @@ import { PastedTextPreview, type PastedTextItem } from './PastedTextRef'
 import { readImageFile, decodeBase64Size, type ImageAttachmentResult } from '@/utils/imageAttachment'
 import { matchCopiedMessageImages } from '@/utils/copiedMessageClipboard'
 import { ImagePreview } from './ImagePreview'
+import { appendSelectionBlock } from '@/utils/conversationSelections'
+import { SelectionRefChip } from './SelectionRefChip'
 import '../styles/input-box.less'
 import '../styles/agent-select.less'
 import '../styles/cua-entry.less'
+import '../styles/conversation-selection.less'
 
 /** 内联 chip hover tooltip 的 DOM 节点 id（挂 document.body）*/
 const INLINE_CHIP_TIP_ID = 'zcode-inline-chip-tip'
@@ -169,6 +172,10 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
    */
   const currentFileEnabled = useStore((s) => s.currentFileEnabled)
   const setCurrentFileEnabled = useStore((s) => s.setCurrentFileEnabled)
+  // 划词引用（调研 ⑩）：输入框引用条 pill（独立组件，popover 自持状态）+ 发送拼块 + 发送后清空
+  const conversationSelections = useStore((s) => s.conversationSelections)
+  const removeConversationSelection = useStore((s) => s.removeConversationSelection)
+  const clearConversationSelections = useStore((s) => s.clearConversationSelections)
   /** 工作区路径（CurrentFileChip tooltip 显示相对路径用）*/
   const projectPath = useStore((s) => s.projectPath)
   // 多目录会话·变体A：目录标识已迁移至 ChatHeader 标题下方（用户定稿 2026-10-28），
@@ -593,7 +600,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     const text = serializeEditor(editorRef.current ?? document.createElement('div'), {
       pasteText: pasteTextResolver,
     }).replace(/\s+$/, '')
-    if (!text.trim() && fileRefs.length === 0 && skillRefs.length === 0 && images.length === 0) return
+    // 纯引用无正文可发送（划词引用挂了但正文为空 = 只追问引用内容）
+    if (!text.trim() && fileRefs.length === 0 && skillRefs.length === 0 && images.length === 0 && conversationSelections.length === 0) return
 
     const fullText = assembleRefsText(text)
     // 目标模式拦截（/goal）：goal 命令 chip（序列化成 /goal 前缀文本）或直接键入
@@ -626,6 +634,11 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     if (images.length > 0 && !currentModelSupportsImages) {
       finalText += `\n\n[附图说明：本消息附带 ${images.length} 张图片。若你无法直接看到图片内容（当前模型配置可能未启用图像直输），图片已由服务端缓存（路径见消息附件标注），请用 Read 工具读取图片文件或调用识图工具查看图片内容后再回答。]`
     }
+    // 划词引用拼块（调研 ⑩，官方 Ofe）：**最末**拼 # userselect: 围栏——展示剥离
+    // 正则锚整条消息末尾（\s*$），必须排在图片占位引导之后（方案 §6.1 拼装顺序）；
+    // 记录输入历史用不含块的干净文本（历史回填不把协议块带回编辑器）
+    const cleanText = finalText
+    const finalWithSelections = appendSelectionBlock(finalText, conversationSelections)
     // 当前文件上下文（《当前文件chip-发送链路实现.md》）：发送取值表达式 = chip
     // 显示表达式（enabled && currentFileRef，与 CurrentFileChip renderLabel 同一
     // 份 state 同一个式子）——任何时刻 chip 显示了什么，下一条消息就带什么。
@@ -637,7 +650,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     // 消息，不携带上下文。
     const currentFileCtx = currentFileEnabled && currentFileRef ? currentFileRef : null
     onSend(
-      finalText,
+      finalWithSelections,
       fileRefs,
       [
         ...(currentFileCtx ? [parseCurrentFileAttachment(currentFileCtx)] : []),
@@ -650,7 +663,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         })),
       ],
     )
-    record(finalText)
+    record(cleanText)
 
     // 清空
     clearEditor()
@@ -658,6 +671,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     setSkillRefs([])
     setImages([])
     setSlashQuery(null)
+    // 引用已随消息组装发出，清空（官方：发送组装后同样清）
+    clearConversationSelections()
     // 发完即关：勾选只管下一条消息，发送成功即取消（勾选灭掉 = 附件已带走的
     // 回执）。goal 早退路径不经过这里——控制意图不算消息，勾选留给真正的下一条；
     // 排队消息入队时已把附件快照进参数，这里取消只影响后续发送
@@ -1943,8 +1958,16 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
         {/* 选中子智能体 chip + 文件引用 chips（蓝色）+ 粘贴文本（灰色）+ 粘贴图片缩略图。
             技能/命令/goal chip 已内联进输入框（0.3.2 真机反馈）。对齐 cc-gui ChatInputBoxHeader：
             AttachmentList 在 ContextBar 之上，不贴输入框 */}
-        {(selectedAgent || skillRefs.length > 0 || fileRefs.length > 0 || images.length > 0) && (
+        {(selectedAgent || skillRefs.length > 0 || fileRefs.length > 0 || images.length > 0 || conversationSelections.length > 0) && (
           <div className="input-box__refs">
+            {/* 划词引用条 pill（调研 ⑩）：N 条对话引用 + popover 逐条预览/移除 */}
+            {conversationSelections.length > 0 && (
+              <SelectionRefChip
+                selections={conversationSelections}
+                onRemove={removeConversationSelection}
+                onClear={clearConversationSelections}
+              />
+            )}
             {/* 模型不支持图片提示（附件带图时）：图片会随消息保存，但发给模型前被服务端剥离 */}
             {images.length > 0 && !currentModelSupportsImages && (
               <div className="img-unsupported-tip" role="alert">
@@ -2271,6 +2294,8 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
           ref={wrapperRef}
           className="input-editable-wrapper"
           style={inputHeight ? { height: inputHeight, maxHeight: inputHeight } : undefined}
+          // 划词浮条黑名单标记（调研 ⑩）：输入坞内划选不出引用浮条
+          data-composer-dock="1"
         >
           <div
             ref={editorRef}

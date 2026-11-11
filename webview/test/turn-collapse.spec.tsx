@@ -190,7 +190,11 @@ describe('完成轮折叠', () => {
     // 概览只统计结论之前的过程（1 个工具，不含尾部收尾）
     expect(processBar().textContent).toContain('1 个工具')
     // 尾部工具卡在结论之后（content 的最后一个可见子块）
-    const contentChildren = [...document.querySelector('.msg__content')!.children].filter(
+    // 注：划词引用（conversation selections）给每个 part 单元包了一层
+    // display:contents 标记 div（零布局影响），扁平化后按可见子块断言
+    const flattenVisible = (parent: Element): Element[] =>
+      [...parent.children].flatMap((el) => (el.style.display === 'contents' ? flattenVisible(el) : [el]))
+    const contentChildren = flattenVisible(document.querySelector('.msg__content')!).filter(
       (el) => el.classList.contains('tool-card') || el.textContent!.includes(CONCLUSION),
     )
     expect(contentChildren.length).toBe(2)

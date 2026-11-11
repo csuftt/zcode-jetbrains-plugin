@@ -23,6 +23,8 @@ import { CuaActionGroupCard } from './CuaActionGroupCard'
 import { ImagePreview } from './ImagePreview'
 import type { PartRenderUnit } from '@/utils/groupParts'
 import { isCuaTool, cuaIconKeyFromOutput } from '@/utils/cuaTools'
+import { selectionMark } from '@/utils/conversationSelections'
+import type { SelectionContentType } from '@/utils/conversationSelections'
 
 /**
  * user 消息的图片 part 收集：乐观消息（type:'image'）与服务端读回
@@ -126,12 +128,18 @@ export function PartRenderer({
  * 渲染分组单元列表（组卡与单卡全覆盖）。units 通常来自 groupParts(parts)。
  * softenError：子代理弹窗活动 running 期间传 true——组卡 error 工具降级为
  * 「↻ 重试中」中性样式（中间失败重试是常态，红色 ✗ 误导）；主聊天不传保持 ✗。
+ * selectionCtx：划词引用行标记（调研 ⑩，主聊天传 { messageId }，子代理弹窗不传）——
+ * 每个可引用单元包一层 display:contents 的标记层（零布局影响，纯 DOM 归属锚点）：
+ * data-selection-id=`{messageId}-{unitIndex}`、data-selection-type 按 part kind
+ * 映射（text→assistant / reasoning→reasoning / tool→tool，图片不可引用不打标）。
+ * 聚组渲染双路径：组卡与单卡都进标记（项目老坑，两路径同拍处理）。
  */
 export function renderPartUnits(
   units: PartRenderUnit[],
   parts: MessagePart[],
   streaming?: boolean,
   softenError?: boolean,
+  selectionCtx?: { messageId: string },
 ): ReactNode[] {
   // 最后一个 reasoning 的自动展开推导：其后尚无正文（思考进行中/刚结束）才展开
   let lastReasoningIdx = -1
@@ -157,28 +165,53 @@ export function renderPartUnits(
     }
   })
 
-  return units.map((unit) =>
-    unit.kind === 'toolGroup' ? (
-      unit.group === 'bash' ? (
-        <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} softenError={softenError} />
-      ) : unit.group === 'cua' ? (
-        <CuaActionGroupCard
-          key={`cua-${unit.startIndex}`}
-          parts={unit.parts}
-          softenError={softenError}
-          cuaIconKey={cuaIconByIndex.get(unit.startIndex) ?? null}
-        />
+  return units.map((unit) => {
+    const node =
+      unit.kind === 'toolGroup' ? (
+        unit.group === 'bash' ? (
+          <BashCommandGroupCard key={`bash-${unit.startIndex}`} parts={unit.parts} softenError={softenError} />
+        ) : unit.group === 'cua' ? (
+          <CuaActionGroupCard
+            key={`cua-${unit.startIndex}`}
+            parts={unit.parts}
+            softenError={softenError}
+            cuaIconKey={cuaIconByIndex.get(unit.startIndex) ?? null}
+          />
+        ) : (
+          <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} softenError={softenError} />
+        )
       ) : (
-        <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} softenError={softenError} />
+        <PartRenderer
+          key={unit.index}
+          part={unit.part}
+          autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
+          streaming={!!streaming && unit.index === lastPartIdx}
+          cuaIconKey={unit.part.type === 'tool' && isCuaTool(unit.part.tool) ? cuaIconByIndex.get(unit.index) ?? null : null}
+        />
       )
-    ) : (
-      <PartRenderer
-        key={unit.index}
-        part={unit.part}
-        autoExpandReasoning={unit.index === lastReasoningIdx && !hasTextAfterLastReasoning}
-        streaming={!!streaming && unit.index === lastPartIdx}
-        cuaIconKey={unit.part.type === 'tool' && isCuaTool(unit.part.tool) ? cuaIconByIndex.get(unit.index) ?? null : null}
-      />
-    ),
-  )
+    if (!selectionCtx) return node
+    // 划词行标记层：display:contents 对布局零影响（子元素直接参与父级排版），
+    // 只承担 DOM 归属（hook 的 closest 反查）。图片/file part 不可引用不打标。
+    const idx = unit.kind === 'toolGroup' ? unit.startIndex : unit.index
+    const contentType: SelectionContentType | null =
+      unit.kind === 'toolGroup'
+        ? 'tool'
+        : unit.part.type === 'text'
+          ? 'assistant'
+          : unit.part.type === 'reasoning'
+            ? 'reasoning'
+            : unit.part.type === 'tool'
+              ? 'tool'
+              : null
+    if (!contentType) return node
+    return (
+      <div
+        key={`selrow-${idx}`}
+        style={{ display: 'contents' }}
+        {...selectionMark(`${selectionCtx.messageId}-${idx}`, contentType)}
+      >
+        {node}
+      </div>
+    )
+  })
 }

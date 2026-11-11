@@ -13,6 +13,8 @@
     "searchSession": "会話を検索",
     "history": "履歴",
     "settings": "設定",
+    "detachPin": "ウィンドウを最前面に固定",
+    "detachPinOff": "最前面固定を解除",
     "sessionTitleAria": "セッションタイトル",
     "saveTitleAria": "タイトルを保存",
     "cancelEditAria": "編集をキャンセル",
@@ -241,5 +243,23 @@
     "confirmTitle": "このメッセージを再送信しますか？",
     "confirmMessage": "原文のまま再送信して回答を再生成します。現在の回答は破棄されます。",
     "confirmOk": "再送信"
+  },
+  "selections": {
+    "addToTask": "現在のタスクに追加",
+    "copy": "コピー",
+    "count": "{{count}} 件の会話引用",
+    "remove": "すべての引用を削除",
+    "removeOne": "この引用を削除",
+    "type": {
+      "user": "ユーザーメッセージ",
+      "assistant": "アシスタントメッセージ",
+      "reasoning": "推論内容",
+      "tool": "ツール結果"
+    },
+    "limit": {
+      "single": "1 件の引用は最大 8,000 文字です。",
+      "count": "追加できる会話引用は最大 8 件です。",
+      "total": "会話引用の合計は最大 16,000 文字です。"
+    }
   }
 }

@@ -24,6 +24,8 @@ import type { QuotaBannerTrigger } from '@/utils/quotaWindows'
 import { isDefaultSessionTitle } from '@/utils/format'
 import { mergeSessionsIndex } from '@/utils/sessionIndexMerge'
 import type { SessionIndexEntry } from '@/types/messages'
+import { validateAddSelection } from '@/utils/conversationSelections'
+import type { ConversationSelection, SelectionAddError, SelectionContentType } from '@/utils/conversationSelections'
 import i18n from '@/i18n/config'
 
 /** 渠道/模型启停变更（modelToggled 应答与 onModelsChanged 广播同源）合并进管理页清单。
@@ -934,6 +936,9 @@ function sessionResetBase(): Partial<StoreState> {
     turnFileChangesDialogFor: null,
     turnFileChangesDialogPath: null,
     turnFileChangesDialogRewind: false,
+    // 划词引用挂的是当前会话时间线的行（rowId 按会话消息 id 生成），切会话必须清空
+    // ——带着旧会话的引用发到新会话会让 AI 读到无从解析的上下文
+    conversationSelections: [],
     subagentActivities: [],
     subagents: [],
     subagentDetail: null,
@@ -1682,6 +1687,24 @@ interface StoreState {
   // 切会话/删当前会话/Java 自动 newSession/createSession 响应均不动它
   currentFileEnabled: boolean
 
+  // ============ 划词引用（conversation selections，调研 ⑩）============
+  // 时间线划选文字 → 浮条「添加到当前任务」挂到输入框；发送时以 # userselect:
+  // 围栏块拼在消息末尾（纯 prompt 约定，官方客户端双向互认）。限额三件套与
+  // 去重判定在 validateAddSelection（纯函数）；会话切换随 sessionResetBase 清空
+  conversationSelections: ConversationSelection[]
+  /** 追加一条引用（校验失败返回原因：single/count/total；duplicate 静默返回 null 的上层约定见实现） */
+  addConversationSelection: (candidate: { rowId: string; contentType: SelectionContentType; text: string }) => SelectionAddError | null
+  removeConversationSelection: (id: string) => void
+  clearConversationSelections: () => void
+
+  // ============ 会话弹窗态（调研 ⑧）============
+  // detached=本面板在独立窗口（Header 置顶按钮的显隐权威），pinned=窗口置顶态。
+  // Java 推送（弹出默认置顶/搬回/切换）与 toggleDetachPin 应答同形，case 双源等价消费。
+  // 面板级态：不随切会话清空（sessionResetBase 不含），搬回主窗由 Java 推 detached=false 收按钮
+  detachWindow: { detached: boolean; pinned: boolean }
+  /** 切换弹窗置顶（Java AWT setAlwaysOnTop 是权威，新态经 detachWindowState 推送回流） */
+  toggleDetachPin: () => void
+
   // actions
   init: () => void
   loadSessions: () => void
@@ -2148,6 +2171,8 @@ export const useStore = create<StoreState>((set, get) => ({
   askUserPendingActive: false,
   currentFileRef: null,
   currentFileEnabled: false,
+  conversationSelections: [],
+  detachWindow: { detached: false, pinned: false },
 
   models: [],
   modelsRefreshing: false,
@@ -2555,6 +2580,28 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setCurrentFileEnabled: (enabled) => {
     set({ currentFileEnabled: enabled })
+  },
+
+  addConversationSelection: (candidate) => {
+    // 校验/去重/限额全在纯函数（官方 Dfe 同序）：single/count/total 返回原因给浮条
+    // 内联提示；duplicate 按官方语义静默（返回 null 且不改动——浮条保留但无反馈）
+    const { list, error } = validateAddSelection(get().conversationSelections, candidate)
+    if (error) return error === 'duplicate' ? null : error
+    set({ conversationSelections: list })
+    return null
+  },
+
+  removeConversationSelection: (id) => {
+    set({ conversationSelections: get().conversationSelections.filter((s) => s.id !== id) })
+  },
+
+  clearConversationSelections: () => {
+    set({ conversationSelections: [] })
+  },
+
+  toggleDetachPin: () => {
+    // 置顶权威在 Java（AWT Window.setAlwaysOnTop）；新态经 detachWindowState 推送回流
+    sendToJava({ op: 'toggleDetachPin' })
   },
 
   selectSession: (session) => {
@@ -4548,6 +4595,11 @@ export function handleResponse(
     case 'projectPath':
       // 启动兜底应答：写回注入失败的 projectPath（该字段仅 init 与此处两处写入）
       if (msg.workspacePath) set({ projectPath: msg.workspacePath })
+      break
+    case 'detachWindowState':
+      // 会话弹窗态（⑧）：Java 推送（弹出默认置顶/搬回/切换/就绪补推）与 toggleDetachPin
+      // 应答同形，双源等价消费；面板级态不随切会话清空
+      set({ detachWindow: { detached: msg.detached, pinned: msg.pinned } })
       break
     case 'linkedWorkspaces': {
       // 关联目录全量快照（get/add/remove 三 op 共用应答）
