@@ -16,7 +16,9 @@ import { useStore } from '@/store/useStore'
 import '../styles/input-box.less'
 
 /** 级别 value → 标签 i18n key（ZCode 客户端 UI 本地化同款，未知值原样显示）
- *  实测补充：部分模型用 disabled / nothink 表示关闭思考（与 off 同义）*/
+ *  实测补充：部分模型用 disabled / nothink 表示关闭思考（与 off 同义）；
+ *  qwen 系在 high 之上还有 xhigh，服务端写法不统一（xhigh / extra-high / extra_high），
+ *  别名一律归到同一档文案，漏一条就退回英文原样显示*/
 const LEVEL_LABEL_KEYS: Record<string, string> = {
   off: 'input.thought.off',
   disabled: 'input.thought.disabled',
@@ -24,11 +26,17 @@ const LEVEL_LABEL_KEYS: Record<string, string> = {
   low: 'input.thought.low',
   medium: 'input.thought.medium',
   high: 'input.thought.high',
+  xhigh: 'input.thought.xhigh',
+  'extra-high': 'input.thought.xhigh',
+  extra_high: 'input.thought.xhigh',
+  extrahigh: 'input.thought.xhigh',
   max: 'input.thought.max',
+  highest: 'input.thought.max',
   enabled: 'input.thought.enabled',
 }
 
-/** 级别图标（off/disabled/nothink=禁止圈 / low·enabled=灯泡 / medium·high=灯泡火花 / max=火箭）*/
+/** 级别图标（off/disabled/nothink=禁止圈 / low·enabled=灯泡 / medium·high=灯泡火花 /
+ *  xhigh=火焰 / max·highest=火箭）*/
 const LEVEL_ICONS: Record<string, string> = {
   off: 'codicon-circle-slash',
   disabled: 'codicon-circle-slash',
@@ -36,9 +44,15 @@ const LEVEL_ICONS: Record<string, string> = {
   low: 'codicon-lightbulb',
   medium: 'codicon-lightbulb-sparkle',
   high: 'codicon-lightbulb-sparkle',
+  xhigh: 'codicon-flame',
+  'extra-high': 'codicon-flame',
+  extra_high: 'codicon-flame',
+  extrahigh: 'codicon-flame',
   max: 'codicon-rocket',
+  highest: 'codicon-rocket',
   enabled: 'codicon-lightbulb',
 }
+
 const levelIcon = (v: string) => LEVEL_ICONS[v] ?? 'codicon-lightbulb'
 
 function levelLabel(value: string, t: TFunction): string {
