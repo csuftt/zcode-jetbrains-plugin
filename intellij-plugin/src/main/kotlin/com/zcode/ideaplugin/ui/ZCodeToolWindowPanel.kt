@@ -793,6 +793,9 @@ class ZCodeToolWindowPanel(
                         // store init（InputBox 的监听注册先于 App init effect），此刻推送必达
                         val pending = drainPendingInputRefs()
                         if (pending.isNotEmpty()) pushFilesToInput(pending)
+                        // 弹窗态补推（⑧）：webview 在弹窗期重载丢 detachWindowState，
+                        // 就绪信号补推恢复 Header 置顶按钮显隐/态
+                        SessionDetachWindow.pushDetachStateIfActive(project, this)
                     }
                 }
                 log.info("JS message received: ${LogRedactor.redact(request.take(600)).take(200)}")
@@ -1388,6 +1391,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "createTab" -> handleCreateTab(msg)
                         "openExternal" -> handleOpenExternal(msg)
                         "toggleBrowserPane" -> handleToggleBrowserPane()
+                        "toggleDetachPin" -> handleToggleDetachPin()
                         "setTabTitle" -> handleSetTabTitle(msg)
                         "clearTabSession" -> handleClearTabSession()
                         "appearanceSave" -> handleAppearanceSave(msg)
@@ -2049,6 +2053,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 待命↔落位迁移瞬间清/设，平时不覆盖 handleSetTabTitle 的会话标题。EDT。
      */
     private fun applyTabDisplayName() {
+        // 状态栏 Widget 与标签 ● 同源同拍刷新（监督面入口前移，调研 ③）；invokeLater 内部自行排队
+        com.zcode.ideaplugin.ui.statusbar.ZCodeStatusBarWidget.refreshFor(project)
         val content = attachedContent ?: return
         val standby = isStandbyUnbound()
         val wasStandby = lastAppliedStandby
@@ -2080,6 +2086,17 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /** 本标签当前是否为无会话空标签（空心色块标识 + 批量关闭 + 关闭免确认共用判据）*/
     fun isStandbyUnbound(): Boolean =
         isStandbyUnbound(currentSessionId, initialSessionId, frontendReady)
+
+    /** 面板所属 project（状态栏 Widget / 标签弹窗等外部监督面按项目过滤用；字段本身 private）*/
+    internal fun getOwningProject(): Project = project
+
+    /** 是否已弹出独立窗口（搬运式标签弹窗 ⑧；ContentManager 事件守卫按它豁免）*/
+    @Volatile
+    private var detachedToWindow = false
+    fun markDetachedToWindow(detached: Boolean) {
+        detachedToWindow = detached
+    }
+    fun isDetachedToWindow(): Boolean = detachedToWindow
 
     /** 本标签生成中状态变化（turn.started/completed/failed 驱动）*/
     private fun setTabStreaming(active: Boolean) {
@@ -7580,6 +7597,21 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject {
             put("op", "browserPaneToggled")
             put("visible", visible)
+        }
+    }
+
+    /**
+     * 弹窗置顶切换（Header 置顶按钮，仅弹窗态显示）：权威在 SessionDetachWindow
+     * （AWT Window.setAlwaysOnTop），其内部会 pushToWebview 同步态；应答同形，
+     * 前端 case 'detachWindowState' 双源等价消费。
+     */
+    private fun handleToggleDetachPin(): JsonObject {
+        val window = SessionDetachWindow.activeWindow(project) ?: return errorResponse("没有独立窗口")
+        window.togglePin()
+        return buildJsonObject {
+            put("op", "detachWindowState")
+            put("detached", true)
+            put("pinned", window.isPinned())
         }
     }
 
