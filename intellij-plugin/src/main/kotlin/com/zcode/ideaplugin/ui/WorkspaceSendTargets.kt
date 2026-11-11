@@ -20,13 +20,16 @@ object WorkspaceSendTargets {
         val displayName: String,
         /** 当前激活标签所在工作区（菜单「（当前）」置顶项） */
         val isCurrent: Boolean,
+        /** 当前项即弹窗中的标签（activePanel 获焦抢占态）：菜单文案加「·独立窗口」徽标让去向可预判 */
+        val isCurrentDetached: Boolean = false,
     )
 
     /**
      * 目标清单。首个元素恒为当前标签工作区（[currentWorkspace] 空缺时缺位，调用方
      * 以 isCurrent 判别：无当前项时调用方应整组隐藏=退化平铺现状），其余为其他候选
      * （按归一键排除当前、去重）：项目根在前，关联目录按 kv 顺序随后。
-     * [filePaths] 为空返回空表。
+     * [filePaths] 为空返回空表。[currentIsDetached] 只影响 current 项的徽标位，
+     * 不参与匹配与去重。
      */
     fun compute(
         filePaths: List<String>,
@@ -34,6 +37,7 @@ object WorkspaceSendTargets {
         projectDisplayName: String,
         linkedWorkspaces: List<String>,
         currentWorkspace: String?,
+        currentIsDetached: Boolean = false,
     ): List<Target> {
         if (filePaths.isEmpty()) return emptyList()
         val linkedKeys = linkedWorkspaces.map { normKey(it) }
@@ -57,7 +61,7 @@ object WorkspaceSendTargets {
         val currentPath = currentWorkspace?.takeIf { it.isNotBlank() } ?: basePath
         val current = currentPath?.let { cp ->
             val display = if (rootKey != null && normKey(cp) == rootKey) projectDisplayName else basename(cp)
-            Target(cp, display, true)
+            Target(cp, display, true, currentIsDetached)
         }
         // 候选按归一键去重（项目根与关联目录理论上 kv 侧已互异，仍防手工 kv 撞车）+ 排除当前
         val seen = HashSet<String>()

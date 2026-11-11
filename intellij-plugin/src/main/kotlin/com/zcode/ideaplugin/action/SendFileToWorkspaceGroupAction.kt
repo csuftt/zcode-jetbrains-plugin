@@ -73,10 +73,14 @@ private class SendToWorkspaceTargetAction(
 
     init {
         // 当前项语义前置：「（当前）」后缀会被误读成「当前项目」；「当前标签（目录名）」
-        // 把目标语义放前面，目录名退为补充；其余工作区恒新开，文案对称「新开标签（目录名）」
-        templatePresentation.text =
-            if (target.isCurrent) message("action.sendToWorkspace.currentTab", target.displayName)
-            else message("action.sendToWorkspace.newTab", target.displayName)
+        // 把目标语义放前面，目录名退为补充；当前项是弹窗中的标签时加「·独立窗口」徽标
+        // （activePanel 随弹窗获焦抢占，用户可预判发送去向）；其余工作区恒新开，文案对称
+        templatePresentation.text = when {
+            target.isCurrent && target.isCurrentDetached ->
+                message("action.sendToWorkspace.currentTabDetached", target.displayName)
+            target.isCurrent -> message("action.sendToWorkspace.currentTab", target.displayName)
+            else -> message("action.sendToWorkspace.newTab", target.displayName)
+        }
         templatePresentation.description = target.workspacePath
         templatePresentation.icon = ZCodeIcons.ZcGui
     }
@@ -129,5 +133,8 @@ internal fun computeWorkspaceSendTargets(project: Project, files: List<VirtualFi
         projectDisplayName = project.name,
         linkedWorkspaces = ZCodeLinkedWorkspaces.readActive(project),
         currentWorkspace = panel.getTargetingWorkspacePath(),
+        // activePanel 获焦抢占态（弹窗获焦转发，见 SessionDetachWindow.attachFocusForwarding）：
+        // 当前项文案加「·独立窗口」徽标，用户点完弹窗再右键能看到去向是弹窗会话
+        currentIsDetached = panel.isDetachedToWindow(),
     )
 }
