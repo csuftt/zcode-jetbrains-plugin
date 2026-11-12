@@ -26,7 +26,8 @@
     "regenConfirmMessage": "会話内容から AI が新しいタイトルを生成し、現在のタイトルを上書きします。続行しますか？",
     "regenConfirmOk": "再生成",
     "untitled": "新しいセッション",
-    "phoneRemote": "スマホリモート"
+    "phoneRemote": "スマホリモート",
+    "wsBadgeRevealHint": "ダブルクリックでプロジェクトビューに表示して展開"
   },
   "message": {
     "emptyText": "（空）",

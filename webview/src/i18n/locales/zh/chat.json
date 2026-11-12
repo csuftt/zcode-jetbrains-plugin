@@ -26,7 +26,8 @@
     "regenConfirmMessage": "将根据对话内容用 AI 重新生成标题并覆盖当前标题，是否继续？",
     "regenConfirmOk": "重新生成",
     "untitled": "新会话",
-    "phoneRemote": "手机远程"
+    "phoneRemote": "手机远程",
+    "wsBadgeRevealHint": "双击可在项目视图中定位并展开"
   },
   "message": {
     "emptyText": "(空)",

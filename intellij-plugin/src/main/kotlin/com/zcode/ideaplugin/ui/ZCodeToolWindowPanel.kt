@@ -5397,6 +5397,34 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * 目录在 IDE Project View 中定位并展开（openFile 目录路由：消息内目录链接 /
+     * 会话标题下方目录徽标双击共用，2026-11-12）。
+     *
+     * 裸 ProjectView.select 有前置空洞：Project 工具窗从未打开时 pane 未初始化，
+     * select 静默空转（233 的 ProjectViewImpl.getCurrentProjectViewPane 返回 null）。
+     * 按官方 SelectInProjectView 流程：先激活 Project 工具窗，再切到当前视图
+     * （未初始化时回落默认视图，createComponent 顺带落 myCurrentViewId），最后
+     * select。233 的 AsyncProjectViewSupport.select 路径自带 expandPath，选中
+     * 目录节点即展开其子节点，正是徽标双击的「定位并展开」语义。
+     */
+    private fun revealDirectoryInProjectView(vdir: VirtualFile) {
+        val projectView = com.intellij.ide.projectView.ProjectView.getInstance(project)
+        val reveal = {
+            val viewId = projectView.currentViewId ?: projectView.defaultViewId
+            projectView.changeViewCB(viewId, null).doWhenProcessed {
+                projectView.select(null, vdir, true)
+            }
+        }
+        val toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+            .getToolWindow(com.intellij.openapi.wm.ToolWindowId.PROJECT_VIEW)
+        if (toolWindow != null) {
+            toolWindow.activate({ reveal() }, true)
+        } else {
+            reveal()
+        }
+    }
+
+    /**
      * op=openFile — 在 IDEA 编辑器打开文件（支持行号定位）
      *
      * findText 可选：打开后在编辑器 Find 栏填充该关键词（EditorSearchSession，
@@ -5423,8 +5451,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 }
             }
             val ioFile = java.io.File(resolvedPath)
-            // 目录路由（消息内路径链接的文件夹打开）：IDE Project View 定位选中并聚焦
-            // （真机拍板 2026-10-09：不要系统文件管理器，要 IDE 内打开）；
+            // 目录路由（消息内路径链接的文件夹打开 / 标题徽标双击）：IDE Project View
+            // 定位选中并聚焦（真机拍板 2026-10-09：不要系统文件管理器，要 IDE 内打开）；
             // 目录不在 VFS/项目内容内时定位静默落空——与文件死链同款体验，不额外兜底
             if (ioFile.isDirectory) {
                 val vdir = LocalFileSystem.getInstance().findFileByPath(resolvedPath)
@@ -5435,8 +5463,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                             }
                     } else null
                 if (vdir != null) {
-                    com.intellij.ide.projectView.ProjectView.getInstance(project)
-                        .select(null, vdir, true)
+                    revealDirectoryInProjectView(vdir)
                 } else {
                     log.warn("Open directory failed: not found after VFS refresh $resolvedPath")
                 }

@@ -72,7 +72,8 @@
    配色（2026-11-02 统一配色定稿）：本项目=金黄（--project 置 --ws-badge-color），
    关联目录=色板色（--dir1..9 置 --ws-badge-color，Java 轮询分配），无色类回落主题蓝。
    左对齐 = 标题首字（.session-title 有 padding-left:8px，row 同步 8px）；
-   悬浮全路径 = data-tooltip + tooltip-bottom-center（JCEF 下原生 title 不可靠）*/
+   悬浮气泡 = 自绘子元素（两行：全路径 + 双击定位提示，分行可分别设字号/颜色；
+   JCEF 下原生 title 不可靠）*/
 .ws-header-badge-row {
     flex-basis: 100%;
     display: flex;
@@ -91,28 +92,66 @@
     font-size: 10px;
     line-height: 15px;
     font-weight: 400;
-    cursor: default;
+    /* 双击=Project View 定位展开（2026-11-12）：pointer 提示可交互，
+       user-select 关掉双击选词的文字高亮残留 */
+    cursor: pointer;
+    user-select: none;
     background: color-mix(in srgb, var(--ws-badge-color, var(--accent-primary)) 10%, transparent);
     color: color-mix(in srgb, var(--ws-badge-color, var(--accent-primary)) 80%, var(--text-primary));
     max-width: 100%;
     min-width: 0;
-    /* offset 28：mixin 语义是「气泡底边」距宿主的距离，不是间隙——offset 必须
-       大于气泡自身高（11px 字体+8padding≈21px）才有间隙，22px 时顶边反扣进
-       徽标底部压字（真机 2026-11-07「新平台部署」徽标实锤，GT 同族） */
-    .tooltip-bottom-center(28px);
 
-    /* tooltip 左对齐展开（覆盖 mixin 的居中定位）：徽标贴面板左缘，居中的长路径
-       tooltip 会伸出工具窗左缘被裁（真机 2026-10-28）；箭头对齐徽标左部 */
-    &::after {
+    /* 自绘两行悬浮气泡（2026-11-12）：伪元素 tooltip 只能给整段内容一个样式，
+       做不到「全路径正常小字 + 双击提示更小灰字」——改 hover 显示的绝对定位
+       子元素。定位用 top: calc(100% + 8px) 而非固定 offset，行高/字号变化不会
+       再出现气泡顶边反扣徽标压字（GT / 2026-11-07「新平台部署」同族教训） */
+    &__tip {
+        position: absolute;
+        top: calc(100% + 8px);
         left: 0;
-        transform: none;
-        max-width: 100vw;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1px;
+        padding: 4px 8px;
+        background: var(--bg-elevated);
+        border-radius: 4px;
+        box-shadow: var(--shadow-md);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+        z-index: 1000;
+
+        /* 上指箭头对齐徽标左部（原 mixin 同款；气泡贴面板左缘，居中会伸出左缘被裁） */
+        &::before {
+            content: '';
+            position: absolute;
+            top: -5px;
+            left: 14px;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-bottom: 5px solid var(--bg-elevated);
+        }
     }
 
-    &::before {
-        left: 14px;
+    &:hover &__tip {
+        opacity: 1;
+    }
+
+    &__tip-path {
+        max-width: calc(100vw - 16px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+
+    /* 双击提示行：比路径小一档 + 灰色弱化（用户 2026-11-12 定稿） */
+    &__tip-hint {
+        white-space: nowrap;
+        font-size: 10px;
+        color: var(--text-tertiary);
     }
 
     &__name {

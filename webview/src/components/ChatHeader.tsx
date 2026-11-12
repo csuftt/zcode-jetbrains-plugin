@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import '../styles/header.less'
+import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import { ConfirmDialog } from './ConfirmDialog'
 
@@ -121,7 +122,9 @@ export function ChatHeader({
         {/* 目录徽标（多目录会话·变体A·方案A 定稿 2026-10-28）：紧凑徽标挂标题下方，
             header 仅增高 ~17px。两态语义（会话归属/待命落位）由 App 算好传入，
             唯一目录不显示；本项目=金黄（2026-11-06 同步压暗），关联目录=统一配色色板
-            （colorIndex 由 Java 轮询分配，null 回落默认主题色），悬浮 title 完整路径。
+            （colorIndex 由 Java 轮询分配，null 回落默认主题色）；悬浮气泡两行
+            （全路径 + 弱化双击提示），双击=在 Project View 定位该目录并展开
+            （openFile 目录路由，2026-11-12）；
             外层 row 占满一行触发换行（无背景），徽标本体自适应内容宽度（背景不拉满） */}
         {wsBadge && currentView === 'chat' && (
           <span className="ws-header-badge-row">
@@ -137,10 +140,21 @@ export function ChatHeader({
               ]
                 .filter(Boolean)
                 .join(' ')}
-              data-tooltip={wsBadge.dir}
+              onDoubleClick={(e) => {
+                // 目录归属徽标 → IDE 项目树定位并展开（Java 侧 openFile 的目录路由：
+                // 激活 Project 工具窗后 ProjectView.select，选中即展开子目录）
+                e.preventDefault()
+                sendToJava({ op: 'openFile', filePath: wsBadge.dir })
+              }}
             >
               <span className="ws-header-badge__name">
                 {wsBadge.dir.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop()}
+              </span>
+              {/* 悬浮气泡两行分别着色（全路径正常小字 / 双击提示更小灰字）：
+                  伪元素 content:attr 只能整体一个样式，改 hover 显示的绝对定位子元素 */}
+              <span className="ws-header-badge__tip" aria-hidden="true">
+                <span className="ws-header-badge__tip-path">{wsBadge.dir}</span>
+                <span className="ws-header-badge__tip-hint">{t('chat.header.wsBadgeRevealHint')}</span>
               </span>
             </span>
           </span>
