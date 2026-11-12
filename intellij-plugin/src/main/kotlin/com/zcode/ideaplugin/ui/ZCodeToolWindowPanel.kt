@@ -3183,10 +3183,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
      *  cache miss 时回退编辑附件临时目录（serveImageCache 同款兜底）：编辑重发图片
      *  的 ref 文件在 editAttachmentsRoot（image-cache 只在原始内联发送时由 zcode.cjs
      *  落盘），重发消息 part.filename=ref basename（diag-edit-double 实锤），二次
-     *  编辑反查时 basename 即 temp 文件名——不回退则「图片附件解析失败」。 */
+     *  编辑反查时 basename 即 temp 文件名——不回退则「图片附件解析失败」。
+     *  3.18.0 起历史读回的图片 part url 直接内联 data:image/...;base64（缺陷HG，
+     *  图数据自包含无磁盘文件）→ 解码落编辑附件临时目录（writeEditTempAttachment
+     *  内容 hash 确定性命名与受控命名体系自洽，读回兜底链可命中）。 */
     private fun locateImageCacheFile(o: JsonObject): String? {
         val url = o["url"]?.jsonPrimitive?.contentOrNull ?: return null
         val mime = o["mime"]?.jsonPrimitive?.contentOrNull ?: ""
+        if (url.startsWith("data:image/")) {
+            val payload = url.substringAfter(";base64,", "")
+            if (payload.isEmpty()) return null
+            return writeEditTempAttachment(payload, mime)
+        }
         val file: File? = if (url.contains("/zcode-image/")) {
             val segs = url.substringAfter("/zcode-image/").trim('/').split('/')
             if (segs.size != 2 || !ZCodeWebviewServer.sidPattern.matches(segs[0]) ||

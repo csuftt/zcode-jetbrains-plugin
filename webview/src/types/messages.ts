@@ -235,9 +235,10 @@ export interface MessageInfo {
    */
   turnId?: string
   /**
-   * /compact 压缩摘要消息（role=user）的顶层字段（2026-08-21 RPC 实测）：
+   * /compact 压缩摘要消息（role=user）的顶层字段（旧形态，≤3.17.x RPC 实测）：
    * {title:"Compact summary", body:"摘要全文"}。消息级无 synthetic 标记（仅
    * part 级有），不能靠 isHiddenSyntheticMessage 过滤，须专门识别渲染。
+   * 3.18.0 起此字段消失，改 semantics={kind:'compact_summary'}，正文放 text part。
    */
   summary?: { title?: string; body?: string }
 }

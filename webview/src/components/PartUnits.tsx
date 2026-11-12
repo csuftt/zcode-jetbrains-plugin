@@ -36,15 +36,18 @@ export function collectImageParts(parts: MessagePart[]): Array<ImagePart | FileP
   )
 }
 
-/** 图片 part → 可渲染 src：image 用 dataUrl/拼 base64；file 用 url（Java 已换成 http）*/
+/** 图片 part → 可渲染 src：image 用 dataUrl/拼 base64；file 用 url（Java 已换 http 或 3.18.0 内联 data:）*/
 export function imagePartSrc(img: ImagePart | FilePart): string {
   if (img.type === 'image') {
     if (img.dataUrl) return img.dataUrl
     if (img.dataBase64) return `data:${img.mediaType || 'image/png'};base64,${img.dataBase64}`
     return ''
   }
-  // file part：zcode-artifact://（Java 未转换/转换失败）不可渲染，返回空跳过
-  return img.url && /^https?:\/\//.test(img.url) ? img.url : ''
+  // file part：3.18.0 起 url 直接内联完整 data:image/...;base64（zcode-artifact://
+  // 引用挪进 metadata.artifactUri，diag-image-file-part-3180.py 实测）；旧形态由
+  // Java ImageArtifactMapper 换成 /zcode-image/ http。zcode-artifact://（Java 未
+  // 转换/转换失败）不可渲染，返回空跳过
+  return img.url && (/^https?:\/\//.test(img.url) || /^data:image\//.test(img.url)) ? img.url : ''
 }
 
 /** 图片 part 的展示标题（hover/大图预览）*/

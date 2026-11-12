@@ -35,6 +35,22 @@ const SUMMARY_MSG: ZCodeMessage = {
   ],
 }
 
+/**
+ * 3.18.0 新形态（diag-compact-summary-3180.py 真机实测）：顶层 summary 消失，
+ * 改 semantics={kind:'compact_summary',origin:'agent_runtime'}，正文在 text part，
+ * compaction part 不再带 compactBoundary（元信息退化为纯标题行）。
+ */
+const SUMMARY_MSG_V2: ZCodeMessage = {
+  info: {
+    id: 'm_sum2', sessionID: 's1', role: 'user', time: { created: 1794406379519 },
+    semantics: { origin: 'agent_runtime', kind: 'compact_summary', uiVisibility: 'hidden', providerVisibility: 'visible', transcriptVisibility: 'hidden' },
+  },
+  parts: [
+    { type: 'text', text: 'This session is being continued from a previous conversation…\n\nSummary:\n1. Primary Request and Intent:…' },
+    { type: 'compaction', auto: false, trigger: 'manual', metadata: { compactReason: 'user_requested', operationId: 'cmp_x' } },
+  ],
+}
+
 const COMPACT_MARKER_MSG: ZCodeMessage = {
   info: {
     id: 'm_marker', sessionID: 's1', role: 'assistant',
@@ -80,6 +96,20 @@ describe('压缩摘要消息渲染（缺陷 C2）', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(document.querySelector('.subagent-detail-overlay')).toBeFalsy()
     expect(screen.queryByText(/之前的对话完成了 0.2.2 发布/)).toBeNull()
+  })
+
+  it('3.18.0 形态（semantics 标记 + text part 正文）同样分流为单行卡，不当用户气泡', () => {
+    const { container } = render(<MessageBubble message={SUMMARY_MSG_V2} />)
+    expect(container.querySelector('.compact-card')).toBeTruthy()
+    expect(container.querySelector('.msg--user')).toBeFalsy()
+    // compaction part 无 compactBoundary → 元信息退化为纯标题行（无「N 条消息已摘要」）
+    expect(screen.getByText('上下文已压缩')).toBeTruthy()
+    expect(screen.queryByText(/条消息已摘要/)).toBeNull()
+    // 正文默认折叠；点开弹窗后从 text part 取全文
+    expect(screen.queryByText(/Primary Request and Intent/)).toBeNull()
+    fireEvent.click(screen.getByRole('button'))
+    expect(document.querySelector('.subagent-detail-overlay')).toBeTruthy()
+    expect(screen.getByText(/Primary Request and Intent/)).toBeTruthy()
   })
 })
 

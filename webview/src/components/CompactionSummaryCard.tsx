@@ -1,10 +1,11 @@
 /**
  * /compact 压缩摘要卡片
  *
- * 压缩摘要消息（role=user + info.summary）的专门渲染（2026-08-21 RPC 实测）：
+ * 压缩摘要消息的专门渲染（2026-08-21 RPC 实测；3.18.0 形态适配）：
  * 不当用户气泡（8k+ 字符摘要塞右对齐蓝气泡的视觉灾难），改为左对齐单行卡——
  * 头部一行元信息（标题 + 被摘要消息数），点击弹出全文弹窗阅读
  * （壳复用子代理报告弹窗样式，图标同用书本 codicon-book）。
+ * 识别判据与正文来源见 isCompactSummaryMessage（旧顶层 summary / 新 semantics 标记）。
  *
  * token 元信息优先取 compaction part 的 compactBoundary（摘要消息自带），
  * 缺失时退化为纯标题行（boundary 是压缩点固有产物，正常都在）。
@@ -28,7 +29,16 @@ interface Props {
 export function CompactionSummaryCard({ message, time, anchorAttr }: Props) {
   const { t } = useTranslation()
   const { info, parts } = message
-  const body = info.summary?.body ?? ''
+  // 正文两代形态：旧=顶层 summary.body；新（3.18.0+）=text part（顶层 summary 消失）
+  const body =
+    info.summary?.body ??
+    parts
+      .filter(
+        (p): p is { type: 'text'; text: string } =>
+          p.type === 'text' && typeof (p as { text?: unknown }).text === 'string',
+      )
+      .map((p) => p.text)
+      .join('\n\n')
   const [open, setOpen] = useState(false)
 
   const boundary = parts.find(
