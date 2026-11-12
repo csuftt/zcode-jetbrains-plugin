@@ -1,18 +1,33 @@
 {
   "quota": {
-    "title": "Quota",
-    "titleWithPlan": "Quota ({{level}} plan)",
+    "title": "Quota · used",
+    "titleWithPlan": "Quota ({{level}} plan) · used",
     "lastRefresh": "Last refreshed {{time}}",
     "refresh": "Refresh quota",
     "loading": "Loading…",
     "empty": "No quota data",
-    "resetAt": "Resets {{time}}",
-    "usedPct": "{{pct}}% used"
+    "resetAt": "Resets {{time}}"
   },
   "plan": {
     "tab": "GLM Plan Usage",
     "credHint": "Credential: {{name}}",
     "credForeign": "Query credential: {{name}} (plan data is scoped to the account owning this key)"
+  },
+  "trend": {
+    "title": "Quota Trend",
+    "empty": "No quota history yet — from this version on every quota query is recorded",
+    "noWindow": "No trackable quota window for the current plan",
+    "current": "Current usage",
+    "consumed": "Consumed in range",
+    "dailyAvg": "Daily average",
+    "tokenPerPct": "Avg. tokens per 1%",
+    "tokenPerPctHint": "Last {{days}} days: {{tokens}} tokens / {{pct}}%",
+    "tokenPerPctUnavailable": "Not enough samples for token conversion (needs ≥1% consumed with server-side model usage)",
+    "curveTitle": "{{name}} used",
+    "coveredDays": "{{days}} days covered",
+    "dailyTitle": "Daily consumption",
+    "barTip": "{{date}}: {{pct}}% consumed",
+    "consumedHint": "Summed across quota resets within the range — may exceed 100%"
   },
   "app": {
     "tab": "App Usage",

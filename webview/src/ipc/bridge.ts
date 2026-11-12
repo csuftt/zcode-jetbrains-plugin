@@ -1246,6 +1246,31 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
           ],
         },
       }
+    case 'getQuotaHistory': {
+      // mock：近 N 天额度采样（30 分钟一个点；3 天一个重置周期，便于验证曲线跳变与
+      // 每日消耗柱重置不计负）。日期与 getModelUsage 的 mock 时间轴重叠，Token 换算可验。
+      const days = req.days ?? 7
+      const now = Date.now()
+      const step = 30 * 60 * 1000
+      const cycle = 3 * 86400_000
+      const start = now - days * 86400_000
+      const samples = []
+      for (let ts = start; ts <= now; ts += step) {
+        const pos = (ts - start) % cycle
+        const weekly = Math.min(100, Math.round(2 + (pos / cycle) * 88))
+        const fiveHour = Math.min(99, Math.round(20 + ((ts / step) % 60)))
+        samples.push({
+          ts,
+          providerId: 'builtin:bigmodel-coding-plan',
+          limits: [
+            { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: fiveHour, nextResetTime: ts + 3 * 3600_000 },
+            { type: 'TOKENS_LIMIT', unit: 6, percentage: weekly, nextResetTime: ts + (cycle - pos) },
+            { type: 'TIME_LIMIT', unit: 5, percentage: 40 },
+          ],
+        })
+      }
+      return { op: 'quotaHistory', data: samples }
+    }
     case 'getAppUsage': {
       // mock：应用用量（usage/stats 本地聚合；含第三方模型，验证徽章与曲线对齐）
       return {
@@ -1278,8 +1303,15 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
       }
     }
     case 'getModelUsage': {
-      // mock：模型用量曲线（2 模型 × 8 时间点）
-      const xt = ['2026-08-13 09:00', '2026-08-13 12:00', '2026-08-13 15:00', '2026-08-13 18:00', '2026-08-13 21:00', '2026-08-14 00:00', '2026-08-14 09:00', '2026-08-14 12:00']
+      // mock：模型用量曲线（2 模型 × 8 时间点，末点为当前时刻）。
+      // 时间轴动态：额度趋势的「每 1% ≈ Token」需要与额度采样日期重叠，
+      // 写死历史日期会让换算指标在 dev 下永远不出现。
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const fmtTs = (ts: number) => {
+        const d = new Date(ts)
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+      }
+      const xt = Array.from({ length: 8 }, (_, i) => fmtTs(Date.now() - (7 - i) * 3 * 3600_000))
       return {
         op: 'modelUsage',
         providerId: 'builtin:bigmodel-coding-plan',

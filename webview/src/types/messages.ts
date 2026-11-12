@@ -645,6 +645,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'getUsage'; sessionId: string }
   | { op: 'getSessionDebug'; sessionId: string }
   | { op: 'getQuota' }
+  /** 额度历史采样（用量页「额度趋势」；days 缺省 7，服务端夹在 1..60）*/
+  | { op: 'getQuotaHistory'; days?: number }
   | { op: 'getAppUsage'; range: AppUsageRange }
   | { op: 'getModelUsage'; startTime: string; endTime: string }
   | { op: 'getToolUsage'; startTime: string; endTime: string }
@@ -1569,6 +1571,8 @@ export type JavaResponse =
   // providerId/providerName：monitor 三路 HTTP 实际取 key 的渠道（回退链不筛身份，
   // 可能落到非 coding-plan 渠道，用量页据此提示数据口径）
   | { op: 'quota'; data?: QuotaData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
+  /** 额度历史采样（op=getQuotaHistory 的响应，ts 升序）*/
+  | { op: 'quotaHistory'; data?: QuotaHistorySample[]; error?: string }
   | { op: 'appUsage'; data?: AppUsageData | null; error?: string }
   | { op: 'modelUsage'; data?: ModelUsageData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
   | { op: 'toolUsage'; data?: ToolUsageData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
@@ -1931,6 +1935,23 @@ export interface QuotaLimit {
 export interface QuotaData {
   limits: QuotaLimit[]
   level?: string
+}
+
+/** 额度历史采样里的单个窗口（QuotaHistoryStore 落盘的 JSONL 行内对象）*/
+export interface QuotaHistoryLimit {
+  type?: string
+  unit?: number
+  /** 窗口序号（5h 池=5 等；历史存储不落该字段，mock/兼容用）*/
+  number?: number
+  percentage?: number
+  nextResetTime?: number
+}
+
+/** 一次额度应答的历史采样（ts=采样时刻毫秒；providerId=当时查询凭证所属渠道）*/
+export interface QuotaHistorySample {
+  ts: number
+  providerId?: string
+  limits: QuotaHistoryLimit[]
 }
 
 /** 时间范围（用量明细 tab + 自定义日期）*/

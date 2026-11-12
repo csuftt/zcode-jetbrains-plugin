@@ -16,7 +16,7 @@ import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId, getTabWorkspacePath } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
-import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary } from '@/types/messages'
+import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, QuotaHistorySample, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { classifyQuotaError, bannerTriggerKey, providerLimitedMessage } from '@/utils/quotaWindows'
@@ -1462,6 +1462,9 @@ interface StoreState {
   quotaFetchedAt: number
   /** monitor HTTP 实际取 key 的渠道（用量页提示数据口径；成功响应携带）*/
   usageProvider: { id: string; name: string; keyMasked?: string } | null
+  /** 额度历史采样（用量页「额度趋势」，ts 升序；null=未加载）*/
+  quotaHistory: QuotaHistorySample[] | null
+  quotaHistoryLoading: boolean
 
   // 记忆文件（设置视图「记忆」条目，Kotlin 端固定清单扫描）
   memoryFiles: MemoryFileInfo[] | null
@@ -1829,6 +1832,8 @@ interface StoreState {
   loadSessionDebug: () => void
   /** 拉取额度（设置视图 + 圆环 popover 用）*/
   loadQuota: () => void
+  /** 拉取额度历史采样（用量页「额度趋势」；days 缺省 7，上限 60）*/
+  loadQuotaHistory: (days?: number) => void
   /** 关闭当前额度横幅（记录去重键，同源触发不再展示）*/
   dismissQuotaBanner: (key: string) => void
   /** 清除额度横幅错误触发源（窗口恢复/新回合开始时由 useQuotaBanner 调用）*/
@@ -2202,6 +2207,8 @@ export const useStore = create<StoreState>((set, get) => ({
   quota: null,
   quotaLoading: false,
   quotaFetchedAt: 0,
+  quotaHistory: null,
+  quotaHistoryLoading: false,
   usageProvider: null,
   memoryFiles: null,
   memoryWorkspace: '',
@@ -3590,6 +3597,11 @@ export const useStore = create<StoreState>((set, get) => ({
     quotaRequestedAt = Date.now()
     set({ quotaLoading: true })
     sendToJava({ op: 'getQuota' })
+  },
+
+  loadQuotaHistory: (days = 7) => {
+    set({ quotaHistoryLoading: true })
+    sendToJava({ op: 'getQuotaHistory', days })
   },
 
   dismissQuotaBanner: (key: string) => {
@@ -6352,6 +6364,11 @@ export function handleResponse(
           }),
         })
       }
+      break
+
+    case 'quotaHistory':
+      // 历史采样是只读数据：失败（文件不可写/读异常）按空数组处理，趋势区展示空态
+      set({ quotaHistory: msg.data ?? [], quotaHistoryLoading: false })
       break
 
     case 'appUsage':

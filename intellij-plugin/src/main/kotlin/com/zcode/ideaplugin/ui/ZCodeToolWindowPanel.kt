@@ -1380,6 +1380,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "getUsage" -> handleGetUsage(msg)
                         "getSessionDebug" -> handleGetSessionDebug(msg)
                         "getQuota" -> handleGetQuota(msg)
+                        "getQuotaHistory" -> handleGetQuotaHistory(msg)
                         "getAppUsage" -> handleGetAppUsage(msg)
                         "getModelUsage" -> handleGetModelUsage(msg)
                         "getToolUsage" -> handleGetToolUsage(msg)
@@ -5267,17 +5268,32 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 .GET().build()
             val resp = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString())
             if (resp.statusCode() != 200) return usageErrorResponse("quota", "额度查询失败: HTTP ${resp.statusCode()}")
+            val rawData = json.parseToJsonElement(resp.body()).jsonObject
+            // 历史采样（额度趋势数据源）：成功应答顺手落一行，失败不影响本次查询
+            QuotaHistoryStore.record(rawData["data"]?.jsonObject, creds.providerId)
             buildJsonObject {
                 put("op", "quota")
                 put("providerId", creds.providerId)
                 put("providerName", creds.providerName)
                 put("providerKeyMasked", maskKey(creds.apiKey))
-                val rawData = json.parseToJsonElement(resp.body()).jsonObject
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
             if (e is java.io.IOException) usageErrorResponse("quota", friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: com.zcode.ideaplugin.ZCodeBundle.message("quota.network.unreachable")}"))
             else usageErrorResponse("quota", "额度查询异常: ${e.message}")
+        }
+    }
+
+    /**
+     * op=getQuotaHistory — 读取额度历史采样（用量页「额度趋势」）。
+     * days 缺省 7，服务端夹在 1..[QuotaHistoryStore.RETENTION_DAYS]；
+     * 样本按 ts 升序，前端自行按 provider 分段与降采样。
+     */
+    private fun handleGetQuotaHistory(msg: JsonObject): JsonObject {
+        val days = msg["days"]?.jsonPrimitive?.intOrNull ?: 7
+        return buildJsonObject {
+            put("op", "quotaHistory")
+            put("data", QuotaHistoryStore.load(days))
         }
     }
 
