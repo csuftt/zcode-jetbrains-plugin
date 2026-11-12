@@ -58,7 +58,6 @@ object McpConfigReader {
     )
 
     private const val PLUGIN_WALK_DEPTH = 8
-    private val VERSION_LIKE = Regex("^v?\\d+(\\.\\d+)*.*$")
 
     /** 读取三来源全部服务器配置（同名先到先得：user > project > plugin） */
     fun scan(projectBasePath: String?): List<McpServerInfo> {
@@ -103,28 +102,31 @@ object McpConfigReader {
         }
     }
 
-    /** 解析插件 .mcp.json（顶层 mcpServers；只认 cache/ 已安装插件，marketplaces/ 是市场索引清单不算已配置） */
+    /**
+     * 解析插件 .mcp.json（顶层 mcpServers）。
+     * 只扫启用插件的安装目录：data/ 与 config.json plugins.enabledPlugins 的启用判据统一收敛到
+     * SlashCommandScanner.enabledPluginVersionDirs。已禁用插件官方不加载其 skill/MCP，这里同样不列
+     *（marketplaces/ 市场索引清单、cache 中未启用插件都因此自然排除）。
+     */
     private fun scanPluginMcpJson(root: File, out: MutableMap<String, McpServerInfo>) {
-        if (!root.isDirectory) return
-        try {
-            Files.walk(root.toPath(), PLUGIN_WALK_DEPTH).use { stream ->
-                stream.forEach { path ->
-                    if (path.fileName?.toString() != ".mcp.json") return@forEach
-                    val rel = root.toPath().relativize(path).toString().replace('\\', '/')
-                    if (rel.startsWith("marketplaces/")) return@forEach // 市场索引≠已安装
-                    val file = path.toFile()
-                    val json = readJson(file) ?: return@forEach
-                    val servers = runCatching { json["mcpServers"]?.jsonObject }.getOrNull() ?: return@forEach
-                    val pluginName = pluginNameFromPath(rel)
-                    servers.forEach { (name, cfg) ->
-                        if (name in out) return@forEach
-                        val info = parseServerEntry(name, cfg, "plugin", pluginName, file.absolutePath) ?: return@forEach
-                        out[name] = info
+        for ((pluginName, versionDir) in SlashCommandScanner.enabledPluginVersionDirs(root)) {
+            try {
+                Files.walk(versionDir.toPath(), PLUGIN_WALK_DEPTH).use { stream ->
+                    stream.forEach { path ->
+                        if (path.fileName?.toString() != ".mcp.json") return@forEach
+                        val file = path.toFile()
+                        val json = readJson(file) ?: return@forEach
+                        val servers = runCatching { json["mcpServers"]?.jsonObject }.getOrNull() ?: return@forEach
+                        servers.forEach { (name, cfg) ->
+                            if (name in out) return@forEach
+                            val info = parseServerEntry(name, cfg, "plugin", pluginName, file.absolutePath) ?: return@forEach
+                            out[name] = info
+                        }
                     }
                 }
+            } catch (_: Exception) {
+                // 单个插件目录结构异常不阻塞整体
             }
-        } catch (_: Exception) {
-            // 插件目录结构异常不阻塞整体
         }
     }
 
@@ -306,14 +308,6 @@ object McpConfigReader {
         if (namespaced == null) return direct
         if (str(direct["status"]) != "connected" && str(namespaced["status"]) == "connected") return namespaced
         return direct
-    }
-
-    /** rel 形如 cache/marketplace/<plugin>/<version>/.mcp.json → 取版本段上一层 */
-    private fun pluginNameFromPath(rel: String): String? {
-        val parts = rel.split('/')
-        val dirParts = parts.dropLast(1) // 去掉 .mcp.json
-        val last = dirParts.lastOrNull() ?: return null
-        return if (dirParts.size >= 2 && VERSION_LIKE.matches(last)) dirParts[dirParts.size - 2] else last
     }
 
     private fun str(e: kotlinx.serialization.json.JsonElement?): String? =

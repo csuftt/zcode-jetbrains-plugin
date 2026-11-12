@@ -5,9 +5,10 @@ import java.io.File
 /**
  * 内置浏览器设置（与 ZCode 客户端公用配置，只读展示——修改一律以 ZCode 客户端为准）：
  *
- * 浏览器控制 = zcode.cjs discoverPluginsSync 以 `~/.zcode/cli/plugins/data/` 下的
- * 目录为启用判据（目录存在即启用，内容为空；实测 `plugins list` 的 [enabled] 与
- * data 目录一一对应），客户端侧开关操作的也是同一目录——插件侧读目录即得最新状态。
+ * 浏览器控制开关 = 官方启用状态：`~/.zcode/cli/config.json` 的 plugins.enabledPlugins
+ * 显式 false 即禁用（官方判定 `enabledPlugins[id] ?? defaultEnabled`）。data/ 目录只是
+ * 插件曾初始化的残留——禁用不删除（pdf/presentations 等实测 data 仍在但已 disabled），
+ * 所以不能单独拿目录存在当启用判据，要叠加 config 开关。客户端侧开关改的就是这两个位置。
  * （曾实现可写开关，但 zcode.cjs 每次加载插件都 mkdirSync 重建 data 目录——长驻
  * app-server 会把删除的目录"复活"，禁用必须重启后端、中断进行中对话，改为只读。）
  *
@@ -33,7 +34,7 @@ object ZCodeBrowserSettingStore {
         return versions.isDirectory && versions.list()?.isNotEmpty() == true
     }
 
-    /** 浏览器控制是否开启（data 目录存在即启用；只读，客户端侧修改）*/
+    /** 浏览器控制是否开启：data 目录存在（曾初始化）+ config.json 未显式禁用（只读，客户端侧修改）*/
     fun isBrowserControlEnabled(home: String = System.getProperty("user.home")): Boolean =
-        dataDir(home).isDirectory
+        dataDir(home).isDirectory && PLUGIN_ID !in SlashCommandScanner.disabledPluginIds(pluginsRoot(home))
 }

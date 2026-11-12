@@ -9206,6 +9206,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             val pluginName = p["name"]?.jsonPrimitive?.contentOrNull ?: continue
             val hostNames = runCatching { p["hostMcpServerNames"]?.jsonArray }.getOrNull() ?: continue
             val pluginEnabled = runCatching { p["enabled"]?.jsonPrimitive?.boolean }.getOrNull() ?: true
+            // 已禁用插件官方不加载其宿主 MCP：整条跳过（enabled=false 条目不进列表，与磁盘扫描同口径）
+            if (!pluginEnabled) continue
             val rootPath = p["rootPath"]?.jsonPrimitive?.contentOrNull
             for (n in hostNames) {
                 val name = runCatching { n.jsonPrimitive.content }.getOrNull() ?: continue

@@ -31,6 +31,7 @@ cd webview && npm test                # webview 测试（vitest，test/ 与 *.te
 - webview 产物（`intellij-plugin/src/main/resources/webview`、`webview-single`）不入库（.gitignore）。**单独跑 `buildPlugin` 会打出只含兜底 HTML 的 zip**——必须先 `npm run build` + `npm run build:single`（或直接 `./build.sh`）。
 - 生产模式用内置 HttpServer（127.0.0.1 随机端口）serve 多文件产物（sourcemap 可用），启动失败自动降级 singlefile 单文件加载。
 - 改协议交互前先看 `docs/internal/design-research/`（含负结论文档，避免重蹈）；缺陷修复要在 `docs/internal/bugs-regressions/` 落记录。
+- 插件技能/MCP 发现：启用权威是 `~/.zcode/cli/config.json` 的 `plugins.enabledPlugins`（`enabledPlugins[id] ?? 默认启用`；`plugins/data/` 目录只是曾初始化残留，禁用不删，别当判据）；技能集合按插件清单 `skills` 声明（`.zcode-plugin → .claude-plugin → .codex-plugin`，字符串=技能根直下两层、数组=逐个技能目录，不递归更深）。统一走 `SlashCommandScanner.enabledPluginVersionDirs()` / `pluginSkillDirs()`，勿另写扫描面。
 
 ## 发版流程
 

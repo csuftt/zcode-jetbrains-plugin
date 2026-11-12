@@ -18,7 +18,8 @@ import java.nio.file.StandardCopyOption
  *   user    ~/.zcode/skills、~/.agents/skills
  *           （junction 挂载时两根指向同一目录，按真实路径去重只保留先扫到的条目）
  *   project 项目根及 git worktree 根的 .zcode/skills、.agents/skills
- *   plugin  仅启用插件的 skills 目录（~/.zcode/cli/plugins，启用判据与版本选择见 SlashCommandScanner）
+ *   plugin  仅启用插件的 skills 目录（~/.zcode/cli/plugins，技能集合按插件清单 skills 声明，
+ *           启用判据与版本选择见 SlashCommandScanner）
  *
  * 启用状态：~/.zcode/cli/config.json 的 skill 节点 {<SKILL.md路径>: {enable:false}}
  * （CLI collectDisabledPaths 只取 enable===false 条目；匹配时对技能路径做 resolve/realpath
@@ -99,16 +100,16 @@ object SkillScanner {
 
     /**
      * 插件贡献：仅实际启用的插件（data/ 目录为启用判据，见 SlashCommandScanner），
-     * 取 cache 下最新版本目录的 skills/<name>/SKILL.md（直下一层，对齐 CLI 计数语义）。
+     * 技能目录按插件清单 skills 声明发现（见 SlashCommandScanner.pluginSkillDirs：
+     * 字符串=技能根直下一层，数组=逐个技能目录，无声明回退直下一层）。
      * marketplaces/ 市场清单（未安装插件）与 cache 中未启用插件不进列表。
      */
     private fun scanPluginSkills(root: File, disabled: Set<String>, out: MutableList<SkillInfo>) {
         SlashCommandScanner.enabledPluginVersionDirs(root).forEach { (pluginName, versionDir) ->
-            File(versionDir, "skills").listFiles()?.filter { it.isDirectory }?.forEach { skillDir ->
+            for (skillDir in SlashCommandScanner.pluginSkillDirs(versionDir)) {
                 val skillFile = File(skillDir, "SKILL.md")
-                if (skillFile.isFile) {
-                    parseSkill(skillFile, skillDir, "plugin", "plugin", pluginName, disabled, out)
-                }
+                if (!skillFile.isFile) continue
+                parseSkill(skillFile, skillDir, "plugin", "plugin", pluginName, disabled, out)
             }
         }
     }
