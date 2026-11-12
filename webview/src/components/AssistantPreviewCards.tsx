@@ -63,7 +63,10 @@ export const AssistantPreviewCards = memo(function AssistantPreviewCards({
   text: string
 }) {
   const { t } = useTranslation()
-  const workspacePath = useStore((s) => s.projectPath)
+  // 相对路径锚「当前会话 workspace」而非 projectPath：多目录会话（关联目录标签）下
+  // projectPath 是 IDE 项目根，与会话目录不一致时会把产物解析到错误目录、stat 全 false
+  // 静默无卡（2026-11-11 实锤：项目根 suiteng-ai-agent / 会话目录 zcode-idea-plugin）
+  const workspacePath = useStore((s) => s.currentWorkspacePath || s.projectPath)
   const sessionId = useStore((s) => s.currentSessionId)
   // 占位符路径展开白名单（缺陷 GY）：null=未到达，占位符引用暂解析不出（env 到达后本
   // 组件经依赖重算二段补出，与 changedPaths 的二段出卡同构）

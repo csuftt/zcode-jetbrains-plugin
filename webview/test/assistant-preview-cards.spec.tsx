@@ -49,6 +49,7 @@ beforeEach(() => {
   sentRequests.length = 0
   useStore.setState({
     projectPath: 'G:/demo',
+    currentWorkspacePath: '',
     currentSessionId: 'sess1',
     turnFileChanges: {},
   })
@@ -73,6 +74,20 @@ describe('AssistantPreviewCards', () => {
     expect(await screen.findByText('report.pdf')).toBeTruthy()
     expect(screen.queryByText('ghost.pdf')).toBeNull()
     expect(container.textContent).toContain('文档 · PDF')
+  })
+
+  it('相对路径锚 currentWorkspacePath（多目录会话）而非 projectPath', async () => {
+    // 多目录会话（关联目录标签）：projectPath=IDE 项目根，会话目录是 currentWorkspacePath。
+    // 旧实现锚 projectPath → 产物解析到错误目录、stat 全 false 静默无卡（2026-11-11 真机）
+    useStore.setState({ projectPath: 'G:/base', currentWorkspacePath: 'G:/linked' })
+    render(<AssistantPreviewCards messageId="msg_ws" text="产物 report.pdf" />)
+    await waitFor(() => {
+      expect(sentRequests.some((r) => r.op === 'checkFilesExist')).toBe(true)
+    })
+    const statReq = sentRequests.find((r) => r.op === 'checkFilesExist')!
+    expect(statReq.paths).toEqual(['G:/linked/report.pdf'])
+    statResultFor(statReq, () => true)
+    expect(await screen.findByText('report.pdf')).toBeTruthy()
   })
 
   it('md 需命中本轮 fileChanges：先查询账本，命中后出卡', async () => {

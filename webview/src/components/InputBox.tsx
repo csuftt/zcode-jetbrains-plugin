@@ -557,7 +557,7 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
       sendToJava({
         op: 'scheduledCreate',
         sessionId,
-        workspacePath: useStore.getState().projectPath,
+        workspacePath: useStore.getState().currentWorkspacePath || useStore.getState().projectPath,
         text,
         fireAt,
         ...(picked ? { providerId: picked.providerId, modelId: picked.modelId } : {}),
