@@ -21,6 +21,8 @@ import { BashCommandGroupCard } from './BashCommandGroupCard'
 import { FileToolGroupCard } from './FileToolGroupCard'
 import { CuaActionGroupCard } from './CuaActionGroupCard'
 import { ImagePreview } from './ImagePreview'
+import { AgentNotificationCard } from './AgentNotificationCard'
+import { clockTime } from '@/utils/time'
 import type { PartRenderUnit } from '@/utils/groupParts'
 import { isCuaTool, cuaIconKeyFromOutput } from '@/utils/cuaTools'
 import { selectionMark } from '@/utils/conversationSelections'
@@ -121,6 +123,16 @@ export function PartRenderer({
     case 'step-start':
     case 'step-finish':
       return null
+
+    case 'notification':
+      // 回合中途到达的通知卡（缺陷HI）：边界 part 落在到达时刻的 parts 位置，
+      // 与历史轮通知卡（段间独立消息）同一张卡片形态
+      return (
+        <AgentNotificationCard
+          message={part.message}
+          time={clockTime(part.message.info.time?.created)}
+        />
+      )
 
     default:
       return null

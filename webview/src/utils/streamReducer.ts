@@ -276,6 +276,43 @@ function closeOpenReasoning(parts: MessagePart[], timestamp: number): void {
   }
 }
 
+/**
+ * 回合中途到达的通知 → 流式气泡内联边界 part（缺陷HI）。
+ *
+ * 不插独立消息的原因见 NotificationPart 类型注释：实时流整轮是一条持续增长的
+ * 气泡，插在其后的独立消息会被后续内容一路顶到实时输出末尾。挂边界 part 让
+ * 卡片钉在通知到达时刻的位置，后续 delta 在卡片之后继续追加。幂等：同一通知
+ * 重复到达（多轮快照拉取）不重复挂。顺手收尾可能还开着的思考计时——卡片插在
+ * 中间会让「最后一个 part」不再是 reasoning，不收尾会让思考耗时一直跳动。
+ */
+export function appendMidTurnNotification(
+  messages: ZCodeMessage[],
+  streamingMessageId: string | null,
+  notification: ZCodeMessage,
+  timestamp: number,
+): ZCodeMessage[] {
+  if (!streamingMessageId) return messages
+  const idx = messages.findIndex((m) => m.info.id === streamingMessageId)
+  if (idx < 0 || messages[idx].info.role !== 'assistant') return messages
+  const msg = messages[idx]
+  if (msg.parts.some((p) => p.type === 'notification' && p.message.info.id === notification.info.id)) {
+    return messages
+  }
+  // 通知早于气泡创建 = 属于上一轮的注入（例如 steer 注入后回合已收、新回合已开，
+  // 拉取才到达）——不能挂进新气泡，返回原数组让调用方走位置法插入
+  const notifCreated = notification.info.time?.created
+  const shellCreated = msg.info.time?.created
+  if (typeof notifCreated === 'number' && typeof shellCreated === 'number' && notifCreated < shellCreated) {
+    return messages
+  }
+  const parts = [...msg.parts]
+  closeOpenReasoning(parts, timestamp)
+  parts.push({ type: 'notification', message: notification })
+  const out = [...messages]
+  out[idx] = { ...msg, parts }
+  return out
+}
+
 function handleModelStreaming(
   messages: ZCodeMessage[],
   streamingMessageId: string | null,

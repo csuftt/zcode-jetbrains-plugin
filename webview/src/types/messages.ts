@@ -23,6 +23,24 @@ export type MessagePart =
   | StepFinishPart
   | TimelinePart
   | CompactionPart
+  | NotificationPart
+
+/**
+ * 回合中途到达的通知卡边界（缺陷HI，2026-11-12）：本地专有形态，服务端不产出。
+ *
+ * 背景：CLI 把 task-notification / subagent-message 注入转录的轮界位置（模型调用
+ * 边界），服务端按 step 拆行后通知夹在两段 assistant 行之间；而实时流把整轮聚合
+ * 成**一条**持续增长的流式气泡。若通知作为独立消息插到流式气泡之后（缺陷EG 口径），
+ * 气泡后续增长会把卡片一路顶到实时输出末尾（用户观感=通知卡永远钉在最下面）。
+ * 故回合中途到达时改为在当前 parts 尾部挂边界 part：卡片落在到达时刻的位置，后续
+ * delta 在卡片之后追加。轮末权威快照整包替换后边界 part 随旧壳消失，通知回到真身
+ * 消息（step 行之间的时序位）。
+ */
+export interface NotificationPart {
+  type: 'notification'
+  /** 快照里的通知真身消息（渲染 AgentNotificationCard 用）*/
+  message: ZCodeMessage
+}
 
 /**
  * 图片 part：服务端把用户消息附件转成的读回形态（zcode.cjs 实测），

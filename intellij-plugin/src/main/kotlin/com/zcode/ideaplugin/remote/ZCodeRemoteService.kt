@@ -332,6 +332,12 @@ class ZCodeRemoteService : Disposable {
                           runningSessionIds.remove(sessionId) != null
                       }
         if (!changed) return
+        // 标签「●」/「✔」视觉同步（缺陷HI）：本汇点覆盖 legacy turn.* 与 v4 turnHeader
+        // 帧扫描两路，且不受面板 subscribedSessions 闸门/线程竞态影响——本地回合、
+        // 其他标签发送、手机远程驱动都能让绑定该会话的标签实时亮灭
+        runCatching {
+            com.zcode.ideaplugin.ui.ZCodeToolWindowPanel.syncTabPhaseForSession(sessionId, running)
+        }
         scheduleRepushDebounced()
         if (running) startPhaseTickerIfNeeded()
     }

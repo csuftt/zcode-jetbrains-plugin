@@ -572,6 +572,29 @@ class ZCodeToolWindowPanel(
                 }
             }
         }
+
+        /**
+         * 权威回合相位 → 标签「●」生成中/「✔」完成标记同步（缺陷HI，2026-11-12）。
+         *
+         * 为什么不能只靠面板自己的流式事件：`pushStreamEvent` 顶部有 subscribedSessions
+         * 闸门与 `sessionId == currentSessionId` 归属判断——subscribe 与 send 在 JCEF
+         * 消息池两类线程并发，忙窗口下 turn.started 可能先于订阅簿记落位而被整条丢弃
+         * （webview 自己的 streaming 是发送时的乐观态，Java 侧标签 ● 却永远不会亮）。
+         * ZCodeRemoteService.onSessionTurnPhase 是 legacy turn.* 与 v4 turnHeader 帧扫描
+         * 的公共汇点（跨面板闸门外），由它驱动标签视觉即可覆盖：本标签发送、别的标签
+         * 发送、重开运行中会话、手机远程驱动。只影响绑定该会话的标签，其余面板 no-op。
+         */
+        fun syncTabPhaseForSession(sessionId: String, running: Boolean) {
+            SwingUtilities.invokeLater {
+                activePanels.forEach { panel ->
+                    try {
+                        panel.syncTabPhaseFromAuthority(sessionId, running)
+                    } catch (_: Exception) {
+                        // 未初始化/销毁中的标签跳过
+                    }
+                }
+            }
+        }
     }
 
     /** 读取外观配置 JSON（fontScale/themePref/chatBg/chatBar/userMsg），无配置返回 null */
@@ -2104,6 +2127,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (tabStreaming == active) return
         tabStreaming = active
         applyTabDisplayName()
+    }
+
+    /**
+     * 权威回合相位 → 本标签视觉（缺陷HI）：只处理绑定本会话的标签。running → ● 亮
+     * （覆盖旧完成标记）；ended → ● 灭 + 未选中时亮完成标记（复用 onTurnEndedForTab
+     * 的选中态判据）。相位源=ZCodeRemoteService 运行集合（legacy turn.* 与 v4
+     * turnHeader 帧扫描两路汇合），与面板自身流式事件幂等并存——本面板收到过
+     * turn.started 时这里重复置位无副作用。
+     */
+    fun syncTabPhaseFromAuthority(sessionId: String, running: Boolean) {
+        if (disposed || sessionId != currentSessionId) return
+        if (running) onTurnStartedForTab() else onTurnEndedForTab()
     }
 
     /** 本标签回合开始：● 亮 + 完成标记灭（新一轮开始即覆盖旧完成态）*/
@@ -6913,6 +6948,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("sessionId", sessionId)
             put("phase", "running")
         })
+        // 标签「●」同拍补亮（缺陷HI）：本次订阅没经历该回合的 turn.started（事件发生在
+        // 订阅建立前/被订阅闸门丢弃），只推 webview 会让标签停在无标识态
+        syncTabPhaseFromAuthority(sessionId, true)
     }
 
     /**
