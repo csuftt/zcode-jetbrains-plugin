@@ -37,6 +37,20 @@ cd webview && npm test                # webview 测试（vitest，test/ 与 *.te
 
 版本分支管理与完整发版流程（升版本三处、构建签名、GitHub release、Marketplace 上传与覆盖发版）见 [`docs/release-process.md`](docs/release-process.md)，发版时先读。
 
+## Agent skills
+
+### Issue tracker
+
+公开 issue/spec 落在 GitHub Issues（`csuftt/zcode-jetbrains-plugin`）；协议逆向等内部内容留 `docs/internal/` 私有仓库。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+沿用五个规范 triage 角色同名字符串（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单 context 布局：根目录 `GLOSSARY.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
+
 ## 外部参考
 
 - CCGUI 参考项目（GitHub）：https://github.com/zhukunpenglinyutong/jetbrains-cc-gui （本项目 UI/设置页参考项目 jetbrains-cc-gui，探索其实现直接读 GitHub 源码；本机副本路径见工作区记忆）
