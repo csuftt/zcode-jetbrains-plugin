@@ -2059,10 +2059,15 @@ class ZCodeProtocolClient private constructor(
                 }))
                 s.isolation?.let { put("isolation", it) }
                 s.timeoutMs?.let { put("timeoutMs", it) }
-                // 3.17.x：scope 绕开 workspace-mcp-trust 撞名门控；alwaysLoad 防
-                // toolSearchMode 延迟加载。与 SessionMcpServerStore.encodeServers 同口径。
-                s.scope?.let { put("scope", it) }
-                s.alwaysLoad?.let { put("alwaysLoad", it) }
+                // 3.17.x（仅 NEW 代下发）：scope 绕开 workspace-mcp-trust 撞名门控；
+                // alwaysLoad 防 toolSearchMode 延迟加载。OLD 代的 zcodeProtocolMcpServerSchema
+                // 是 strict——未知键即拒（缺陷HH：老 CLI 上建会话必炸 -32602
+                // mcpServers.0: Invalid input，电脑控制开启即复现）。磁盘档案
+                // （SessionMcpServerStore）保全量不门控，wire 面统一在此按当代代际裁剪
+                if (generation == ProtocolGeneration.NEW) {
+                    s.scope?.let { put("scope", it) }
+                    s.alwaysLoad?.let { put("alwaysLoad", it) }
+                }
             })
         }
     }

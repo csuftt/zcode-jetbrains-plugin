@@ -62,12 +62,14 @@ data class McpServerSpec(
      * 不带时名字与项目配置声明的 MCP server 撞名 → 被 workspace-mcp-trust 门控打成
      * untrusted 拒连（callTool 抛 workspace_mcp_pending_trust）；带 "user" 完全绕开门控。
      * 插件注入恒 "user"（工具面由插件自己管理，不属工作区声明域）。
+     * 仅 NEW 代下发——OLD 代 strict schema 拒未知键（缺陷HH），wire 裁剪在 mcpServersJson。
      */
     val scope: String? = null,
     /**
      * 3.17.x 新增 optional（源码 zcode-protocol/index.ts:783）。ToolSearch 延迟加载
      * （toolSearchMode 非 off）下所有 MCP 工具注册默认 shouldDefer=true，注入 server
      * 不带 alwaysLoad=true 会被延迟出上下文、模型要先调 ToolSearch 才见到工具。
+     * 仅 NEW 代下发（同 scope，缺陷HH）。
      */
     val alwaysLoad: Boolean? = null,
 )

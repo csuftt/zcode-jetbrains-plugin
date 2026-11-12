@@ -100,7 +100,11 @@ internal object SessionMcpServerStore {
         Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
 
-    /** 编码与 wire 面 mcpServersJson 同形状（resume 直接可用） */
+    /**
+     * 编码落盘（规格保全量，含 3.17.x scope/alwaysLoad）。磁盘档案不按代际裁剪——
+     * wire 面统一在 ZCodeProtocolClient.mcpServersJson 按当代代际门控（缺陷HH），
+     * 这里裁了会让 CLI 在新旧间切换时丢信息、回不去。
+     */
     private fun encodeServers(servers: List<McpServerSpec>): JsonArray = buildJsonArray {
         servers.forEach { s ->
             add(buildJsonObject {
@@ -115,7 +119,6 @@ internal object SessionMcpServerStore {
                 }))
                 s.isolation?.let { put("isolation", it) }
                 s.timeoutMs?.let { put("timeoutMs", it) }
-                // 与 ZCodeProtocolClient.mcpServersJson 同口径（3.17.x scope/alwaysLoad）
                 s.scope?.let { put("scope", it) }
                 s.alwaysLoad?.let { put("alwaysLoad", it) }
             })
