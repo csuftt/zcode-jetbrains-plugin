@@ -6,6 +6,52 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.4.5-beta.1] - 2026-11-12
+
+中文:
+
+### 适配
+
+- **适配 ZCode 桌面端 3.18.0**（11-11 推送，此前插件会出现的五个问题全部解决）：
+  - 会话内容区黑屏打不开；
+  - 模型列表内置订阅渠道全部消失、key 换发失效；
+  - 一轮回复被拆成多个「已工作」分段，完成轮折叠散开；
+  - 上下文压缩摘要整段渲染成用户消息；
+  - 历史消息里的图片不显示，编辑带图的历史消息报错。
+
+### 新增
+
+- **供应商预设大幅扩充**：对齐 ZCode 客户端最新模板集（34 条模板 31 张预设卡，新增 OpenCode Zen、千问 Token Plan 个人版等），预设卡补齐 Kimi Code / Z.ai API / BigModel API / OpenRouter 的模型目录；模型厂商图标识别补全（混元、Kimi、阿里云百炼等）。
+- **思考级别新增「超高」档**：qwen 系模型的 xhigh 级别可正常选择与显示。
+
+### 修复
+
+- 弹出独立窗口的会话无法再被右键「发送到其他工作区」选中，已修复；发送目标为独立窗口时显示「当前标签 · 独立窗口」徽标。
+- 「让 ZC GUI 解释这个提交」弹窗改为非模态：生成期间可自由切回 IDE 干其他活，弹窗可最小化；右键菜单项位置提前。
+- 多目录会话（关联目录标签）下产物预览卡不显示、更改明细打不开、定时任务会落错目录。
+
+English:
+
+### Adapted
+
+- **Adapted to ZCode Desktop 3.18.0** (pushed on Nov 11; all five issues the plugin had after upgrading are now fixed):
+  - Session content area showed a black screen;
+  - Built-in subscription channels disappeared from the model list and key renewal failed;
+  - A single reply was split into multiple "worked for" segments, completed-turn folds scattered;
+  - Context compaction summaries were rendered as user messages;
+  - Images in history messages were not displayed, and editing history messages with images failed.
+
+### Added
+
+- **Greatly expanded provider presets**: aligned with the latest ZCode client template set (34 templates / 31 preset cards, adding OpenCode Zen, Qwen Token Plan personal edition, etc.); added model catalogs for Kimi Code / Z.ai API / BigModel API / OpenRouter; completed model vendor icon recognition (Hunyuan, Kimi, Aliyun Bailian, etc.).
+- **New "Ultra-high" thought level**: the xhigh level of qwen-series models can now be selected and displayed correctly.
+
+### Fixed
+
+- Detached (pop-out) sessions could no longer be selected as a right-click "Send to workspace" target; fixed, with a "current tab · detached window" badge shown when applicable.
+- The "Ask ZC GUI to explain this commit" dialog is now non-modal: you can switch back to the IDE freely while it generates, and the dialog can be minimized; the menu entry is moved earlier in the list.
+- In multi-directory sessions (attached-directory tabs), artifact preview cards were missing, change details failed to open, and scheduled tasks landed in the wrong directory.
+
 ## [0.4.4] - 2026-11-11
 
 中文:
