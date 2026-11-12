@@ -10,6 +10,7 @@
  * 本组件只渲染 kind/name/description，不硬编码选项语义——服务端加选项自动生效。
  */
 
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PermissionOption } from '@/types/messages'
 import { sendToJava } from '@/ipc/bridge'
@@ -97,6 +98,35 @@ export function PermissionApprovalDialog({
   const rows = summarizeInput(input)
   const shown = rows.slice(0, MAX_FIELDS)
   const restCount = rows.length - shown.length
+  /** 收起态（最小化）：只留 header 一行（徽章/标题/工具/风险/倒计时/展开按钮），
+      对齐询问/计划审批弹窗（issue#45-4.3 同款交互） */
+  const [collapsed, setCollapsed] = useState(false)
+  /** 收起横条悬浮位：输入框上沿 y + 水平中心 x（视口坐标）。null=测量未就绪，
+      横条回落 dock 贴底原位 */
+  const [dockPos, setDockPos] = useState<{ x: number; top: number } | null>(null)
+
+  // 收起横条悬浮到输入框顶部中间（同计划审批弹窗）：拖拽调高、排队卡增减行都会
+  // 改变输入框上沿，ResizeObserver + window resize 双跟随
+  useEffect(() => {
+    if (!collapsed) {
+      setDockPos(null)
+      return
+    }
+    const box = document.querySelector('.chat-input-box')
+    if (!box || typeof ResizeObserver === 'undefined') return
+    const update = () => {
+      const r = box.getBoundingClientRect()
+      setDockPos({ x: r.left + r.width / 2, top: r.top })
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(box)
+    window.addEventListener('resize', update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [collapsed])
 
   /** 服务端 optionId → 本地化按钮文案（allow_once/allow_project/deny 为稳定枚举；
    *  未知 optionId（服务端扩展选项）fallback 服务端原文）*/
@@ -139,45 +169,81 @@ export function PermissionApprovalDialog({
     // 用户可回看工具卡上下文再决定；倒计时与应答逻辑不变
     <div className="ask-user-overlay ask-user-overlay--dock">
       {/* 遮罩不响应点击（与 AskUserDialog 同款纪律）：审批是显式决策，误触遮罩不得改变语义 */}
-      <div className="perm-dialog" title={toolName}>
-        <div className="perm-dialog__header">
+      <div
+        className={`perm-dialog ${collapsed ? 'perm-dialog--collapsed' : ''}`}
+        title={toolName}
+        style={
+          collapsed && dockPos
+            ? {
+                position: 'fixed',
+                left: dockPos.x,
+                top: dockPos.top - 8,
+                transform: 'translate(-50%, -100%)',
+                // 横条宽度跟随主界面：与展开 dock 态同口径（overlay 左右 12px 边距内撑满）
+                width: 'calc(100vw - 24px)',
+              }
+            : undefined
+        }
+      >
+        <div
+          className="perm-dialog__header"
+          onClick={collapsed ? () => setCollapsed(false) : undefined}
+          role={collapsed ? 'button' : undefined}
+        >
           <span className="perm-dialog__icon">🛡️</span>
           <span className="perm-dialog__title">{t('app.permissionApproval.title')}</span>
           <span className="perm-dialog__tool">{toolName}</span>
           {riskLabel && <span className="perm-dialog__risk">{riskLabel}</span>}
           <DialogCountdown deadlineMs={deadlineMs} />
+          <button
+            type="button"
+            className="perm-dialog__collapse"
+            aria-expanded={!collapsed}
+            title={collapsed ? t('app.askUser.expand') : t('app.askUser.collapse')}
+            onClick={(e) => {
+              e.stopPropagation()
+              setCollapsed((v) => !v)
+            }}
+          >
+            {/* 弹窗贴底部：展开态点收起显 chevron-down，收起态点展开显 chevron-up（对齐询问弹窗） */}
+            <span className={`codicon codicon-chevron-${collapsed ? 'up' : 'down'}`} />
+          </button>
         </div>
 
-        <div className="perm-dialog__body">
-          {reason && <div className="perm-dialog__reason">{localizeReason(reason, t)}</div>}
-          {shown.length > 0 && (
-            <div className="perm-dialog__input">
-              {shown.map((row) => (
-                <div key={row.label} className="perm-dialog__input-row">
-                  <span className="perm-dialog__input-label">{fieldLabel(row.label)}</span>
-                  <span className="perm-dialog__input-value">{row.value}</span>
+        {!collapsed && (
+          <>
+            <div className="perm-dialog__body">
+              {reason && <div className="perm-dialog__reason">{localizeReason(reason, t)}</div>}
+              {shown.length > 0 && (
+                <div className="perm-dialog__input">
+                  {shown.map((row) => (
+                    <div key={row.label} className="perm-dialog__input-row">
+                      <span className="perm-dialog__input-label">{fieldLabel(row.label)}</span>
+                      <span className="perm-dialog__input-value">{row.value}</span>
+                    </div>
+                  ))}
+                  {restCount > 0 && (
+                    <div className="perm-dialog__input-more">{t('app.permissionApproval.moreFields', { count: restCount })}</div>
+                  )}
                 </div>
-              ))}
-              {restCount > 0 && (
-                <div className="perm-dialog__input-more">{t('app.permissionApproval.moreFields', { count: restCount })}</div>
               )}
             </div>
-          )}
-        </div>
 
-        <div className="perm-dialog__footer">
-          {sorted.map((opt) => (
-            <button
-              key={opt.optionId}
-              type="button"
-              className={`perm-dialog__btn ${btnClass(opt)} ${opt.optionId === 'allow_once' ? 'perm-dialog__btn--primary' : ''}`}
-              onClick={() => handleChoose(opt)}
-              title={optionDesc(opt)}
-            >
-              {optionName(opt)}
-            </button>
-          ))}
-        </div>
+            <div className="perm-dialog__footer">
+              {sorted.map((opt) => (
+                <button
+                  key={opt.optionId}
+                  type="button"
+                  className={`perm-dialog__btn ${btnClass(opt)} ${opt.optionId === 'allow_once' ? 'perm-dialog__btn--primary' : ''}`}
+                  onClick={() => handleChoose(opt)}
+                  title={optionDesc(opt)}
+                >
+                  {optionName(opt)}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
