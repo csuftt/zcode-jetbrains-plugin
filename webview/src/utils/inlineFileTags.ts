@@ -16,7 +16,7 @@
 import { getFileIcon, getFolderIcon } from '@/utils/fileIcons'
 import { splitReference, basename, refTooltip } from '@/components/FileRef'
 import { SESS_MD_RE, SESS_BARE_RE, sessionRefShortLabel, sessionRefTip } from '@/utils/sessionRefPattern'
-import { SKILL_MD_RE, SKILL_BARE_RE, skillRefText, unescapeSkillMd } from '@/utils/skillRefPattern'
+import { SKILL_MD_RE, SKILL_BARE_RE, skillRefText, skillShortName, unescapeSkillMd } from '@/utils/skillRefPattern'
 
 const CHIP_CLASS = 'file-ref--inline'
 const CMD_CHIP_CLASS = 'cmd-ref--inline'
@@ -76,7 +76,8 @@ export function hasAnyInlineChip(el: HTMLElement): boolean {
 //   data-skill="1"  序列化走 skillRefText（[$名称](路径) / 裸 $名称），区别于命令的 /name
 //   data-path       技能目录绝对路径（Kotlin 扫描器透出；缺省=裸 token 形态）
 
-/** 构造内联技能 chip 的 HTML（结构复用命令 chip；tip 完整路径/名称）*/
+/** 构造内联技能 chip 的 HTML（结构复用命令 chip；tip 完整路径/名称）
+ *  展示走 skillShortName 短名（剥插件前缀，对齐官方客户端），data-cmd/tip 保留全名*/
 export function buildSkillChipHTML(name: string, path?: string, description?: string): string {
   const tip = path ? `$${name} — ${path}` : `$${name}${description ? ` — ${description}` : ''}`
   return (
@@ -84,7 +85,7 @@ export function buildSkillChipHTML(name: string, path?: string, description?: st
     (path ? ` data-path="${escapeHtml(path)}"` : '') +
     ` data-tip="${escapeHtml(tip)}">` +
     `<span class="codicon codicon-wand cmd-ref__icon"></span>` +
-    `<span class="cmd-ref__name">${escapeHtml(name)}</span>` +
+    `<span class="cmd-ref__name">${escapeHtml(skillShortName(name))}</span>` +
     `<button class="cmd-ref__remove" type="button" tabindex="-1">✕</button>` +
     `</span>`
   )
@@ -260,14 +261,17 @@ export function insertChipAtCursor(el: HTMLElement, path: string): void {
  * 构造内联命令 chip 的 HTML（/ 下拉选中后插进输入框，替代顶部附件栏 chip）。
  * 序列化（serializeEditor）回 /name 前缀文本：goal 走 doSend 正则拦截，
  * 命令/技能由服务端 CLI 解析。
+ * 技能条目展示短名（剥插件前缀，对齐官方客户端）；命令的冒号是嵌套目录名
+ * （review:code），剥了丢语义，保持全名。data-cmd/tip 一律全名。
  */
 export function buildCommandChipHTML(name: string, kind: CmdChipKind, description?: string): string {
   const meta = CMD_META[kind] ?? CMD_META.command
   const tip = description ? `/${name} — ${description}` : `/${name}`
+  const displayName = kind === 'skill' ? skillShortName(name) : name
   return (
     `<span class="cmd-ref cmd-ref--inline cmd-ref--${meta.variant}" contenteditable="false" data-cmd="${escapeHtml(name)}" data-tip="${escapeHtml(tip)}">` +
     `<span class="codicon ${meta.icon} cmd-ref__icon"></span>` +
-    `<span class="cmd-ref__name">${escapeHtml(name)}</span>` +
+    `<span class="cmd-ref__name">${escapeHtml(displayName)}</span>` +
     `<button class="cmd-ref__remove" type="button" tabindex="-1">✕</button>` +
     `</span>`
   )

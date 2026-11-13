@@ -7,12 +7,14 @@ import { describe, expect, it } from 'vitest'
 import {
   matchSkillRefTrigger,
   skillRefText,
+  skillShortName,
   SKILL_MD_RE,
   SKILL_BARE_RE,
   unescapeSkillMd,
 } from '../src/utils/skillRefPattern'
 import {
   buildSkillChipHTML,
+  buildCommandChipHTML,
   serializeEditor,
   convertCompletedSkillRefs,
 } from '../src/utils/inlineFileTags'
@@ -101,6 +103,35 @@ describe('技能提及序列化（skillRefText 双形态）', () => {
   })
 })
 
+describe('技能 chip 展示短名（skillShortName，对齐官方客户端）', () => {
+  it('剥插件命名空间前缀，无前缀原样返回', () => {
+    expect(skillShortName('mattpocock-skills:grill-with-docs')).toBe('grill-with-docs')
+    expect(skillShortName('browser-use:control-browser')).toBe('control-browser')
+    expect(skillShortName('code-review')).toBe('code-review')
+  })
+
+  it('只剥首个冒号前缀（叶子名自身可含冒号）', () => {
+    expect(skillShortName('plugin:a:b')).toBe('a:b')
+  })
+
+  it('内联技能 chip：展示短名，data-cmd/tip 保留全名（序列化不受影响）', () => {
+    const html = buildSkillChipHTML('mattpocock-skills:grill-with-docs', 'C:\\s\\g')
+    expect(html).toContain('data-cmd="mattpocock-skills:grill-with-docs"')
+    expect(html).toContain('data-tip="$mattpocock-skills:grill-with-docs — C:\\s\\g"')
+    expect(html).toContain('>grill-with-docs</span>')
+    expect(html).not.toContain('>mattpocock-skills:grill-with-docs</span>')
+  })
+
+  it('/ 面板命令 chip：技能剥前缀，命令冒号是嵌套目录名不剥', () => {
+    const skillHtml = buildCommandChipHTML('mattpocock-skills:grill-me', 'skill')
+    expect(skillHtml).toContain('>grill-me</span>')
+    expect(skillHtml).toContain('data-cmd="mattpocock-skills:grill-me"')
+    const cmdHtml = buildCommandChipHTML('review:code', 'command')
+    expect(cmdHtml).toContain('>review:code</span>')
+    expect(cmdHtml).toContain('data-cmd="review:code"')
+  })
+})
+
 describe('内联技能 chip（buildSkillChipHTML + serializeEditor）', () => {
   it('chip 结构：cmd-ref--skill 变体 + data-skill 标记 + data-path', () => {
     const html = buildSkillChipHTML('code-review', 'C:\\s\\review', '审查代码')
@@ -176,6 +207,17 @@ describe('消息回显识别（renderUserRefChips）', () => {
   it('普通 /命令 识别不受影响', () => {
     const node = renderUserRefChips('跑 /review', undefined, cmdNames)
     expect(renderToText(node)).toContain('cmd-ref--command')
+  })
+
+  it('插件技能 chip 展示短名（剥命名空间前缀，对齐官方客户端）', () => {
+    const pluginNames = new Map<string, CmdRefInfo>([
+      ['mattpocock-skills:grill-with-docs', { kind: 'skill', path: 'C:\\s\\g' }],
+    ])
+    const node = renderUserRefChips('先跑 [$mattpocock-skills:grill-with-docs](C:\\s\\g)', undefined, pluginNames)
+    const html = renderToText(node)
+    expect(html).toContain('cmd-ref--skill')
+    expect(html).toContain('grill-with-docs')
+    expect(html).not.toContain('mattpocock-skills')
   })
 
   it('hasUserRefChips 覆盖技能两类形态', () => {

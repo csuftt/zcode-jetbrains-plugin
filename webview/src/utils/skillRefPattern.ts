@@ -65,3 +65,15 @@ export function skillRefText(name: string, path?: string): string {
   if (!path) return `$${name}`
   return `[$${escapeSkillMdLabel(name)}](${escapeSkillMdDestination(path)})`
 }
+
+/**
+ * 技能 chip 的展示短名：剥掉插件命名空间前缀（mattpocock-skills:grill-with-docs →
+ * grill-with-docs），对齐官方客户端 chip 只显叶子名；全名保留在 data-tip 悬浮兜底。
+ * 仅对 kind=skill 的名字使用——用户自建命令的冒号是嵌套目录名本身（review:code），
+ * 剥了会丢语义；用户自建技能无冒号（scanSkillDir 不加命名空间），天然不受影响。
+ * 序列化仍走全名（data-cmd），此处只管展示层。
+ */
+export function skillShortName(name: string): string {
+  const i = name.indexOf(':')
+  return i >= 0 ? name.slice(i + 1) : name
+}

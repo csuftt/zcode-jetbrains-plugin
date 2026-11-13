@@ -24,7 +24,7 @@ import { splitReference, basename } from '@/components/FileRef'
 import { truncateMiddle } from '@/components/CurrentFileChip'
 import { FileIcon } from '@/components/FileIcon'
 import { SESS_MD_RE, SESS_BARE_RE, sessionRefShortLabel, sessionRefTip } from '@/utils/sessionRefPattern'
-import { SKILL_MD_RE, SKILL_BARE_RE, unescapeSkillMd } from '@/utils/skillRefPattern'
+import { SKILL_MD_RE, SKILL_BARE_RE, skillShortName, unescapeSkillMd } from '@/utils/skillRefPattern'
 
 /** /命令·技能引用（名字字符集对齐 SlashCommand.name，如 code-review、review:code；
  *  前缀限词首，@/ 路径不会被命中）*/
@@ -82,14 +82,16 @@ function sessionChip(sessionId: string, title: string, key: string): ReactNode {
   )
 }
 
-/** 只读命令/技能 chip（显示裸名不带斜杠，对齐输入框内联 cmd chip；data-tip 留完整前缀形态）*/
+/** 只读命令/技能 chip（显示裸名不带斜杠，对齐输入框内联 cmd chip；data-tip 留完整前缀形态。
+ *  技能展示短名剥插件前缀（对齐官方客户端），命令冒号是嵌套目录名保持全名；tip 一律全名）*/
 function cmdChip(name: string, info: CmdRefInfo, key: string, titlePrefix = '/'): ReactNode {
   const meta = MSG_CMD_META[info.kind] ?? MSG_CMD_META.command
   const tip = `${titlePrefix}${name}${info.path ? ` · ${info.path}` : ''}`
+  const displayName = info.kind === 'skill' ? skillShortName(name) : name
   return (
     <span key={key} className={`cmd-ref user-ref-chip cmd-ref--${meta.variant}`} data-tip={truncateMiddle(tip, 60)}>
       <span className={`codicon ${info.icon ?? meta.icon} cmd-ref__icon`} />
-      <span className="cmd-ref__name">{name}</span>
+      <span className="cmd-ref__name">{displayName}</span>
     </span>
   )
 }

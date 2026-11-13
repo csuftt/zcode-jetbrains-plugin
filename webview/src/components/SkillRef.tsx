@@ -8,6 +8,7 @@
 
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { skillShortName } from '@/utils/skillRefPattern'
 import '../styles/skill-ref.less'
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
 
 function SkillRefInner({ name, description, kind = 'skill', onRemove }: Props) {
   const { t } = useTranslation()
+  // 展示短名（剥插件前缀，对齐官方客户端；命令的冒号是嵌套目录名不剥）；tip 保留全名兜底
   const tooltip = description ? `/${name} — ${description}` : `/${name}`
   return (
     <span
@@ -29,7 +31,7 @@ function SkillRefInner({ name, description, kind = 'skill', onRemove }: Props) {
       <span
         className={`codicon ${kind === 'command' ? 'codicon-terminal' : 'codicon-wand'} skill-ref__icon`}
       />
-      <span className="skill-ref__name">{name}</span>
+      <span className="skill-ref__name">{kind === 'skill' ? skillShortName(name) : name}</span>
       <button
         className="skill-ref__remove"
         onClick={onRemove}
