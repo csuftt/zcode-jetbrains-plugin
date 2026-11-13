@@ -1,18 +1,33 @@
 {
   "quota": {
-    "title": "利用枠",
-    "titleWithPlan": "利用枠（{{level}} プラン）",
+    "title": "利用枠 · 使用",
+    "titleWithPlan": "利用枠（{{level}} プラン）· 使用",
     "lastRefresh": "最終更新 {{time}}",
     "refresh": "利用枠を更新",
     "loading": "読み込み中…",
     "empty": "利用枠データなし",
-    "resetAt": "リセット {{time}}",
-    "usedPct": "使用 {{pct}}%"
+    "resetAt": "リセット {{time}}"
   },
   "plan": {
     "tab": "GLM プラン利用量",
     "credHint": "照会キー：{{name}}",
     "credForeign": "照会 credentials: {{name}}（データはこのキーのアカウントのプランに準ずる）"
+  },
+  "trend": {
+    "title": "利用枠トレンド",
+    "empty": "利用枠の履歴がまだありません（このバージョンから照会のたびに記録します）",
+    "noWindow": "現在のプランに追跡可能な利用枠がありません",
+    "current": "現在の使用率",
+    "consumed": "期間内の消費",
+    "dailyAvg": "1日平均の消費",
+    "tokenPerPct": "1% あたり平均 Token",
+    "tokenPerPctHint": "直近 {{days}} 日：{{tokens}} Token / {{pct}}%",
+    "tokenPerPctUnavailable": "Token 換算のサンプル不足（1% 以上の消費とサーバー側モデル使用量が必要）",
+    "curveTitle": "{{name}}の使用率",
+    "coveredDays": "{{days}} 日分をカバー",
+    "dailyTitle": "日別の消費",
+    "barTip": "{{date}} は {{pct}}% 消費",
+    "consumedHint": "期間内のリセットをまたいで累加するため、100% を超えることがあります"
   },
   "app": {
     "tab": "アプリ利用量",

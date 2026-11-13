@@ -1,5 +1,12 @@
 package com.zcode.ideaplugin.ui
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.nio.charset.Charset
 
@@ -136,34 +143,124 @@ object SlashCommandScanner {
      */
     private fun scanPluginResources(root: File, result: LinkedHashMap<String, SlashCommand>) {
         enabledPluginVersionDirs(root).forEach { (pluginName, versionDir) ->
-            // skills/<name>/SKILL.md（直下一层，对齐 CLI 的 skills 计数语义）
-            File(versionDir, "skills").listFiles()?.filter { it.isDirectory }?.forEach { skillDir ->
+            for (skillDir in pluginSkillDirs(versionDir)) {
                 val skillFile = File(skillDir, "SKILL.md")
-                if (!skillFile.isFile) return@forEach
+                if (!skillFile.isFile) continue
                 try {
                     val fm = parseFrontmatter(skillFile.readText(Charsets.UTF_8).take(MAX_READ))
-                    if (!isUserInvocable(fm)) return@forEach
-                val name = fm["name"] ?: skillDir.name
-                putIfAbsent(result, "$pluginName:$name", fm["description"], "skill", "plugin", skillDir.absolutePath)
+                    if (!isUserInvocable(fm)) continue
+                    val name = fm["name"] ?: skillDir.name
+                    putIfAbsent(result, "$pluginName:$name", fm["description"], "skill", "plugin", skillDir.absolutePath)
                 } catch (_: Exception) { }
             }
             scanCommandDir(File(versionDir, "commands"), "plugin", result, namespace = pluginName)
         }
     }
 
-    /** 启用插件 → 其最新版本目录（SkillScanner 共用）；data/ 目录名形如 插件名@市场名 */
+    /** 插件清单位置（按优先级，对齐官方 zcode.cjs 的 .zcode-plugin → .claude-plugin → .codex-plugin） */
+    private val PLUGIN_MANIFESTS = listOf(
+        ".zcode-plugin/plugin.json",
+        ".claude-plugin/plugin.json",
+        ".codex-plugin/plugin.json",
+    )
+
+    /**
+     * 插件技能目录发现（SkillScanner 共用），对齐官方 Mxo/oSo/FZ 语义：
+     *
+     * 取首个存在的清单的 `skills` 字段，两种形态归一为技能根列表：
+     *   - 字符串（如 `"skills": "skills"`）：单个根
+     *   - 数组（如 `["./skills/engineering/ask-matt", ...]`）：逐个根
+     * 每个根按官方 FZ 两层语义展开：根本身含 SKILL.md 即一个技能，否则取其直下一层
+     * `<根>/<name>/SKILL.md`（不递归更深）。
+     *
+     * - `skills` 字段缺失：官方回退默认根 `skills`（同 `Mxo` 的 manifest.skills===void 0 分支）
+     * - 字段存在但为空数组/空串：官方不启用任何根，这里同样不回退
+     * - 无任何清单：宽容回退默认根（官方不会加载无清单插件，但多列不会误伤既有技能）
+     *
+     * 不能只认直下一层：Mattpocock 这类 Claude 市场插件把技能放在分类子目录
+     * （skills/engineering/ask-matt），且用清单数组显式声明集合（in-progress/misc 故意不声明），
+     * 无脑递归又会把未声明的实验性技能带出来。
+     */
+    internal fun pluginSkillDirs(versionDir: File): List<File> {
+        val manifest = PLUGIN_MANIFESTS.map { File(versionDir, it) }.firstOrNull { it.isFile }
+            ?: return childSkillDirs(File(versionDir, "skills"))
+        val roots = declaredSkillRoots(manifest)
+            ?: return childSkillDirs(File(versionDir, "skills"))
+        val base = runCatching { versionDir.canonicalFile }.getOrDefault(versionDir)
+        return roots.mapNotNull { rel -> containedUnder(base, rel) }
+            .flatMap { skillDirOrRoot(it) }
+            .distinct()
+    }
+
+    /** manifest.skills → 根路径列表；null = 字段缺失（官方语义：回退默认 skills 根） */
+    private fun declaredSkillRoots(manifest: File): List<String>? = runCatching {
+        val skills = Json.parseToJsonElement(manifest.readText(Charsets.UTF_8)).jsonObject["skills"]
+            ?: return null
+        when (skills) {
+            is JsonArray -> skills.mapNotNull { el ->
+                (el as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            }
+            is JsonPrimitive -> listOfNotNull(skills.contentOrNull?.takeIf { it.isNotBlank() })
+            else -> emptyList()
+        }
+    }.getOrNull()
+
+    /**
+     * 根路径解析并限制在插件目录内（对齐官方 VT：绝对路径/../ 越界视为非法根，跳过）。
+     * 解析不到（越界）返回 null。
+     */
+    private fun containedUnder(base: File, rel: String): File? {
+        val f = File(rel)
+        if (f.isAbsolute) return null
+        val resolved = runCatching { File(base, rel).canonicalFile }.getOrNull() ?: return null
+        val basePath = base.path.trimEnd(File.separatorChar)
+        val path = resolved.path
+        if (path != basePath && !path.startsWith(basePath + File.separatorChar)) return null
+        return resolved
+    }
+
+    /** 根本身是技能目录则取自身；否则取其直下一层子目录（官方 FZ 两层语义） */
+    private fun skillDirOrRoot(dir: File): List<File> =
+        if (File(dir, "SKILL.md").isFile) listOf(dir) else childSkillDirs(dir)
+
+    private fun childSkillDirs(dir: File): List<File> =
+        dir.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.lowercase() }.orEmpty()
+
+    /**
+     * 启用插件 → 其最新版本目录（SkillScanner / McpConfigReader 共用）。
+     *
+     * 双重判据：
+     *   data/<插件名>@<市场名>/           插件曾初始化（cache 有但从未启用的不列）
+     *   config.json plugins.enabledPlugins 显式 false = 官方禁用开关（权威；禁用不删 data/cache，
+     *   所以只看 data 目录会把已禁用插件当启用——pdf/presentations 等实测就是 data 残留）
+     *   未出现在 enabledPlugins 的视为默认启用（官方内置插件不写该节点）。
+     */
     internal fun enabledPluginVersionDirs(root: File): List<Pair<String, File>> {
         val dataDir = File(root, "data")
         val cacheDir = File(root, "cache")
         if (!dataDir.isDirectory || !cacheDir.isDirectory) return emptyList()
+        val disabled = disabledPluginIds(root)
         return dataDir.listFiles().orEmpty()
-            .filter { it.isDirectory && it.name.contains('@') }
+            .filter { it.isDirectory && it.name.contains('@') && it.name !in disabled }
             .mapNotNull { data ->
                 val pluginName = data.name.substringBefore('@')
                 val marketplace = data.name.substringAfter('@')
                 if (pluginName.isEmpty() || marketplace.isEmpty()) return@mapNotNull null
                 newestVersionDir(File(cacheDir, "$marketplace/$pluginName"))?.let { pluginName to it }
             }
+    }
+
+    /** config.json 的 plugins.enabledPlugins 中显式 false 的插件 id（插件名@市场名） */
+    internal fun disabledPluginIds(pluginsRoot: File): Set<String> {
+        val cfg = File(pluginsRoot.parentFile, "config.json")
+        if (!cfg.isFile) return emptySet()
+        return runCatching {
+            val plugins = Json.parseToJsonElement(cfg.readText(Charsets.UTF_8)).jsonObject["plugins"]?.jsonObject
+            val enabled = plugins?.get("enabledPlugins")?.jsonObject ?: return emptySet()
+            enabled.entries.mapNotNull { (id, v) ->
+                if (runCatching { v.jsonPrimitive.boolean }.getOrNull() == false) id else null
+            }.toSet()
+        }.getOrElse { emptySet() }
     }
 
     /** 版本目录取语义最新（点分数值比较，0.10.0 > 0.9.0；非数字段按 0）*/

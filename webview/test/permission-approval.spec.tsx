@@ -191,4 +191,34 @@ describe('权限审批弹窗交互', () => {
     const value = screen.getByText(/x{300}…/)
     expect(value).toBeTruthy()
   })
+
+  // ==== 可折叠（对齐询问/计划审批弹窗形态，2026-11-12 改造回归锁）====
+
+  it('折叠按钮收起 body/footer：reason 与应答按钮消失、aria-expanded 翻转、title 变「展开」', () => {
+    renderDialog()
+    const collapseBtn = screen.getByTitle('收起')
+    expect(screen.getByText('工具 Write 需要批准后执行')).toBeTruthy()
+    fireEvent.click(collapseBtn)
+    // body/footer 条件渲染收起：reason 与全部应答按钮不可见
+    expect(screen.queryByText('工具 Write 需要批准后执行')).toBeNull()
+    expect(screen.queryByText('允许一次')).toBeNull()
+    // 收起不触发应答
+    expect(sent).toHaveLength(0)
+    // 按钮态翻转：title/aria-expanded
+    const expandBtn = screen.getByTitle('展开')
+    expect(expandBtn.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('收起态点击 header 整行展开恢复', () => {
+    renderDialog()
+    fireEvent.click(screen.getByTitle('收起'))
+    expect(screen.queryByText('允许一次')).toBeNull()
+    // header 在收起态带 button role，点击整行展开（经折叠钮父级定位 header）
+    const headerEl = screen.getByTitle('展开').closest('.perm-dialog__header')
+    expect(headerEl).toBeTruthy()
+    fireEvent.click(headerEl as Element)
+    expect(screen.getByText('工具 Write 需要批准后执行')).toBeTruthy()
+    expect(screen.getByText('允许一次')).toBeTruthy()
+    expect(screen.getByTitle('收起').getAttribute('aria-expanded')).toBe('true')
+  })
 })

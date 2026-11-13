@@ -1,18 +1,33 @@
 {
   "quota": {
-    "title": "額度",
-    "titleWithPlan": "額度（{{level}} 套餐）",
+    "title": "額度 · 已用",
+    "titleWithPlan": "額度（{{level}} 套餐）· 已用",
     "lastRefresh": "上次重新整理 {{time}}",
     "refresh": "重新整理額度",
     "loading": "載入中…",
     "empty": "暫無額度資料",
-    "resetAt": "重置 {{time}}",
-    "usedPct": "已用 {{pct}}%"
+    "resetAt": "重置 {{time}}"
   },
   "plan": {
     "tab": "GLM 套餐用量",
     "credHint": "查詢憑證：{{name}}",
     "credForeign": "查詢憑證：{{name}}（非訂閱渠道，資料可能不符）"
+  },
+  "trend": {
+    "title": "額度趨勢",
+    "empty": "暫無額度歷史取樣，本版本起每次查詢額度都會記錄",
+    "noWindow": "目前套餐沒有可追蹤的額度視窗",
+    "current": "目前已用",
+    "consumed": "區間消耗",
+    "dailyAvg": "日均消耗",
+    "tokenPerPct": "平均 1% ≈ Token",
+    "tokenPerPctHint": "近 {{days}} 天口徑：{{tokens}} Token / {{pct}}%",
+    "tokenPerPctUnavailable": "Token 換算樣本不足（需至少 1% 消耗且有伺服器端模型用量資料）",
+    "curveTitle": "{{name}}已用佔比",
+    "coveredDays": "覆蓋 {{days}} 天",
+    "dailyTitle": "每日消耗",
+    "barTip": "{{date}} 消耗 {{pct}}%",
+    "consumedHint": "區間內每次額度重置前後分別累加，可超過 100%"
   },
   "app": {
     "tab": "應用用量",

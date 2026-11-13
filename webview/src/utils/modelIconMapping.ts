@@ -49,6 +49,9 @@ const MODEL_VENDOR_PATTERNS: ReadonlyArray<readonly [RegExp, ModelVendor]> = [
   [/zhipu/i, 'zhipu'],
   [/minimax/i, 'minimax'],
   [/xiaomi|mimo/i, 'xiaomi'],
+  // 腾讯混元 TokenHub 用短名（hy3 / hy4-preview）；Kimi Code 订阅侧 k3 系即 Kimi 模型
+  [/^hy\d/i, 'hunyuan'],
+  [/^k3(?:[.\-_]|$)/i, 'kimi'],
   [/longcat/i, 'longcat'],
   [/opencode/i, 'opencode'],
   [/doubao/i, 'doubao'],
@@ -78,11 +81,16 @@ const MODEL_VENDOR_PATTERNS: ReadonlyArray<readonly [RegExp, ModelVendor]> = [
  */
 const BASE_URL_VENDOR_PATTERNS: ReadonlyArray<readonly [RegExp, ModelVendor]> = [
   [/bigmodel\.cn/i, 'zhipu'],
-  [/moonshot\.(cn|ai)|kimi\.com/i, 'kimi'],
+  [/moonshot\.(cn|ai)|api\.kimi\.(com|ai)/i, 'kimi'],
   [/deepseek\.com/i, 'deepseek'],
-  [/minimaxi\.com|minimax\.(io|com)/i, 'minimax'],
+  [/minimaxi\.com|minimax\.(io|com|cn)/i, 'minimax'],
   [/xiaomimimo\.com/i, 'xiaomi'],
-  [/dashscope\.aliyuncs\.com/i, 'bailian'],
+  // 百炼系：dashscope / coding.dashscope / token-plan.*.maas.aliyuncs
+  [/dashscope|maas\.aliyuncs\.com/i, 'bailian'],
+  // 千问 AI 平台（Token Plan 个人版域名）
+  [/qianwenaiapi\.com/i, 'qwen'],
+  [/tencentmaas\.com/i, 'hunyuan'],
+  [/volces\.com/i, 'doubao'],
   [/longcat\.chat/i, 'longcat'],
   [/opencode\.ai/i, 'opencode'],
   [/openrouter\.ai/i, 'openrouter'],

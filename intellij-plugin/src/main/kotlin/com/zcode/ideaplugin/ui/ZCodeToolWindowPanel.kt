@@ -572,6 +572,29 @@ class ZCodeToolWindowPanel(
                 }
             }
         }
+
+        /**
+         * 权威回合相位 → 标签「●」生成中/「✔」完成标记同步（缺陷HI，2026-11-12）。
+         *
+         * 为什么不能只靠面板自己的流式事件：`pushStreamEvent` 顶部有 subscribedSessions
+         * 闸门与 `sessionId == currentSessionId` 归属判断——subscribe 与 send 在 JCEF
+         * 消息池两类线程并发，忙窗口下 turn.started 可能先于订阅簿记落位而被整条丢弃
+         * （webview 自己的 streaming 是发送时的乐观态，Java 侧标签 ● 却永远不会亮）。
+         * ZCodeRemoteService.onSessionTurnPhase 是 legacy turn.* 与 v4 turnHeader 帧扫描
+         * 的公共汇点（跨面板闸门外），由它驱动标签视觉即可覆盖：本标签发送、别的标签
+         * 发送、重开运行中会话、手机远程驱动。只影响绑定该会话的标签，其余面板 no-op。
+         */
+        fun syncTabPhaseForSession(sessionId: String, running: Boolean) {
+            SwingUtilities.invokeLater {
+                activePanels.forEach { panel ->
+                    try {
+                        panel.syncTabPhaseFromAuthority(sessionId, running)
+                    } catch (_: Exception) {
+                        // 未初始化/销毁中的标签跳过
+                    }
+                }
+            }
+        }
     }
 
     /** 读取外观配置 JSON（fontScale/themePref/chatBg/chatBar/userMsg），无配置返回 null */
@@ -1380,6 +1403,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "getUsage" -> handleGetUsage(msg)
                         "getSessionDebug" -> handleGetSessionDebug(msg)
                         "getQuota" -> handleGetQuota(msg)
+                        "getQuotaHistory" -> handleGetQuotaHistory(msg)
                         "getAppUsage" -> handleGetAppUsage(msg)
                         "getModelUsage" -> handleGetModelUsage(msg)
                         "getToolUsage" -> handleGetToolUsage(msg)
@@ -2103,6 +2127,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (tabStreaming == active) return
         tabStreaming = active
         applyTabDisplayName()
+    }
+
+    /**
+     * 权威回合相位 → 本标签视觉（缺陷HI）：只处理绑定本会话的标签。running → ● 亮
+     * （覆盖旧完成标记）；ended → ● 灭 + 未选中时亮完成标记（复用 onTurnEndedForTab
+     * 的选中态判据）。相位源=ZCodeRemoteService 运行集合（legacy turn.* 与 v4
+     * turnHeader 帧扫描两路汇合），与面板自身流式事件幂等并存——本面板收到过
+     * turn.started 时这里重复置位无副作用。
+     */
+    fun syncTabPhaseFromAuthority(sessionId: String, running: Boolean) {
+        if (disposed || sessionId != currentSessionId) return
+        if (running) onTurnStartedForTab() else onTurnEndedForTab()
     }
 
     /** 本标签回合开始：● 亮 + 完成标记灭（新一轮开始即覆盖旧完成态）*/
@@ -3183,10 +3219,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
      *  cache miss 时回退编辑附件临时目录（serveImageCache 同款兜底）：编辑重发图片
      *  的 ref 文件在 editAttachmentsRoot（image-cache 只在原始内联发送时由 zcode.cjs
      *  落盘），重发消息 part.filename=ref basename（diag-edit-double 实锤），二次
-     *  编辑反查时 basename 即 temp 文件名——不回退则「图片附件解析失败」。 */
+     *  编辑反查时 basename 即 temp 文件名——不回退则「图片附件解析失败」。
+     *  3.18.0 起历史读回的图片 part url 直接内联 data:image/...;base64（缺陷HG，
+     *  图数据自包含无磁盘文件）→ 解码落编辑附件临时目录（writeEditTempAttachment
+     *  内容 hash 确定性命名与受控命名体系自洽，读回兜底链可命中）。 */
     private fun locateImageCacheFile(o: JsonObject): String? {
         val url = o["url"]?.jsonPrimitive?.contentOrNull ?: return null
         val mime = o["mime"]?.jsonPrimitive?.contentOrNull ?: ""
+        if (url.startsWith("data:image/")) {
+            val payload = url.substringAfter(";base64,", "")
+            if (payload.isEmpty()) return null
+            return writeEditTempAttachment(payload, mime)
+        }
         val file: File? = if (url.contains("/zcode-image/")) {
             val segs = url.substringAfter("/zcode-image/").trim('/').split('/')
             if (segs.size != 2 || !ZCodeWebviewServer.sidPattern.matches(segs[0]) ||
@@ -5259,17 +5303,32 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 .GET().build()
             val resp = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString())
             if (resp.statusCode() != 200) return usageErrorResponse("quota", "额度查询失败: HTTP ${resp.statusCode()}")
+            val rawData = json.parseToJsonElement(resp.body()).jsonObject
+            // 历史采样（额度趋势数据源）：成功应答顺手落一行，失败不影响本次查询
+            QuotaHistoryStore.record(rawData["data"]?.jsonObject, creds.providerId)
             buildJsonObject {
                 put("op", "quota")
                 put("providerId", creds.providerId)
                 put("providerName", creds.providerName)
                 put("providerKeyMasked", maskKey(creds.apiKey))
-                val rawData = json.parseToJsonElement(resp.body()).jsonObject
                 rawData["data"]?.let { put("data", it) }
             }
         } catch (e: Exception) {
             if (e is java.io.IOException) usageErrorResponse("quota", friendlyNetworkMessage("${e.javaClass.simpleName}: ${e.message ?: com.zcode.ideaplugin.ZCodeBundle.message("quota.network.unreachable")}"))
             else usageErrorResponse("quota", "额度查询异常: ${e.message}")
+        }
+    }
+
+    /**
+     * op=getQuotaHistory — 读取额度历史采样（用量页「额度趋势」）。
+     * days 缺省 7，服务端夹在 1..[QuotaHistoryStore.RETENTION_DAYS]；
+     * 样本按 ts 升序，前端自行按 provider 分段与降采样。
+     */
+    private fun handleGetQuotaHistory(msg: JsonObject): JsonObject {
+        val days = msg["days"]?.jsonPrimitive?.intOrNull ?: 7
+        return buildJsonObject {
+            put("op", "quotaHistory")
+            put("data", QuotaHistoryStore.load(days))
         }
     }
 
@@ -5373,6 +5432,34 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * 目录在 IDE Project View 中定位并展开（openFile 目录路由：消息内目录链接 /
+     * 会话标题下方目录徽标双击共用，2026-11-12）。
+     *
+     * 裸 ProjectView.select 有前置空洞：Project 工具窗从未打开时 pane 未初始化，
+     * select 静默空转（233 的 ProjectViewImpl.getCurrentProjectViewPane 返回 null）。
+     * 按官方 SelectInProjectView 流程：先激活 Project 工具窗，再切到当前视图
+     * （未初始化时回落默认视图，createComponent 顺带落 myCurrentViewId），最后
+     * select。233 的 AsyncProjectViewSupport.select 路径自带 expandPath，选中
+     * 目录节点即展开其子节点，正是徽标双击的「定位并展开」语义。
+     */
+    private fun revealDirectoryInProjectView(vdir: VirtualFile) {
+        val projectView = com.intellij.ide.projectView.ProjectView.getInstance(project)
+        val reveal = {
+            val viewId = projectView.currentViewId ?: projectView.defaultViewId
+            projectView.changeViewCB(viewId, null).doWhenProcessed {
+                projectView.select(null, vdir, true)
+            }
+        }
+        val toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+            .getToolWindow(com.intellij.openapi.wm.ToolWindowId.PROJECT_VIEW)
+        if (toolWindow != null) {
+            toolWindow.activate({ reveal() }, true)
+        } else {
+            reveal()
+        }
+    }
+
+    /**
      * op=openFile — 在 IDEA 编辑器打开文件（支持行号定位）
      *
      * findText 可选：打开后在编辑器 Find 栏填充该关键词（EditorSearchSession，
@@ -5399,8 +5486,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 }
             }
             val ioFile = java.io.File(resolvedPath)
-            // 目录路由（消息内路径链接的文件夹打开）：IDE Project View 定位选中并聚焦
-            // （真机拍板 2026-10-09：不要系统文件管理器，要 IDE 内打开）；
+            // 目录路由（消息内路径链接的文件夹打开 / 标题徽标双击）：IDE Project View
+            // 定位选中并聚焦（真机拍板 2026-10-09：不要系统文件管理器，要 IDE 内打开）；
             // 目录不在 VFS/项目内容内时定位静默落空——与文件死链同款体验，不额外兜底
             if (ioFile.isDirectory) {
                 val vdir = LocalFileSystem.getInstance().findFileByPath(resolvedPath)
@@ -5411,8 +5498,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                             }
                     } else null
                 if (vdir != null) {
-                    com.intellij.ide.projectView.ProjectView.getInstance(project)
-                        .select(null, vdir, true)
+                    revealDirectoryInProjectView(vdir)
                 } else {
                     log.warn("Open directory failed: not found after VFS refresh $resolvedPath")
                 }
@@ -6862,6 +6948,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("sessionId", sessionId)
             put("phase", "running")
         })
+        // 标签「●」同拍补亮（缺陷HI）：本次订阅没经历该回合的 turn.started（事件发生在
+        // 订阅建立前/被订阅闸门丢弃），只推 webview 会让标签停在无标识态
+        syncTabPhaseFromAuthority(sessionId, true)
     }
 
     /**
@@ -9117,6 +9206,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
             val pluginName = p["name"]?.jsonPrimitive?.contentOrNull ?: continue
             val hostNames = runCatching { p["hostMcpServerNames"]?.jsonArray }.getOrNull() ?: continue
             val pluginEnabled = runCatching { p["enabled"]?.jsonPrimitive?.boolean }.getOrNull() ?: true
+            // 已禁用插件官方不加载其宿主 MCP：整条跳过（enabled=false 条目不进列表，与磁盘扫描同口径）
+            if (!pluginEnabled) continue
             val rootPath = p["rootPath"]?.jsonPrimitive?.contentOrNull
             for (n in hostNames) {
                 val name = runCatching { n.jsonPrimitive.content }.getOrNull() ?: continue

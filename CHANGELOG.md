@@ -6,6 +6,118 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.4.5] - 2026-11-13
+
+中文:
+
+### 适配
+
+- **适配 ZCode 桌面端 3.18.x**（3.18.0 推送后插件出现的五个问题全部解决）：
+  - 会话内容区黑屏打不开；
+  - 模型列表内置订阅渠道全部消失、key 换发失效；
+  - 一轮回复被拆成多个「已工作」分段，完成轮折叠散开；
+  - 上下文压缩摘要整段渲染成用户消息；
+  - 历史消息里的图片不显示，编辑带图的历史消息报错；
+  - 兼容 Z.ai 渠道登录的凭证形态（PAT 自动换发续期）：内置账号渠道（BigModel 个人/团队套餐）不再从模型列表消失；原 BigModel 直登方式不受影响。
+
+### 新增
+
+- **供应商预设大幅扩充**：对齐 ZCode 客户端最新模板集（34 条模板 31 张预设卡，新增 OpenCode Zen、千问 Token Plan 个人版等），预设卡补齐 Kimi Code / Z.ai API / BigModel API / OpenRouter 的模型目录；模型厂商图标识别补全（混元、Kimi、阿里云百炼等）。
+- **额度历史趋势**：用量页新增周额度曲线，每日消耗按天摊分展示，可回看近期额度走势；额度卡行内百分比与「已用」上移到卡片标题。
+- **思考级别新增「超高」档**：qwen 系模型的 xhigh 级别可正常选择与显示。
+- **权限审批弹窗可折叠**：权限审批弹窗铺满主界面宽度（对齐询问/计划审批弹窗形态），可折叠成横条悬浮在输入框上沿，折叠后审批倒计时照常走。
+- **提交面板右键发送文件到输入框**：提交工具窗选中文件右键即可发送到 ZC GUI 输入框（已删除文件自动跳过）。
+- **会话标题目录徽标双击定位**：双击目录徽标在项目树中定位并展开该目录，悬浮气泡显示完整路径；消息内目录链接同样生效。
+
+### 修复
+
+- 修复桌面端重定向数据目录后，输入框「润色」等轻任务对自定义渠道失效的问题（issue #50）：轻任务子进程现与桌面端读同一份渠道配置。
+- 修复桌面端归档/置顶的会话在插件历史列表不同步的问题：插件任务索引跟随数据目录重定向，两端置顶、归档、未读同源。
+- 修复启用电脑控制等 MCP 插件时，旧版 CLI 下新建会话必报错的问题（新版注入的 scope/alwaysLoad 键被旧 CLI 整条拒收，现按 CLI 代际门控下发）。
+- 弹出独立窗口的会话无法再被右键「发送到其他工作区」选中，已修复；发送目标为独立窗口时显示「当前标签 · 独立窗口」徽标。
+- 「让 ZC GUI 解释这个提交」弹窗改为非模态：生成期间可自由切回 IDE 干其他活，弹窗可最小化；右键菜单项位置提前。
+- 多目录会话（关联目录标签）下产物预览卡不显示、更改明细打不开、定时任务会落错目录。
+- 修复会话标题生成中的圆点标识偶发丢失、后台通知卡片钉在会话中途位置错乱的问题。
+- 修复已禁用插件的技能仍出现在设置页与 / 补全、分类子目录插件的技能整组漏扫的问题。
+
+English:
+
+### Adapted
+
+- **Adapted to ZCode Desktop 3.18.x** (all five issues the plugin had after the 3.18.0 push are now fixed):
+  - Session content area showed a black screen;
+  - Built-in subscription channels disappeared from the model list and key renewal failed;
+  - A single reply was split into multiple "worked for" segments, completed-turn folds scattered;
+  - Context compaction summaries were rendered as user messages;
+  - Images in history messages were not displayed, and editing history messages with images failed;
+  - Compatible with the credential form used by Z.ai channel sign-in (PAT renewed automatically): built-in account channels (BigModel individual/team coding plans) no longer disappear from the model list; direct BigModel sign-ins are unaffected.
+
+### Added
+
+- **Greatly expanded provider presets**: aligned with the latest ZCode client template set (34 templates / 31 preset cards, adding OpenCode Zen, Qwen Token Plan personal edition, etc.); added model catalogs for Kimi Code / Z.ai API / BigModel API / OpenRouter; completed model vendor icon recognition (Hunyuan, Kimi, Aliyun Bailian, etc.).
+- **Quota usage trend**: the usage page gains a weekly quota curve with daily consumption spread across days, so recent quota movement is visible at a glance; the in-card percentage and "used" label moved up into the card title.
+- **New "Ultra-high" thought level**: the xhigh level of qwen-series models can now be selected and displayed correctly.
+- **Collapsible permission approval dialog**: the permission dialog now spans the main UI width (matching the ask/plan approval dialogs) and can collapse into a floating bar above the input box; the approval countdown keeps running while collapsed.
+- **Send files from the commit panel to the input box**: right-click selected files in the Commit toolwindow to send them straight to the ZC GUI input box (deleted files are skipped automatically).
+- **Double-click the directory badge on a session tab to locate it**: double-clicking the badge locates and expands the directory in the project tree, with a hover bubble showing the full path; in-message directory links work the same way.
+
+### Fixed
+
+- Fixed prompt polish (and other light tasks) failing for custom channels after the desktop app redirected its data directory (issue #50): light-task child processes now read the same channel configuration as the desktop app.
+- Fixed archived/pinned sessions not syncing with the plugin's history list: the plugin's task index now follows the redirected data directory, so pins, archives and unread state are shared with the desktop app.
+- Fixed session creation always failing with MCP plugins such as computer control on older CLIs (the newly injected scope/alwaysLoad keys were rejected as a whole; they are now gated by CLI generation).
+- Detached (pop-out) sessions could no longer be selected as a right-click "Send to workspace" target; fixed, with a "current tab · detached window" badge shown when applicable.
+- The "Ask ZC GUI to explain this commit" dialog is now non-modal: you can switch back to the IDE freely while it generates, and the dialog can be minimized; the menu entry is moved earlier in the list.
+- In multi-directory sessions (attached-directory tabs), artifact preview cards were missing, change details failed to open, and scheduled tasks landed in the wrong directory.
+- Fixed the running indicator dot on generating session tabs disappearing intermittently and background notification cards getting pinned mid-turn at the wrong position.
+- Fixed skills from disabled plugins still showing up in the settings page and / completions, and skills of plugins using categorized subdirectories being missed entirely.
+
+## [0.4.5-beta.1] - 2026-11-12
+
+中文:
+
+### 适配
+
+- **适配 ZCode 桌面端 3.18.0**（11-11 推送，此前插件会出现的五个问题全部解决）：
+  - 会话内容区黑屏打不开；
+  - 模型列表内置订阅渠道全部消失、key 换发失效；
+  - 一轮回复被拆成多个「已工作」分段，完成轮折叠散开；
+  - 上下文压缩摘要整段渲染成用户消息；
+  - 历史消息里的图片不显示，编辑带图的历史消息报错。
+
+### 新增
+
+- **供应商预设大幅扩充**：对齐 ZCode 客户端最新模板集（34 条模板 31 张预设卡，新增 OpenCode Zen、千问 Token Plan 个人版等），预设卡补齐 Kimi Code / Z.ai API / BigModel API / OpenRouter 的模型目录；模型厂商图标识别补全（混元、Kimi、阿里云百炼等）。
+- **思考级别新增「超高」档**：qwen 系模型的 xhigh 级别可正常选择与显示。
+
+### 修复
+
+- 弹出独立窗口的会话无法再被右键「发送到其他工作区」选中，已修复；发送目标为独立窗口时显示「当前标签 · 独立窗口」徽标。
+- 「让 ZC GUI 解释这个提交」弹窗改为非模态：生成期间可自由切回 IDE 干其他活，弹窗可最小化；右键菜单项位置提前。
+- 多目录会话（关联目录标签）下产物预览卡不显示、更改明细打不开、定时任务会落错目录。
+
+English:
+
+### Adapted
+
+- **Adapted to ZCode Desktop 3.18.0** (pushed on Nov 11; all five issues the plugin had after upgrading are now fixed):
+  - Session content area showed a black screen;
+  - Built-in subscription channels disappeared from the model list and key renewal failed;
+  - A single reply was split into multiple "worked for" segments, completed-turn folds scattered;
+  - Context compaction summaries were rendered as user messages;
+  - Images in history messages were not displayed, and editing history messages with images failed.
+
+### Added
+
+- **Greatly expanded provider presets**: aligned with the latest ZCode client template set (34 templates / 31 preset cards, adding OpenCode Zen, Qwen Token Plan personal edition, etc.); added model catalogs for Kimi Code / Z.ai API / BigModel API / OpenRouter; completed model vendor icon recognition (Hunyuan, Kimi, Aliyun Bailian, etc.).
+- **New "Ultra-high" thought level**: the xhigh level of qwen-series models can now be selected and displayed correctly.
+
+### Fixed
+
+- Detached (pop-out) sessions could no longer be selected as a right-click "Send to workspace" target; fixed, with a "current tab · detached window" badge shown when applicable.
+- The "Ask ZC GUI to explain this commit" dialog is now non-modal: you can switch back to the IDE freely while it generates, and the dialog can be minimized; the menu entry is moved earlier in the list.
+- In multi-directory sessions (attached-directory tabs), artifact preview cards were missing, change details failed to open, and scheduled tasks landed in the wrong directory.
+
 ## [0.4.4] - 2026-11-11
 
 中文:

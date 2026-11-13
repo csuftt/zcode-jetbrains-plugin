@@ -72,6 +72,9 @@
                 icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
             <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
+            <!-- 提交面板/版本控制变更视图右键（ChangesViewPopupMenu 同时覆盖提交工具窗、
+                 版本控制本地 tab 与老提交对话框；选中的变更文件经 VIRTUAL_FILE_ARRAY 供给） -->
+            <add-to-group group-id="ChangesViewPopupMenu" anchor="first"/>
             <!-- 编辑器右键发整文件（issue #15 用户诉求：打开的页面右键也想要） -->
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendSelectionToInput"/>
         </action>
@@ -84,6 +87,7 @@
                icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
             <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
+            <add-to-group group-id="ChangesViewPopupMenu" anchor="first"/>
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendFileToInput"/>
         </group>
         <!-- 控制台右键：选中日志文本发送到输入框（发纯文本正文，行号引用是编辑器场景专属） -->

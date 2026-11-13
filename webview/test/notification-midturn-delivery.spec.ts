@@ -65,8 +65,10 @@ function assistantMsg(id: string, text: string): ZCodeMessage {
   }
 }
 
-/** 转录注入的后台子代理完成通知（parseNotification 实测结构） */
-function taskNotificationMsg(id: string): ZCodeMessage {
+/** 转录注入的后台子代理完成通知（parseNotification 实测结构）
+ *  inputPresentation：3.18.0 实测 task_notification_steer=回合中途 steer 注入（同 turn），
+ *  task_notification=轮界注入并唤醒新 turn（后续 assistant 换新 turnId）*/
+function taskNotificationMsg(id: string, inputPresentation = 'task_notification_steer'): ZCodeMessage {
   return {
     info: {
       id,
@@ -75,6 +77,7 @@ function taskNotificationMsg(id: string): ZCodeMessage {
       time: { created: Date.now() },
       synthetic: true,
       source: 'background_task',
+      metadata: { inputPresentation, source: 'background_task' },
       semantics: { origin: 'agent_runtime', kind: 'subagent_notification', uiVisibility: 'hidden' },
     } as unknown as MessageInfo,
     parts: [{
@@ -121,13 +124,14 @@ describe('通知卡实时落地（缺陷复现）', () => {
       messages: [userMsg('u1'), assistantMsg('asst_done', '已派出验收员'), assistantMsg('asst_live', '正在生')],
     })
     // 轮末重拉/触发重拉的快照返回：已含通知合成消息（服务端转录已注入）
+    // ip=task_notification = 轮界注入（wake 轮触发形态，后续 assistant 换新 turnId）
     messageHandler!({
       op: 'messages',
       sessionId: SID,
       messages: [
         userMsg('u1'),
         assistantMsg('asst_done', '已派出验收员'),
-        taskNotificationMsg('notif_0062'),
+        taskNotificationMsg('notif_0062', 'task_notification'),
         assistantMsg('asst_live', '正在生成中'),
       ],
     })
@@ -142,10 +146,11 @@ describe('通知卡实时落地（缺陷复现）', () => {
     expect(ids.indexOf('notif_0062')).toBeLessThan(ids.indexOf('asst_live'))
   })
 
-  it('F. 回合中途到达（缺陷EG）：快照前驱=流式气泡本体 → 通知插到流式气泡之后', () => {
-    // 2026-09-30 真机实锤：后台命令在回合跑着时完成，转录 [.., 在途回合, 通知]——
-    // 原实现恒插流式气泡之前，卡片被顶到整条在途回合上方（时序倒挂）。
-    // 快照里通知的前驱就是在飞的流式消息 → 应插其后（时序位）
+  it('F. 回合中途到达（缺陷EG/HI）：通知挂流式气泡边界 part，不插独立消息', () => {
+    // 2026-09-30 真机实锤：后台命令在回合跑着时完成，转录 [.., 在途回合, 通知]。
+    // 2026-11-12 追修（缺陷HI）：通知作为独立消息插在流式气泡之后，气泡持续增长
+    // 会把卡片一路顶到实时输出末尾（永远钉在最下面）；改为挂成气泡的边界 part，
+    // 卡片钉在到达时刻的位置，后续 delta 在卡片之后继续追加
     useStore.setState({
       streaming: true,
       streamingMessageId: 'asst_live',
@@ -156,9 +161,63 @@ describe('通知卡实时落地（缺陷复现）', () => {
       sessionId: SID,
       messages: [userMsg('u1'), assistantMsg('asst_live', '正在生成中'), taskNotificationMsg('notif_0062')],
     })
-    const ids = useStore.getState().messages.map((m) => m.info.id)
-    expect(ids).toContain('notif_0062')
-    expect(ids.indexOf('notif_0062')).toBeGreaterThan(ids.indexOf('asst_live'))
+    const st = useStore.getState()
+    const ids = st.messages.map((m) => m.info.id)
+    // 通知不再是独立消息（独立消息会被持续增长的流式内容顶到实时输出末尾）
+    expect(ids).not.toContain('notif_0062')
+    // 边界 part 挂在流式气泡当前尾部
+    const liveMsg = st.messages.find((m) => m.info.id === 'asst_live')!
+    const mark = liveMsg.parts.find((p) => p.type === 'notification')
+    expect(mark).toBeTruthy()
+    expect((mark as unknown as { message: { info: { id: string } } }).message.info.id).toBe('notif_0062')
+    expect(liveMsg.parts[0].type).toBe('text')
+
+    // 后续流式内容在卡片之后追加（卡片不被顶走）
+    pushEvent('model.streaming', { kind: 'text_delta', delta: '后续正文' })
+    const after = useStore.getState().messages.find((m) => m.info.id === 'asst_live')!
+    // 新正文不会叠进卡片之前的旧 text part，而是另起一段排在卡片之后
+    expect(after.parts.map((p) => p.type)).toEqual(['text', 'notification', 'text'])
+    expect((after.parts[2] as { text: string }).text).toBe('后续正文')
+
+    // 幂等：同一通知随后续快照再来，不重复挂边界
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [userMsg('u1'), assistantMsg('asst_live', '正在生成中'), taskNotificationMsg('notif_0062')],
+    })
+    const again = useStore.getState().messages.find((m) => m.info.id === 'asst_live')!
+    expect(again.parts.filter((p) => p.type === 'notification').length).toBe(1)
+  })
+
+  it('G. 回合中途 steer（3.18.0）：快照前驱在气泡之前也不掉到回合上方', () => {
+    // 2026-11-12 真机实证（sess_ded647b8）：3.18.0 把回合中途完成的通知以
+    // inputPresentation=task_notification_steer 注入**同一 turn 内部**。此时实时
+    // 气泡是整轮聚合的单条消息，快照前驱（user/首条 assistant）都在气泡之前——
+    // 按位置插入会把卡片顶到整条在途回合上方。steer 标记必须直接挂气泡边界。
+    useStore.setState({
+      streaming: true,
+      streamingMessageId: 'stream_u1',
+      messages: [userMsg('u1'), assistantMsg('stream_u1', '第一批内容')],
+    })
+    messageHandler!({
+      op: 'messages',
+      sessionId: SID,
+      messages: [
+        userMsg('u1'),
+        assistantMsg('a1', '第一批内容'),
+        taskNotificationMsg('notif_steer'), // 默认 steer 形态
+        assistantMsg('a2', '第二批内容'),
+      ],
+    })
+    const st = useStore.getState()
+    // 不产生独立消息（否则会落在气泡之前/之后，观感两难）
+    expect(st.messages.map((m) => m.info.id)).not.toContain('notif_steer')
+    const liveMsg = st.messages.find((m) => m.info.id === 'stream_u1')!
+    expect(liveMsg.parts[liveMsg.parts.length - 1].type).toBe('notification')
+    // 后续 delta 继续排在卡片之后
+    pushEvent('model.streaming', { kind: 'text_delta', delta: '第三批内容' })
+    const after = useStore.getState().messages.find((m) => m.info.id === 'stream_u1')!
+    expect(after.parts.map((p) => p.type)).toEqual(['text', 'notification', 'text'])
   })
 
   it('B. 非 streaming 同一快照：通知照常落地（对照，现状应过）', () => {
@@ -208,7 +267,7 @@ describe('通知卡实时落地（缺陷复现）', () => {
     messageHandler!({
       op: 'messages',
       sessionId: SID,
-      messages: [userMsg('u2'), taskNotificationMsg('notif_0062_wake'), assistantMsg('asst_live2', '正在生成中')],
+      messages: [userMsg('u2'), taskNotificationMsg('notif_0062_wake', 'task_notification'), assistantMsg('asst_live2', '正在生成中')],
     })
     const ids = useStore.getState().messages.map((m) => m.info.id)
     expect(ids).toContain('notif_0062_wake')
@@ -228,7 +287,7 @@ describe('通知卡实时落地（缺陷复现）', () => {
       sessionId: SID,
       messages: [
         userMsg('u1'),
-        taskNotificationMsg('notif_0062'), // 真身与流式消息同 id
+        taskNotificationMsg('notif_0062', 'task_notification'), // 真身与流式消息同 id
         assistantMsg('asst_wake', '正在生成中'),
       ],
     })
@@ -239,7 +298,7 @@ describe('通知卡实时落地（缺陷复现）', () => {
     messageHandler!({
       op: 'messages',
       sessionId: SID,
-      messages: [userMsg('u1'), taskNotificationMsg('notif_0062'), assistantMsg('asst_wake', '生成中')],
+      messages: [userMsg('u1'), taskNotificationMsg('notif_0062', 'task_notification'), assistantMsg('asst_wake', '生成中')],
     })
     ids = useStore.getState().messages.map((m) => m.info.id)
     expect(ids.filter((x) => x === 'local_n_notif_0062').length).toBe(1)

@@ -113,6 +113,10 @@ Header 地球按钮在聊天区右侧展开浏览器分栏（上图为完整 IDE
 | :---: | :---: |
 | ![多标签工作区](docs/screenshots/multi-workspace-tabs.png) | ![历史目录chips](docs/screenshots/history-directory-chips.png) |
 
+| **会话标签弹出独立窗口：与主窗多标签并存（同时限一个），适合双屏监督；关闭独立窗自动搬回主窗** |
+| :---: |
+| ![会话标签弹出为独立窗口，与主窗并排使用](docs/screenshots/session-detach-window.png) |
+
 **输入增强与多任务**
 
 | `@` 引用文件补全 | `$` 技能提及（按来源折叠） | `/` 技能调用 |

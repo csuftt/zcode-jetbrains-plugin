@@ -90,12 +90,15 @@ export function isHiddenSyntheticMessage(info: MessageInfo): boolean {
 // ============ /compact 压缩消息识别（2026-08-21 RPC 实测）============
 
 /**
- * 是否为压缩摘要消息：role=user + 顶层 summary:{title:"Compact summary",body}。
+ * 是否为压缩摘要消息。两代形态（diag-compact-summary-3180.py 实测）：
+ * - 旧（≤3.17.x）：role=user + 顶层 summary:{title:"Compact summary",body}
+ * - 新（3.18.0+）：顶层 summary 消失，改 info.semantics={kind:'compact_summary',
+ *   origin:'agent_runtime',...}（官方投影策略同款判据），正文改放 text part
  * 消息级无 synthetic 标记（仅 text part 级有），isHiddenSyntheticMessage 拦不住，
  * 若不专门识别会整段 8k+ 字符摘要渲染成右对齐用户气泡。
  */
 export function isCompactSummaryMessage(info: MessageInfo): boolean {
-  return info.summary?.body != null
+  return info.summary?.body != null || info.semantics?.kind === 'compact_summary'
 }
 
 /**

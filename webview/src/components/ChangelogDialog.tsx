@@ -73,9 +73,22 @@ function ContentBody({ content }: { content: ChangelogContent }) {
             </h4>
           )}
           <ul className="changelog-dialog__list">
-            {section.items.map((item, ii) => (
-              <li key={ii} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
-            ))}
+            {section.items.map((item, ii) => {
+              // 嵌套子项以 `\n- ` 追加在父项文本内（extract-changelog 并入），展开为二级列表
+              const [head, ...subs] = item.split('\n')
+              return (
+                <li key={ii}>
+                  <span dangerouslySetInnerHTML={{ __html: renderInline(head) }} />
+                  {subs.length > 0 && (
+                    <ul className="changelog-dialog__sublist">
+                      {subs.map((sub, si) => (
+                        <li key={si} dangerouslySetInnerHTML={{ __html: renderInline(sub.replace(/^- /, '')) }} />
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </div>
       ))}

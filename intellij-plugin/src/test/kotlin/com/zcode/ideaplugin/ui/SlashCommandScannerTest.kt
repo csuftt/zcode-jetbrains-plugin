@@ -136,4 +136,81 @@ class SlashCommandScannerTest {
         assertNotNull(items.firstOrNull { it.name == "ver:new" }, "应加载 0.10.0 的命令")
         assertTrue(items.none { it.name == "ver:old" }, "旧版本命令不应出现（0.10.0 > 0.9.0 按数值比较）")
     }
+
+    @Test
+    fun `清单 skills 数组按声明发现技能（分类子目录插件，未声明的不扫）`() {
+        // Mattpocock 形态：技能散在 skills/<分类>/<名>/，清单数组逐个声明；in-progress/misc 故意不声明
+        makePlugin(
+            "catalog", "1.0.0", enabled = true,
+            mapOf(
+                ".claude-plugin/plugin.json" to
+                    """{"name":"catalog","skills":["./skills/eng/alpha","./skills/prod/beta"]}""",
+                "skills/eng/alpha/SKILL.md" to "---\nname: alpha\ndescription: 甲\n---\n内容",
+                "skills/prod/beta/SKILL.md" to "---\nname: beta\ndescription: 乙\n---\n内容",
+                "skills/wip/gamma/SKILL.md" to "---\nname: gamma\ndescription: 未声明\n---\n内容",
+            )
+        )
+
+        val items = SlashCommandScanner.scan(tmp.absolutePath, tmp.absolutePath)
+        assertNotNull(items.firstOrNull { it.name == "catalog:alpha" }, "数组声明的技能应被发现")
+        assertNotNull(items.firstOrNull { it.name == "catalog:beta" }, "跨分类子目录的技能应被发现")
+        assertTrue(items.none { it.name == "catalog:gamma" }, "清单未声明的技能不应出现（对齐官方 skills 口径）")
+    }
+
+    @Test
+    fun `清单 skills 字符串形态取技能根直下子目录`() {
+        makePlugin(
+            "rooted", "1.0.0", enabled = true,
+            mapOf(
+                ".zcode-plugin/plugin.json" to """{"name":"rooted","skills":"./skills"}""",
+                "skills/one/SKILL.md" to "---\nname: one\ndescription: 直下一层\n---\n内容",
+            )
+        )
+
+        val items = SlashCommandScanner.scan(tmp.absolutePath, tmp.absolutePath)
+        assertNotNull(items.firstOrNull { it.name == "rooted:one" }, "字符串声明=技能根，取直下一层")
+    }
+
+    @Test
+    fun `清单无 skills 字段回退直下一层扫描`() {
+        makePlugin(
+            "plain", "1.0.0", enabled = true,
+            mapOf(
+                ".claude-plugin/plugin.json" to """{"name":"plain","description":"无技能声明"}""",
+                "skills/direct/SKILL.md" to "---\nname: direct\n---\n内容",
+            )
+        )
+
+        val items = SlashCommandScanner.scan(tmp.absolutePath, tmp.absolutePath)
+        assertNotNull(items.firstOrNull { it.name == "plain:direct" }, "无 skills 声明应回退直下一层扫描")
+    }
+
+    @Test
+    fun `config 显式禁用的插件不贡献技能与命令`() {
+        // 官方禁用开关落在 config.json plugins.enabledPlugins=false，data/ 目录是曾启用残留（不删）
+        makePlugin(
+            "offplug", "1.0.0", enabled = true,
+            mapOf(
+                ".zcode-plugin/plugin.json" to """{"name":"offplug","skills":"skills"}""",
+                "skills/hidden/SKILL.md" to "---\nname: hidden\ndescription: 不该出现\n---\n内容",
+                "commands/secret.md" to "不该出现的命令",
+            )
+        )
+        File(tmp, ".zcode/cli/config.json").apply { parentFile.mkdirs() }
+            .writeText("""{"plugins":{"enabledPlugins":{"offplug@mp1":false}}}""")
+
+        val items = SlashCommandScanner.scan(tmp.absolutePath, tmp.absolutePath)
+        assertTrue(items.none { it.name == "offplug:hidden" }, "已禁用插件的技能不应出现")
+        assertTrue(items.none { it.name == "offplug:secret" }, "已禁用插件的命令不应出现")
+    }
+
+    @Test
+    fun `未出现在 enabledPlugins 的插件默认启用`() {
+        makePlugin("builtin", "1.0.0", enabled = true, mapOf("skills/keep/SKILL.md" to "---\nname: keep\n---\n内容"))
+        File(tmp, ".zcode/cli/config.json").apply { parentFile.mkdirs() }
+            .writeText("""{"plugins":{"enabledPlugins":{"other@mp1":false}}}""")
+
+        val items = SlashCommandScanner.scan(tmp.absolutePath, tmp.absolutePath)
+        assertNotNull(items.firstOrNull { it.name == "builtin:keep" }, "enabledPlugins 未登记的官方内置插件应默认启用")
+    }
 }

@@ -23,6 +23,24 @@ export type MessagePart =
   | StepFinishPart
   | TimelinePart
   | CompactionPart
+  | NotificationPart
+
+/**
+ * 回合中途到达的通知卡边界（缺陷HI，2026-11-12）：本地专有形态，服务端不产出。
+ *
+ * 背景：CLI 把 task-notification / subagent-message 注入转录的轮界位置（模型调用
+ * 边界），服务端按 step 拆行后通知夹在两段 assistant 行之间；而实时流把整轮聚合
+ * 成**一条**持续增长的流式气泡。若通知作为独立消息插到流式气泡之后（缺陷EG 口径），
+ * 气泡后续增长会把卡片一路顶到实时输出末尾（用户观感=通知卡永远钉在最下面）。
+ * 故回合中途到达时改为在当前 parts 尾部挂边界 part：卡片落在到达时刻的位置，后续
+ * delta 在卡片之后追加。轮末权威快照整包替换后边界 part 随旧壳消失，通知回到真身
+ * 消息（step 行之间的时序位）。
+ */
+export interface NotificationPart {
+  type: 'notification'
+  /** 快照里的通知真身消息（渲染 AgentNotificationCard 用）*/
+  message: ZCodeMessage
+}
 
 /**
  * 图片 part：服务端把用户消息附件转成的读回形态（zcode.cjs 实测），
@@ -200,8 +218,8 @@ export interface MessageInfo {
   agent?: string
   /** 定时消息标记（fireAt）：定时到点发出的乐观 user 消息携带（历史重拉不带，预期）*/
   scheduledFireAt?: number
-  // user 消息用嵌套 model
-  model?: { providerID: string; modelID: string }
+  // user 消息用嵌套 model（v1 大写 D；3.18.0 起嵌套键也改小写驼峰，双命名兼容读取）
+  model?: { providerID?: string; modelID?: string; providerId?: string; modelId?: string }
   // assistant 消息用扁平字段（v1 大写 D）；v2 服务端改小写驼峰 modelId/providerId
   //（2026-09-17 db.sqlite 实测：值都在，仅字段名变了），双命名兼容读取
   modelID?: string
@@ -213,6 +231,8 @@ export interface MessageInfo {
   cost?: number
   finish?: string
   parentID?: string
+  /** 触发 user 消息 id（3.18.0 改名形态；同轮全部 step 行指向同一条，mergeTurnMessages 分组键兜底）*/
+  parentMessageId?: string
   id: string
   sessionID: string
   semantics?: Record<string, unknown>
@@ -233,9 +253,10 @@ export interface MessageInfo {
    */
   turnId?: string
   /**
-   * /compact 压缩摘要消息（role=user）的顶层字段（2026-08-21 RPC 实测）：
+   * /compact 压缩摘要消息（role=user）的顶层字段（旧形态，≤3.17.x RPC 实测）：
    * {title:"Compact summary", body:"摘要全文"}。消息级无 synthetic 标记（仅
    * part 级有），不能靠 isHiddenSyntheticMessage 过滤，须专门识别渲染。
+   * 3.18.0 起此字段消失，改 semantics={kind:'compact_summary'}，正文放 text part。
    */
   summary?: { title?: string; body?: string }
 }
@@ -642,6 +663,8 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'getUsage'; sessionId: string }
   | { op: 'getSessionDebug'; sessionId: string }
   | { op: 'getQuota' }
+  /** 额度历史采样（用量页「额度趋势」；days 缺省 7，服务端夹在 1..60）*/
+  | { op: 'getQuotaHistory'; days?: number }
   | { op: 'getAppUsage'; range: AppUsageRange }
   | { op: 'getModelUsage'; startTime: string; endTime: string }
   | { op: 'getToolUsage'; startTime: string; endTime: string }
@@ -1566,6 +1589,8 @@ export type JavaResponse =
   // providerId/providerName：monitor 三路 HTTP 实际取 key 的渠道（回退链不筛身份，
   // 可能落到非 coding-plan 渠道，用量页据此提示数据口径）
   | { op: 'quota'; data?: QuotaData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
+  /** 额度历史采样（op=getQuotaHistory 的响应，ts 升序）*/
+  | { op: 'quotaHistory'; data?: QuotaHistorySample[]; error?: string }
   | { op: 'appUsage'; data?: AppUsageData | null; error?: string }
   | { op: 'modelUsage'; data?: ModelUsageData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
   | { op: 'toolUsage'; data?: ToolUsageData | null; error?: string; providerId?: string; providerName?: string; providerKeyMasked?: string }
@@ -1928,6 +1953,23 @@ export interface QuotaLimit {
 export interface QuotaData {
   limits: QuotaLimit[]
   level?: string
+}
+
+/** 额度历史采样里的单个窗口（QuotaHistoryStore 落盘的 JSONL 行内对象）*/
+export interface QuotaHistoryLimit {
+  type?: string
+  unit?: number
+  /** 窗口序号（5h 池=5 等；历史存储不落该字段，mock/兼容用）*/
+  number?: number
+  percentage?: number
+  nextResetTime?: number
+}
+
+/** 一次额度应答的历史采样（ts=采样时刻毫秒；providerId=当时查询凭证所属渠道）*/
+export interface QuotaHistorySample {
+  ts: number
+  providerId?: string
+  limits: QuotaHistoryLimit[]
 }
 
 /** 时间范围（用量明细 tab + 自定义日期）*/

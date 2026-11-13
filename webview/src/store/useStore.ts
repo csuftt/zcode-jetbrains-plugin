@@ -16,8 +16,8 @@ import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId, getTabWorkspacePath } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
-import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary } from '@/types/messages'
-import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages } from '@/utils/streamReducer'
+import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, QuotaHistorySample, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary } from '@/types/messages'
+import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages, appendMidTurnNotification } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { classifyQuotaError, bannerTriggerKey, providerLimitedMessage } from '@/utils/quotaWindows'
 import type { QuotaBannerTrigger } from '@/utils/quotaWindows'
@@ -1462,6 +1462,9 @@ interface StoreState {
   quotaFetchedAt: number
   /** monitor HTTP 实际取 key 的渠道（用量页提示数据口径；成功响应携带）*/
   usageProvider: { id: string; name: string; keyMasked?: string } | null
+  /** 额度历史采样（用量页「额度趋势」，ts 升序；null=未加载）*/
+  quotaHistory: QuotaHistorySample[] | null
+  quotaHistoryLoading: boolean
 
   // 记忆文件（设置视图「记忆」条目，Kotlin 端固定清单扫描）
   memoryFiles: MemoryFileInfo[] | null
@@ -1829,6 +1832,8 @@ interface StoreState {
   loadSessionDebug: () => void
   /** 拉取额度（设置视图 + 圆环 popover 用）*/
   loadQuota: () => void
+  /** 拉取额度历史采样（用量页「额度趋势」；days 缺省 7，上限 60）*/
+  loadQuotaHistory: (days?: number) => void
   /** 关闭当前额度横幅（记录去重键，同源触发不再展示）*/
   dismissQuotaBanner: (key: string) => void
   /** 清除额度横幅错误触发源（窗口恢复/新回合开始时由 useQuotaBanner 调用）*/
@@ -2202,6 +2207,8 @@ export const useStore = create<StoreState>((set, get) => ({
   quota: null,
   quotaLoading: false,
   quotaFetchedAt: 0,
+  quotaHistory: null,
+  quotaHistoryLoading: false,
   usageProvider: null,
   memoryFiles: null,
   memoryWorkspace: '',
@@ -3592,6 +3599,11 @@ export const useStore = create<StoreState>((set, get) => ({
     sendToJava({ op: 'getQuota' })
   },
 
+  loadQuotaHistory: (days = 7) => {
+    set({ quotaHistoryLoading: true })
+    sendToJava({ op: 'getQuotaHistory', days })
+  },
+
   dismissQuotaBanner: (key: string) => {
     const { quotaBannerDismissed } = get()
     // 去重键由组件层经 deriveQuotaBanner 得出后回传（store 只存，不重复派生）
@@ -4366,10 +4378,11 @@ function loadBreakdownCache(sessionId: string, used: number): ContextBreakdownIt
 function inferCurrentModel(messages: ZCodeMessage[], models: ModelOption[]): { modelId: string; providerId: string } | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const info = messages[i].info
-    // v1 大写 modelID/providerID、user 嵌套 model；v2 小写驼峰 modelId/providerId
-    const modelId = info.modelID ?? info.modelId ?? info.model?.modelID
+    // v1 大写 modelID/providerID、user 嵌套 model；v2 小写驼峰 modelId/providerId；
+    // 3.18.0 起嵌套 model 也改小写（model.modelId/model.providerId）
+    const modelId = info.modelID ?? info.modelId ?? info.model?.modelID ?? info.model?.modelId
     if (modelId) {
-      const providerId = info.providerID ?? info.providerId ?? info.model?.providerID ?? models.find((m) => m.modelId === modelId)?.providerId
+      const providerId = info.providerID ?? info.providerId ?? info.model?.providerID ?? info.model?.providerId ?? models.find((m) => m.modelId === modelId)?.providerId
       return providerId ? { modelId, providerId } : null
     }
   }
@@ -6353,6 +6366,11 @@ export function handleResponse(
       }
       break
 
+    case 'quotaHistory':
+      // 历史采样是只读数据：失败（文件不可写/读异常）按空数组处理，趋势区展示空态
+      set({ quotaHistory: msg.data ?? [], quotaHistoryLoading: false })
+      break
+
     case 'appUsage':
       if (msg.error) {
         set({ appUsage: null, appUsageError: msg.error })
@@ -8330,11 +8348,20 @@ export function preserveAskUserDurations(
 /** messages 响应的权威落地（常规重拉与对账收尾共用） */
 /**
  * 流式中快照到达的通知卡摘取合并（缺陷CI）：只取「本地还没有 + 通知白名单
- * （isAgentNotification）」的合成消息，插到流式气泡之前；其余快照内容一律不
- * 落地（防断流/叠字，见 case 'messages' 守卫注释）。通知是唯一在回合中「服务端
+ * （isAgentNotification）」的合成消息插入时间线；其余快照内容一律不落地
+ * （防断流/叠字，见 case 'messages' 守卫注释）。通知是唯一在回合中「服务端
  * 已落库、本地时间线却无从得知」的消息族（CLI 注入转录不发流式事件），按白
  * 名单摘取不会把过期快照的历史改写冲进流式。顺手跑通知收尾（幂等，仅 running
  * 可翻转），底部栏与子代理活动卡随通知及时落定，不等轮末。
+ *
+ * 插入位分两类（缺陷EG + 缺陷HI 追修）：
+ *   - 回合中途注入（3.18.0 metadata.inputPresentation=task_notification_steer，
+ *     或快照位置在流式气泡正后方）→ **挂流式气泡的边界 part**，不插独立消息。
+ *     这类通知夹在已被实时流聚合成单条气泡的内容中间：独立消息会被后续 delta
+ *     顶到实时输出末尾（卡片永远钉在最下面），或按快照前驱落到气泡之前（卡片
+ *     顶到整条在途回合上方）——边界 part 把卡片钉在到达时刻的位置，新内容在其后追加。
+ *   - 其余（wake 轮触发形态 task_notification：前驱是被切断的前段消息）→ 独立
+ *     消息插入气泡之前（CI/EG 原语义，保证通知桥接链合并渲染不拆组）。
  *
  * wake 轮 id 撞车特例（2026-09-20 真机 12:53 实锤）：turn.started 会借用「触发
  * 本轮的那条用户消息」的 id 给本地流式气泡（叠字守卫注释的同款机制），而 wake
@@ -8368,17 +8395,33 @@ function mergeNotificationsMidTurn(
     }
     return m
   })
-  // 插入点按快照自身时序（缺陷EG）：转录里的位置是权威——从通知在快照中的位
-  // 置向前找最近一个已在实时时间线的前驱，插到它之后。回合中途到达 → 前驱是
-  // 流式气泡本体（插其后，时序正确，不再顶到整条在途回合上方）；wake 轮场景 →
-  // 前驱是被切断的前段消息（即流式气泡之前，CI 原语义）。快照里找不到任何前驱
-  // 时退回旧口径（流式气泡之前/追加尾部）
+  // 位置法（缺陷EG，steer 标记不可用/旧 CLI 时的兜底）：从通知在快照中的位置向前
+  // 找最近一个已在实时时间线的前驱，插到它之后。wake 轮场景 → 前驱是被切断的
+  // 前段消息（即流式气泡之前，CI 原语义）；快照里找不到任何前驱时退回旧口径
+  // （流式气泡之前/追加尾部）
   const streamIdx = st.streamingMessageId
     ? st.messages.findIndex((m) => m.info.id === st.streamingMessageId)
     : -1
   let live = [...st.messages]
   for (const item of insertables) {
     const baseId = item.info.id.startsWith('local_n_') ? item.info.id.slice(8) : item.info.id
+    // 3.18.0 回合中途 steer 注入（缺陷HI）：metadata.inputPresentation=
+    // task_notification_steer = 通知作为 steer 注入到**正在跑的回合内部**（对照
+    // wake 触发形态 task_notification：通知属于上一轮、后续 assistant 换新
+    // turnId）。这类通知在快照里夹在已被实时流聚合成单条气泡的内容中间，
+    // 位置无法映射回气泡内部——按快照前驱插会落到气泡之前（卡片顶到整个在途
+    // 回合上方，2026-11-12 真机实证），必须挂气泡边界 part 才能钉在到达时刻。
+    const steerTurn = (item.info.metadata as { inputPresentation?: unknown } | undefined)
+      ?.inputPresentation === 'task_notification_steer'
+    if (steerTurn && st.streamingMessageId) {
+      const next = appendMidTurnNotification(live, st.streamingMessageId, item, Date.now())
+      if (next !== live) {
+        midTurnInsertedNotifIds.add(baseId)
+        live = next
+        continue
+      }
+      // 气泡不可挂（streamingMessageId 已失效/消息被替换）→ 退回位置插入
+    }
     const sIdx = snapshot.findIndex((m) => m.info.id === baseId)
     let at = -1
     if (sIdx > 0) {
@@ -8388,6 +8431,21 @@ function mergeNotificationsMidTurn(
       }
     }
     if (at < 0) at = streamIdx >= 0 ? streamIdx : live.length
+    // 流式气泡正后方 = 回合中途到达（缺陷HI）：卡片挂进气泡 parts 的当前尾部，
+    // 后续 delta 在卡片之后继续追加——不插独立消息，否则会被持续增长的流式
+    // 内容一路顶到实时输出末尾。位置随 live 变化现算（loop 内可能已插入别的卡）
+    const curStreamIdx = st.streamingMessageId
+      ? live.findIndex((m) => m.info.id === st.streamingMessageId)
+      : -1
+    if (curStreamIdx >= 0 && at === curStreamIdx + 1) {
+      const next = appendMidTurnNotification(live, st.streamingMessageId, item, Date.now())
+      if (next !== live) {
+        midTurnInsertedNotifIds.add(item.info.id)
+        live = next
+        continue
+      }
+      // 挂不上（气泡不可挂/通知早于气泡创建）→ 退回位置插入
+    }
     live.splice(at, 0, item)
   }
   const patch: Partial<StoreState> = {

@@ -26,7 +26,8 @@
     "regenConfirmMessage": "將根據對話內容用 AI 重新產生標題並覆蓋目前標題，是否繼續？",
     "regenConfirmOk": "重新產生",
     "untitled": "新會話",
-    "phoneRemote": "手機遠程"
+    "phoneRemote": "手機遠程",
+    "wsBadgeRevealHint": "雙擊可在專案檢視中定位並展開"
   },
   "message": {
     "emptyText": "(空)",

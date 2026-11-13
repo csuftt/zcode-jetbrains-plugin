@@ -8,6 +8,8 @@
    .ask-user-dialog，此处对 perm-dialog 单独生效） */
 .ask-user-overlay--dock .perm-dialog {
   pointer-events: auto;
+  /* 铺满主界面宽度（对齐 ask/plan 弹窗 issue#45-4.1 手法）：overlay 左右 12px 边距内 100% 撑满 */
+  width: 100%;
   animation: perm-dialog-slide-up 0.18s ease-out;
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
 }
@@ -24,8 +26,10 @@
 }
 
 .perm-dialog {
-  width: 520px;
-  max-width: 90vw;
+  /* 基类宽度对齐 plan-approval-dialog（0.4.2 同款）：非 dock 形态 calc 留 24px 边距；
+     dock 态由 overlay--dock 覆写为 100% 撑满（原 520px 定宽在宽面板下两侧大片空白） */
+  width: calc(100vw - 48px);
+  max-width: calc(100vw - 24px);
   max-height: 80vh;
   overflow-y: auto;
   background: var(--bg-elevated);
@@ -44,7 +48,17 @@
   }
 
   &__icon { font-size: 16px; }
-  &__title { font-weight: 600; font-size: 14px; color: var(--text-primary); }
+
+  &__title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+    /* flex:1 吸收剩余空间：工具徽章/风险标签/倒计时/折叠钮恒靠右（对齐计划审批弹窗） */
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   &__tool {
     font-size: 12px;
@@ -145,5 +159,29 @@
       border-color: var(--error, #e5484d);
       &:hover { background: rgba(229, 72, 77, 0.1); }
     }
+  }
+}
+
+/* 收起态（最小化）：条件渲染已去掉 body/footer，只补 header 一行的交互态 */
+.perm-dialog--collapsed .perm-dialog__header {
+  border-bottom: none;
+  cursor: pointer;
+}
+
+/* 头部收起/展开按钮（对齐询问/计划审批弹窗 __collapse） */
+.perm-dialog__collapse {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
   }
 }

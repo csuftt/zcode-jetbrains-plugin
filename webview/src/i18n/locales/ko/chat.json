@@ -26,7 +26,8 @@
     "regenConfirmMessage": "대화 내용을 바탕으로 AI가 새 제목을 생성하여 현재 제목을 덮어씁니다. 계속할까요?",
     "regenConfirmOk": "다시 생성",
     "untitled": "새 세션",
-    "phoneRemote": "휴대폰 원격"
+    "phoneRemote": "휴대폰 원격",
+    "wsBadgeRevealHint": "두 번 클릭하여 프로젝트 뷰에서 표시 및 펼치기"
   },
   "message": {
     "emptyText": "(비어 있음)",

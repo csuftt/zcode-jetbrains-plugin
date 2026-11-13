@@ -70,8 +70,9 @@ class ZCodeProtocolClient private constructor(
     /** app-server 会话库（session/list 数据源；删除、旧归档迁移直写） */
     private val cliDbPath = Path.of(System.getProperty("user.home"), ".zcode", "cli", "db", "db.sqlite")
 
-    /** ZCode 客户端任务索引（归档/恢复与客户端共写同一数据源，见 TaskIndexStore） */
-    val taskIndex = TaskIndexStore(nodePath, Path.of(System.getProperty("user.home"), ".zcode", "v2", "tasks-index.sqlite"))
+    /** ZCode 客户端任务索引（归档/恢复与客户端共写同一数据源，见 TaskIndexStore）。
+     *  路径跟随 dataBaseDir（桌面端在重定向根维护任务索引），新增见 [Credentials.taskIndexPath] */
+    val taskIndex = TaskIndexStore(nodePath, Credentials.taskIndexPath())
 
     /**
      * 归档/软删会话排除集合（tasks-index 与 ZCode 客户端同源，task_id=会话 id）。
@@ -405,13 +406,19 @@ class ZCodeProtocolClient private constructor(
          * @param stdinWriteTimeoutMs stdin 写阻塞判死时限（毫秒）：对端挂死不再消费
          *   stdin 时写入会永久阻塞，此参数封顶阻塞等待，到期 kill 进程树触发重建
          *   （app-server-silent-hang 三/四例；仅测试传小值）
+         * @param extraEnv 附加 spawn env（组装完成后 putAll 合并，同名键以此为准——含与
+         *   继承环境、凭证/代理 env 撞名的场景）：轻任务专用 app-server 由调用方传
+         *   [CliSpawnEnv.extraEnv]（数据根重定向，issue #50）。主 client 不传——桌面端
+         *   CLI 也不跟随数据根，会话数据 `cli/` 不随重定向迁移，注入会把会话库指向
+         *   空库（ADR-0011）
          */
         fun start(
             zcodePath: Path = ZCodeLocator.detect(),
             credentials: ZCodeCredentials? = Credentials.loadOrNull(),
             nodePath: String = findNode(),
             readyTimeoutMs: Long = 30_000,
-            stdinWriteTimeoutMs: Long = 30_000
+            stdinWriteTimeoutMs: Long = 30_000,
+            extraEnv: Map<String, String> = emptyMap()
         ): ZCodeProtocolClient {
             val env = (System.getenv() + (credentials?.toEnvMap() ?: emptyMap())).toMutableMap()
             // 模型请求 UA 版本号对齐官方客户端：zcode.cjs 请求头构造读 env.ZCODE_APP_VERSION
@@ -445,6 +452,10 @@ class ZCodeProtocolClient private constructor(
                 }
             }
 
+            // 轻任务专用 app-server 的附加 env（数据根重定向，issue #50）：调用方显式传入，
+            // 覆盖同名继承变量（setting.json 是客户端当前状态的权威）
+            if (extraEnv.isNotEmpty()) env.putAll(extraEnv)
+
             val pb = ProcessBuilder(nodePath, zcodePath.toString(), "app-server")
             pb.environment().clear()
             pb.environment().putAll(env)
@@ -460,6 +471,10 @@ class ZCodeProtocolClient private constructor(
             // 排障主线索（issue #12 用户实测三态：坏地址失败/清空直连/好地址成功——
             // 没有这行日志时分不清「代理坏了」还是「没注入」）：代理地址 userinfo 脱敏
             println("[ZCodeProxy] app-server spawn ${proxyConfig?.logSummary ?: "<no proxy, direct>"}")
+            println(
+                "[ZCodeProtocolClient] app-server dataBaseDir env = " +
+                    (env[CliSpawnEnv.DATA_BASE_DIR] ?: "<unset, CLI defaults to home>")
+            )
             // ⚠️ 必须 drain stderr！Windows 管道缓冲约 4KB，node 写 stderr 是同步阻塞的。
             // 模型调用失败时 app-server 会向 stderr 打错误堆栈，一次就可能填满缓冲；
             // 无人读 → node 永久阻塞在写 stderr → 整个 app-server 事件循环停摆，
@@ -586,6 +601,59 @@ class ZCodeProtocolClient private constructor(
             val sep = if (os.contains("win")) ";" else ":"
             return PathEnvScan.findExecutable(System.getenv("PATH") ?: "", sep, names)
                 ?: throw IllegalStateException("找不到 node，请确认 Node.js 已安装并在 PATH 中")
+        }
+
+        /**
+         * session/messages 消息形态归一（2026-11-11 桌面端 3.18.0 / CLI 0.17.1 适配）：
+         * 新版把转录消息 info 的 `id`/`sessionID` 改名为 `messageId`/`sessionId`
+         * （assistant `parentID`→`parentMessageId`，webview 无运行时读取不补），tool
+         * part 的 `callID`→`callId`；嵌套 model 键名不变仍是大写 D。webview 全线按旧
+         * 契约读 `info.id`（editHistory findEditableUserMessage 无保护直调 startsWith）
+         * 与 `info.sessionID`（fork 门控/定时历史匹配），id 缺失即未捕获 TypeError →
+         * React 树整体卸载 → 会话内容区黑屏；callID 缺失则后台任务匹配/CUA 截图回填
+         * （Kotlin 按 part["callID"] 查）静默失效。
+         *
+         * 在协议边界把新键回填为旧键别名：**只补缺不覆盖**（真身带旧键的旧形态原样
+         * 透传，本函数对旧形态是零开销直通）。v4 快照→事件通道不受影响——
+         * turn.userInput 的 messageId 由 V4FrameMapper 显式映射。手机远程桥
+         * readSessionFull 不走此处：H5 端 zod schema 以官方新版形态为准，勿归一。
+         *
+         * 已知不补（有意）：file part 丢了 `filename`、url 变内联 data:（metadata
+         * .artifactUri 承接 zcode-artifact://）——webview 直接渲染 data URL 不受影响，
+         * 丢名字仅外观层；编辑附件 filename 匹配链失效属可接受降级，随上游对齐再收。
+         *
+         * @return 归一后的消息数组（无 info 对象的元素原样保留）
+         */
+        internal fun normalizeLegacyMessageShape(messages: JsonArray): JsonArray {
+            var changed = false
+            val out = messages.map { element ->
+                val obj = element as? JsonObject ?: return@map element
+                val info = obj["info"] as? JsonObject ?: return@map element
+                val patch = buildMap<String, JsonElement> {
+                    val mid = info["messageId"]?.jsonPrimitive?.contentOrNull
+                    if (mid != null && info["id"]?.jsonPrimitive?.contentOrNull == null) put("id", JsonPrimitive(mid))
+                    val sid = info["sessionId"]?.jsonPrimitive?.contentOrNull
+                    if (sid != null && info["sessionID"]?.jsonPrimitive?.contentOrNull == null) put("sessionID", JsonPrimitive(sid))
+                }
+                // tool part：callId → callID（webview 后台任务匹配/分组键、Kotlin CUA 回填按旧键读）
+                val parts = obj["parts"] as? JsonArray
+                var partsChanged = false
+                val patchedParts: List<JsonElement>? = parts?.map { p ->
+                    val po = p as? JsonObject ?: return@map p
+                    val cid = po["callId"]?.jsonPrimitive?.contentOrNull
+                    if (cid != null && po["callID"]?.jsonPrimitive?.contentOrNull == null) {
+                        partsChanged = true
+                        JsonObject(po + mapOf("callID" to JsonPrimitive(cid)))
+                    } else p
+                }
+                if (patch.isEmpty() && !partsChanged) return@map element
+                changed = true
+                val updates = LinkedHashMap(obj)
+                if (patch.isNotEmpty()) updates["info"] = JsonObject(info + patch)
+                if (partsChanged && parts != null) updates["parts"] = JsonArray(patchedParts!!)
+                JsonObject(updates)
+            }
+            return if (changed) JsonArray(out) else messages
         }
     }
 
@@ -1452,10 +1520,14 @@ class ZCodeProtocolClient private constructor(
         try {
             val builtin = BuiltinModelCatalog.locateBuiltinFile(zcodePath)
             val overlay = builtin?.let { AccountProviderBridge.buildAccountOverlay(it) }
-            if (builtin == null || overlay == null) {
-                println("[ZCodeAccountOverlay] push skipped: builtin file or credentials unavailable (account channels stay fail-closed)")
-                return
+            // skip 原因拆开说（builtin 缺失=目录定位问题；overlay null=无凭证材料可激活
+            // 渠道——登录态/家族键漂移时一眼定位，2026-11-13 zai_cn 排障教训）
+            if (builtin == null) {
+                println("[ZCodeAccountOverlay] push skipped: builtin file unavailable (account channels stay fail-closed)")
+            } else if (overlay == null) {
+                println("[ZCodeAccountOverlay] push skipped: no activatable account channels (credential/family mismatch, account channels stay fail-closed)")
             }
+            if (builtin == null || overlay == null) return
             val result = request(
                 "provider/updateAccountConfig",
                 buildJsonObject {
@@ -2006,10 +2078,15 @@ class ZCodeProtocolClient private constructor(
                 }))
                 s.isolation?.let { put("isolation", it) }
                 s.timeoutMs?.let { put("timeoutMs", it) }
-                // 3.17.x：scope 绕开 workspace-mcp-trust 撞名门控；alwaysLoad 防
-                // toolSearchMode 延迟加载。与 SessionMcpServerStore.encodeServers 同口径。
-                s.scope?.let { put("scope", it) }
-                s.alwaysLoad?.let { put("alwaysLoad", it) }
+                // 3.17.x（仅 NEW 代下发）：scope 绕开 workspace-mcp-trust 撞名门控；
+                // alwaysLoad 防 toolSearchMode 延迟加载。OLD 代的 zcodeProtocolMcpServerSchema
+                // 是 strict——未知键即拒（缺陷HH：老 CLI 上建会话必炸 -32602
+                // mcpServers.0: Invalid input，电脑控制开启即复现）。磁盘档案
+                // （SessionMcpServerStore）保全量不门控，wire 面统一在此按当代代际裁剪
+                if (generation == ProtocolGeneration.NEW) {
+                    s.scope?.let { put("scope", it) }
+                    s.alwaysLoad?.let { put("alwaysLoad", it) }
+                }
             })
         }
     }
@@ -2384,8 +2461,16 @@ class ZCodeProtocolClient private constructor(
 
         val pb = ProcessBuilder(args)
         pb.environment().clear()
-        pb.environment().putAll(credentialsOverride?.toEnvMap() ?: credentials?.toEnvMap() ?: emptyMap())
+        // 数据根重定向（issue #50）：clear 后必须显式补 ZCODE_DATA_BASE_DIR，否则
+        // CLI 回退 homedir，读不到重定向目录的 provider_config.json（自定义渠道
+        // 报 Select a model before sending a message）
+        val baseEnv = credentialsOverride?.toEnvMap() ?: credentials?.toEnvMap() ?: emptyMap()
+        pb.environment().putAll(CliSpawnEnv.withDataBaseDir(baseEnv))
         applyProxyEnv(pb)
+        println(
+            "[ZCodeProtocolClient] CLI one-shot dataBaseDir env = " +
+                (pb.environment()[CliSpawnEnv.DATA_BASE_DIR] ?: "<unset, CLI defaults to home>")
+        )
         pb.redirectErrorStream(false)
 
         val proc = pb.start()
@@ -2587,7 +2672,8 @@ class ZCodeProtocolClient private constructor(
         val params = buildJsonObject { put("sessionId", sessionId) }
         val r = request("session/messages", params, timeoutMs)
         requireOk(r)
-        return r["result"]?.jsonObject?.get("messages")?.jsonArray ?: JsonArray(emptyList())
+        val raw = r["result"]?.jsonObject?.get("messages")?.jsonArray ?: JsonArray(emptyList())
+        return normalizeLegacyMessageShape(raw)
     }
 
     /**

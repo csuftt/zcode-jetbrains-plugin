@@ -292,6 +292,40 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     }
 
     /**
+     * 当前生效的数据根基目录（setting.json 的 `dataBaseDir`）：未配置/空白/相对路径
+     * 返回 null。值是"基目录"语义——v2 数据在其下的 `.zcode/v2/`（与 zcode.cjs 一致）。
+     *
+     * 下发给 CLI 子进程必须走 env（[CliSpawnEnv]）：zcode.cjs 解析数据根只认
+     * `ZCODE_DATA_BASE_DIR`（缺省 homedir），**不读 setting.json**（issue #50 实测）。
+     * 相对路径不下发——CLI 按自身 cwd 解析，跨进程语义不可控。
+     */
+    fun configuredDataBaseDir(home: String = System.getProperty("user.home") ?: "."): String? {
+        val raw = readDataBaseDir(home)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return try {
+            val path = Path.of(raw)
+            if (path.isAbsolute) path.toString() else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 任务索引文件（`v2/tasks-index.sqlite`）路径：跟随 dataBaseDir 重定向。
+     *
+     * 桌面端在重定向数据根维护自己的任务索引（迁移实测：桌面端归档只写重定向副本），
+     * 插件的置顶/未读/归档/自动归档必须读写同一份，否则两端元数据互不可见。新位置
+     * 文件缺失（迁移中途/客户端未初始化）回退 home，保持老行为。
+     *
+     * 与 `cli/` 的边界：会话数据不随 dataBaseDir 迁移（见 ADR-0011），本方法只管 v2 面。
+     * 路径在 client 构造时解析一次；切换数据根后需重启 IDE 生效（与桌面端一致）。
+     */
+    fun taskIndexPath(home: String = System.getProperty("user.home") ?: "."): Path {
+        val legacy = Path.of(home, ".zcode", "v2", "tasks-index.sqlite")
+        val redirected = readDataBaseDir(home)?.let { Path.of(it, ".zcode", "v2", "tasks-index.sqlite") }
+        return if (redirected?.isRegularFile() == true) redirected else legacy
+    }
+
+    /**
      * 按 providerId + modelId 构造凭证（provider 定义取自 config.json）。
      * 提示词润色等一次性 CLI 调用按前端当前选择模型注入 ZCODE_MODEL 环境用。
      *
@@ -330,18 +364,26 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     fun hasFamilyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): Boolean =
         familyOAuthToken(providerId, configPath) != null
 
-    /** 家族 oauth access_token 明文（credentials.json）；订阅套餐无明文 apiKey 时的调用期凭证（设置页激活 key 展示用） */
+    /**
+     * 家族 oauth access_token（credentials.json 原值，加密形态——调用方只作
+     * 有/无判定与脱敏展示，不裁明文）；订阅套餐无明文 apiKey 时的调用期凭证
+     * （设置页激活 key 展示用）。按候选序取首个非空白：bigmodel 直登键优先，
+     * zai_cn 登录态（3.18.2 起 oauth:bigmodel:* 不落盘）回退 linked_bigmodel
+     * 关联材料（官方 materialFromSnapshot 同款兼容，2026-11-13）。
+     */
     fun familyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): String? {
-        val tokenKey = when (providerId) {
-            "builtin:bigmodel-coding-plan" -> "oauth:bigmodel:access_token"
-            "builtin:zai-coding-plan" -> "oauth:zai:access_token"
+        val tokenKeys = when (providerId) {
+            "builtin:bigmodel-coding-plan" -> listOf("oauth:bigmodel:access_token", "oauth:linked_bigmodel")
+            "builtin:zai-coding-plan" -> listOf("oauth:zai:access_token")
             else -> return null
         }
         val credFile = configPath.resolveSibling("credentials.json")
         if (!credFile.exists()) return null
         return try {
-            json.parseToJsonElement(credFile.readText()).jsonObject[tokenKey]
-                ?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            val obj = json.parseToJsonElement(credFile.readText()).jsonObject
+            tokenKeys.firstNotNullOfOrNull { key ->
+                obj[key]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            }
         } catch (e: Exception) {
             null
         }

@@ -27,6 +27,12 @@ interface Props {
   xLabels: string[]
   granularity?: string
   height?: number
+  /** 固定 Y 轴上限（缺省按数据最大值 ×1.15；额度百分比曲线用 100）*/
+  yMax?: number
+  /** 数值格式化（Y 轴刻度与悬停浮层；缺省 Y 轴 compact / 浮层 fmtBig）*/
+  valueFormat?: (v: number) => string
+  /** 隐藏悬停浮层的合计行（单序列指标图不需要合计）*/
+  hideTotal?: boolean
 }
 
 const PAD_L = 44
@@ -37,7 +43,7 @@ const PAD_B = 22
 /** 调色板长度（与 variables.less 的 --chart-line-1..6 对齐）*/
 const PALETTE = 6
 
-export function LineChart({ series, xLabels, granularity, height = 110 }: Props) {
+export function LineChart({ series, xLabels, granularity, height = 110, yMax, valueFormat, hideTotal }: Props) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -65,10 +71,11 @@ export function LineChart({ series, xLabels, granularity, height = 110 }: Props)
   }, [n, plotW])
 
   const maxVal = useMemo(() => {
+    if (yMax != null && yMax > 0) return yMax
     let m = 0
     for (const s of series) for (const v of s.values) if (v > m) m = v
     return m <= 0 ? 1 : m * 1.15
-  }, [series])
+  }, [series, yMax])
 
   const yFor = (v: number) => PAD_T + plotH * (1 - Math.min(1, Math.max(0, v / maxVal)))
 
@@ -89,7 +96,7 @@ export function LineChart({ series, xLabels, granularity, height = 110 }: Props)
   // Y 网格 4 档（从顶到底）
   const yTicks = [0, 1, 2, 3, 4].map((i) => ({
     y: PAD_T + (plotH * i) / 4,
-    label: compact((maxVal * (4 - i)) / 4),
+    label: (valueFormat ?? compact)((maxVal * (4 - i)) / 4),
   }))
 
   // X 标签：首/中/尾（去重保序）
@@ -213,13 +220,15 @@ export function LineChart({ series, xLabels, granularity, height = 110 }: Props)
                 style={{ background: `var(--chart-line-${(r.si % PALETTE) + 1})` }}
               />
               <span className="lc-tooltip__name" title={r.name}>{r.name}</span>
-              <span className="lc-tooltip__val">{fmtBig(r.value)}</span>
+              <span className="lc-tooltip__val">{(valueFormat ?? fmtBig)(r.value)}</span>
             </div>
           ))}
-          <div className="lc-tooltip__row lc-tooltip__row--total">
-            <span className="lc-tooltip__name">{t('usage.chart.total')}</span>
-            <span className="lc-tooltip__val">{fmtBig(hoverTotal)}</span>
-          </div>
+          {!hideTotal && (
+            <div className="lc-tooltip__row lc-tooltip__row--total">
+              <span className="lc-tooltip__name">{t('usage.chart.total')}</span>
+              <span className="lc-tooltip__val">{(valueFormat ?? fmtBig)(hoverTotal)}</span>
+            </div>
+          )}
         </div>
       )}
     </div>

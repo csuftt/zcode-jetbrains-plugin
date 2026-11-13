@@ -165,4 +165,31 @@ class WorkspaceSendTargetsTest {
         assertEquals(listOf(wsB), targets.map { it.workspacePath })
         assertTrue(targets.none { it.isCurrent })
     }
+
+    @Test
+    fun `detached badge only lands on current item when flagged`() {
+        // activePanel 获焦抢占态（弹窗中的标签）：current 项带徽标，其余项不带
+        val flagged = WorkspaceSendTargets.compute(
+            filePaths = listOf("$wsB/src/A.kt"),
+            basePath = proj,
+            projectDisplayName = "MyProj",
+            linkedWorkspaces = listOf(wsB),
+            currentWorkspace = proj,
+            currentIsDetached = true,
+        )
+        assertTrue(flagged[0].isCurrent)
+        assertTrue(flagged[0].isCurrentDetached)
+        assertFalse(flagged[1].isCurrentDetached)
+
+        // 默认参数向后兼容：不传时所有项均不带徽标（匹配与去重不受该参数影响）
+        val plain = WorkspaceSendTargets.compute(
+            filePaths = listOf("$wsB/src/A.kt"),
+            basePath = proj,
+            projectDisplayName = "MyProj",
+            linkedWorkspaces = listOf(wsB),
+            currentWorkspace = proj,
+        )
+        assertTrue(plain.none { it.isCurrentDetached })
+        assertEquals(flagged.map { it.workspacePath }, plain.map { it.workspacePath })
+    }
 }

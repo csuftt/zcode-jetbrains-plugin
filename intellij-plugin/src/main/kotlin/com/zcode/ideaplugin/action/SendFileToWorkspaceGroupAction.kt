@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vcs.VcsDataKeys
 import com.intellij.openapi.vfs.VirtualFile
 import com.zcode.ideaplugin.ZCodeBundle.message
 import com.zcode.ideaplugin.ZCodeIcons
@@ -73,10 +74,14 @@ private class SendToWorkspaceTargetAction(
 
     init {
         // 当前项语义前置：「（当前）」后缀会被误读成「当前项目」；「当前标签（目录名）」
-        // 把目标语义放前面，目录名退为补充；其余工作区恒新开，文案对称「新开标签（目录名）」
-        templatePresentation.text =
-            if (target.isCurrent) message("action.sendToWorkspace.currentTab", target.displayName)
-            else message("action.sendToWorkspace.newTab", target.displayName)
+        // 把目标语义放前面，目录名退为补充；当前项是弹窗中的标签时加「·独立窗口」徽标
+        // （activePanel 随弹窗获焦抢占，用户可预判发送去向）；其余工作区恒新开，文案对称
+        templatePresentation.text = when {
+            target.isCurrent && target.isCurrentDetached ->
+                message("action.sendToWorkspace.currentTabDetached", target.displayName)
+            target.isCurrent -> message("action.sendToWorkspace.currentTab", target.displayName)
+            else -> message("action.sendToWorkspace.newTab", target.displayName)
+        }
         templatePresentation.description = target.workspacePath
         templatePresentation.icon = ZCodeIcons.ZcGui
     }
@@ -97,7 +102,13 @@ private class SendToWorkspaceTargetAction(
 /** 两 action 共用的文件解析（缺陷 BR 口径：数组优先、单数兜底，不要求 EDITOR 语境） */
 internal fun resolveMenuVirtualFiles(e: AnActionEvent): List<VirtualFile> {
     e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY)?.let { return it.toList() }
-    return e.getData(CommonDataKeys.VIRTUAL_FILE)?.let { listOf(it) } ?: emptyList()
+    e.getData(CommonDataKeys.VIRTUAL_FILE)?.let { return listOf(it) }
+    // 变更视图兜底：提交面板/版本控制的变更树在 233~2025.x 间换代（ChangesTree→
+    // AsyncChangesTreeImpl），VFS 键供给万一缺席时从选中 Change 映射（已删除文件
+    // virtualFile=null 自然跳过）；其余菜单语境该键恒 null，零影响
+    return e.getData(VcsDataKeys.CHANGES)
+        ?.mapNotNull { it.virtualFile }
+        ?: emptyList()
 }
 
 /**
@@ -129,5 +140,8 @@ internal fun computeWorkspaceSendTargets(project: Project, files: List<VirtualFi
         projectDisplayName = project.name,
         linkedWorkspaces = ZCodeLinkedWorkspaces.readActive(project),
         currentWorkspace = panel.getTargetingWorkspacePath(),
+        // activePanel 获焦抢占态（弹窗获焦转发，见 SessionDetachWindow.attachFocusForwarding）：
+        // 当前项文案加「·独立窗口」徽标，用户点完弹窗再右键能看到去向是弹窗会话
+        currentIsDetached = panel.isDetachedToWindow(),
     )
 }

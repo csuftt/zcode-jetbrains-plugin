@@ -2,7 +2,8 @@
  * 模型按钮悬停信息卡（ModelSelect）+ 思考级别图标类回归：
  * - 选中模型悬停 → body 挂 .model-info-tip 三行（供应商/模型名/上下文窗口千分位）
  * - 模型无 contextWindow → 省略窗口行；未选模型悬停不出卡；移开即消失
- * - 思考级别按钮图标带 thought-level-icon（字号由 less 控制，jsdom 不算 CSS 只断类名）
+ * - 思考级别按钮图标带 thought-level-icon（字号由 less 控制，jsdom 不算 CSS 只断类名）；
+ *   xhigh 及其别名必须落到本地化文案（漏映射就裸露英文原样显示）
  */
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -92,5 +93,33 @@ describe('思考级别选择器', () => {
     const icon = document.querySelector('.selector-button .thought-level-icon')
     expect(icon).toBeTruthy()
     expect(icon!.className).toContain('codicon-rocket')
+  })
+
+  it('xhigh 档本地化出中文标签 + 火焰图标（别名 extra-high 同档，不再裸露英文）', async () => {
+    const i18n = (await import('i18next')).default
+    await i18n.changeLanguage('zh')
+    useStore.setState({
+      thoughtLevel: {
+        enabled: true,
+        current: 'xhigh',
+        defaultLevel: 'medium',
+        available: [
+          { label: 'low', value: 'low' },
+          { label: 'medium', value: 'medium' },
+          { label: 'xhigh', value: 'xhigh' },
+          { label: 'extra-high', value: 'extra-high' },
+        ],
+      } as never,
+      models: [] as never,
+      messages: [] as never,
+    })
+    render(<ThoughtLevelSelect />)
+    const btn = screen.getByRole('button')
+    expect(btn.textContent).toBe('极高')
+    expect(btn.querySelector('.thought-level-icon')!.className).toContain('codicon-flame')
+
+    fireEvent.click(btn)
+    const names = Array.from(document.querySelectorAll('.selector-dropdown-item-name')).map((n) => n.textContent)
+    expect(names).toEqual(['低', '中', '极高', '极高'])
   })
 })

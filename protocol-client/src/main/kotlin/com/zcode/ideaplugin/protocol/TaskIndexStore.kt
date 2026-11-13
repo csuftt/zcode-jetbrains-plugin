@@ -11,7 +11,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * ZCode 客户端任务索引（~/.zcode/v2/tasks-index.sqlite）读写器
+ * ZCode 客户端任务索引（默认 `~/.zcode/v2/tasks-index.sqlite`；dataBaseDir 重定向时
+ * 跟随到 `<dataBaseDir>/.zcode/v2/`，路径见 [Credentials.taskIndexPath]）读写器
  *
  * 归档/恢复与 ZCode 桌面客户端共用同一数据源（tasks.archived 位），实现两端列表一致：
  * - 插件归档 → 客户端列表（下次重读库时）同步隐藏；客户端归档（含自动归档）→ 插件同步隐藏

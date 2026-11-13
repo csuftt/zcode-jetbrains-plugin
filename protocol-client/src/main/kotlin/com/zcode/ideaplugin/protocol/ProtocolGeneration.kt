@@ -376,10 +376,17 @@ object BuiltinModelCatalog {
         }
     }
 
-    private fun catalogFile(zcodePath: Path?, home: String): Path? {
-        // ① v2/runtime 缓存（多 endpoint 目录取 mtime 最新）
+    private fun catalogFile(
+        zcodePath: Path?,
+        home: String,
+        localAppData: String? = System.getenv("LOCALAPPDATA"),
+    ): Path? {
+        // ① v2/runtime 缓存（多 endpoint 目录取 mtime 最新）：数据根跟随 dataBaseDir
+        //    重定向（issue #50——重定向用户的 CDN 缓存不在 home，读 home 会落空或命中
+        //    迁移前冻结快照）
         try {
-            val runtimeRoot = Path.of(home, ".zcode", "v2", "runtime", "provider")
+            val dataRoot = Credentials.configuredDataBaseDir(home)?.let { Path.of(it) } ?: Path.of(home)
+            val runtimeRoot = dataRoot.resolve(".zcode/v2/runtime/provider")
             if (Files.isDirectory(runtimeRoot)) {
                 var newest: Path? = null
                 var newestMtime = -1L
@@ -398,24 +405,30 @@ object BuiltinModelCatalog {
             }
         } catch (_: Exception) {
         }
-        // ② 安装目录 resources/config/provider（zcode.cjs 同级布局）
-        try {
-            zcodePath?.resolve("../config/provider/zcode-builtin.json")?.normalize()?.let {
-                if (Files.isRegularFile(it)) return it
-            }
-        } catch (_: Exception) {
-        }
-        // ③ AppData/config/provider（缺陷BT 兜底拷贝）
-        val fallback = Path.of(home, "AppData", "config", "provider", "zcode-builtin.json")
-        return fallback.takeIf { Files.isRegularFile(it) }
+        // ②+ 安装副本候选（按序取首个存在）：resources/config/provider →
+        //    %LOCALAPPDATA%/config/provider（缺陷BT 兜底拷贝；旧版误拼为 home/AppData）→
+        //    home/AppData/config/provider（历史误拼位置，个别机器上确有拷贝，兼容保留）
+        val installCandidates = listOf(
+            runCatching { zcodePath?.resolve("../config/provider/zcode-builtin.json")?.normalize() }.getOrNull(),
+            localAppData?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { Path.of(it, "config", "provider", "zcode-builtin.json") },
+            Path.of(home, "AppData", "config", "provider", "zcode-builtin.json"),
+        )
+        return installCandidates.firstOrNull { it != null && Files.isRegularFile(it) }
     }
 
     /**
      * 定位 zcode-builtin.json 供 [AccountProviderBridge] 组 spawn env 对与 revision
-     * 计算。与读侧 [catalogFile] 同一候选序（v2/runtime CDN 缓存 → 安装目录 →
-     * AppData 兜底）；找不到返回 null（env 对不注入，CLI 走自解析，账号渠道保持
-     * fail-closed——功能降级但不致错）。
+     * 计算。与读侧 [catalogFile] 同一候选序（dataBaseDir 感知的 runtime CDN 缓存 →
+     * 安装目录 config/provider → LOCALAPPDATA 兜底 → 历史 home/AppData 兼容）；
+     * 找不到返回 null（env 对不注入，CLI 走自解析，账号渠道保持 fail-closed——功能
+     * 降级但不致错）。
+     *
+     * @param localAppData Windows 兜底根（默认取环境变量；测试注入用）
      */
-    fun locateBuiltinFile(zcodePath: Path?, home: String = System.getProperty("user.home") ?: "."): Path? =
-        catalogFile(zcodePath, home)
+    fun locateBuiltinFile(
+        zcodePath: Path?,
+        home: String = System.getProperty("user.home") ?: ".",
+        localAppData: String? = System.getenv("LOCALAPPDATA"),
+    ): Path? = catalogFile(zcodePath, home, localAppData)
 }

@@ -4,6 +4,7 @@
  * 单容器紧凑行布局（原三张竖排大卡过高，压缩为每条额度一行）：
  *   标题 → 进度条 → 百分比 → 重置时间
  *
+ * 行内只显示百分比（「已用」语义已上移到区块标题，2026-11-12 用户定）；
  * 注：额度 API（quota/limit）对 5 小时/每周等档位只返回 percentage，
  * 没有 currentValue/usage（具体 token 数），故只展示百分比 + 重置时间，
  * 不展示「已用/总量」。与「工具用量」不同——后者有调用次数。
@@ -33,7 +34,8 @@ export function QuotaCards({ limits }: Props) {
             <div className="quota-card__bar">
               <div className="quota-card__bar-fill" style={{ width: `${pct}%` }} />
             </div>
-            <span className="quota-card__pct">{t('usage.quota.usedPct', { pct: pct.toFixed(0) })}</span>
+            {/* 行内只显示百分比（「已用」语义放在区块标题，2026-11-12 用户定）*/}
+            <span className="quota-card__pct">{pct.toFixed(0)}%</span>
             {limit.nextResetTime ? (
               <span className="quota-card__reset">{t('usage.quota.resetAt', { time: fmtResetTime(limit.nextResetTime) })}</span>
             ) : null}

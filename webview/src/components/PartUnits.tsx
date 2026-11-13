@@ -21,6 +21,8 @@ import { BashCommandGroupCard } from './BashCommandGroupCard'
 import { FileToolGroupCard } from './FileToolGroupCard'
 import { CuaActionGroupCard } from './CuaActionGroupCard'
 import { ImagePreview } from './ImagePreview'
+import { AgentNotificationCard } from './AgentNotificationCard'
+import { clockTime } from '@/utils/time'
 import type { PartRenderUnit } from '@/utils/groupParts'
 import { isCuaTool, cuaIconKeyFromOutput } from '@/utils/cuaTools'
 import { selectionMark } from '@/utils/conversationSelections'
@@ -36,15 +38,18 @@ export function collectImageParts(parts: MessagePart[]): Array<ImagePart | FileP
   )
 }
 
-/** 图片 part → 可渲染 src：image 用 dataUrl/拼 base64；file 用 url（Java 已换成 http）*/
+/** 图片 part → 可渲染 src：image 用 dataUrl/拼 base64；file 用 url（Java 已换 http 或 3.18.0 内联 data:）*/
 export function imagePartSrc(img: ImagePart | FilePart): string {
   if (img.type === 'image') {
     if (img.dataUrl) return img.dataUrl
     if (img.dataBase64) return `data:${img.mediaType || 'image/png'};base64,${img.dataBase64}`
     return ''
   }
-  // file part：zcode-artifact://（Java 未转换/转换失败）不可渲染，返回空跳过
-  return img.url && /^https?:\/\//.test(img.url) ? img.url : ''
+  // file part：3.18.0 起 url 直接内联完整 data:image/...;base64（zcode-artifact://
+  // 引用挪进 metadata.artifactUri，diag-image-file-part-3180.py 实测）；旧形态由
+  // Java ImageArtifactMapper 换成 /zcode-image/ http。zcode-artifact://（Java 未
+  // 转换/转换失败）不可渲染，返回空跳过
+  return img.url && (/^https?:\/\//.test(img.url) || /^data:image\//.test(img.url)) ? img.url : ''
 }
 
 /** 图片 part 的展示标题（hover/大图预览）*/
@@ -118,6 +123,16 @@ export function PartRenderer({
     case 'step-start':
     case 'step-finish':
       return null
+
+    case 'notification':
+      // 回合中途到达的通知卡（缺陷HI）：边界 part 落在到达时刻的 parts 位置，
+      // 与历史轮通知卡（段间独立消息）同一张卡片形态
+      return (
+        <AgentNotificationCard
+          message={part.message}
+          time={clockTime(part.message.info.time?.created)}
+        />
+      )
 
     default:
       return null

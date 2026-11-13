@@ -976,7 +976,8 @@ function AssistantBubble({
 export function TurnFileChangesBar({ fc, messageId }: { fc: TurnFileChangeSummary; messageId: string }) {
   const { t } = useTranslation()
   const sessionId = useStore((s) => s.currentSessionId)
-  const workspacePath = useStore((s) => s.projectPath)
+  // 相对路径锚当前会话 workspace（多目录会话下 projectPath 是项目根，可能不同）
+  const workspacePath = useStore((s) => s.currentWorkspacePath || s.projectPath)
   const openDialog = useStore((s) => s.openTurnFileChanges)
   const [expanded, setExpanded] = useState(false)
   const [items, setItems] = useState<TurnFileChangeItem[] | null>(null)

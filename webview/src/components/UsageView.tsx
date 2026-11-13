@@ -21,6 +21,7 @@ import { useStore } from '@/store/useStore'
 import type { AppUsageRange, UsageRange } from '@/types/messages'
 import { fmtBig, fmtTime } from '@/utils/format'
 import { QuotaCards } from './QuotaCards'
+import { QuotaTrend } from './QuotaTrend'
 import { LineChart } from './LineChart'
 import type { ChartSeries } from './LineChart'
 import '../styles/usage-view.less'
@@ -321,6 +322,9 @@ function PlanUsageTab() {
           <div className="usage-view__empty">{usageError || t('usage.quota.empty')}</div>
         )}
       </section>
+
+      {/* 额度趋势（历史采样：百分比曲线 + 每日消耗 + Token 换算）*/}
+      <QuotaTrend />
 
       {/* 用量明细分隔 */}
       <h3 className="usage-view__divider">{t('usage.detail')}</h3>

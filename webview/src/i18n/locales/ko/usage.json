@@ -1,18 +1,33 @@
 {
   "quota": {
-    "title": "할당량",
-    "titleWithPlan": "할당량({{level}} 플랜)",
+    "title": "할당량 · 사용",
+    "titleWithPlan": "할당량({{level}} 플랜) · 사용",
     "lastRefresh": "마지막 갱신 {{time}}",
     "refresh": "할당량 새로 고침",
     "loading": "불러오는 중…",
     "empty": "할당량 데이터 없음",
-    "resetAt": "리셋 {{time}}",
-    "usedPct": "사용 {{pct}}%"
+    "resetAt": "리셋 {{time}}"
   },
   "plan": {
     "tab": "GLM 플랜 사용량",
     "credHint": "조회 자격증명: {{name}}",
     "credForeign": "조회 자격증명: {{name}} (데이터는 이 키 소유 계정의 플랜 기준)"
+  },
+  "trend": {
+    "title": "할당량 추세",
+    "empty": "할당량 기록이 없습니다. 이 버전부터 조회할 때마다 기록됩니다",
+    "noWindow": "현재 플랜에 추적 가능한 할당량 창이 없습니다",
+    "current": "현재 사용률",
+    "consumed": "기간 소비",
+    "dailyAvg": "일평균 소비",
+    "tokenPerPct": "1%당 평균 Token",
+    "tokenPerPctHint": "최근 {{days}}일: {{tokens}} Token / {{pct}}%",
+    "tokenPerPctUnavailable": "Token 환산 샘플이 부족합니다 (1% 이상 소비와 서버 모델 사용량 필요)",
+    "curveTitle": "{{name}} 사용률",
+    "coveredDays": "{{days}}일 커버",
+    "dailyTitle": "일별 소비",
+    "barTip": "{{date}} {{pct}}% 소비",
+    "consumedHint": "기간 내 리셋을 넘어 누적되므로 100%를 넘을 수 있습니다"
   },
   "app": {
     "tab": "앱 사용량",
