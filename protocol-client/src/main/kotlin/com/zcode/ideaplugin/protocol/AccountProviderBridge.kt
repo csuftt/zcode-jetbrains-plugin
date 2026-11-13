@@ -51,6 +51,14 @@ import kotlin.io.path.readText
  *   遗留，直连可用）优先、缺失走 PAT；team 只走 PAT（静态键 1004，org/project 取
  *   setting.json 连接选择）；换发实现在 [ProjectAccessTokenClient]。渠道激活跟
  *   selection 语义（连接选择是官方认的"当前连接事实"），不跟遗留键名。
+ * - 【2026-11-13 zai_cn 登录态兼容】桌面端 3.18.2 起新增 Z.ai CN 登录（active_provider=
+ *   zai_cn，凭证键 oauth:zai_cn:*，oauth:bigmodel:* 不再落盘），BigModel 关联材料挪到
+ *   `oauth:linked_bigmodel`（{userId,customerId,accessToken}，accessToken 为 BigModel
+ *   签发 JWT）。官方 materialFromSnapshot（app.asar 逆向）：bigmodel 家族在 zai_cn
+ *   登录态以 linked_bigmodel 为准——accountIdentity=customerId、accessToken 取其
+ *   accessToken；zai 家族不认 zai_cn（直登 zai 才算，本桥同款不回退）。本桥对
+ *   bigmodel 家族补同款回退：直登键（oauth:bigmodel:*）存在时优先、行为与旧版
+ *   逐字节一致，缺失才回退 linked_bigmodel——老登录态零影响。
  */
 object AccountProviderBridge {
 
@@ -70,6 +78,9 @@ object AccountProviderBridge {
         "account:bigmodel-offpeak-idle-plan" to "bigmodel",
         "account:bigmodel-highspeed-card" to "bigmodel",
     )
+
+    /** BigModel 关联材料键（3.18.2 zai_cn 登录态：oauth:bigmodel:* 不落盘，材料挪到这里） */
+    const val KEY_LINKED_BIGMODEL = "oauth:linked_bigmodel"
 
     /** 凭证文件：config.json 同目录口径（跟随 dataBaseDir 迁移，与 [Credentials.familyOAuthToken] 一致） */
     fun credentialsPath(configPath: Path = Credentials.defaultConfigPath()): Path =
@@ -167,14 +178,42 @@ object AccountProviderBridge {
         return emptyMap()
     }
 
-    /** 账号身份：oauth:{family}:user_info JSON 的 id 字段（官方 loadAccountIdentity 同源） */
+    /**
+     * 账号身份：oauth:{family}:user_info JSON 的 id 字段（官方 loadAccountIdentity 同源）。
+     * bigmodel 家族在 zai_cn 登录态（无 oauth:bigmodel:user_info）回退 linked_bigmodel 的
+     * customerId（官方 materialFromSnapshot：accountIdentity = linkedBigModel.customerId
+     * ?? profile.id 同款；customerId 缺失再退 userId）；zai 家族不回退（zai_cn ≠ zai）。
+     */
     fun identityOf(entries: Map<String, String>, family: String): String? = try {
         entries["oauth:$family:user_info"]?.let {
             json.parseToJsonElement(it).jsonObject["id"]?.jsonPrimitive?.content?.takeIf { id -> id.isNotBlank() }
+        } ?: linkedBigModelIdentity(entries, family)
+    } catch (_: Exception) {
+        null
+    }
+
+    /** linked_bigmodel 身份回退：仅 bigmodel 家族；customerId 优先、userId 兜底 */
+    private fun linkedBigModelIdentity(entries: Map<String, String>, family: String): String? {
+        if (family != "bigmodel") return null
+        val m = linkedBigModelMaterial(entries) ?: return null
+        return m.customerId?.takeIf { it.isNotBlank() } ?: m.userId?.takeIf { it.isNotBlank() }
+    }
+
+    /** linked_bigmodel 关联材料（3.18.2 zai_cn 登录态；解析失败/accessToken 缺失按无材料） */
+    private fun linkedBigModelMaterial(entries: Map<String, String>): LinkedBigModelMaterial? = try {
+        entries[KEY_LINKED_BIGMODEL]?.takeIf { it.isNotBlank() }?.let {
+            val root = json.parseToJsonElement(it).jsonObject
+            LinkedBigModelMaterial(
+                userId = root["userId"]?.jsonPrimitive?.contentOrNull,
+                customerId = root["customerId"]?.jsonPrimitive?.contentOrNull,
+                accessToken = root["accessToken"]?.jsonPrimitive?.contentOrNull ?: return null,
+            )
         }
     } catch (_: Exception) {
         null
     }
+
+    private data class LinkedBigModelMaterial(val userId: String?, val customerId: String?, val accessToken: String)
 
     // ============ 反向请求应答：requestAuth 供给 ============
 
@@ -276,8 +315,7 @@ object AccountProviderBridge {
         clientVersion: String,
         http: ProjectAccessTokenClient.Http?,
     ): AuthResult {
-        val accessToken = entries["oauth:$family:access_token"]
-            ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] }
+        val accessToken = patAccessToken(entries, family)
         if (accessToken == null) {
             println("[AccountProviderBridge] PAT skipped: oauth:$family:access_token missing or equals zcodejwttoken (entries=${entries.size})")
             return AuthResult.Unavailable(UnavailableCause.NoAccessToken(family))
@@ -428,7 +466,10 @@ object AccountProviderBridge {
      *    - individual：本地静态键（老客户端，直连可用）【或】selection=individual 连接 +
      *      oauth access_token（新客户端不落静态键，走 PAT 换发）；
      *    - team：selection=team 连接（官方 schema 必带 org/project）+ oauth access_token
-     *      ——静态 team 键实机 1004【不可作材料】（2026-10-23 定案）。
+     *      ——静态 team 键实机 1004【不可作材料】（2026-10-23 定案）；
+     *    - bigmodel 家族的 identity/access_token 在 zai_cn 登录态（oauth:bigmodel:* 缺失）
+     *      回退 linked_bigmodel 关联材料（2026-11-13，官方 materialFromSnapshot 同款；
+     *      zai 家族不回退——zai_cn ≠ zai，直登 zai 才算）。
      */
     fun activatableAccountChannels(
         zcodePath: Path?,
@@ -462,10 +503,25 @@ object AccountProviderBridge {
         }
     }
 
-    /** PAT 链可用前提：oauth access_token 存在且非误存的 zcode JWT（官方同款守卫） */
+    /** PAT 链可用前提：PAT 材料 access_token 存在且非误存的 zcode JWT（官方同款守卫） */
     private fun hasPatAccessToken(entries: Map<String, String>, family: String): Boolean =
+        patAccessToken(entries, family) != null
+
+    /**
+     * PAT 换发材料 access_token：家族直登键（oauth:{family}:access_token）优先——老
+     * 登录态行为不变；bigmodel 家族直登键缺失（zai_cn 登录态）回退
+     * [KEY_LINKED_BIGMODEL] 的 accessToken（官方 materialFromSnapshot 同源，
+     * 2026-11-13 实机 getCustomerInfo 200 验证材料可用）。守卫同款：拒绝与
+     * zcodejwttoken 同值（误存 JWT 不是可换发材料）。
+     */
+    private fun patAccessToken(entries: Map<String, String>, family: String): String? {
         entries["oauth:$family:access_token"]
-            ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] } != null
+            ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] }
+            ?.let { return it }
+        if (family != "bigmodel") return null
+        return linkedBigModelMaterial(entries)?.accessToken
+            ?.takeIf { it.isNotBlank() && it != entries["zcodejwttoken"] }
+    }
 
     /**
      * Built-in revision 计算：`zcode-builtin:<json 顶层 revision>:<sha256(绝对路径)>`。

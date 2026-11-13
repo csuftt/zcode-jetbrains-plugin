@@ -126,6 +126,34 @@ class AccountProviderBridgeTest {
         "oauth:bigmodel:access_token" to "oauth-access-token",
     )
 
+    /** 3.18.2 zai_cn 登录态凭证表（实机形态）：oauth:bigmodel:* 不落盘，BigModel 关联材料在 linked_bigmodel */
+    private fun zaiCnEntries(): Map<String, String> = mapOf(
+        "oauth:zai_cn:user_info" to """{"id":"cn-user-01","name":"cn"}""",
+        "oauth:zai_cn:access_token" to "cn-access-token",
+        "oauth:active_provider" to "zai_cn",
+        "oauth:linked_bigmodel" to """{"userId":"bm-user-01","customerId":"bm-customer-01","accessToken":"bm-linked-token"}""",
+    )
+
+    /** PAT 全链 fake（可捕获 getCustomerInfo 的 Authorization，验证换发材料来源）；org/proj 参数化避开进程级缓存串扰 */
+    private fun patHttpCapturingAuth(
+        org: String,
+        proj: String,
+        pat: String,
+        onGetCustomerInfo: (String?) -> Unit,
+    ): ProjectAccessTokenClient.Http = ProjectAccessTokenClient.Http { method, url, headers, _ ->
+        when {
+            url.endsWith("/getCustomerInfo") -> {
+                onGetCustomerInfo(headers["Authorization"])
+                200 to """{"code":200,"data":{"organizations":[{"organizationId":"$org","projects":[{"projectId":"$proj","projectType":"1"}]}]}}"""
+            }
+            url.endsWith("/api_keys") && method == "GET" ->
+                200 to """{"code":200,"data":{"api_keys":[{"apiKey":"key-$org","name":"zcode-api-key"}]}}"""
+            url.endsWith("/access_tokens") && method == "POST" ->
+                200 to """{"code":200,"data":{"accessToken":"$pat","expiresIn":600}}"""
+            else -> 404 to """{"code":404}"""
+        }
+    }
+
     @Test
     fun `individual 新客户端无静态键走 PAT 换发供给`() {
         val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
@@ -256,6 +284,99 @@ class AccountProviderBridgeTest {
         val pat = cause as AccountProviderBridge.UnavailableCause.PatFailed
         assertEquals(ProjectAccessTokenClient.FailKind.UNAUTHORIZED, pat.failure.kind)
         assertTrue(pat.failure.detail.contains("401"), pat.failure.detail)
+    }
+
+    // ===== zai_cn 登录态兼容（3.18.2 linked_bigmodel，2026-11-13）=====
+
+    @Test
+    fun `zai_cn 登录态 bigmodel 身份回退 linked_bigmodel customerId`() {
+        assertEquals("bm-customer-01", AccountProviderBridge.identityOf(zaiCnEntries(), "bigmodel"))
+        // zai 家族不认 zai_cn（官方 materialFromSnapshot 同款：直登 zai 才算）
+        assertNull(AccountProviderBridge.identityOf(zaiCnEntries(), "zai"))
+        // customerId 缺失退 userId
+        val noCustomer = zaiCnEntries() + mapOf(
+            "oauth:linked_bigmodel" to """{"userId":"bm-user-01","accessToken":"bm-linked-token"}""",
+        )
+        assertEquals("bm-user-01", AccountProviderBridge.identityOf(noCustomer, "bigmodel"))
+    }
+
+    @Test
+    fun `直登键优先——bigmodel user_info 在时身份不回退 linked_bigmodel（老登录态零影响）`() {
+        val direct = zaiCnEntries() + mapOf("oauth:bigmodel:user_info" to """{"id":"bm-direct-01"}""")
+        assertEquals("bm-direct-01", AccountProviderBridge.identityOf(direct, "bigmodel"))
+    }
+
+    @Test
+    fun `zai_cn 登录态 PAT 材料回退 linked_bigmodel accessToken`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        var authHeader: String? = null
+        assertEquals(
+            "cn-pat",
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+                zaiCnEntries(), sel,
+                http = patHttpCapturingAuth("org-2", "proj-2", "cn-pat") { authHeader = it },
+            ),
+        )
+        // 换发材料必须是 linked_bigmodel.accessToken（实机 getCustomerInfo 200 验证可用）
+        assertEquals("bm-linked-token", authHeader)
+    }
+
+    @Test
+    fun `PAT 材料直登键优先于 linked_bigmodel（老登录态行为不变）`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val entries = zaiCnEntries() + mapOf(
+            "oauth:bigmodel:user_info" to """{"id":"bm-direct-01"}""",
+            "oauth:bigmodel:access_token" to "oauth-access-token",
+        )
+        var authHeader: String? = null
+        assertEquals(
+            "direct-pat",
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+                entries, sel,
+                http = patHttpCapturingAuth("org-3", "proj-3", "direct-pat") { authHeader = it },
+            ),
+        )
+        assertEquals("oauth-access-token", authHeader)
+    }
+
+    @Test
+    fun `linked_bigmodel accessToken 误存 zcode JWT 拒绝（守卫与直登键同款）`() {
+        val entries = zaiCnEntries() + mapOf(
+            "zcodejwttoken" to "jwt-token-value",
+            "oauth:linked_bigmodel" to """{"userId":"u","customerId":"c","accessToken":"jwt-token-value"}""",
+        )
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "team-coding-plan", "o", "p")
+        assertNull(
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-team-coding-plan", "team-coding-plan", entries, sel,
+                http = patHttp(team = true),
+            ),
+        )
+    }
+
+    @Test
+    fun `linked_bigmodel 坏 JSON 按无材料处理（不抛不误激活）`() {
+        val entries = zaiCnEntries() + mapOf("oauth:linked_bigmodel" to "{not-json")
+        assertNull(AccountProviderBridge.identityOf(entries, "bigmodel"))
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        assertNull(
+            AccountProviderBridge.requestAuthApiKey(
+                "account:bigmodel-individual-coding-plan", "individual-coding-plan",
+                entries, sel, http = patHttp(team = false),
+            ),
+        )
+    }
+
+    @Test
+    fun `zai_cn 登录态 overlay 只激活 bigmodel individual（zai 家族不认 zai_cn）`() {
+        val sel = ProjectAccessTokenClient.Selection("bigmodel", "individual-coding-plan", null, null)
+        val overlay = AccountProviderBridge.buildAccountOverlay(builtinFile(), zaiCnEntries(), sel)!!
+        assertEquals(setOf("account:bigmodel-individual-coding-plan"), overlay.providers.keys)
+        // 同表在 zai 家族 selection 下无可激活渠道（zai_cn ≠ zai）
+        val zaiSel = ProjectAccessTokenClient.Selection("zai", "individual-coding-plan", null, null)
+        assertNull(AccountProviderBridge.buildAccountOverlay(builtinFile(), zaiCnEntries(), zaiSel))
     }
 
     @Test

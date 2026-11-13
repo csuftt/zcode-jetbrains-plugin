@@ -364,18 +364,26 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     fun hasFamilyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): Boolean =
         familyOAuthToken(providerId, configPath) != null
 
-    /** 家族 oauth access_token 明文（credentials.json）；订阅套餐无明文 apiKey 时的调用期凭证（设置页激活 key 展示用） */
+    /**
+     * 家族 oauth access_token（credentials.json 原值，加密形态——调用方只作
+     * 有/无判定与脱敏展示，不裁明文）；订阅套餐无明文 apiKey 时的调用期凭证
+     * （设置页激活 key 展示用）。按候选序取首个非空白：bigmodel 直登键优先，
+     * zai_cn 登录态（3.18.2 起 oauth:bigmodel:* 不落盘）回退 linked_bigmodel
+     * 关联材料（官方 materialFromSnapshot 同款兼容，2026-11-13）。
+     */
     fun familyOAuthToken(providerId: String, configPath: Path = defaultConfigPath()): String? {
-        val tokenKey = when (providerId) {
-            "builtin:bigmodel-coding-plan" -> "oauth:bigmodel:access_token"
-            "builtin:zai-coding-plan" -> "oauth:zai:access_token"
+        val tokenKeys = when (providerId) {
+            "builtin:bigmodel-coding-plan" -> listOf("oauth:bigmodel:access_token", "oauth:linked_bigmodel")
+            "builtin:zai-coding-plan" -> listOf("oauth:zai:access_token")
             else -> return null
         }
         val credFile = configPath.resolveSibling("credentials.json")
         if (!credFile.exists()) return null
         return try {
-            json.parseToJsonElement(credFile.readText()).jsonObject[tokenKey]
-                ?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            val obj = json.parseToJsonElement(credFile.readText()).jsonObject
+            tokenKeys.firstNotNullOfOrNull { key ->
+                obj[key]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            }
         } catch (e: Exception) {
             null
         }

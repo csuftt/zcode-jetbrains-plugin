@@ -1520,10 +1520,14 @@ class ZCodeProtocolClient private constructor(
         try {
             val builtin = BuiltinModelCatalog.locateBuiltinFile(zcodePath)
             val overlay = builtin?.let { AccountProviderBridge.buildAccountOverlay(it) }
-            if (builtin == null || overlay == null) {
-                println("[ZCodeAccountOverlay] push skipped: builtin file or credentials unavailable (account channels stay fail-closed)")
-                return
+            // skip 原因拆开说（builtin 缺失=目录定位问题；overlay null=无凭证材料可激活
+            // 渠道——登录态/家族键漂移时一眼定位，2026-11-13 zai_cn 排障教训）
+            if (builtin == null) {
+                println("[ZCodeAccountOverlay] push skipped: builtin file unavailable (account channels stay fail-closed)")
+            } else if (overlay == null) {
+                println("[ZCodeAccountOverlay] push skipped: no activatable account channels (credential/family mismatch, account channels stay fail-closed)")
             }
+            if (builtin == null || overlay == null) return
             val result = request(
                 "provider/updateAccountConfig",
                 buildJsonObject {
