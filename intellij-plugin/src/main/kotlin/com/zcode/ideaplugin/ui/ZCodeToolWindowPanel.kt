@@ -345,6 +345,31 @@ class ZCodeToolWindowPanel(
         fun isStandbyUnbound(sessionId: String?, initialSessionId: String?, frontendReady: Boolean): Boolean =
             sessionId == null && (initialSessionId == null || frontendReady)
 
+        /** getSettings 冷会话自愈失败后的收尾决策（见 [settingsFallbackAfterColdResume]）*/
+        internal data class SettingsFallback(val retryBusy: Boolean, val coldBoot: Boolean)
+
+        /**
+         * getSettings 冷会话自愈失败后的收尾决策（纯函数放 companion 供单测，
+         * 2026-11-13 PyCharm 冷启动窗口案例：重启后服务端载入 775 条重会话约 100s，
+         * resume/read 接连超时，最终把外层 -32004 原样抛前端被误套「槽位满重启 IDE」）。
+         *
+         * @param retryBusy e2 是真超时（请求超时: session/read）——会话在服务端忙窗口
+         *   排队（冷启动载入中/回合恢复），应调度 settings busy-retry 待就绪补推，
+         *   而非只落一条 error 让用户干等（此前 e2 超时只 log 不重试，自愈链断头）
+         * @param coldBoot 驻留账本水位未达上限——服务端不可能因占满拒绝会话，
+         *   外层 -32004 必为冷启动/冷会话载入问题，下发 reason=coldBoot 让前端走
+         *   「冷启动载入中」文案而非「槽位满重启 IDE」（刚重启完的用户重启无效）
+         */
+        internal fun settingsFallbackAfterColdResume(
+            e2: Exception,
+            activeCount: Int,
+            highWater: Int = 16,
+        ): SettingsFallback = SettingsFallback(
+            retryBusy = e2 is com.zcode.ideaplugin.protocol.ZCodeProtocolException &&
+                e2.message?.startsWith("请求超时") == true,
+            coldBoot = activeCount < highWater,
+        )
+
         /** 浏览器缩放基准（Chromium zoom level 1.0 = 原生 120%）：webview 观感按此档
          *  调校，原生 100% 在 HiDPI 下过小（真机 2026-10-08 反馈「120% 才正常，
          *  100% 看不清」）。启动与重置（Ctrl+0/点胶囊）都落此档，前端百分比相对基准显示 */
@@ -5880,6 +5905,22 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     return settingsResponse(sessionId, client.readSettings(sessionId))
                 } catch (e2: Exception) {
                     log.warn("settings read still failing after cold-session resume: ${e2.message}")
+                    // 自愈失败收尾决策（2026-11-13 冷启动窗口案例）：e2 真超时说明会话在
+                    // 服务端忙窗口排队（冷启动载入中）——调度 busy-retry 待就绪补推 settings，
+                    // 不再只 log 断头（错误条之外无自愈）；水位未满时下发 reason=coldBoot，
+                    // 前端走「冷启动载入中」文案而非「槽位满重启 IDE」（刚重启完的用户重启无效）
+                    val fallback = settingsFallbackAfterColdResume(
+                        e2,
+                        project.zCodeService().residentLedger.activeCount(),
+                    )
+                    if (fallback.retryBusy) scheduleSettingsBusyRetry(sessionId)
+                    if (fallback.coldBoot) {
+                        return buildJsonObject {
+                            put("op", "error")
+                            put("message", "读取设置失败: ${e.message}")
+                            put("reason", "coldBoot")
+                        }
+                    }
                 }
             }
             errorResponse("读取设置失败: ${e.message}")

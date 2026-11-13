@@ -5688,12 +5688,16 @@ export function handleResponse(
       // 按错误码/两种文案匹配，统一追加槽位指引
       // 模型切换来源的 -32004 不套槽位文案：Java 侧 handleSetModel 已带 resume 自愈，
       // 走到这里说明自愈后仍失败，多半是启动恢复竞态残留而非槽位满——引导重开会话后重切
+      // 冷启动载入窗口（reason=coldBoot，2026-11-13 PyCharm 案例）：刚重启后的 -32004/
+      // 超时是服务端冷启动载入重会话（新进程槽位必然是空的，账本水位由 Java 侧判定），
+      // "重启 IDE 释放槽位"指引完全失效。结构化判据优先于一切 message 文本正则
+      const coldBoot = msg.reason === 'coldBoot'
       const modelSwitchInactive =
         /^Model switch failed:/.test(msg.message) && /-32004|Session is not active|Session not found/i.test(msg.message)
       const sessionInactive =
         !modelSwitchInactive && /-32004|Session is not active|Session not found/i.test(msg.message)
       // -32010（A prompt is already running）：服务端回合悬挂，Java 已自动 stop+重发，
-      // 走到前端说明自愈失败——提示可操作文案；且跳过 flushQueue（服务端 prompt 状态
+      // 走到这里说明自愈失败——提示可操作文案；且跳过 flushQueue（服务端 prompt 状态
       // 未清前队列下一条大概率再撞，会连环报错，2026-08-20 实测）
       const promptRunning = /-32010|prompt is already running/i.test(msg.message)
       // 会话级请求超时（缺陷AB 忙窗口）：resume 恢复带中断回合的会话时，app-server 对
@@ -5708,7 +5712,9 @@ export function handleResponse(
       set({
         // 人话指引放句首、协议原文挪进括号（缺陷BA）：错误条空间有限，指引垫在
         // 句尾会被截断——用户先看到"怎么办"，原文只作存证
-        lastError: modelSwitchInactive
+        lastError: coldBoot
+          ? `${i18n.t('app.coldBootHint')}（${msg.message}）`
+          : modelSwitchInactive
           ? `${i18n.t('app.modelSwitchInactiveHint')}（${msg.message}）`
           : sessionLost
             ? `${i18n.t('app.sessionLostHint')}（${msg.message}）`
