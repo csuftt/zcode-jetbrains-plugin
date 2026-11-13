@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.zcode.ideaplugin"
-version = "0.4.5-beta.1"
+version = "0.4.5"
 
 // 从仓库根 CHANGELOG.md 提取「最新一个版本块」（## 标题到下一个 ## 之前），
 // 输出中英双语并列的 HTML：中文段在前（主用户群），<h3>English</h3> 分隔后接英文段
@@ -47,7 +47,23 @@ fun latestChangelogSection(): String {
 
         val html = StringBuilder()
         var inList = false
+        var inSubList = false
+        var liOpen = false
+        fun closeLi() {
+            if (liOpen) {
+                html.append("</li>\n")
+                liOpen = false
+            }
+        }
+        fun closeSubList() {
+            if (inSubList) {
+                html.append("</ul>\n")
+                inSubList = false
+            }
+        }
         fun closeList() {
+            closeSubList()
+            closeLi()
             if (inList) {
                 html.append("</ul>\n")
                 inList = false
@@ -64,11 +80,23 @@ fun latestChangelogSection(): String {
                     html.append("<h4>").append(inline(line.removePrefix("### "))).append("</h4>\n")
                 }
                 line.startsWith("- ") -> {
+                    closeSubList()
+                    closeLi()
                     if (!inList) {
                         html.append("<ul>\n")
                         inList = true
                     }
-                    html.append("<li>").append(inline(line.removePrefix("- "))).append("</li>\n")
+                    // 父项保持开放，嵌套子项的 <ul> 落在其内
+                    html.append("<li>").append(inline(line.removePrefix("- ")))
+                    liOpen = true
+                }
+                inList && liOpen && line.trimStart().startsWith("- ") -> {
+                    // 嵌套子项（缩进 `- `）：父项内的二级 <ul>（如适配块的问题清单）
+                    if (!inSubList) {
+                        html.append("<ul>\n")
+                        inSubList = true
+                    }
+                    html.append("<li>").append(inline(line.trimStart().removePrefix("- "))).append("</li>\n")
                 }
                 line.isBlank() -> { /* 空行：段落间隔，列表边界在下一内容行处理 */ }
                 else -> {
