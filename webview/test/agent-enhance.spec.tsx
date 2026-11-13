@@ -446,6 +446,25 @@ describe('InputBox 发送拼装（@<name> 前缀）', () => {
     expect(req).toMatchObject({ text: '写一个排序函数' })
   })
 
+  it('润色按钮：会话流式中不禁用（润色只碰输入框正文，独立通道不扰会话）', () => {
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        isStreaming
+        currentModel={{ modelId: 'GLM-5.2', providerId: 'p1' }}
+        onModelSelect={() => {}}
+      />,
+    )
+    const editor = document.querySelector('.input-editable') as HTMLDivElement
+    editor.textContent = '流式期间想润色的话'
+    fireEvent.input(editor)
+    const btn = document.querySelector('.enhance-prompt-button') as HTMLButtonElement
+    expect(btn.disabled).toBe(false)
+    fireEvent.click(btn)
+    const req = sentRequests.find((r) => r.op === 'enhancePrompt')
+    expect(req).toMatchObject({ text: '流式期间想润色的话' })
+  })
+
   it('使用润色结果（issue #22）：长结果折叠为内联粘贴 chip 不撑满输入框，发送时按位展开', async () => {
     const { onSend, editor } = setup(null)
     editor.textContent = '短原文'

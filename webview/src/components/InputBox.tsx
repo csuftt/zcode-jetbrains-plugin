@@ -399,10 +399,10 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
     }
   }, [enhanceEnabled])
 
-  /** 润色按钮：取编辑器正文（与 doSend 同源的序列化）。润色在途中再点=重新打开
+  /** 润色按钮：取编辑器正文（与 doSend 同源的序列化）。流式中不禁用（润色只作用于
+   *  输入框正文，独立 generateText 通道与会话流互不干扰）；润色在途中再点=重新打开
    *  弹窗复用在途请求（store 内分流），不重发；空文本交 store 拦截 */
   function handleEnhanceClick() {
-    if (isStreaming) return
     const text = serializeEditor(editorRef.current ?? document.createElement('div'), {
       pasteText: pasteTextResolver,
     }).replace(/\s+$/, '')
@@ -2341,8 +2341,9 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                   className="enhance-prompt-button"
                   ref={enhanceBtnRef}
                   onClick={handleEnhanceClick}
-                  // 润色在途不禁用：再点=重新打开弹窗复用在途请求（store 分流），不重发
-                  disabled={disabled || isStreaming || !hasText}
+                  // 润色在途不禁用：再点=重新打开弹窗复用在途请求（store 分流），不重发；
+                  // 会话流式中也不禁用（润色只碰输入框正文，独立通道不扰会话）
+                  disabled={disabled || !hasText}
                   type="button"
                 >
                   <span
