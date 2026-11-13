@@ -7,6 +7,7 @@
   "turnFailed": "本轮执行失败：{{message}}",
   "turnFailedNoDetail": "本轮执行失败（服务端未返回错误详情）",
   "sessionInactiveHint": "会话槽位已满（服务端上限 16，已打开的会话不会自动释放）：重启 IDE 释放槽位后，重新发送消息或从历史列表重新打开会话即可",
+  "coldBootHint": "服务端冷启动载入中（刚重启后首次打开会话，载入需要时间）：等待 1~2 分钟后重新发送消息或重新打开会话即可，无需再重启 IDE",
   "sessionLostHint": "会话记录已丢失（多因进程异常中断、会话未及落盘），此会话已无法继续发送——请新建会话后重新发送",
   "modelSwitchInactiveHint": "模型切换失败（会话尚未激活）：从历史列表重新打开会话或发送一条消息后再切换即可",
   "modelSwitchDeferred": "模型切换将在本轮结束后生效：{{model}}",

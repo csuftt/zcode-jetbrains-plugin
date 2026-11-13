@@ -2012,6 +2012,10 @@ class ZCodeProtocolClient private constructor(
         mcpServers: List<McpServerSpec>? = null,
     ): String {
         val nativePath = workspace.workspacePath.replace('/', File.separatorChar)
+        // 电脑控制（CUA）注入通道：顶层 mcpServers 数组（diag-cua-inject.py 实测，
+        // stdio 分支 strict 形状见 McpServerSpec 注释）。空/null 不发键；
+        // injected 提到 params 外声明——自愈重试（callWithMcpKeysHeal）重建 params 需复用
+        val injected = mcpServers?.takeIf { it.isNotEmpty() }
         val params = buildJsonObject {
             put("workspace", buildJsonObject {
                 put("workspacePath", nativePath)
@@ -2026,14 +2030,11 @@ class ZCodeProtocolClient private constructor(
             thoughtLevel?.takeIf { it.isNotBlank() }?.let {
                 put("thoughtLevel", it)
             }
-            // 电脑控制（CUA）注入通道：顶层 mcpServers 数组（diag-cua-inject.py 实测，
-            // stdio 分支 strict 形状见 McpServerSpec 注释）。空/null 不发键
-            mcpServers?.takeIf { it.isNotEmpty() }?.let { servers ->
+            injected?.let { servers ->
                 put("mcpServers", mcpServersJson(servers))
             }
         }
-        val r = request("session/create", params, timeoutMs)
-        requireOk(r)
+        val r = callWithMcpKeysHeal("session/create", params, injected, timeoutMs)
         // 会话档缓存写入（sessionId 此刻才可知；create 带档即缓存，供首条 send 的
         // modelSelection 直接取用同值）
         thoughtLevel?.takeIf { it.isNotBlank() }?.let { lvl ->
@@ -2064,6 +2065,18 @@ class ZCodeProtocolClient private constructor(
         }
     }
 
+    /**
+     * wire 面是否允许 mcpServers 条目携带 scope/alwaysLoad（缺陷HH+HO 门控收口）：
+     * NEW 代且当代 cjs 实含两键（[ProtocolGenerations.probeMcpServerKeys]，两键
+     * ≈3.16 线才进 schema，中间 NEW 代按代放行必炸 -32602，issue#51）；cjs 探不动
+     * （不可读）时乐观放行保持 0.4.5 行为。自愈降级（[callWithMcpKeysHeal]）后
+     * 进程内恒 false——running 的 app-server 已拒过，同进程重试无意义。
+     */
+    @Volatile
+    private var mcpServerKeysAllowed: Boolean =
+        generation == ProtocolGeneration.NEW &&
+            (ProtocolGenerations.probeMcpServerKeys(zcodePath) ?: true)
+
     private fun mcpServersJson(servers: List<McpServerSpec>): JsonArray = buildJsonArray {
         servers.forEach { s ->
             add(buildJsonObject {
@@ -2078,17 +2091,57 @@ class ZCodeProtocolClient private constructor(
                 }))
                 s.isolation?.let { put("isolation", it) }
                 s.timeoutMs?.let { put("timeoutMs", it) }
-                // 3.17.x（仅 NEW 代下发）：scope 绕开 workspace-mcp-trust 撞名门控；
-                // alwaysLoad 防 toolSearchMode 延迟加载。OLD 代的 zcodeProtocolMcpServerSchema
-                // 是 strict——未知键即拒（缺陷HH：老 CLI 上建会话必炸 -32602
-                // mcpServers.0: Invalid input，电脑控制开启即复现）。磁盘档案
-                // （SessionMcpServerStore）保全量不门控，wire 面统一在此按当代代际裁剪
-                if (generation == ProtocolGeneration.NEW) {
+                // 3.16+（NEW 代且 cjs 实含两键才下发，缺陷HO 内容探测）：scope 绕开
+                // workspace-mcp-trust 撞名门控；alwaysLoad 防 toolSearchMode 延迟加载。
+                // 老版 zcodeProtocolMcpServerSchema 是 strict——未知键即拒（缺陷HH：OLD
+                // 代建会话必炸 -32602 mcpServers.0: Invalid input；缺陷HO：3.12.3~3.15
+                // 的 NEW 代同样拒，issue#51）。磁盘档案（SessionMcpServerStore）保全量
+                // 不门控，wire 面统一在此裁剪
+                if (mcpServerKeysAllowed) {
                     s.scope?.let { put("scope", it) }
                     s.alwaysLoad?.let { put("alwaysLoad", it) }
                 }
             })
         }
+    }
+
+    /**
+     * 带 mcpServers 注入面的请求执行（create/resume 共用，缺陷HO 自愈收口）：
+     * 首发若被 strict schema 以 Unrecognized keys 点名 scope/alwaysLoad 拒收
+     * （-32602，当代 cjs 探测漏网/未来版本键改名等场景），立即裁两键重发一次——
+     * 注入面降级为基线键（CUA 工具仍注入，仅失 scope/alwaysLoad 双保险），功能
+     * 降级不致错。降级进程内记住，后续请求直接走裁剪面不再撞拒。
+     */
+    private fun callWithMcpKeysHeal(
+        method: String,
+        params: JsonObject,
+        servers: List<McpServerSpec>?,
+        timeoutMs: Long,
+    ): JsonObject {
+        val first = request(method, params, timeoutMs)
+        val err = first["error"]
+        if (err != null && servers?.isNotEmpty() == true && mcpServerKeysAllowed && isMcpKeysRejection(err)) {
+            mcpServerKeysAllowed = false
+            println("[ZCodeProtocolClient] mcpServers scope/alwaysLoad rejected by current schema (-32602 Unrecognized keys), retry trimmed + downgrade for process lifetime, method=$method")
+            val healed = buildJsonObject {
+                params.forEach { (k, v) -> if (k != "mcpServers") put(k, v) }
+                put("mcpServers", mcpServersJson(servers))
+            }
+            return requireOk(request(method, healed, timeoutMs))
+        }
+        return requireOk(first)
+    }
+
+    /**
+     * strict schema 两键拒收判据（zod Unrecognized keys 文本 + -32602 + 双键点名）。
+     * 认原始 error 报文文本而非解析 code（fromError 对数字 code 的解析留有历史口径）。
+     */
+    private fun isMcpKeysRejection(error: JsonElement): Boolean {
+        val text = error.toString()
+        return text.contains("-32602") &&
+            text.contains("Unrecognized keys", ignoreCase = true) &&
+            text.contains("scope") &&
+            text.contains("alwaysLoad")
     }
 
     /**
@@ -3512,24 +3565,23 @@ class ZCodeProtocolClient private constructor(
     fun resume(sessionId: String, workspace: Workspace, timeoutMs: Long = 15000): JsonObject {
         // 归一原生分隔符（同 createSession：防 0.16.5 原样落库造成同项目双形态行）
         val nativePath = workspace.workspacePath.replace('/', File.separatorChar)
+        // 冷恢复重建 runtime 时必须沿用 create 的工具面（源码 zcodeSessionResumeParamsSchema
+        // 注释：否则会绕过 create 的 allow/deny 约束，尤其 CUA 会话）；热订阅复挂无影响。
+        // 内存未命中（IDE 重启后新 client 实例）回灌磁盘档案——注入记录不得因重启丢失
+        val resumedSpecs = sessionMcpServers[sessionId]
+            ?: SessionMcpServerStore.load(sessionId)?.also {
+                println("[ZCodeProtocolClient] session mcpServers restored from disk store (${it.size} servers) for ${sessionId.takeLast(8)}")
+                sessionMcpServers[sessionId] = it
+            }
         val params = buildJsonObject {
             put("sessionId", sessionId)
             put("workspace", buildJsonObject {
                 put("workspacePath", nativePath)
                 put("workspaceKey", nativePath)
             })
-            // 冷恢复重建 runtime 时必须沿用 create 的工具面（源码 zcodeSessionResumeParamsSchema
-            // 注释：否则会绕过 create 的 allow/deny 约束，尤其 CUA 会话）；热订阅复挂无影响。
-            // 内存未命中（IDE 重启后新 client 实例）回灌磁盘档案——注入记录不得因重启丢失
-            val resumedSpecs = sessionMcpServers[sessionId]
-                ?: SessionMcpServerStore.load(sessionId)?.also {
-                    println("[ZCodeProtocolClient] session mcpServers restored from disk store (${it.size} servers) for ${sessionId.takeLast(8)}")
-                    sessionMcpServers[sessionId] = it
-                }
             resumedSpecs?.let { put("mcpServers", mcpServersJson(it)) }
         }
-        val r = request("session/resume", params, timeoutMs)
-        requireOk(r)
+        val r = callWithMcpKeysHeal("session/resume", params, resumedSpecs, timeoutMs)
         return r["result"]?.jsonObject ?: JsonObject(emptyMap())
     }
 

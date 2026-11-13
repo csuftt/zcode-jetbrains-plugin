@@ -1642,8 +1642,11 @@ export type JavaResponse =
   | { op: 'modelTrajectoryResult'; sessionId: string; records?: TrajectoryRecord[]; sourceFiles?: string[]; truncated?: boolean; totalCount?: number; error?: string }
   /** envStatus 存在 = 环境前置检查失败（EnvCheckException），前端据此刷新环境提醒条；
    *  sourceOp 存在 = 钩子族/send 等带归属的错误，前端按域过滤（不误吞其他操作的失败）；
-   *  sessionId 存在 = send 来源错误附带的目标会话（落位看门狗快路定位凭据用） */
-  | { op: 'error'; message: string; envStatus?: EnvStatus; sourceOp?: string; sessionId?: string }
+   *  sessionId 存在 = send 来源错误附带的目标会话（落位看门狗快路定位凭据用）；
+   *  reason='coldBoot' = 冷启动载入窗口（Java 按驻留账本水位判定，2026-11-13 案例）：
+   *  -32004 家族在刚重启后是服务端冷启动载入重会话而非槽位满，前端据此走
+   *  冷启动文案（结构化判据优先于 message 文本正则） */
+  | { op: 'error'; message: string; envStatus?: EnvStatus; sourceOp?: string; sessionId?: string; reason?: string }
   /** app-server stderr 解析出的后端模型 API 错误（APICallError 兜底通道）：
    *  429 配额超限等被服务端按可重试分类退避重试，turn 终止帧迟迟不发时的第一现场 */
   | { op: 'backendError'; statusCode?: number; code?: string; message: string }

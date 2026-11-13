@@ -6,6 +6,22 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.4.5.1] - 2026-11-13
+
+中文:
+
+### 修复
+
+- 修复部分 ZCode 客户端版本上「电脑控制」开启后发消息必报「处理失败 [-32602]」的问题（issue #51）：插件为 MCP 注入附加的 scope/alwaysLoad 参数，在中间版本区间的客户端上会被严格校验整条拒收；现按客户端实际支持的参数动态下发，对端不认时自动降级重试，不再报错。
+- 刚重启 IDE 后首次打开会话、服务端冷启动载入期间（会话多时约一两分钟）的报错不再误报「会话槽位满，请重启 IDE」——改为「冷启动载入中」提示，载入就绪后自动恢复。
+
+English:
+
+### Fixed
+
+- Fixed "processing failed [-32602]" when sending messages with Computer Control enabled on some ZCode client versions (issue #51): the scope/alwaysLoad keys attached with MCP injections were rejected wholesale by stricter schemas of intermediate client builds; the plugin now sends them according to what the client actually supports and auto-retries with trimmed keys, so the error no longer occurs.
+- Errors right after restarting the IDE while the server is cold-loading sessions (up to a minute or two with many sessions) no longer misreport "session slots full, please restart the IDE" — the hint now says the server is cold-starting, and settings/content resume automatically once it is ready.
+
 ## [0.4.5] - 2026-11-13
 
 中文:

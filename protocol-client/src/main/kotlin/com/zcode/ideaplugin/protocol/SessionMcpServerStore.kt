@@ -101,9 +101,9 @@ internal object SessionMcpServerStore {
     }
 
     /**
-     * 编码落盘（规格保全量，含 3.17.x scope/alwaysLoad）。磁盘档案不按代际裁剪——
-     * wire 面统一在 ZCodeProtocolClient.mcpServersJson 按当代代际门控（缺陷HH），
-     * 这里裁了会让 CLI 在新旧间切换时丢信息、回不去。
+     * 编码落盘（规格保全量，含 3.17.x scope/alwaysLoad）。磁盘档案不按代际/内容探测
+     * 裁剪——wire 面统一在 ZCodeProtocolClient.mcpServersJson 收口（缺陷HH 代际 +
+     * 缺陷HO 内容探测），这里裁了会让 CLI 在新旧间切换时丢信息、回不去。
      */
     private fun encodeServers(servers: List<McpServerSpec>): JsonArray = buildJsonArray {
         servers.forEach { s ->
