@@ -292,6 +292,24 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     }
 
     /**
+     * 当前生效的数据根基目录（setting.json 的 `dataBaseDir`）：未配置/空白/相对路径
+     * 返回 null。值是"基目录"语义——v2 数据在其下的 `.zcode/v2/`（与 zcode.cjs 一致）。
+     *
+     * 下发给 CLI 子进程必须走 env（[CliSpawnEnv]）：zcode.cjs 解析数据根只认
+     * `ZCODE_DATA_BASE_DIR`（缺省 homedir），**不读 setting.json**（issue #50 实测）。
+     * 相对路径不下发——CLI 按自身 cwd 解析，跨进程语义不可控。
+     */
+    fun configuredDataBaseDir(home: String = System.getProperty("user.home") ?: "."): String? {
+        val raw = readDataBaseDir(home)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return try {
+            val path = Path.of(raw)
+            if (path.isAbsolute) path.toString() else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * 按 providerId + modelId 构造凭证（provider 定义取自 config.json）。
      * 提示词润色等一次性 CLI 调用按前端当前选择模型注入 ZCODE_MODEL 环境用。
      *

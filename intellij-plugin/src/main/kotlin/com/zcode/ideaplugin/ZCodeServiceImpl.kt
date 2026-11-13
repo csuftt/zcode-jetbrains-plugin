@@ -840,6 +840,9 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                 zcodePath = env.zcodePath,
                 credentials = env.credentials,
                 nodePath = env.nodePath,
+                // 数据根重定向（issue #50）：本进程只跑 generateText，与会话库无关，
+                // 跟随客户端 dataBaseDir 才能读到自定义渠道的 provider_config.json
+                extraEnv = com.zcode.ideaplugin.protocol.CliSpawnEnv.extraEnv(),
             )
             log.info("[enhance] dedicated app-server started (isolates generateText from session traffic)")
             // 无会话一般不会被问，但防御性挂上 fail-soft 应答，避免专用进程万一收到

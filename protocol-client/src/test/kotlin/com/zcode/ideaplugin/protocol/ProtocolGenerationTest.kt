@@ -151,6 +151,74 @@ class ProtocolGenerationTest {
         assertEquals("max", BuiltinModelCatalog.defaultReasoningLevel("glm-5.2", null, home.toString()))
     }
 
+    // ============ locateBuiltinFile（spawn env 对目录定位，issue #50） ============
+
+    private fun writeInstallCatalog(zcodePath: Path, relative: String): Path {
+        Files.createDirectories(zcodePath.parent)
+        if (!Files.isRegularFile(zcodePath)) zcodePath.toFile().writeText("// cli")
+        val file = zcodePath.parent.resolve(relative).normalize()
+        Files.createDirectories(file.parent)
+        file.toFile().writeText("{}")
+        return file
+    }
+
+    @Test
+    fun `builtin 定位优先跟随 dataBaseDir 的 runtime 缓存`() {
+        val redirect = home.resolve("redirect-root").toAbsolutePath()
+        v2().resolve("setting.json").toFile()
+            .writeText("""{"dataBaseDir":"${redirect.toString().replace("\\", "\\\\")}"}""")
+        val redirected = redirect.resolve(".zcode/v2/runtime/provider/ep/1.0/endpoint-x/zcode-builtin.json")
+        Files.createDirectories(redirected.parent)
+        redirected.toFile().writeText("""{"revision":44}""")
+        // 安装目录副本也存在：旧口径会先命中它，新口径必须让重定向缓存胜出
+        val zcode = home.resolve("install/glm/zcode.cjs")
+        writeInstallCatalog(zcode, "../config/provider/zcode-builtin.json")
+        assertEquals(
+            redirected.toAbsolutePath(),
+            BuiltinModelCatalog.locateBuiltinFile(zcode, home.toString(), localAppData = null)?.toAbsolutePath(),
+        )
+    }
+
+    @Test
+    fun `config_provider 缺失时回退历史 home_AppData 拷贝`() {
+        val zcode = home.resolve("install/glm/zcode.cjs")
+        Files.createDirectories(zcode.parent)
+        zcode.toFile().writeText("// cli")
+        val legacy = home.resolve("AppData/config/provider/zcode-builtin.json")
+        Files.createDirectories(legacy.parent)
+        legacy.toFile().writeText("{}")
+        assertEquals(
+            legacy.toAbsolutePath(),
+            BuiltinModelCatalog.locateBuiltinFile(zcode, home.toString(), localAppData = null)?.toAbsolutePath(),
+        )
+    }
+
+    @Test
+    fun `LOCALAPPDATA 兜底`() {
+        val zcode = home.resolve("install/glm/zcode.cjs")
+        Files.createDirectories(zcode.parent)
+        zcode.toFile().writeText("// cli")
+        val localAppData = home.resolve("localappdata")
+        val fallback = localAppData.resolve("config/provider/zcode-builtin.json")
+        Files.createDirectories(fallback.parent)
+        fallback.toFile().writeText("{}")
+        // 历史误拼位置同时存在：正确位置 LOCALAPPDATA 必须优先
+        val legacy = home.resolve("AppData/config/provider/zcode-builtin.json")
+        Files.createDirectories(legacy.parent)
+        legacy.toFile().writeText("{}")
+        assertEquals(
+            fallback.toAbsolutePath(),
+            BuiltinModelCatalog.locateBuiltinFile(zcode, home.toString(), localAppData = localAppData.toString())
+                ?.toAbsolutePath(),
+        )
+    }
+
+    @Test
+    fun `所有候选缺失 fail-soft 返回 null`() {
+        val zcode = home.resolve("missing/glm/zcode.cjs")
+        assertNull(BuiltinModelCatalog.locateBuiltinFile(zcode, home.toString(), localAppData = null))
+    }
+
     @Test
     fun `真实样式目录冒烟（存在才跑）`() {
         val real = Path.of(System.getProperty("user.home"), ".zcode", "v2", "runtime", "provider")

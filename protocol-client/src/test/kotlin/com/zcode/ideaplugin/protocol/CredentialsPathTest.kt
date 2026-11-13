@@ -1,11 +1,13 @@
 package com.zcode.ideaplugin.protocol
 
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.io.path.isRegularFile
 import kotlin.test.AfterTest
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -93,6 +95,34 @@ class CredentialsPathTest {
             home.resolve(".zcode/v2/config.json"),
             Credentials.configPathFor(home.toString()),
         )
+    }
+
+    // ============ configuredDataBaseDir（CLI spawn env 下传，issue #50） ============
+
+    @Test
+    fun `configuredDataBaseDir 返回绝对数据根`() {
+        val dir = home.resolve("newroot").toAbsolutePath().toString()
+        givenSetting(dataBaseDir = dir)
+        assertEquals(Path.of(dir).toString(), Credentials.configuredDataBaseDir(home.toString()))
+    }
+
+    @Test
+    fun `configuredDataBaseDir 空白值返回 null`() {
+        givenSetting(dataBaseDir = null, content = "{\"dataBaseDir\": \"   \"}")
+        assertNull(Credentials.configuredDataBaseDir(home.toString()))
+    }
+
+    @Test
+    fun `configuredDataBaseDir 相对路径返回 null（不把相对路径下发给 CLI）`() {
+        givenSetting(dataBaseDir = "relative/data")
+        assertNull(Credentials.configuredDataBaseDir(home.toString()))
+    }
+
+    @Test
+    fun `configuredDataBaseDir 文件缺失或损坏返回 null`() {
+        assertNull(Credentials.configuredDataBaseDir(home.toString()))
+        givenSetting(dataBaseDir = null, content = "{\"dataBaseDir\": \"F:\\\\Zcode\", broken")
+        assertNull(Credentials.configuredDataBaseDir(home.toString()))
     }
 
     @Test

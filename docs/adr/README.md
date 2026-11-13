@@ -16,6 +16,7 @@
 | [0008](0008-direct-read-write-tasks-index.md) | 直接读写官方 tasks-index.sqlite 承载置顶与归档 | accepted（回溯） |
 | [0009](0009-public-internal-repo-boundary.md) | 公开主仓库与内部过程仓库的硬边界 | accepted（回溯） |
 | [0010](0010-idea-platform-2023-3-floor.md) | IDE 编译下限钉在 2023.3 | accepted（回溯） |
+| [0011](0011-data-root-scope-for-child-processes.md) | 数据根重定向只下发给轻任务子进程，主会话进程暂留 home | accepted |
 
 ## 功能 → 决策 → 记录
 
@@ -33,6 +34,7 @@
 | 浏览器独立窗口 | 0.4.1 | 0003 | `design-research/浏览器弹窗独立窗口调研-2026-10-16.md` |
 | 手机远程会话 | 0.3.9 | 0004 | `design-research/手机远程会话复用调研-2026-08.md` |
 | 轻任务模型 | 0.4.4-beta.1 | — | issue #48 |
+| 润色/标题轻任务数据根跟随 | 0.4.5 | 0011 | `bugs-regressions/缺陷HL-数据根重定向子进程读不到provider_config-2026-11-13.md` |
 
 内部记录的根目录是 `docs/internal/`（独立私有仓库，主仓库不跟踪）。
 

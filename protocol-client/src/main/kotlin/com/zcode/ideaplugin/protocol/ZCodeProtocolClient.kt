@@ -405,13 +405,18 @@ class ZCodeProtocolClient private constructor(
          * @param stdinWriteTimeoutMs stdin 写阻塞判死时限（毫秒）：对端挂死不再消费
          *   stdin 时写入会永久阻塞，此参数封顶阻塞等待，到期 kill 进程树触发重建
          *   （app-server-silent-hang 三/四例；仅测试传小值）
+         * @param extraEnv 附加 spawn env（组装完成后 putAll 合并，同名键以此为准——含与
+         *   继承环境、凭证/代理 env 撞名的场景）：轻任务专用 app-server 由调用方传
+         *   [CliSpawnEnv.extraEnv]（数据根重定向，issue #50）。主 client 不传——插件
+         *   直读会话库仍以 home 为权威，主进程跟随重定向会两侧错位
          */
         fun start(
             zcodePath: Path = ZCodeLocator.detect(),
             credentials: ZCodeCredentials? = Credentials.loadOrNull(),
             nodePath: String = findNode(),
             readyTimeoutMs: Long = 30_000,
-            stdinWriteTimeoutMs: Long = 30_000
+            stdinWriteTimeoutMs: Long = 30_000,
+            extraEnv: Map<String, String> = emptyMap()
         ): ZCodeProtocolClient {
             val env = (System.getenv() + (credentials?.toEnvMap() ?: emptyMap())).toMutableMap()
             // 模型请求 UA 版本号对齐官方客户端：zcode.cjs 请求头构造读 env.ZCODE_APP_VERSION
@@ -445,6 +450,10 @@ class ZCodeProtocolClient private constructor(
                 }
             }
 
+            // 轻任务专用 app-server 的附加 env（数据根重定向，issue #50）：调用方显式传入，
+            // 覆盖同名继承变量（setting.json 是客户端当前状态的权威）
+            if (extraEnv.isNotEmpty()) env.putAll(extraEnv)
+
             val pb = ProcessBuilder(nodePath, zcodePath.toString(), "app-server")
             pb.environment().clear()
             pb.environment().putAll(env)
@@ -460,6 +469,10 @@ class ZCodeProtocolClient private constructor(
             // 排障主线索（issue #12 用户实测三态：坏地址失败/清空直连/好地址成功——
             // 没有这行日志时分不清「代理坏了」还是「没注入」）：代理地址 userinfo 脱敏
             println("[ZCodeProxy] app-server spawn ${proxyConfig?.logSummary ?: "<no proxy, direct>"}")
+            println(
+                "[ZCodeProtocolClient] app-server dataBaseDir env = " +
+                    (env[CliSpawnEnv.DATA_BASE_DIR] ?: "<unset, CLI defaults to home>")
+            )
             // ⚠️ 必须 drain stderr！Windows 管道缓冲约 4KB，node 写 stderr 是同步阻塞的。
             // 模型调用失败时 app-server 会向 stderr 打错误堆栈，一次就可能填满缓冲；
             // 无人读 → node 永久阻塞在写 stderr → 整个 app-server 事件循环停摆，
@@ -2442,8 +2455,16 @@ class ZCodeProtocolClient private constructor(
 
         val pb = ProcessBuilder(args)
         pb.environment().clear()
-        pb.environment().putAll(credentialsOverride?.toEnvMap() ?: credentials?.toEnvMap() ?: emptyMap())
+        // 数据根重定向（issue #50）：clear 后必须显式补 ZCODE_DATA_BASE_DIR，否则
+        // CLI 回退 homedir，读不到重定向目录的 provider_config.json（自定义渠道
+        // 报 Select a model before sending a message）
+        val baseEnv = credentialsOverride?.toEnvMap() ?: credentials?.toEnvMap() ?: emptyMap()
+        pb.environment().putAll(CliSpawnEnv.withDataBaseDir(baseEnv))
         applyProxyEnv(pb)
+        println(
+            "[ZCodeProtocolClient] CLI one-shot dataBaseDir env = " +
+                (pb.environment()[CliSpawnEnv.DATA_BASE_DIR] ?: "<unset, CLI defaults to home>")
+        )
         pb.redirectErrorStream(false)
 
         val proc = pb.start()
