@@ -5464,15 +5464,35 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * select 静默空转（233 的 ProjectViewImpl.getCurrentProjectViewPane 返回 null）。
      * 按官方 SelectInProjectView 流程：先激活 Project 工具窗，再切到当前视图
      * （未初始化时回落默认视图，createComponent 顺带落 myCurrentViewId），最后
-     * select。233 的 AsyncProjectViewSupport.select 路径自带 expandPath，选中
-     * 目录节点即展开其子节点，正是徽标双击的「定位并展开」语义。
+     * select。AsyncProjectViewSupport.select 路径自带 expandPath，选中目录节点
+     * 即展开其子节点，正是徽标双击的「定位并展开」语义。
+     *
+     * 项目根特例（缺陷 HC，2026-11-13 真机实锤）：select(null, 根目录, true) 静默空转
+     * ——项目视图树的不可见根（rootVisible=false）user object 正是 ProjectViewProjectNode，
+     * 其 canRepresent(baseDir)=element.equals(project.getBaseDir()) 对根目录恒真，
+     * null 元素的 FileVisitor 在树根就被截胡：收集到的是不可见根的路径，SKIP_CHILDREN
+     * 不再下钻，selectPaths 选中一个看不见的节点（无日志无异常无反应）；子目录目标在
+     * 树根 canRepresent 判否 → contains 放行下钻 → 命中可见 PsiDirectoryNode，故一直
+     * 正常。根目录改传 PsiDirectory 元素（平台 Select In 同款传参）：NodeVisitor 对
+     * 项目节点判否下钻，命中可见的根目录行（PsiDirectoryNode(baseDir)）选中并滚动。
      */
     private fun revealDirectoryInProjectView(vdir: VirtualFile) {
         val projectView = com.intellij.ide.projectView.ProjectView.getInstance(project)
+        // 项目根判定用路径级比较（大小写不敏感），不比 VFS 实例
+        val basePath = project.basePath?.replace('\\', '/')?.trimEnd('/')
+        val isProjectRoot = !basePath.isNullOrEmpty() &&
+            vdir.path.trimEnd('/').equals(basePath, ignoreCase = true)
         val reveal = {
             val viewId = projectView.currentViewId ?: projectView.defaultViewId
             projectView.changeViewCB(viewId, null).doWhenProcessed {
-                projectView.select(null, vdir, true)
+                // 根目录带 PsiDirectory 元素走 NodeVisitor（元素非 VirtualFile，
+                // 不可见根 canRepresent 判否放行下钻）；findDirectory 失败回落原路径
+                val psiDir = if (isProjectRoot) {
+                    com.intellij.psi.PsiManager.getInstance(project).findDirectory(vdir)
+                } else {
+                    null
+                }
+                projectView.select(psiDir, vdir, true)
             }
         }
         val toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
