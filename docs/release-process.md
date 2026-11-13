@@ -32,6 +32,7 @@
 4. **提交合并**：分支提交（git-commit-format skill）→ 合并回 master → `git push origin master feature/x.y.z`。**构建签名后、push 前必须再 `git status` 检查一次**：prebuild 生成的 `webview/src/version/changelog.ts`（入库产物）落在升版本提交之后的工作区，不补提交会让 master/tag 滞后一个版本块（0.2.4 实踩）。
 5. **GitHub release**（csuftt/zcode-jetbrains-plugin，gh 全路径 `"/c/Program Files/GitHub CLI/gh.exe"`）：
    - `git tag vx.y.z <合并提交>` + push tag；
+   - **release 标题统一 `ZC-GUI <版本号>`**（不带 v 前缀——tag 才带 v，标题别混两套；beta 同规，如 `ZC-GUI 0.4.5.1-beta.1`。0.4.5.1 起立纪，历史不规范的 `v0.4.5.1`/`v0.4.5-beta.1`/`v0.4.4-beta.1` 已批量改名，`gh release edit <tag> --title` 即改）；
    - `gh release create` 或覆盖旧版（移 tag / `delete-asset`+`upload` / `edit --notes-file`）；notes 写 CHANGELOG 块 + 附件说明，**用 `--notes-file` 别用 `--body`**。
    - notes 结尾固定格式（勿漏，0.4.1 实踩）：`---` 分隔线后接双语附件安装说明（中文段 + `English:` 段），再 `---` + 署名两句：
      ```markdown
