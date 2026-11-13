@@ -3,11 +3,13 @@
  *
  * 覆盖：双语语言段（中文:/English:）/ 版本头/节/条目/intro 引言（含 > 引用）/
  *       文件头忽略/空节过滤/旧格式无语言标记归 zh /
- *       build.gradle.kts 版本抽取 / changelog.ts 生成物可回读
+ *       build.gradle.kts 版本抽取 / changelog.ts 生成物可回读 /
+ *       预发布块剔除（弹窗版本记录只留稳定版）
  */
 
 import { describe, it, expect } from 'vitest'
-import { parseChangelog, extractGradleVersion, generateChangelogTs } from '../scripts/extract-changelog.mjs'
+import { parseChangelog, extractGradleVersion, generateChangelogTs, omitPrerelease } from '../scripts/extract-changelog.mjs'
+import { CHANGELOG_DATA } from '@/version/changelog'
 
 const SAMPLE = `# Changelog
 
@@ -111,6 +113,24 @@ describe('parseChangelog', () => {
     expect(entries[1].zh.sections[0].items).toEqual(['热修复块'])
     expect(entries[2].zh.sections[0].items).toEqual(['预发布块'])
   })
+
+  it('嵌套子项并进父项（\\n- 分隔），渲染层展开二级列表', () => {
+    // 回归：嵌套子项曾被整行丢弃（适配块的问题清单在弹窗里消失）
+    const md = [
+      '## [1.0.0] - 2026-11-13', '', '中文:', '', '### 适配', '',
+      '- **适配 XX**（说明）：', '',
+      '  - 子项一；',
+      '  - 子项二。',
+    ].join('\n')
+    const e = parseChangelog(md)[0]
+    expect(e.zh.sections[0].items).toEqual(['**适配 XX**（说明）：\n- 子项一；\n- 子项二。'])
+  })
+
+  it('嵌套子项无父项可挂时按顶格条目处理（防御）', () => {
+    const md = '## [1.0.0] - 2026-11-13\n\n中文:\n\n### Fixed\n\n  - 孤儿子项'
+    const e = parseChangelog(md)[0]
+    expect(e.zh.sections[0].items).toEqual(['孤儿子项'])
+  })
 })
 
 describe('extractGradleVersion', () => {
@@ -132,5 +152,25 @@ describe('generateChangelogTs', () => {
     // 数据段是 JSON：从 = 后截取回读
     const json = ts.slice(ts.indexOf('= ', ts.indexOf('CHANGELOG_DATA')) + 2)
     expect(JSON.parse(json)).toEqual(entries)
+  })
+})
+
+describe('omitPrerelease', () => {
+  it('预发布块（-beta.N）不入弹窗版本记录，稳定版与四段热修复块保留', () => {
+    const md = [
+      '## [1.1.0-beta.2] - 2026-11-13', '', '中文:', '', '### Added', '', '- beta2', '',
+      '## [1.1.0-beta.1] - 2026-11-12', '', '中文:', '', '### Added', '', '- beta1', '',
+      '## [1.0.0] - 2026-11-11', '', '中文:', '', '### Added', '', '- 稳定版', '',
+      '## [0.2.3.1] - 2026-08-25', '', '中文:', '', '### Fixed', '', '- 热修复',
+    ].join('\n')
+    const kept = omitPrerelease(parseChangelog(md))
+    expect(kept.map((e) => e.version)).toEqual(['1.0.0', '0.2.3.1'])
+    expect(omitPrerelease([])).toEqual([])
+  })
+})
+
+describe('CHANGELOG_DATA（提交仓库的生成物）', () => {
+  it('不含预发布块（beta 只写 GitHub release 描述，不进弹窗版本记录）', () => {
+    expect(CHANGELOG_DATA.every((e) => /^\d+\.\d+\.\d+(\.\d+)?$/.test(e.version))).toBe(true)
   })
 })

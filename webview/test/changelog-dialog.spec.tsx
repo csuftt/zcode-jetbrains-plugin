@@ -130,4 +130,24 @@ describe('ChangelogDialog 渲染', () => {
     fireEvent.keyDown(document, { key: 'ArrowRight' })
     expect(document.querySelector('.changelog-dialog__star-banner')).not.toBeNull()
   })
+
+  it('嵌套子项（\\n- 分隔）展开为二级列表，父项文本保留行内格式', () => {
+    const entry: ChangelogEntry = {
+      version: '9.9.9',
+      date: '2026-11-13',
+      zh: {
+        sections: [{ title: '适配', items: ['**适配 XX**（说明）：\n- 子项一；\n- 子项二。'] }],
+      },
+    }
+    render(<ChangelogDialog entries={[entry]} onClose={() => {}} />)
+    const sublist = document.querySelector('.changelog-dialog__sublist')
+    expect(sublist).not.toBeNull()
+    const subs = sublist!.querySelectorAll('li')
+    expect(subs.length).toBe(2)
+    expect(subs[0].textContent).toBe('子项一；')
+    expect(subs[1].textContent).toBe('子项二。')
+    // 父项加粗保留在二级列表之外
+    const strong = document.querySelectorAll('.changelog-dialog__list > li > span strong')
+    expect(strong[0]?.textContent).toBe('适配 XX')
+  })
 })
