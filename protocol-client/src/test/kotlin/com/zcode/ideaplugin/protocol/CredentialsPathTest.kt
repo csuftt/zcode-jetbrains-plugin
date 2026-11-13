@@ -125,6 +125,30 @@ class CredentialsPathTest {
         assertNull(Credentials.configuredDataBaseDir(home.toString()))
     }
 
+    // ============ taskIndexPath（任务索引跟随 dataBaseDir，2026-11-13 迁移实测） ============
+
+    @Test
+    fun `taskIndexPath 未配置 dataBaseDir 走 home 旧位置`() {
+        givenSetting(dataBaseDir = null)
+        assertEquals(home.resolve(".zcode/v2/tasks-index.sqlite"), Credentials.taskIndexPath(home.toString()))
+    }
+
+    @Test
+    fun `taskIndexPath 配置 dataBaseDir 且重定向文件存在时跟随`() {
+        val redirect = home.resolve("newroot")
+        givenSetting(dataBaseDir = redirect.toString())
+        val redirected = redirect.resolve(".zcode/v2/tasks-index.sqlite")
+        Files.createDirectories(redirected.parent)
+        redirected.toFile().writeText("")
+        assertEquals(redirected, Credentials.taskIndexPath(home.toString()))
+    }
+
+    @Test
+    fun `taskIndexPath 重定向文件缺失时回退 home`() {
+        givenSetting(dataBaseDir = home.resolve("newroot").toString())
+        assertEquals(home.resolve(".zcode/v2/tasks-index.sqlite"), Credentials.taskIndexPath(home.toString()))
+    }
+
     @Test
     fun `defaultConfigPath 真机解析到存在的文件`() {
         // 前置：本机已登录 ZCode（与 EnvChecker 真机测试同风格）。

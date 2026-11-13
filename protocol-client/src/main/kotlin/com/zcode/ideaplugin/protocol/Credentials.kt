@@ -310,6 +310,22 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     }
 
     /**
+     * 任务索引文件（`v2/tasks-index.sqlite`）路径：跟随 dataBaseDir 重定向。
+     *
+     * 桌面端在重定向数据根维护自己的任务索引（迁移实测：桌面端归档只写重定向副本），
+     * 插件的置顶/未读/归档/自动归档必须读写同一份，否则两端元数据互不可见。新位置
+     * 文件缺失（迁移中途/客户端未初始化）回退 home，保持老行为。
+     *
+     * 与 `cli/` 的边界：会话数据不随 dataBaseDir 迁移（见 ADR-0011），本方法只管 v2 面。
+     * 路径在 client 构造时解析一次；切换数据根后需重启 IDE 生效（与桌面端一致）。
+     */
+    fun taskIndexPath(home: String = System.getProperty("user.home") ?: "."): Path {
+        val legacy = Path.of(home, ".zcode", "v2", "tasks-index.sqlite")
+        val redirected = readDataBaseDir(home)?.let { Path.of(it, ".zcode", "v2", "tasks-index.sqlite") }
+        return if (redirected?.isRegularFile() == true) redirected else legacy
+    }
+
+    /**
      * 按 providerId + modelId 构造凭证（provider 定义取自 config.json）。
      * 提示词润色等一次性 CLI 调用按前端当前选择模型注入 ZCODE_MODEL 环境用。
      *

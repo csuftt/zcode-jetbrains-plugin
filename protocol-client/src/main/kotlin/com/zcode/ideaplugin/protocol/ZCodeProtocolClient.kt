@@ -70,8 +70,9 @@ class ZCodeProtocolClient private constructor(
     /** app-server 会话库（session/list 数据源；删除、旧归档迁移直写） */
     private val cliDbPath = Path.of(System.getProperty("user.home"), ".zcode", "cli", "db", "db.sqlite")
 
-    /** ZCode 客户端任务索引（归档/恢复与客户端共写同一数据源，见 TaskIndexStore） */
-    val taskIndex = TaskIndexStore(nodePath, Path.of(System.getProperty("user.home"), ".zcode", "v2", "tasks-index.sqlite"))
+    /** ZCode 客户端任务索引（归档/恢复与客户端共写同一数据源，见 TaskIndexStore）。
+     *  路径跟随 dataBaseDir（桌面端在重定向根维护任务索引），新增见 [Credentials.taskIndexPath] */
+    val taskIndex = TaskIndexStore(nodePath, Credentials.taskIndexPath())
 
     /**
      * 归档/软删会话排除集合（tasks-index 与 ZCode 客户端同源，task_id=会话 id）。
@@ -407,8 +408,9 @@ class ZCodeProtocolClient private constructor(
          *   （app-server-silent-hang 三/四例；仅测试传小值）
          * @param extraEnv 附加 spawn env（组装完成后 putAll 合并，同名键以此为准——含与
          *   继承环境、凭证/代理 env 撞名的场景）：轻任务专用 app-server 由调用方传
-         *   [CliSpawnEnv.extraEnv]（数据根重定向，issue #50）。主 client 不传——插件
-         *   直读会话库仍以 home 为权威，主进程跟随重定向会两侧错位
+         *   [CliSpawnEnv.extraEnv]（数据根重定向，issue #50）。主 client 不传——桌面端
+         *   CLI 也不跟随数据根，会话数据 `cli/` 不随重定向迁移，注入会把会话库指向
+         *   空库（ADR-0011）
          */
         fun start(
             zcodePath: Path = ZCodeLocator.detect(),

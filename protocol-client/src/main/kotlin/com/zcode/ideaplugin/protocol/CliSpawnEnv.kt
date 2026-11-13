@@ -13,9 +13,11 @@ package com.zcode.ideaplugin.protocol
  * - 润色/标题专用 app-server（`ZCodeProtocolClient.start(extraEnv = ...)`）
  * - 一次性 CLI 调用 `ZCodeProtocolClient.cliOneShot`
  *
- * 不用于主 app-server 与 `sendViaCliResume`：插件直读会话库/任务索引（cli/db/db.sqlite、
- * v2/tasks-index.sqlite）仍以 home 为权威，单点重定向会让 app-server 与直读侧错位，
- * `--resume` 也会找不到会话。全面数据根对齐另行设计（ADR-0011）。
+ * 不用于主 app-server 与 `sendViaCliResume`：桌面端自己的 CLI 进程也不跟随 dataBaseDir
+ * （迁移实测：会话数据 `cli/` 不随数据根迁移，桌面端新会话照样写 home 的 `cli/db`）。
+ * 主进程若注入该变量，CLI 会在重定向目录新建一份空的 `cli` 库，制造真正的会话分叉
+ * （ADR-0011）。任务索引等 v2 直读面由插件侧单独跟随 dataBaseDir（见
+ * [Credentials.taskIndexPath]），与 CLI 进程无关。
  */
 object CliSpawnEnv {
 
