@@ -40,8 +40,15 @@ object ProtocolGenerations {
     /** 新版架构标记串：provider_config 个人渠道解析链的 env 变量名（zcode.cjs 实挖） */
     private val NEW_MARKER = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE".toByteArray(Charsets.US_ASCII)
 
+    /** mcpServers 条目新键标记：zcodeProtocolMcpServerSchema 的 alwaysLoad 字段名。
+     *  两键（scope/alwaysLoad）2026-10-19 sync（≈3.16 线）才进 schema——见 [probeMcpServerKeys] */
+    private val MCP_KEYS_MARKER = "alwaysLoad".toByteArray(Charsets.US_ASCII)
+
     /** zcode.cjs → 代际，按 (mtime, size) 缓存；CLI 升级/回滚换文件自动失效重判 */
     private val cache = ConcurrentHashMap<Path, Pair<Pair<Long, Long>, ProtocolGeneration>>()
+
+    /** zcode.cjs → mcp 两键有无，同 [cache] 的 (mtime, size) 缓存口径 */
+    private val mcpKeysCache = ConcurrentHashMap<Path, Pair<Pair<Long, Long>, Boolean>>()
 
     fun detect(zcodePath: Path, home: String = System.getProperty("user.home") ?: "."): ProtocolGeneration {
         try {
@@ -49,7 +56,7 @@ object ProtocolGenerations {
                 val attrs = Files.readAttributes(zcodePath, java.nio.file.attribute.BasicFileAttributes::class.java)
                 val key = attrs.lastModifiedTime().toMillis() to attrs.size()
                 cache[zcodePath]?.let { (k, g) -> if (k == key) return g }
-                val gen = if (containsMarker(zcodePath)) ProtocolGeneration.NEW else ProtocolGeneration.OLD
+                val gen = if (containsBytes(zcodePath, NEW_MARKER)) ProtocolGeneration.NEW else ProtocolGeneration.OLD
                 cache[zcodePath] = key to gen
                 return gen
             }
@@ -59,16 +66,41 @@ object ProtocolGenerations {
         return detectByConfig(home)
     }
 
-    /** zcode.cjs 流式搜标记（11MB 文件按 64K 窗口滑动，防标记跨块） */
-    private fun containsMarker(path: Path): Boolean {
+    /**
+     * 当代 cjs 的 zcodeProtocolMcpServerSchema 是否实含 scope/alwaysLoad 两键（缺陷HO）。
+     * NEW 代是 3.12.3+ 的大区间，两键 2026-10-19 sync（≈3.16 线）才进 schema——中间版本
+     * 「NEW 标记在、键不在」，按代放行即被 strict schema 拒整条（issue#51：-32602
+     * mcpServers.0: Unrecognized keys: "scope", "alwaysLoad"）。故 wire 门控按 cjs
+     * 内容探测而非版本号/代际，同 [detect] 的 (mtime, size) 缓存口径。
+     *
+     * @return true/false = 键的有无；null = cjs 不可读不可判（调用方乐观放行，
+     *         由 -32602 自愈兜底，见 ZCodeProtocolClient.callWithMcpKeysHeal）
+     */
+    fun probeMcpServerKeys(zcodePath: Path?): Boolean? {
+        if (zcodePath == null) return null
+        return try {
+            if (!Files.isRegularFile(zcodePath)) return null
+            val attrs = Files.readAttributes(zcodePath, java.nio.file.attribute.BasicFileAttributes::class.java)
+            val key = attrs.lastModifiedTime().toMillis() to attrs.size()
+            mcpKeysCache[zcodePath]?.let { (k, v) -> if (k == key) return v }
+            val has = containsBytes(zcodePath, MCP_KEYS_MARKER)
+            mcpKeysCache[zcodePath] = key to has
+            has
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** cjs 流式搜标记（11MB 文件按 64K 窗口滑动，防标记跨块） */
+    private fun containsBytes(path: Path, marker: ByteArray): Boolean {
         Files.newByteChannel(path, StandardOpenOption.READ).use { ch ->
-            val win = Math.max(NEW_MARKER.size * 2, 64 * 1024)
-            val buf = java.nio.ByteBuffer.allocate(win + NEW_MARKER.size)
+            val win = Math.max(marker.size * 2, 64 * 1024)
+            val buf = java.nio.ByteBuffer.allocate(win + marker.size)
             while (ch.read(buf) != -1) {
                 buf.flip()
-                if (indexOf(buf, NEW_MARKER)) return true
+                if (indexOf(buf, marker)) return true
                 // 留尾部（标记可能跨读块），其余丢弃
-                val keep = Math.min(buf.limit(), NEW_MARKER.size - 1)
+                val keep = Math.min(buf.limit(), marker.size - 1)
                 val tail = ByteArray(keep)
                 System.arraycopy(buf.array(), buf.limit() - keep, tail, 0, keep)
                 buf.clear()
