@@ -141,24 +141,29 @@
         </action>
         <!-- worktree（0.4.6，spec #52）：ZCGUIWorktrees 节点右键动作组（数据由
              WorktreeTreeStructureProvider.getData 供应，动作只认自己的 key）。
-             2026-11-14 反馈：原 anchor=last 沉底在长菜单里翻不到，上提到系统组
-             （剪切/复制/粘贴）之前；个别 IDE 缺该组时回落 append，最差=原底部位置 -->
+             2026-11-16 反馈：整组置顶（anchor=first，平台「新建」组之前），按
+             「会话操作 / 打开 / 删除」三段排布，段间与组尾用分隔线隔开；组尾
+             分隔线即本组与平台菜单的边界，平台折叠无内容的孤儿分隔线，非
+             worktree 节点上全部动作隐藏时不会残留横线 -->
         <group id="ZCode.WorktreeActions" popup="false">
-            <add-to-group group-id="ProjectViewPopupMenu" anchor="before" relative-to-action="CutCopyPasteGroup"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
             <action id="ZCode.WorktreeNewSession"
                     class="com.zcode.ideaplugin.worktree.WorktreeNewSessionAction"/>
             <group id="ZCode.WorktreeOpenSessions" popup="true"
                    class="com.zcode.ideaplugin.worktree.WorktreeOpenSessionsGroup"/>
+            <action id="ZCode.WorktreeSendToGui"
+                    class="com.zcode.ideaplugin.worktree.WorktreeSendToGuiAction"/>
+            <separator/>
             <action id="ZCode.WorktreeOpen"
                     class="com.zcode.ideaplugin.worktree.WorktreeOpenAction"/>
             <action id="ZCode.WorktreeReveal"
                     class="com.zcode.ideaplugin.worktree.WorktreeRevealAction"/>
-            <action id="ZCode.WorktreeSendToGui"
-                    class="com.zcode.ideaplugin.worktree.WorktreeSendToGuiAction"/>
+            <separator/>
             <action id="ZCode.WorktreeDelete"
                     class="com.zcode.ideaplugin.worktree.WorktreeDeleteAction"/>
             <action id="ZCode.WorktreeCleanup"
                     class="com.zcode.ideaplugin.worktree.WorktreeCleanupAction"/>
+            <separator/>
         </group>
     </actions>
 </idea-plugin>

@@ -244,7 +244,7 @@ class WorktreeEntryNode(
     override fun getVirtualFile(): com.intellij.openapi.vfs.VirtualFile? =
         com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByNioFile(entry.root)
 
-    /** Q7=A：单击交给平台展开/收起；「打开 worktree（新窗口）」走右键菜单 */
+    /** Q7=A：单击交给平台展开/收起；「在新窗口打开」走右键菜单 */
     override fun canNavigate(): Boolean = false
 }
 
