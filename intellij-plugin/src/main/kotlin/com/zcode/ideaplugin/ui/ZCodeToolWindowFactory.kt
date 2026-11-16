@@ -135,11 +135,37 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
          * workspacePath（多目录会话）：会话所属目录，随标签注入——新标签 boot 首拉列表
          * 按它过滤，跨目录会话才能被恢复；null = 本项目（旧调用方缺省）。
          */
-        fun openSessionTab(project: Project, sessionId: String, workspacePath: String? = null) {
+        fun openSessionTab(
+            project: Project,
+            sessionId: String,
+            workspacePath: String? = null,
+        ) {
             if (sessionId.isBlank()) return
             val toolWindow = getToolWindow(project) ?: return
             if (activateSessionTab(project, sessionId)) return
-            addTabContent(project, toolWindow, sessionId, getNextTabName(toolWindow.contentManager), initialWorkspace = workspacePath)
+            addTabContent(
+                project, toolWindow, sessionId, getNextTabName(toolWindow.contentManager),
+                initialWorkspace = workspacePath,
+            )
+            toolWindow.show(null)
+        }
+
+        /**
+         * 打开绑定既有 worktree 副本的「新会话」待命标签（须在 EDT 调用；2026-11-15 懒创建
+         * 定案）：不建会话，副本规格由面板持有（pendingWorktree），首条消息的 createSession
+         * 在面板拦截——直接落副本目录建会话。落位=源工作区（归属轴照旧）；⎇ chip 由前端
+         * 就绪后的 worktreePending 直推渲染，标题走待命态「新会话」兜底。
+         */
+        fun openPendingWorktreeTab(
+            project: Project,
+            info: com.zcode.ideaplugin.worktree.WorktreeRegistryStore.WorktreeSessionInfo,
+        ) {
+            val toolWindow = getToolWindow(project) ?: return
+            addTabContent(
+                project, toolWindow, null, getNextTabName(toolWindow.contentManager),
+                initialWorkspace = info.sourceWorkspace,
+                pendingWorktree = info,
+            )
             toolWindow.show(null)
         }
 
@@ -173,6 +199,50 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             }
         }
 
+        /**
+         * 删除会话/归档会话/worktree 移除后的标签联动收尾（0.4.6）：绑定目标会话的**其他标签**一并关闭
+         * ——死会话/已收起会话的界面残留徒增困惑。须在 EDT 调用。
+         *
+         * - 非选中标签：removeContent 直接关（守卫集豁免 contentRemoveQuery 确认框——
+         *   会话已删/已归档，确认框问「要丢什么」没有意义）；
+         * - 选中标签（用户正看着）：不关本尊（关了可能空窗），推 sessionDeleted 让前端
+         *   自行回落待命态（「删当前会话→待命」是既有语义，重复推送幂等无害；归档复用
+         *   同一回落链，前端不必新增归档版待命分支）。
+         */
+        fun closeSessionTabs(project: Project, sessionIds: Collection<String>) {
+            val ids = sessionIds.filter { it.isNotBlank() }.toSet()
+            if (ids.isEmpty()) return
+            val toolWindow = getToolWindow(project) ?: return
+            val cm = toolWindow.contentManager
+            val targets = cm.contents.filter {
+                (it.component as? ZCodeToolWindowPanel)?.getCurrentSessionIdForPersist() in ids
+            }
+            if (targets.isEmpty()) return
+            programmaticCloseSessions.addAll(ids)
+            try {
+                for (c in targets) {
+                    if (c === cm.selectedContent) {
+                        (c.component as? ZCodeToolWindowPanel)?.let { panel ->
+                            ids.forEach { sid ->
+                                panel.pushToWebview(kotlinx.serialization.json.buildJsonObject {
+                                    put("op", kotlinx.serialization.json.JsonPrimitive("sessionDeleted"))
+                                    put("sessionId", kotlinx.serialization.json.JsonPrimitive(sid))
+                                })
+                            }
+                        }
+                    } else {
+                        cm.removeContent(c, false)
+                    }
+                }
+            } finally {
+                programmaticCloseSessions.removeAll(ids)
+            }
+        }
+
+        /** 程序化关标签的豁免守卫：在册会话的标签关闭时不弹确认框（见 [closeSessionTabs]） */
+        private val programmaticCloseSessions =
+            java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+
         /** 生成下一个标签名：从 1 起取最小未被占用的编号（最后一个标签禁关、编号只增不减，故不复用 max+1）*/
         private fun getNextTabName(cm: ContentManager): String {
             val pattern = tabNamePattern()
@@ -199,9 +269,22 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             lazy: Boolean = false,
             /** 标签初始目录（多目录会话）：与 initialSessionId 配对，随 bridge 注入（见 panel 注释）*/
             initialWorkspace: String? = null,
+            /** 待命绑定既有副本（2026-11-15 新建会话懒创建，见 panel 构造参数注释） */
+            pendingWorktree: com.zcode.ideaplugin.worktree.WorktreeRegistryStore.WorktreeSessionInfo? = null,
         ): Content {
+            // worktree 归属归一（2026-11-14 真机反馈）：初始目录是注册表在册的 worktree
+            // 执行根时改用源工作区——boot 历史页 scope/色块轴/持久化恢复全按归属目录语义
+            // （旧版本落位曾写 worktree cwd，重启恢复的旧标签同样在此被归一）。kv 查询
+            // EDT 安全；未登记（普通目录/桌面端建副本）原样
+            val normalizedWorkspace = initialWorkspace?.takeIf { it.isNotBlank() }?.let { ws ->
+                runCatching { com.zcode.ideaplugin.worktree.WorktreeRegistry(project).sourceWorkspaceOf(ws) }
+                    .getOrNull() ?: ws
+            } ?: initialWorkspace
             val panel: JComponent = try {
-                ZCodeToolWindowPanel(project, initialSessionId, lazyStart = lazy, initialWorkspace = initialWorkspace)
+                ZCodeToolWindowPanel(
+                    project, initialSessionId, lazyStart = lazy, initialWorkspace = normalizedWorkspace,
+                    pendingWorktree = pendingWorktree,
+                )
             } catch (t: Throwable) {
                 // 工具窗创建的最后一道兜底：面板构造异常炸穿=Cannot init toolwindow，
                 // 整个工具窗死透+标签恢复断链（2026-10-19 JCEF 基础设施死亡、2026-09-17 缺陷BT
@@ -354,6 +437,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 val panel = content.component as? ZCodeToolWindowPanel
                 if (panel?.isStandbyUnbound() == true) return
                 if (panel?.isDetachedToWindow() == true) return
+                // 删除会话/worktree 联动的程序化关标签：会话已不存在，确认框无意义
+                val boundSid = panel?.getCurrentSessionIdForPersist()
+                if (boundSid != null && boundSid in programmaticCloseSessions) return
                 val tabName = content.displayName ?: message("tab.fallbackName")
                 val streaming = panel?.isTabStreaming() == true
                 val dialogMessage = if (streaming) {

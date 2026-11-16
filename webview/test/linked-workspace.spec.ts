@@ -94,6 +94,25 @@ describe('关联目录应答与激活目录切换', () => {
     expect(useStore.getState().activeWorkspacePath).toBe(WS_PROJECT)
   })
 
+  it('boot 恢复期豁免回退守卫（fork-to-worktree 竞态回归，2026-11-14）', () => {
+    // gotoSession 新标签落位=新 worktree 根（恒不在关联目录集）：boot 应答处理完之前，
+    // getLinkedWorkspaces 应答不得把作用域切回主项目——否则绑定会话的列表应答被
+    // 乱序丢弃守卫丢掉，恢复跳过 →「新 worktree 分叉开出的标签是空会话且落位主项目」
+    const wtWs = 'C:\Users\Administrator\.zcode\worktrees\e894\claude-done-work'
+    useStore.setState({
+      activeWorkspacePath: wtWs,
+      bootRestorePending: true,
+      projectPath: WS_PROJECT,
+    })
+    handleResponse(
+      { op: 'linkedWorkspaces', workspaces: [WS_PROJECT] } as never,
+      useStore.setState, useStore.getState,
+    )
+    expect(useStore.getState().activeWorkspacePath).toBe(wtWs) // 落位不被守卫切走
+    const listReqs = sentRequests.filter((r) => r.op === 'listSessions')
+    expect(listReqs).toHaveLength(0) // 无插队重拉
+  })
+
   it('幂等切换：目标即当前列表作用域时不重拉（仅对齐落位）', () => {
     useStore.setState({ activeWorkspacePath: '', sessionsWorkspace: WS_OTHER })
     useStore.getState().setActiveWorkspace(WS_OTHER) // 目标 = 当前列表作用域（chips 原值重击）
@@ -265,14 +284,21 @@ describe('跨目录会话新标签打开（标签初始目录注入）', () => {
     void freshStore.getState().init() // 落位=WS_OTHER（已不在关联列表）
     expect(freshStore.getState().activeWorkspacePath).toBe(WS_OTHER)
     sentRequests.length = 0
+    // 2026-11-14 新时序：boot 期回退守卫豁免（防 fork-to-worktree 恢复竞态），
+    // boot 首拉应答处理完（绑定会话未命中）才在收尾兜底回本项目
     freshHandle(
       { op: 'linkedWorkspaces', workspaces: [] } as never,
       freshStore.setState, freshStore.getState,
     )
+    expect(freshStore.getState().activeWorkspacePath).toBe(WS_OTHER) // boot 期落位不动
+    freshHandle(
+      { op: 'listSessions', workspacePath: WS_OTHER, sessions: [] } as never,
+      freshStore.setState, freshStore.getState,
+    )
     const s = freshStore.getState()
-    expect(s.activeWorkspacePath).toBe(WS_PROJECT) // 兜底回本项目
+    expect(s.activeWorkspacePath).toBe(WS_PROJECT) // 恢复未命中 → 收尾兜底回本项目
     expect(s.sessionsWorkspace).toBe(WS_PROJECT)
-    expect(sentRequests.find((r) => r.op === 'listSessions')?.workspacePath).toBe(WS_PROJECT) // 按兜底目录重拉
+    expect(sentRequests.filter((r) => r.op === 'listSessions').at(-1)?.workspacePath).toBe(WS_PROJECT) // 按兜底目录重拉
   })
 })
 

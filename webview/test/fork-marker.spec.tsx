@@ -30,13 +30,14 @@ vi.mock('@/ipc/bridge', () => ({
   onMessage: () => {},
   onStreamEvent: () => {},
   onStreamBatch: () => {},
-  sendToJava: () => {},
+  sendToJava: vi.fn(),
 }))
 
 import '@/i18n/config'
+import { sendToJava } from '@/ipc/bridge'
 import { MessageBubble } from '@/components/MessageBubble'
 import { isHiddenSyntheticMessage } from '@/utils/parseNotification'
-import { useStore } from '@/store/useStore'
+import { useStore, handleResponse } from '@/store/useStore'
 import type { ZCodeMessage } from '@/types/messages'
 
 Object.defineProperty(window, 'localStorage', {
@@ -106,21 +107,71 @@ describe('分叉标记渲染', () => {
 })
 
 describe('分叉入口（assistant 回复 footer）', () => {
-  it('完成的回复 footer 有分叉按钮；点击弹确认，确认后 forkBusy 置位', () => {
+  it('完成的回复 footer 有分叉按钮；点击弹分叉菜单，选当前目录分叉后弹确认，确认后 forkBusy 置位', () => {
     const r = render(<MessageBubble message={completedReply} />)
     const forkBtn = r.container.querySelector('.msg__footer-fork') as HTMLButtonElement
     expect(forkBtn).not.toBeNull()
     expect(useStore.getState().forkBusy).toBe(false)
-    // 二次确认：先弹窗，不直接分叉
+    // 0.4.6 分叉菜单（对齐桌面端）：点按钮先弹菜单（非 git 仓库门控默认 supported=true 缓存
+    // 未就绪时只有 here 项——worktreeStandby 缺省 null，toWorktree 项隐藏）
     fireEvent.click(forkBtn)
+    const menuItems = Array.from(document.body.querySelectorAll('.fork-menu__item')) as HTMLButtonElement[]
+    expect(menuItems.length).toBeGreaterThanOrEqual(1)
+    expect(r.container.querySelector('.modal-overlay')).toBeNull()
+    expect(useStore.getState().forkBusy).toBe(false)
+    // 选「在当前目录分叉」→ 二次确认弹窗
+    const hereItem = menuItems.find((b) => b.textContent?.includes('在当前目录分叉')) as HTMLButtonElement
+    expect(hereItem).toBeDefined()
+    fireEvent.click(hereItem)
     expect(r.container.querySelector('.modal-overlay')).not.toBeNull()
     expect(useStore.getState().forkBusy).toBe(false)
-    // 确认 → forkFromMessage → forkBusy 置位（sendToJava 已 mock）
+    // 确认 → forkFromMessage('here') → forkBusy 置位（sendToJava 已 mock）
     const confirmBtn = Array.from(r.container.querySelectorAll('.modal-actions .modal-btn'))
       .find((b) => b.textContent === '分叉') as HTMLButtonElement
     expect(confirmBtn).toBeDefined()
     fireEvent.click(confirmBtn)
     expect(useStore.getState().forkBusy).toBe(true)
+    const sent = (sendToJava as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as {
+      worktreeIntent?: string
+    }
+    expect(sent?.worktreeIntent).toBe('here')
+  })
+
+  it('分叉菜单：worktree 门控开启时含「新 worktree 中分叉」项，选择后 intent=new', () => {
+    useStore.setState({
+      worktreeStandby: { supported: true, gitOk: true },
+      worktreeMetaBySession: {
+        [SID]: {
+          sourceWorkspace: 'G:/repo', cwd: 'C:/wt', worktreeRoot: 'C:/wt',
+          bucket: 'ab12', startRef: 'HEAD', startSha: 'abc', origin: 'plugin',
+        },
+      },
+    })
+    const r = render(<MessageBubble message={completedReply} />)
+    fireEvent.click(r.container.querySelector('.msg__footer-fork') as HTMLButtonElement)
+    const items = Array.from(document.body.querySelectorAll('.fork-menu__item')) as HTMLButtonElement[]
+    // worktree 会话：第一项文案切「在当前 worktree 中分叉」，第二项=新 worktree
+    expect(items.some((b) => b.textContent?.includes('在当前 worktree 中分叉'))).toBe(true)
+    const newItem = items.find((b) => b.textContent?.includes('在新 worktree 中分叉')) as HTMLButtonElement
+    expect(newItem).toBeDefined()
+    fireEvent.click(newItem)
+    // 确认框文案切 worktree 专属
+    expect(r.container.textContent).toContain('托管 worktree')
+    const confirmBtn = Array.from(r.container.querySelectorAll('.modal-actions .modal-btn'))
+      .find((b) => b.textContent === '分叉') as HTMLButtonElement
+    fireEvent.click(confirmBtn)
+    const sent = (sendToJava as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as {
+      worktreeIntent?: string
+    }
+    expect(sent?.worktreeIntent).toBe('new')
+  })
+
+  it('backdrop 点击关闭分叉菜单', () => {
+    const r = render(<MessageBubble message={completedReply} />)
+    fireEvent.click(r.container.querySelector('.msg__footer-fork') as HTMLButtonElement)
+    expect(document.body.querySelector('.fork-menu')).not.toBeNull()
+    fireEvent.click(document.body.querySelector('.fork-menu-backdrop') as HTMLElement)
+    expect(document.body.querySelector('.fork-menu')).toBeNull()
   })
 
   it('流式中的回复无分叉按钮', () => {
@@ -205,5 +256,58 @@ describe('历史列表 fork 会话徽标', () => {
     }
     const r = render(<SessionItem session={s as never} active={false} onSelect={() => {}} />)
     expect(r.container.querySelector('.session-item__fork-badge')).toBeNull()
+  })
+})
+
+describe('分叉落位归属目录（2026-11-14 真机反馈）', () => {
+  /** 收集 sendToJava 收到的 gotoSession 请求 */
+  function gotoRequests() {
+    return (sendToJava as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((r) => r.op === 'gotoSession')
+  }
+
+  it('worktree 分叉落位源工作区：gotoSession 带 meta.sourceWorkspace 而非 worktree cwd', () => {
+    // worktree 路径不在目录 chips 列表：落它=「匿名目录」scope（历史页单条、色块无主）
+    useStore.setState({
+      projectPath: 'G:/AI-Agent/suiteng-ai-agent',
+      activeWorkspacePath: 'G:/AI-Agent/suiteng-ai-agent',
+      currentSessionId: 'sess_wt_parent',
+      sessions: [],
+      forkBusy: true,
+    })
+    handleResponse({
+      op: 'sessionForked',
+      forkedSessionId: 'sess_fork_new_wt',
+      workspace: 'C:/Users/Administrator/.zcode/worktrees/df9a/suiteng-ai-agent',
+      worktree: {
+        sourceWorkspace: 'G:/AI-Agent/suiteng-ai-agent',
+        cwd: 'C:/Users/Administrator/.zcode/worktrees/df9a/suiteng-ai-agent',
+        worktreeRoot: 'C:/Users/Administrator/.zcode/worktrees/df9a/suiteng-ai-agent',
+        bucket: 'df9a', startRef: 'master', startSha: '26199ca', origin: 'plugin',
+      },
+    } as never, useStore.setState, useStore.getState)
+    const goto = gotoRequests()
+    expect(goto.length).toBeGreaterThan(0)
+    expect(goto.at(-1)?.sessionId).toBe('sess_fork_new_wt')
+    expect(goto.at(-1)?.workspacePath).toBe('G:/AI-Agent/suiteng-ai-agent')
+    // meta 乐观登记（新标签 ⎇ chip 立即可用）
+    expect(useStore.getState().worktreeMetaBySession['sess_fork_new_wt']?.bucket).toBe('df9a')
+    expect(useStore.getState().forkBusy).toBe(false)
+  })
+
+  it('无 worktree 元数据（当前目录分叉）：回落发起标签激活目录，原语义不变', () => {
+    useStore.setState({
+      projectPath: 'G:/mock',
+      activeWorkspacePath: 'E:/work/other',
+      currentSessionId: 'sess_plain',
+      sessions: [],
+      forkBusy: true,
+    })
+    handleResponse({ op: 'sessionForked', forkedSessionId: 'sess_fork_plain' } as never,
+      useStore.setState, useStore.getState)
+    const goto = gotoRequests()
+    expect(goto.length).toBeGreaterThan(0)
+    expect(goto.at(-1)?.workspacePath).toBe('E:/work/other')
   })
 })

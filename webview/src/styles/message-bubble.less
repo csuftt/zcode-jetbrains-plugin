@@ -499,6 +499,12 @@
     }
   }
 
+  /* 分叉按钮锚点（0.4.6 分叉菜单）：菜单绝对定位在此向上弹出 */
+  &__fork-anchor {
+    position: relative;
+    display: inline-flex;
+  }
+
   &__footer-time {
     color: var(--text-tertiary);
   }
@@ -612,4 +618,66 @@
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
+}
+
+/* ===== 分叉菜单（0.4.6，对齐桌面端两选项）：锚在 footer 分叉按钮上向上弹 ===== */
+.fork-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.fork-menu-portal {
+  position: fixed;
+  z-index: 91;
+}
+
+.fork-menu {
+  z-index: 91;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--bg-elevated, var(--input-bg));
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+
+    .codicon {
+      font-size: 14px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    &:hover:not(:disabled) {
+      background: var(--bg-hover, rgba(128, 128, 128, 0.15));
+
+      .codicon {
+        color: var(--accent-primary);
+      }
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+
+  &__label {
+    flex: 1;
+  }
 }

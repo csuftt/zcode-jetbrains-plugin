@@ -23,6 +23,7 @@ import { memo, useEffect, useRef, useState, Fragment, type ReactNode } from 'rea
 import { useTranslation } from 'react-i18next'
 import type { SessionInfo } from '@/types/messages'
 import { relativeTime, formatFileSize } from '@/utils/time'
+import { sendToJava } from '@/ipc/bridge'
 import { useStore } from '@/store/useStore'
 import '../styles/session-item.less'
 
@@ -153,6 +154,28 @@ function SessionItemInner({
               title={t('history.goalSession')}
             />
           )}
+          {/* worktree 标识（0.4.6，spec #52）：复用主界面标题下 chip 样式（不用分支
+              图标——与 fork 徽标同形冲突）；固定紫色不随目录色板；`⎇ 桶 · 基于 起点`
+              （2026-11-13 反馈：点明 detached 副本关系；2026-11-14 反馈：补目录 hash
+              并与 ProjectView 节点同构——两处都是 `目录hash · 基于 起点`） */}
+          {session.worktree && (() => {
+            // 「基于 分支@提交」（同 ChatHeader，2026-11-14 简化定案）；单击=定位
+            // ProjectView 节点（2026-11-14 反馈：chip 不再开新窗，打开走目录树右键）。
+            // 副本已删除（2026-11-15 反馈：会话保留）：chip 灰态只读，不触发定位
+            const wt = session.worktree
+            const refName = wt.startRef || 'HEAD'
+            const refDisp = wt.startSha ? `${refName}@${wt.startSha.slice(0, 7)}` : refName
+            const deleted = wt.deleted === true
+            return (
+              <span
+                className={`ws-header-badge ws-header-badge--worktree session-item__worktree-chip${deleted ? ' ws-header-badge--worktree-deleted' : ''}`}
+                title={deleted ? t('common.worktree.chipDeletedTooltip') : t('common.worktree.chipTooltip', { source: wt.sourceWorkspace })}
+                onClick={deleted ? undefined : () => sendToJava({ op: 'worktreeLocate', worktreeRoot: wt.worktreeRoot })}
+              >
+                {`⎇ ${wt.bucket ? `${wt.bucket} · ` : ''}${t('common.worktree.chipFrom')} ${refDisp}`}
+              </span>
+            )
+          })()}
           {pendingCount > 0 && (
             <span className="session-item__pending-badge" title={t('history.pendingBadge', { count: pendingCount })}>
               {pendingCount > 9 ? '9+' : pendingCount}

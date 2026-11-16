@@ -187,7 +187,11 @@
     "busy": "Can't fork while the reply is generating or an edit replay is in progress",
     "confirmTitle": "Fork a new session from this reply?",
     "confirmMessage": "History is kept up to this reply (inclusive); the original session stays untouched.",
-    "confirmOk": "Fork"
+    "confirmOk": "Fork",
+    "here": "Fork in current directory",
+    "hereWorktree": "Fork in current worktree",
+    "toWorktree": "Fork into a new worktree",
+    "confirmWorktreeMessage": "A managed worktree (a copy of the current state) will be created and the new session opens there. History is kept up to this reply (inclusive); the original session and its worktree are unaffected. Uncommitted changes are not carried over."
   },
   "previewCards": {
     "website": "Website",

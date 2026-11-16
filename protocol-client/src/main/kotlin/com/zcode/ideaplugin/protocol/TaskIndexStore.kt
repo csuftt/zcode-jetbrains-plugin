@@ -52,6 +52,13 @@ class TaskIndexStore(
         val updatedAt: Long,
         /** 未读标记时间戳（null=已读；官方 tasks.unread_at 同列，后台终态且无端在看时置位）*/
         val unreadAt: Long? = null,
+        /**
+         * worktree 托管列（0.4.6 worktree 承接，桌面端 3.18 migration 0010 起才有）：
+         * 非空 = 该任务跑在托管 worktree 里，[rootPath] 是 worktree 内实际 cwd。
+         * 老库无列时为 null（SELECT 按列存在性动态投影，缺列不触发 schema fail-soft）。
+         */
+        val worktreeRoot: String? = null,
+        val rootPath: String? = null,
     )
 
     /** schema 不兼容标记（进程级；exit code 2 置位）。置位后 listTasks 返回空、写入抛异常 */
@@ -80,11 +87,20 @@ class TaskIndexStore(
                 pinned = o["pinned"]!!.jsonPrimitive.long == 1L,
                 updatedAt = o["updated_at"]!!.jsonPrimitive.long,
                 unreadAt = o["unread_at"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+                worktreeRoot = o["worktree_root"]?.jsonPrimitive?.contentOrNull,
+                rootPath = o["root_path"]?.jsonPrimitive?.contentOrNull,
             )
         }
         cache = fp to rows
         return rows
     }
+
+    /**
+     * 托管 worktree 任务行（0.4.6 worktree 承接数据源之一，桌面端建的会话在这里）；
+     * 命中缓存零 node 进程。插件自建的 worktree 会话不在 tasks-index（客户端只索引
+     * 自己开过的），由 WorktreeRegistry（intellij-plugin 侧）承载，两源在列表层合并。
+     */
+    fun listWorktreeTasks(): List<TaskRow> = listTasks().filter { it.worktreeRoot != null }
 
     /**
      * 归档/恢复会话：读 db.sqlite session 行取 meta（title/时间/工作区），UPSERT 进 tasks 表。
@@ -98,6 +114,16 @@ class TaskIndexStore(
      */
     fun setArchived(sessionId: String, sessionDbPath: Path, archive: Boolean) {
         upsertTaskRow(sessionId, sessionDbPath, if (archive) "archive" else "restore")
+    }
+
+    /**
+     * 带 worktree 元数据的归档变体（0.4.6 worktree 承接）：插件自建的 worktree 会话
+     * UPSERT 补行时顺带写 `worktree_root/root_path`（桌面 3.18 列，列存在才写），
+     * 否则桌面端 Worktrees 弹窗把它当普通任务、插件承接面也少一份字段。
+     * 桌面端建的会话行本就带列，无需走本变体（UPSERT 只动 archived，列保留）。
+     */
+    fun setArchived(sessionId: String, sessionDbPath: Path, archive: Boolean, worktreeRoot: String?, cwd: String?) {
+        upsertTaskRow(sessionId, sessionDbPath, if (archive) "archive" else "restore", worktreeRoot, cwd)
     }
 
     /**
@@ -164,7 +190,7 @@ class TaskIndexStore(
         cache = null
     }
 
-    private fun upsertTaskRow(sessionId: String, sessionDbPath: Path, mode: String) {
+    private fun upsertTaskRow(sessionId: String, sessionDbPath: Path, mode: String, worktreeRoot: String? = null, cwd: String? = null) {
         checkAvailable()
         if (!Files.exists(sessionDbPath)) throw IllegalStateException("db.sqlite 不存在: $sessionDbPath")
         if (!Files.exists(dbPath)) throw IllegalStateException("tasks-index.sqlite 不存在（ZCode 客户端未初始化）: $dbPath")
@@ -172,6 +198,8 @@ class TaskIndexStore(
             "ZCODE_TASKS_SID" to sessionId,
             "ZCODE_TASKS_MODE" to mode,
             "ZCODE_SESS_DB" to sessionDbPath.toString(),
+            "ZCODE_TASKS_WT_ROOT" to (worktreeRoot ?: ""),
+            "ZCODE_TASKS_WT_CWD" to (cwd ?: ""),
         ), onSchemaMismatch = { unavailable = true })
         checkAvailable() // schema 不兼容时转为统一异常（写入不允许静默失败）
         cache = null
@@ -265,7 +293,11 @@ class TaskIndexStore(
     }
 }
 
-/** 全量读 tasks 表（task_id 全局唯一，Kotlin 侧按需过滤）。库缺失输出空数组（客户端未装） */
+/**
+ * 全量读 tasks 表（task_id 全局唯一，Kotlin 侧按需过滤）。库缺失输出空数组（客户端未装）。
+ * worktree 列（桌面 3.18+ 才有）按【存在性】动态投影——缺列补 NULL 别名而非进 need 必查集，
+ * 否则老版客户端整库被判 schema 不兼容、置顶/归档全瘫（optional 列语义，2026-11-13）。
+ */
 private val TASKS_LIST_JS = """
     const {DatabaseSync} = require('node:sqlite');
     const fs = require('fs');
@@ -274,10 +306,12 @@ private val TASKS_LIST_JS = """
     const db = new DatabaseSync(p);
     db.exec('PRAGMA busy_timeout = 5000');
     const need = ['task_id','workspace_path','archived','deleted','pinned','updated_at','unread_at'];
+    const opt = ['worktree_root','root_path'];
     const cols = db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name);
     const missing = need.filter(c => !cols.includes(c));
     if (missing.length) { console.error('ERR:SCHEMA:' + missing.join(',')); process.exit(2); }
-    const rows = db.prepare('SELECT task_id, workspace_path, archived, deleted, pinned, updated_at, unread_at FROM tasks').all();
+    const sel = need.concat(opt.filter(c => cols.includes(c))).concat(opt.filter(c => !cols.includes(c)).map(c => 'NULL AS ' + c)).join(', ');
+    const rows = db.prepare('SELECT ' + sel + ' FROM tasks').all();
     console.log(JSON.stringify(rows));
 """.trimIndent()
 
@@ -328,6 +362,12 @@ private val TASKS_UPSERT_JS = """
       // listArchivedSessions 双源合并的旧机制分支（session.time_archived）仍会命中。
       // pin/unpin 与归档位无关，不碰（幂等空操作也不做）
       if (mode === 'restore' || mode === 'delete') sessDb.prepare('UPDATE session SET time_archived = NULL WHERE id = ?').run(sid);
+      // worktree 元数据补写（0.4.6 承接）：env 带值且列存在（桌面 3.18+）才写，缺列/缺值静默跳过
+      const wtRoot = process.env.ZCODE_TASKS_WT_ROOT || '';
+      const wtCwd = process.env.ZCODE_TASKS_WT_CWD || '';
+      if (wtRoot && wtCwd && cols.includes('worktree_root') && cols.includes('root_path')) {
+        tdb.prepare('UPDATE tasks SET worktree_root = ?, root_path = ? WHERE task_id = ?').run(wtRoot, wtCwd, sid);
+      }
       console.log('ok');
     } catch (e) {
       try { tdb.exec('ROLLBACK'); } catch(_){}

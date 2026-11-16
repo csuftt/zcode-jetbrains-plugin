@@ -1334,3 +1334,166 @@
     flex-shrink: 0;
   }
 }
+
+/* ===== worktree 待命条（0.4.6，spec #52；2026-11-13 反馈重做）=====
+ * 待命（无会话）+ CLI 支持时显示在输入框上方：药丸开关 + 起点下拉。
+ * 无边框透明底（融入输入区，不做「框中框」）；激活态 accent 描边。
+ * position+z-index：本条的气泡/下拉面板要压过后面的输入卡片（同层 DOM 靠后者
+ * 默认在上，气泡朝下会被切半——真机 2026-11-13 实锤） */
+.worktree-standby-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 4px;
+  padding: 2px 2px 0;
+  font-size: 12px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+
+/* 药丸开关：默认弱化描边，激活 accent 描边+浅底 */
+.worktree-bar__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-secondary);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+
+  .codicon-git-branch {
+    font-size: 12px;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--text-primary, inherit);
+    border-color: var(--accent-primary, #4c8bf5);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.worktree-bar__pill--on {
+  color: var(--accent-primary, #4c8bf5);
+  border-color: var(--accent-primary, #4c8bf5);
+  background: color-mix(in srgb, var(--accent-primary, #4c8bf5) 12%, transparent);
+}
+
+/* 起点下拉：自定义面板（WorktreeStartRefSelect）复用 selector-* 主题样式。
+   原生 <select> 的弹层绘制不受 color-scheme 控制（JCEF 110 两轮实证白底），
+   弃用原生控件，这里只补宽度与字号修饰。
+   selector-button 基础 140px 帽对「当前 HEAD（分支名）」太窄（真机截到 fe…），
+   本场景放宽到 320px */
+.worktree-ref-root .selector-button {
+  max-width: 320px;
+  font-size: 12px;
+}
+
+.worktree-ref-root .selector-button-text {
+  max-width: 240px;
+}
+
+.worktree-ref-icon {
+  font-size: 12px;
+}
+
+.worktree-ref-dropdown {
+  min-width: 240px;
+  max-width: 380px;
+}
+
+.worktree-bar__reason {
+  color: var(--text-tertiary, #888);
+}
+
+/* 起点说明图标：点击钉住常显气泡（--open 强制 opacity；2026-11-13 反馈：悬浮/点击
+   均无文字）。注意不给它 position:relative——气泡锚定宿主必须是整条待命条 */
+.worktree-bar__note {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-tertiary, #888);
+  cursor: help;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+}
+
+/* 药丸/说明图标共用悬浮气泡：锚定整条待命条（最近定位祖先=bar），显示在条上方。
+   贴文字宽度（width:max-content），超过面板宽才换行（max-width=条宽-16）——
+   按钮锚定在窄面板会越界、条宽撑满会拖大段空白（真机两轮），左锚+自适应兼得 */
+.worktree-bar__pill::after,
+.worktree-bar__note::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 8px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 1000;
+  box-shadow: var(--shadow-md);
+}
+
+.worktree-bar__pill:hover::after,
+.worktree-bar__note:hover::after,
+.worktree-bar__note.worktree-bar__note--open::after {
+  opacity: 1;
+}
+
+.worktree-bar__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.worktree-bar__failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--error-foreground, #f66);
+
+  .codicon-error {
+    font-size: 13px;
+  }
+}
+
+.worktree-bar__failed-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-bar__btn {
+  font-size: 12px;
+  padding: 1px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--border-secondary);
+  background: transparent;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}

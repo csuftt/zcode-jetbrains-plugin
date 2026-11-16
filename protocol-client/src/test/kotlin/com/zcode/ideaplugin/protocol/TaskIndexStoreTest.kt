@@ -382,6 +382,54 @@ class TaskIndexStoreTest {
         }
     }
 
+    @Test
+    fun `worktree columns absent in old schema do not disable store`() {
+        // 老版客户端（<3.18）无 worktree_root/root_path 列：optional 列缺列必须【不】触发
+        // schema fail-soft（否则升级插件即瘫置顶/归档），投影落 null。
+        // 预置一行普通数据：fail-soft 时 listTasks 会变空，可与非 fail-soft 区分
+        createDbs()
+        node("-e", """
+            const {DatabaseSync} = require('node:sqlite');
+            const t = new DatabaseSync(process.env.T);
+            t.prepare(`INSERT INTO tasks (workspace_key, workspace_path, task_id, title, created_at, updated_at, meta_json)
+              VALUES ('G:/proj/demo', 'G:/proj/demo', 'sess_old-1', '老库会话', 100, 200, '{}')`).run();
+        """.trimIndent(), env = mapOf("T" to tasksDb.toString()))
+        store = TaskIndexStore("node", tasksDb)
+
+        val rows = store.listTasks()
+        assertEquals(1, rows.size, "老库 listTasks 应正常返回（optional 列缺列不 fail-soft）")
+        assertNull(rows[0].worktreeRoot, "老库无 worktree 列，投影应为 null")
+        assertNull(rows[0].rootPath, "老库无 root_path 列，投影应为 null")
+        assertTrue(store.listWorktreeTasks().isEmpty(), "老库无托管 worktree 行")
+    }
+
+    @Test
+    fun `worktree rows projected on new schema`() {
+        // 桌面 3.18（migration 0010_task_worktree_root）后的库形态：托管行带 worktree_root/root_path
+        createDbs()
+        node("-e", """
+            const {DatabaseSync} = require('node:sqlite');
+            const t = new DatabaseSync(process.env.T);
+            t.exec('ALTER TABLE tasks ADD COLUMN worktree_root TEXT');
+            t.exec('ALTER TABLE tasks ADD COLUMN root_path TEXT');
+            t.prepare(`INSERT INTO tasks (workspace_key, workspace_path, task_id, title, created_at, updated_at, meta_json, worktree_root, root_path)
+              VALUES ('G:/proj/demo', 'G:/proj/demo', 'sess_wt-1', 'worktree 会话', 100, 200, '{}', 'C:/wt/demo', 'C:/wt/demo')`).run();
+            t.prepare(`INSERT INTO tasks (workspace_key, workspace_path, task_id, title, created_at, updated_at, meta_json)
+              VALUES ('G:/proj/demo', 'G:/proj/demo', 'sess_wt-2', '普通会话', 101, 201, '{}')`).run();
+        """.trimIndent(), env = mapOf("T" to tasksDb.toString()))
+        // 外部写入已改库指纹，重建 store 模拟冷读
+        store = TaskIndexStore("node", tasksDb)
+
+        val rows = store.listTasks()
+        assertEquals(2, rows.size, "新库两行都应投影")
+        val wt = rows.first { it.taskId == "sess_wt-1" }
+        assertEquals("C:/wt/demo", wt.worktreeRoot, "托管行 worktree_root 投影")
+        assertEquals("C:/wt/demo", wt.rootPath, "托管行 root_path 投影")
+        assertNull(rows.first { it.taskId == "sess_wt-2" }.worktreeRoot, "普通行 worktreeRoot 为 null")
+        val worktreeOnly = store.listWorktreeTasks()
+        assertEquals(listOf("sess_wt-1"), worktreeOnly.map { it.taskId }, "listWorktreeTasks 只返回托管行")
+    }
+
     companion object {
         @JvmStatic
         @BeforeAll

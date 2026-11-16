@@ -64,9 +64,14 @@ object ZCodeLinkedWorkspaces {
      */
     @Synchronized
     fun colorIndexFor(project: Project, path: String): Int {
-        positionalColorIndex(read(project), path)?.let { return it }
+        // worktree 执行根 → 源工作区（0.4.6）：worktree 会话的色块必须与主分支同色，
+        // 否则同项目两色（2026-11-13 反馈）；注册表未登记的（桌面端建的）不映射
+        val effectivePath = runCatching {
+            com.zcode.ideaplugin.worktree.WorktreeRegistry(project).sourceWorkspaceOf(path) ?: path
+        }.getOrDefault(path)
+        positionalColorIndex(read(project), effectivePath)?.let { return it }
         val props = PropertiesComponent.getInstance(project)
-        val key = wsKey(path)
+        val key = wsKey(effectivePath)
         val existing = parseColorMap(props.getValue(COLOR_MAP_KEY))
         existing[key]?.let { return it }
         val counter = props.getInt(COLOR_COUNTER_KEY, 0)

@@ -78,6 +78,10 @@ export default function App() {
   const linkedWorkspaces = useStore((s) => s.linkedWorkspaces)
   const linkedActiveWorkspacePath = useStore((s) => s.activeWorkspacePath)
   const currentWorkspacePath = useStore((s) => s.currentWorkspacePath)
+  // worktree 会话的归属目录（2026-11-14 真机反馈）：currentWorkspacePath 是执行根
+  // （worktree 内 cwd，链接化/产物卡锚定用），归属轴=源工作区——徽标/标签色块推送
+  // 都按归属目录，否则色块落「匿名目录」（worktree 路径不在目录列表）
+  const wtMetaForCurrent = useStore((s) => (s.currentSessionId ? s.worktreeMetaBySession[s.currentSessionId] : undefined))
   const projectPath = useStore((s) => s.projectPath)
   const switchWorkspace = useStore((s) => s.setActiveWorkspace)
   const addLinkedWorkspace = useStore((s) => s.addLinkedWorkspace)
@@ -296,15 +300,17 @@ export default function App() {
   // colorIndex=统一配色色板序号（Java 轮询分配，2026-11-02）：非本项目目录取映射，
   // 未命中（应答未达/旧包）null 回落默认主题色；与标签色块/历史页 chips 三处同源
   const wsColors = useStore((s) => s.wsColors)
+  // 会话归属目录：worktree 会话=源工作区（meta 缺失时回落执行根，等列表刷新补 meta）
+  const ownershipWs = wtMetaForCurrent?.sourceWorkspace || currentWorkspacePath
   const wsBadge = useMemo<{ dir: string; isProject: boolean; colorIndex: number | null } | null>(() => {
-    const dir = currentSessionId ? currentWorkspacePath : linkedActiveWorkspacePath || projectPath
+    const dir = currentSessionId ? ownershipWs : linkedActiveWorkspacePath || projectPath
     if (!dir) return null
     const isProject =
       dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() ===
       projectPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
     if (isProject && linkedWorkspaces.length === 0) return null
     return { dir, isProject, colorIndex: isProject ? null : resolveWsColorIndex(dir, wsColors) }
-  }, [currentSessionId, currentWorkspacePath, linkedActiveWorkspacePath, projectPath, linkedWorkspaces, wsColors])
+  }, [currentSessionId, ownershipWs, linkedActiveWorkspacePath, projectPath, linkedWorkspaces, wsColors])
 
   // AI 重新生成标题：有真实用户消息才可生成；失败提示 6s 自动消失
   const canRegenerateTitle = useMemo(() => extractTitleExcerpt(messages) !== null, [messages])
@@ -321,8 +327,9 @@ export default function App() {
   // （用户定稿 2026-11-03：chip 样式对齐会话名下徽标，【】文字前缀废弃）。
   // 变化时防抖 500ms；只在本 webview 连接 Java 时发送（mock 丢弃）
   const lastPushedKeyRef = useRef('')
-  // 推送目录轴：会话=归属目录；待命=落位（与 createSession/listSessions 同一取值链）
-  const pushWsPath = currentSessionId ? currentWorkspacePath || projectPath : linkedActiveWorkspacePath || projectPath
+  // 推送目录轴：会话=归属目录（worktree 会话=源工作区，Java 据此算色块/tooltip chip）；
+  // 待命=落位（与 createSession/listSessions 同一取值链）
+  const pushWsPath = currentSessionId ? ownershipWs || projectPath : linkedActiveWorkspacePath || projectPath
   useEffect(() => {
     const effective = sessionTitle || (currentSessionId ? currentSessionId.slice(0, 12) : '')
     if (!effective && !pushWsPath) {

@@ -87,6 +87,11 @@ export function ChatHeader({
   // 搬回主窗由 Java 推 detached=false 收起；面板级 store 态，切会话不清
   const detachWindow = useStore((s) => s.detachWindow)
   const toggleDetachPin = useStore((s) => s.toggleDetachPin)
+  // worktree 徽标数据源（0.4.6）：当前会话的注册/承接元数据（列表合并或创建响应注入）；
+  // 待命态（懒创建绑定）从 worktreePending 取（新建会话直推，2026-11-15）
+  const worktreeMetaBySession = useStore((s) => s.worktreeMetaBySession)
+  const worktreePending = useStore((s) => s.worktreePending)
+  const currentSessionId = useStore((s) => s.currentSessionId)
   // settings 视图不渲染（SettingsView 自带关闭入口）
   if (currentView === 'settings') return null
 
@@ -126,8 +131,13 @@ export function ChatHeader({
             （全路径 + 弱化双击提示），双击=在 Project View 定位该目录并展开
             （openFile 目录路由，2026-11-12）；
             外层 row 占满一行触发换行（无背景），徽标本体自适应内容宽度（背景不拉满） */}
-        {wsBadge && currentView === 'chat' && (
+        {currentView === 'chat' && (wsBadge || (currentSessionId != null && worktreeMetaBySession[currentSessionId] != null) || (!currentSessionId && worktreePending != null)) && (() => {
+          // worktree 徽标并入同一行、位于目录徽标右侧（2026-11-13 反馈：不要另起一行）；
+          // 待命态（懒创建绑定）取 worktreePending——首条消息建会话前 chip 就位
+          const wt = currentSessionId ? worktreeMetaBySession[currentSessionId] : (worktreePending ?? undefined)
+          return (
           <span className="ws-header-badge-row">
+            {wsBadge && (
             <span
               className={[
                 'ws-header-badge',
@@ -157,8 +167,45 @@ export function ChatHeader({
                 <span className="ws-header-badge__tip-hint">{t('chat.header.wsBadgeRevealHint')}</span>
               </span>
             </span>
+            )}
+            {/* worktree 徽标（0.4.6，spec #52）：目录徽标右侧同排；显示 `⎇ 桶 · 基于 起点`
+                （2026-11-13 反馈：裸分支名有歧义——worktree 是该起点的 detached 副本，
+                改动并不会同步到该分支，前缀点明「基于」关系；2026-11-14 反馈：补目录
+                hash 与 ProjectView 节点同构——两处都是 `目录hash · 基于 起点`），
+                悬浮=路径+不同步语义，单击=新窗口打开副本（执行根即项目根，IDE 全
+                工具链可用）——「定位 ZCGUIWorktrees 节点」依赖 ProjectView select
+                自定义节点 API，0.4.6 从简 */}
+            {wt && (() => {
+              // 「基于 分支@提交」（2026-11-14 简化定案：起点恒 HEAD，startRef 落创建
+              // 时刻分支名——游离时 HEAD；老条目无 sha 退化只显 ref）。
+              // 副本已删除（2026-11-15 反馈：会话保留）：chip 灰态只读，不触发定位
+              const refName = wt.startRef || 'HEAD'
+              const refDisp = wt.startSha ? `${refName}@${wt.startSha.slice(0, 7)}` : refName
+              const deleted = wt.deleted === true
+              return (
+              <span
+                className={`ws-header-badge ws-header-badge--worktree${deleted ? ' ws-header-badge--worktree-deleted' : ''}`}
+                onClick={deleted ? undefined : () => sendToJava({ op: 'worktreeLocate', worktreeRoot: wt.worktreeRoot })}
+              >
+                <span className="ws-header-badge__name">
+                  {`⎇ ${wt.bucket ? `${wt.bucket} · ` : ''}${t('common.worktree.chipFrom')} ${refDisp}`}
+                </span>
+                <span className="ws-header-badge__tip" aria-hidden="true">
+                  <span className="ws-header-badge__tip-path">
+                    {deleted ? t('common.worktree.chipDeletedTooltip') : wt.worktreeRoot}
+                  </span>
+                  {!deleted && (
+                    <span className="ws-header-badge__tip-hint">
+                      {t('common.worktree.chipTooltip', { source: wt.sourceWorkspace })}
+                    </span>
+                  )}
+                </span>
+              </span>
+              )
+            })()}
           </span>
-        )}
+          )
+        })()}
       </div>
       <div className="header-right">
         {currentView === 'chat' && (

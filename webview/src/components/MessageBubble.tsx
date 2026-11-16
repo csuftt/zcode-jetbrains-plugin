@@ -21,7 +21,7 @@
  * 保会话内搜索 TreeWalker 能扫到/定位到过程文本。
  */
 
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { ZCodeMessage, MessagePart, TextPart, ImagePart, FilePart, TurnFileChangeSummary, TurnFileChangeItem, JavaResponse } from '@/types/messages'
@@ -812,8 +812,18 @@ function AssistantBubble({
   // 老 CLI 无 v4 面（forkSupported=false）隐藏。通道=v4 forkAssistant（官方同款，零文件操作）
   // 合并轮组（缺陷EG）：锚点=末段消息 id——对最终回复分叉，保住整组尾部
   const [confirmFork, setConfirmFork] = useState(false)
+  // 分叉菜单（0.4.6，对齐桌面端两选项）：点按钮弹菜单而非直接确认框——
+  // here=在当前目录/worktree 中分叉（继承父落位），new=在新 worktree 中分叉
+  // （Java 编排：建托管副本 + forkAssistant 带 targetCwd；不带 carry，0.4.7 deferred）
+  const [forkMenuOpen, setForkMenuOpen] = useState(false)
+  const [forkIntent, setForkIntent] = useState<'here' | 'new'>('here')
   const forkBusy = useStore((s) => s.forkBusy)
   const forkSupported = useStore((s) => s.forkSupported)
+  // worktree 会话判定（⎇ 徽标登记）与「新 worktree」门控（CLI worktreeCwd 能力，
+  // 与待命条同源缓存；Java 侧 handleForkToWorktree 还有 isRepository 兜底）
+  const wtMeta = useStore((s) => s.worktreeMetaBySession[info.sessionID])
+  const wtStandby = useStore((s) => s.worktreeStandby)
+  const forkToWorktreeAvailable = !!wtStandby?.supported && wtStandby.gitOk !== false
   // 逐轮文件更改条（B2 回合产物）：key = 消息 id = turnHeader entityId（mapper 构造
   // UI 轮身份的同源约定）；无数据（纯对话轮/老 CLI/历史窗口外）不渲染
   const turnFileChanges = useStore((s) => s.turnFileChanges[info.id])
@@ -826,6 +836,12 @@ function AssistantBubble({
     !forkMsgId.startsWith('stream_local_') &&
     !forkMsgId.startsWith('local_')
   const { t } = useTranslation()
+  // 菜单选中 → 关菜单 → 进确认框（intent 留给确认后分发）
+  const pickFork = (intent: 'here' | 'new') => {
+    setForkMenuOpen(false)
+    setForkIntent(intent)
+    setConfirmFork(true)
+  }
 
   // 连续 Bash 命令聚组（cc-gui groupBlocks 规则）：压缩批量命令的消息区长度。
   // 分组保留原始 part 下标，reasoning 自动展开/流式判定的 index 语义不变
@@ -945,16 +961,57 @@ function AssistantBubble({
         time={time}
         streaming={streaming}
         copy={!streaming ? collectAssistantMarkdown(allParts) : undefined}
-        fork={forkable ? { busy: forkBusy, onClick: () => setConfirmFork(true) } : undefined}
+        fork={
+          forkable
+              ? {
+                  busy: forkBusy,
+                  onClick: () => {
+                    setForkMenuOpen((v) => !v)
+                    // 刷新「新 worktree」门控缓存（worktreeState 应答按落位目录算 gitOk；
+                    // 待命页之外切目录后缓存可能陈旧，Java 侧另有 isRepository 兜底）
+                    useStore.getState().loadWorktreeState()
+                  },
+                  onCloseMenu: () => setForkMenuOpen(false),
+                menu: forkMenuOpen ? (
+                  <div className="fork-menu" role="menu" aria-label={t('chat.message.fork')}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="fork-menu__item"
+                      disabled={forkBusy}
+                      onClick={() => pickFork('here')}
+                    >
+                      <span className="codicon codicon-git-branch" />
+                      <span className="fork-menu__label">
+                        {wtMeta ? t('chat.fork.hereWorktree') : t('chat.fork.here')}
+                      </span>
+                    </button>
+                    {forkToWorktreeAvailable && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="fork-menu__item"
+                        disabled={forkBusy}
+                        onClick={() => pickFork('new')}
+                      >
+                        <span className="codicon codicon-multiple-windows" />
+                        <span className="fork-menu__label">{t('chat.fork.toWorktree')}</span>
+                      </button>
+                    )}
+                  </div>
+                ) : undefined,
+              }
+            : undefined
+        }
       />
       {confirmFork && (
         <ConfirmDialog
           title={t('chat.fork.confirmTitle')}
-          message={t('chat.fork.confirmMessage')}
+          message={forkIntent === 'new' ? t('chat.fork.confirmWorktreeMessage') : t('chat.fork.confirmMessage')}
           confirmText={t('chat.fork.confirmOk')}
           onConfirm={() => {
             setConfirmFork(false)
-            useStore.getState().forkFromMessage(info.sessionID, forkMsgId)
+            useStore.getState().forkFromMessage(info.sessionID, forkMsgId, forkIntent)
           }}
           onCancel={() => setConfirmFork(false)}
         />
@@ -1225,11 +1282,26 @@ function MessageFooter({
   streaming?: boolean
   /** 复制 Markdown 按钮（整条回复 markdown 源文；undefined=不渲染——流式中/无文本）*/
   copy?: string
-  /** 分叉按钮（footer 行右侧，hover 显示；undefined=不渲染——流式中/乐观消息）*/
-  fork?: { busy: boolean; onClick: () => void }
+  /** 分叉按钮（footer 行右侧，hover 显示；undefined=不渲染——流式中/乐观消息）；
+   * menu/onCloseMenu（0.4.6 分叉菜单）：按钮向上弹的两选项菜单（here/toWorktree），
+   * backdrop 点击关闭 */
+  fork?: { busy: boolean; onClick: () => void; menu?: ReactNode; onCloseMenu?: () => void }
 }) {
   const { t } = useTranslation()
   const { state: copyState, showResult: showCopyResult } = useCopyFeedback(1200)
+  // 分叉菜单 portal（0.4.6）：footer 整行 opacity:0.8（淡显），复合透明不可被子级
+  // 抵消——菜单挂 footer 子树会透出底下消息内容（真机 2026-11-14 反馈）。portal 到
+  // body 按 按钮 rect 锚定（向上弹），fixed 定位脱离 opacity 复合
+  const forkAnchorRef = useRef<HTMLSpanElement>(null)
+  const [forkMenuPos, setForkMenuPos] = useState<{ right: number; bottom: number } | null>(null)
+  useEffect(() => {
+    if (fork?.menu && forkAnchorRef.current) {
+      const r = forkAnchorRef.current.getBoundingClientRect()
+      setForkMenuPos({ right: window.innerWidth - r.right, bottom: window.innerHeight - r.top + 6 })
+    } else {
+      setForkMenuPos(null)
+    }
+  }, [fork?.menu])
   const onCopyMarkdown = () => {
     if (copy) void showCopyResult(() => copyText(copy))
   }
@@ -1280,17 +1352,35 @@ function MessageFooter({
             </button>
           )}
           {fork && (
-            <button
-              type="button"
-              className="msg__action-btn msg__footer-fork"
-              onClick={fork.onClick}
-              disabled={fork.busy}
-              title={t('chat.message.fork')}
-              aria-label={t('chat.message.fork')}
-            >
-              <span className="codicon codicon-git-branch" />
-              <span className="msg__action-label">{t('chat.message.fork')}</span>
-            </button>
+            <span className="msg__fork-anchor" ref={forkAnchorRef}>
+              <button
+                type="button"
+                className="msg__action-btn msg__footer-fork"
+                onClick={fork.onClick}
+                disabled={fork.busy}
+                title={t('chat.message.fork')}
+                aria-label={t('chat.message.fork')}
+              >
+                <span className="codicon codicon-git-branch" />
+                <span className="msg__action-label">{t('chat.message.fork')}</span>
+              </button>
+              {fork.menu &&
+                forkMenuPos &&
+                createPortal(
+                  <>
+                    {/* 全屏透明 backdrop：点击外部关闭菜单（footer 无失焦语义，最省事） */}
+                    <div
+                      className="fork-menu-backdrop"
+                      onClick={fork.onCloseMenu}
+                      aria-hidden="true"
+                    />
+                    <div className="fork-menu-portal" style={{ right: forkMenuPos.right, bottom: forkMenuPos.bottom }}>
+                      {fork.menu}
+                    </div>
+                  </>,
+                  document.body,
+                )}
+            </span>
           )}
         </span>
       )}

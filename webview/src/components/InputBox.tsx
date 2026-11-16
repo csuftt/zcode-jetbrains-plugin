@@ -282,6 +282,24 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
 
   // 历史跨会话共享（persist 通道），切会话仅重置导航位置
   const sessionId = useStore((s) => s.currentSessionId)
+  // worktree 待命条（0.4.6，spec #52）：仅待命（无会话）且 CLI 支持时渲染；
+  // 开关（起点恒当前 HEAD，2026-11-14 简化定案），发送首条消息时 Java 拦截编排（进度/失败三键见 worktreeProgress）
+  const worktreeStandby = useStore((s) => s.worktreeStandby)
+  const worktreeEnabled = useStore((s) => s.worktreeEnabled)
+  // 懒创建绑定（2026-11-15）：新建会话直推的既有副本绑定——待命条整条隐藏（header ⎇
+  // chip 已表达绑定），防「⎇ 开关再建一个新副本」的歧义；Java 拦截以面板规格为准
+  const worktreePending = useStore((s) => s.worktreePending)
+  const worktreeCreating = useStore((s) => s.worktreeCreating)
+  const worktreeErrorCode = useStore((s) => s.worktreeErrorCode)
+  const setWorktreeEnabled = useStore((s) => s.setWorktreeEnabled)
+  const loadWorktreeState = useStore((s) => s.loadWorktreeState)
+  const worktreeVisible = !sessionId && !!worktreeStandby?.supported && !worktreePending
+  // 起点说明气泡钉住态（2026-11-13 反馈：悬浮之外点击也要能看到文字）
+  const [worktreeNoteOpen, setWorktreeNoteOpen] = useState(false)
+  useEffect(() => {
+    // 待命态挂载即探测一次（client 实例级缓存，重复调用零开销）
+    loadWorktreeState()
+  }, [loadWorktreeState])
   // 待执行定时任务总数（全项目，Java 权威列表镜像）——日历按钮角标
   const scheduledCount = useStore((s) => s.scheduledMessages.length)
   // 引导中的插队消息（排队卡片「引导」按钮发起，事件驱动清除）——chip 展示
@@ -1901,6 +1919,62 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
 
   return (
     <div className="input-area">
+      {/* worktree 待命条（0.4.6）：待命+CLI 支持时显示；发送首条消息时 Java 拦截编排 */}
+      {worktreeVisible && (
+        <div className="worktree-standby-bar" role="group" aria-label={t('common.worktree.toggle')}>
+          {worktreeCreating === 'failed' ? (
+            <div className="worktree-bar__failed" role="alert">
+              <span className="codicon codicon-error" />
+              <span className="worktree-bar__failed-text">
+                {t('common.worktree.failed')}
+                {worktreeErrorCode ? `（${worktreeErrorCode}）` : ''}
+              </span>
+              <button type="button" className="worktree-bar__btn" onClick={() => setWorktreeEnabled(true)}>
+                {t('common.worktree.retry')}
+              </button>
+              <button type="button" className="worktree-bar__btn" onClick={() => setWorktreeEnabled(false)}>
+                {t('common.worktree.sendWithout')}
+              </button>
+            </div>
+          ) : worktreeCreating === 'creating' ? (
+            <span className="worktree-bar__status" role="status">
+              <span className="codicon codicon-loading codicon-spin" aria-hidden />
+              {t('common.worktree.creating')}
+            </span>
+          ) : (
+            <>
+              {/* 药丸开关（2026-11-13 反馈重做：checkbox+原生 select 太糙）：与底栏
+                  选择器同款交互粒度，激活态 accent 描边 */}
+              <button
+                type="button"
+                className={`worktree-bar__pill${worktreeEnabled ? ' worktree-bar__pill--on' : ''}`}
+                data-tooltip={worktreeStandby?.gitOk ? t('common.worktree.toggleTooltip') : t('common.worktree.notGit')}
+                disabled={!worktreeStandby?.gitOk}
+                onClick={() => setWorktreeEnabled(!worktreeEnabled)}
+              >
+                <span className="codicon codicon-git-branch" aria-hidden />
+                {t('common.worktree.toggle')}
+              </button>
+              {!worktreeStandby?.gitOk && (
+                <span className="worktree-bar__reason">{t('common.worktree.notGit')}</span>
+              )}
+              {worktreeEnabled && (
+                <>
+                  <button
+                    type="button"
+                    className={`worktree-bar__note${worktreeNoteOpen ? ' worktree-bar__note--open' : ''}`}
+                    data-tooltip={t('common.worktree.startNote')}
+                    aria-label={t('common.worktree.startNote')}
+                    onClick={() => setWorktreeNoteOpen((v) => !v)}
+                  >
+                    <span className="codicon codicon-info" aria-hidden />
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {/* 拖拽调高手柄（顶部细条，向上拖增大）*/}
       <div className="input-box__resize-handle" onMouseDown={handleResizeStart} title={t('input.resizeHandle')} />
       <div className="chat-input-box" onMouseDown={handleCardMouseDown}>

@@ -322,6 +322,8 @@ export interface SessionInfo {
   sessionKind?: string
   /** 目标模式会话标识（sqlite session_target 有行即算，active/complete 都标）；与 sessionKind 正交 */
   goalTarget?: boolean
+  /** worktree 元数据（0.4.6 承接/自建；仅 worktree 会话下发，chip 渲染与执行根锚定用）*/
+  worktree?: WorktreeMeta
 }
 
 /**
@@ -544,7 +546,12 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 弹窗置顶切换（⑧ 会话弹窗 Header 置顶按钮）：Java 侧 AWT setAlwaysOnTop 权威 */
   | { op: 'toggleDetachPin' }
   | { op: 'listSessions'; workspacePath?: string }
-  | { op: 'createSession'; workspacePath?: string; thoughtLevel?: string }
+  | { op: 'createSession'; workspacePath?: string; thoughtLevel?: string; worktree?: { enabled: boolean; startRef?: string } }
+  /** worktree 待命条（0.4.6）：能力态拉取 / 起点候选懒加载 / chip 单击新窗口打开副本 */
+  | { op: 'worktreeState'; workspacePath?: string }
+  | { op: 'worktreeReveal'; worktreeRoot: string }
+  /** chip 双击定位到 ProjectView 对应 worktree 节点（2026-11-14 反馈：双击不该开新窗） */
+  | { op: 'worktreeLocate'; worktreeRoot: string }
   /** 关联目录三件套（多目录会话·变体A）：拉列表 / 弹系统目录选择框添加 / 按路径移除 */
   | { op: 'getLinkedWorkspaces' }
   /** 启动兜底：__ZCODE_WORKSPACE__ 注入空串（重启初期面板先于 basePath 就绪）时拉生效项目路径 */
@@ -788,8 +795,11 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   | { op: 'scheduledFired'; sessionId: string; text: string; fireAt: number }
   /** 任务列表跳转会话：Java 统一 openSessionTab——激活已有宿主标签，无则新建标签按 sessionId 恢复 */
   | { op: 'gotoSession'; sessionId: string; workspacePath?: string }
-  /** 从历史消息分叉新会话（B2 一期）：保留到该消息（含），新会话由 sessionForked 应答承载 */
-  | { op: 'forkSession'; sessionId: string; messageId: string }
+  /** 从历史消息分叉新会话（B2 一期）：保留到该消息（含），新会话由 sessionForked 应答承载。
+   *  worktreeIntent（0.4.6 分叉菜单，对齐桌面端两选项）：here=当前目录/worktree 分叉（缺省），
+   *  new=新 worktree 分叉（Java 编排建托管副本 + forkAssistant 带 targetCwd）；workspacePath=
+   *  父会话落位目录（"new" 编排定位父执行根的兜底） */
+  | { op: 'forkSession'; sessionId: string; messageId: string; worktreeIntent?: 'here' | 'new'; workspacePath?: string }
   /**
    * 编辑最后一轮用户消息（v4/command editUserQuery，diag-edit-v4 定案）：服务端
    * abort 活动回合 + rewind + 重发，回合中可编辑。attachments=编辑后的图片附件
@@ -1360,15 +1370,25 @@ export interface AutoArchiveRecord {
 
 export type JavaResponse =
   /** workspacePath=请求作用域回显：前端丢弃晚到的旧目录响应（快速连切防串台）*/
-  | { op: 'listSessions'; sessions: SessionInfo[]; workspacePath?: string }  | { op: 'createSession'; sessionId: string }
+  | { op: 'listSessions'; sessions: SessionInfo[]; workspacePath?: string }  | { op: 'createSession'; sessionId: string; worktree?: WorktreeMeta }
+  /** worktree 能力态（0.4.6 待命页门控；supported=false 老版 CLI 整体隐藏）*/
+  | { op: 'worktreeState'; supported: boolean; gitOk: boolean }
+  /** worktree 起点候选（开启开关时懒加载；ok=false 目录不可解析）*/
+  /** worktree 创建编排进度（creating/failed/done；failed 带 code，前端降级三键提示）*/
+  | { op: 'worktreeProgress'; phase: 'creating' | 'failed' | 'done'; code?: string; sessionId?: string }
+  /** Java 直推待命绑定（新建会话懒创建，2026-11-15）：标签以「新会话」待命态打开、
+   *  首条消息时 Java 面板拦截 createSession 落既有副本目录；meta 供 header ⎇ chip*/
+  | { op: 'worktreePending'; worktree: WorktreeMeta }
   /** 关联目录全量快照（get/add/remove 三 op 共用应答形；added=本次新增并应由前端切换激活；
    *  colors=目录→色板序号映射（键=wsKey 归一形态，2026-11-02 统一配色：徽标/chips/标签块三处同源）*/
   | { op: 'linkedWorkspaces'; workspaces: string[]; added?: string; colors?: Record<string, number> }
   /** getProjectPath 应答：生效项目路径（口径同 Java effectiveWorkspacePath，basePath 未就绪回退 user.dir）*/
   | { op: 'projectPath'; workspacePath: string }
   | { op: 'tabSessionCleared' }
-  /** forkSession 应答：新会话由前端 openSessionNewTab 承载（与历史打开编排一致）*/
-  | { op: 'sessionForked'; forkedSessionId: string; parentSessionId?: string }
+  /** forkSession 应答：新会话由前端 openSessionNewTab 承载（与历史打开编排一致）。
+   *  workspace=分叉会话落位目录（"new" worktree 分叉=新副本根，here 缺省不发=发起标签
+   *  激活目录）；worktree=worktree 元数据（乐观挂 ⎇ 徽标，与列表合并同形状） */
+  | { op: 'sessionForked'; forkedSessionId: string; parentSessionId?: string; workspace?: string; worktree?: WorktreeMeta }
   /** 老 CLI 无 v4 面（-32601）：隐藏分叉入口（不做 legacy 回退——该路径带文件恢复副作用）*/
   | { op: 'forkUnsupported' }
   /** editUserQuery 应答：v4 编辑受理（后续编排全由事件流驱动，ack 可能晚于事件到达）。
@@ -2050,4 +2070,22 @@ export interface AppUsageData {
   models?: AppModelUsage[]
   tools?: AppToolUsage[]
   dailyModelUsage?: { date?: string; models?: { modelId?: string; totalTokens?: number }[] }[]
+}
+
+/** worktree 会话元数据（0.4.6，spec #52）：Java 列表合并/创建响应注入，chip 与打开锚定用 */
+export interface WorktreeMeta {
+  /** 源工作区（本项目或关联目录，历史归属锚点） */
+  sourceWorkspace: string
+  /** 执行根：worktree 内对应源目录的路径（协议请求与文件锚点都用它） */
+  cwd: string
+  /** worktree 根（~/.zcode/worktrees/<桶>/<仓库名>） */
+  worktreeRoot: string
+  bucket?: string
+  /** 起点（分支名或 'HEAD'）；'HEAD' 时展示用 startSha 短位 */
+  startRef?: string
+  startSha?: string
+  /** 来源：plugin=插件自建（注册表）、desktop=桌面端建（任务索引承接） */
+  origin?: 'plugin' | 'desktop' | string
+  /** 副本已删除（2026-11-15 反馈：会话保留、chip 灰态只读），Java 按根目录存在性判定 */
+  deleted?: boolean
 }

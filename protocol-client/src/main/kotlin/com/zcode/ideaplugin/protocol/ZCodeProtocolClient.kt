@@ -1966,11 +1966,13 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
-     * 显式身份批量查询会话（≥0.17.0 session/list 取归档等隐藏会话的唯一通道）。
+     * 显式身份批量查询会话（≥0.17.0 session/list 取归档等隐藏会话的唯一通道；0.4.6
+     * 起 worktree 承接列表合并也走本通道——CLI by-id 路径带 worktree 归属校验，
+     * 源项目 workspace 下托管 worktree 会话会放行返回，diag-worktree-capabilities.py 实证）。
      * 每批 ≤[SESSION_IDS_MAX]，分批失败 fail-soft 保留其余，按 id 去重；工作区路径
      * 双形态各查一遍（斜杠撕裂同 [listSessions]，tasks-index 行可能是任一形态）。
      */
-    private fun listSessionsByIds(
+    fun listSessionsByIds(
         ids: Collection<String>,
         workspacePath: String,
         altWorkspacePath: String? = null,
@@ -2797,11 +2799,22 @@ class ZCodeProtocolClient private constructor(
      * 非流式可见，窗口期无帧）；若会话已在 v4SubscribedSessions（子代理场景）则
      * 复用既有订阅不退订。
      *
+     * @param targetCwd 可选分叉落位（桌面端「在新 worktree 中分叉」的协议通道，
+     *   3.18 asar 逆向 + diag-fork-worktree-spike.py 实测定案）：`{cwd: <新会话执行根>,
+     *   childSessionId: <客户端预生成 sess_uuid>, worktreeCreation: {path, sha, ref(可
+     *   null), output}}`；服务端落库新会话 directory=cwd、timeline 插 worktree_creation
+     *   卡、应答 sessionId=childSessionId（自造 id 直落）。缺省不传键 = 继承父会话落库
+     *   directory（「在当前目录/worktree 中分叉」语义）。
      * @return result {forkedSessionId, parentSessionId}
      * @throws ZCodeProtocolException code=-32601 老版本 CLI 无 v4 面（调用方据此让前端
      * 隐藏分叉入口）；rejected 带 reasonCode 原文案
      */
-    fun forkAssistantViaV4(sessionId: String, messageId: String, timeoutMs: Long = 20000): JsonObject {
+    fun forkAssistantViaV4(
+        sessionId: String,
+        messageId: String,
+        targetCwd: JsonObject? = null,
+        timeoutMs: Long = 20000,
+    ): JsonObject {
         val wasSubscribed = sessionId in v4SubscribedSessions
         // 常驻标题订阅判据：服务端对同 topic 幂等复用同一 subscriptionId，"临时订阅"
         // 即常驻订阅本身，退订即断服务端帧流（标题/更改条静默丢失）——一律不退订
@@ -2880,6 +2893,7 @@ class ZCodeProtocolClient private constructor(
                             put("rowId", targetRowId)
                             put("entityId", targetEntityId)
                         })
+                        targetCwd?.let { put("targetCwd", it) }
                     })
                     put("issuedAt", System.currentTimeMillis())
                     put("baseRevision", baseRevision)
@@ -3942,6 +3956,36 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * worktree 能力探测（0.4.6 worktree 门控唯一信号）：`runtime/capabilities` 响应的
+     * worktreeCwd 位——官方桌面端同款判据（diag-worktree-capabilities.py 实证 0.17.1
+     * 空参即回全量能力表）。老 CLI 无该方法/无该位 → false，worktree 功能整体隐藏。
+     *
+     * 有意发空参：不带 hostCapabilities——sessionDirectorySource 等宿主能力插件并未实现，
+     * 声明了会改变 CLI 侧 session/list by-ids 的行为面（directorySessionId/严格 lineage），
+     * 不能为拿 worktreeCwd 顺手指认。
+     *
+     * 结果实例级缓存：CLI 升级换进程天然失效重探；请求失败 fail-soft=false。
+     */
+    @Volatile
+    private var worktreeCapability: Boolean? = null
+
+    fun isWorktreeSupported(timeoutMs: Long = 8000L): Boolean {
+        worktreeCapability?.let { return it }
+        synchronized(this) {
+            worktreeCapability?.let { return it }
+            val supported = try {
+                val r = request("runtime/capabilities", JsonObject(emptyMap()), timeoutMs)
+                r["result"]?.jsonObject?.get("worktreeCwd")?.jsonPrimitive?.booleanOrNull == true
+            } catch (e: Exception) {
+                println("[ZCodeProtocolClient] worktree capability probe failed: ${LogRedactor.redact(e.message ?: "")}")
+                false
+            }
+            worktreeCapability = supported
+            return supported
+        }
+    }
+
+    /**
      * session/read → 提取 runtime（含 contextUsage + 可能的 breakdown 构成明细）
      * 返回完整 runtime JsonObject，调用者按需提取 contextUsage / breakdown 子字段。
      * 需要会话处于 active 状态（subscribe/resume 后即可）。
@@ -4029,6 +4073,26 @@ class ZCodeProtocolClient private constructor(
     }
 
     /**
+     * 仅卸载运行时会话（app-server 内存/索引），**不删 db.sqlite 记录**——worktree
+     * 删除编排用（桌面同语义：删除 worktree 后任务保留、变只读）。与 [closeSession]
+     * （插件删除会话=卸载+删库）语义不同，勿混用。
+     */
+    fun unloadSession(sessionId: String, timeoutMs: Long = 15000) {
+        try {
+            resumeSession(sessionId, timeoutMs)
+        } catch (e: Exception) {
+            println("[ZCodeProtocolClient] unload resume failed (ignorable): ${LogRedactor.redact(e.message ?: "")}")
+        }
+        try {
+            val params = buildJsonObject { put("sessionId", sessionId) }
+            requireOk(request("session/close", params, timeoutMs))
+        } catch (e: ZCodeProtocolException) {
+            if (e.code != -32004) throw e
+            println("[ZCodeProtocolClient] unload skipped (session already inactive): ${e.message}")
+        }
+    }
+
+    /**
      * 删除会话：resume（激活）→ close（清 app-server 内存/索引）→ 删 db.sqlite 记录（清持久化）
      *
      * 背景（已实测验证）：
@@ -4090,6 +4154,14 @@ class ZCodeProtocolClient private constructor(
      * 从 cli db 读取。旧机制（session.time_archived）已废弃，见 migrateLegacyArchivesOnce。
      */
     fun archiveSession(sessionId: String) = taskIndex.setArchived(sessionId, cliDbPath, archive = true)
+
+    /**
+     * 归档（worktree 变体）：插件自建的 worktree 会话归档时补写 tasks-index 的
+     * worktree_root/root_path（桌面 3.18 列，缺列静默跳过），否则桌面端把它当
+     * 普通任务错位展示。桌面端建的会话行自带列，无需走本变体。
+     */
+    fun archiveSession(sessionId: String, worktreeRoot: String, cwd: String) =
+        taskIndex.setArchived(sessionId, cliDbPath, archive = true, worktreeRoot = worktreeRoot, cwd = cwd)
 
     /**
      * 恢复归档会话：置 tasks.archived=0 并清旧机制归档位（time_archived，老版本插件

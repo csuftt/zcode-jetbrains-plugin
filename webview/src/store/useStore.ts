@@ -16,7 +16,7 @@ import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId, getTabWorkspacePath } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
-import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, QuotaHistorySample, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary } from '@/types/messages'
+import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, QuotaHistorySample, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary, WorktreeMeta } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages, appendMidTurnNotification } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { classifyQuotaError, bannerTriggerKey, providerLimitedMessage } from '@/utils/quotaWindows'
@@ -1176,6 +1176,24 @@ interface StoreState {
   skipInitialSessionRestore: boolean
   /** 建会话请求进行中（手动 + 或懒创建），期间防重入 */
   creatingSession: boolean
+  /** ============ worktree（0.4.6，spec #52） ============ */
+  /** worktree 会话元数据（Java 列表合并/创建响应注入），chip 渲染与打开锚定用 */
+  worktreeMetaBySession: Record<string, WorktreeMeta>
+  /** 待命页 worktree 能力态（null=未拉取；supported=false 老版 CLI 整体隐藏） */
+  worktreeStandby: { supported: boolean; gitOk: boolean } | null
+  /** 待命页 worktree 开关（默认关、不记忆——worktree 是例外场景，防误建目录） */
+  worktreeEnabled: boolean
+  /** 待命绑定既有副本（新建会话右键动作直推，2026-11-15 懒创建）：非空=本标签以「新会话」
+   *  待命态打开、首条消息时 Java 面板拦截 createSession 落该副本目录；meta 供 header ⎇ chip。
+   *  selectSession/createSession 成功即解除（与 Java handleSubscribe 清 pendingWorktree 成对） */
+  worktreePending: WorktreeMeta | null
+  /** 创建进度：creating=进行中（进度提示）、failed=失败（降级三键提示行） */
+  worktreeCreating: 'creating' | 'failed' | null
+  worktreeErrorCode: string | null
+  /** 拉取待命页能力态（门控+git 判定；mount/切目录时调） */
+  loadWorktreeState: () => void
+  /** 待命页开关 */
+  setWorktreeEnabled: (enabled: boolean) => void
   /** 懒创建暂存的首条消息：无会话时发送 → 先建会话，createSession 响应后自动发出 */
   pendingFirstMessage: string | null
   /** 懒创建暂存的首条消息的附件（与 pendingFirstMessage 同生命周期）*/
@@ -1738,8 +1756,9 @@ interface StoreState {
    * 图片附件全量清单（保留+新增−删除），仅 v4 通道消费
    */
   submitEdit: (text: string, images?: EditAttachmentInput[]) => void
-  /** 从历史消息分叉新会话（B2 一期）：session/fork 保留到该消息（含），应答后新标签打开 */
-  forkFromMessage: (sessionId: string, messageId: string) => void
+  /** 从历史消息分叉新会话（B2 一期）：session/fork 保留到该消息（含），应答后新标签打开；
+   * intent（0.4.6 分叉菜单，对齐桌面端）= here 当前目录/worktree 分叉（缺省）｜ new 新 worktree 分叉 */
+  forkFromMessage: (sessionId: string, messageId: string, intent?: 'here' | 'new') => void
   createSession: () => void
   /** 待命态定时任务：先把会话建好再落库（归属唯一化），createSession 响应后自动 scheduledCreate */
   createSessionForSchedule: (text: string, fireAt: number, providerId?: string, modelId?: string, keepCurrent?: boolean) => void
@@ -2103,6 +2122,12 @@ export const useStore = create<StoreState>((set, get) => ({
   currentWorkspacePath: '',
   skipInitialSessionRestore: false,
   creatingSession: false,
+  worktreeMetaBySession: {},
+  worktreeStandby: null,
+  worktreeEnabled: false,
+  worktreePending: null,
+  worktreeCreating: null,
+  worktreeErrorCode: null,
   pendingFirstMessage: null,
   pendingFirstAttachments: null,
   pendingFirstScheduledFireAt: null,
@@ -2635,6 +2660,9 @@ export const useStore = create<StoreState>((set, get) => ({
       modelPendingSwitch: null, // 旧会话的延迟切换提示不带到新会话（补发 modelSet 有 sessionId 守卫）
       modelSwitchPrevModel: null,
       lastNotice: null,
+      // 待命绑定（懒创建）随切会话作废：删当前会话回待命态时不得把旧绑定带进建会话
+      // （Java 侧 handleSubscribe 同步清 pendingWorktree，两侧成对）
+      worktreePending: null,
       ...sessionResetBase(),
       loadingMessages: true, // 切换后要拉取消息历史
       compacting: false,
@@ -2862,7 +2890,7 @@ export const useStore = create<StoreState>((set, get) => ({
    * 只挡：目标消息本身在流式（中间态无意义，按钮层已按消息级 streaming 隐藏，双保险）
    * 与编辑重放期（rewind 截断历史中，分叉目标可能被截）。
    */
-  forkFromMessage: (sessionId, messageId) => {
+  forkFromMessage: (sessionId, messageId, intent = 'here') => {
     const st = get()
     if (st.forkBusy) return
     if (st.editReplay || messageId === st.streamingMessageId) {
@@ -2870,7 +2898,14 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     set({ forkBusy: true })
-    sendToJava({ op: 'forkSession', sessionId, messageId })
+    sendToJava({
+      op: 'forkSession',
+      sessionId,
+      messageId,
+      worktreeIntent: intent,
+      // 父会话落位目录（Java 侧 "new" 编排定位父执行根的兜底，注册表未收录的会话用）
+      workspacePath: get().activeWorkspacePath || get().projectPath,
+    })
   },
 
   /**
@@ -2997,12 +3032,24 @@ export const useStore = create<StoreState>((set, get) => ({
     // loadSettings 读到服务端初始默认档 max（赶在首条消息写回之前），UI 闪「最高」
     // 再回预选档。预选值在 thoughtLevel.current（待命态 setThoughtLevel 乐观更新）
     const tl = get().thoughtLevel
+    // worktree 创建（0.4.6）：待命页开关开启且能力支持时随创建下发，Java 侧拦截
+    // 编排（起点发送时刻定版）；worktreeCreating 进度提示由 worktreeProgress 推送驱动
+    const wtEnabled = get().worktreeEnabled && !!get().worktreeStandby?.supported
     sendToJava({
       op: 'createSession',
       // 新会话落在激活目录（多目录会话·变体A：历史页 chips 切换；Java 侧归一原生分隔符）
       workspacePath: get().activeWorkspacePath || get().projectPath,
       ...(tl?.enabled && tl.current ? { thoughtLevel: tl.current } : {}),
+      ...(wtEnabled ? { worktree: { enabled: true } } : {}),
     })
+  },
+
+  loadWorktreeState: () => {
+    sendToJava({ op: 'worktreeState' })
+  },
+
+  setWorktreeEnabled: (enabled) => {
+    set({ worktreeEnabled: enabled, worktreeCreating: null, worktreeErrorCode: null })
   },
 
   createSessionForSchedule: (text, fireAt, providerId?, modelId?, keepCurrent?) => {
@@ -3052,6 +3099,10 @@ export const useStore = create<StoreState>((set, get) => ({
       //——保守不点亮（utils/currentFileConfig.ts 头注释）
       currentFileEnabled: readCurrentFileConfig().autoOnNewSession,
       creatingSession: false,
+      // worktree 待命条复位（开关默认关不记忆——防误建目录；进度/失败态一并清）
+      worktreeEnabled: false,
+      worktreeCreating: null,
+      worktreeErrorCode: null,
       pendingFirstMessage: null,
       pendingFirstAttachments: null,
       pendingFirstScheduledFireAt: null,
@@ -4621,7 +4672,13 @@ export function handleResponse(
       if (msg.added) {
         get().setActiveWorkspace(msg.added)
       } else if (
-        // 移除的是激活目录 → 回退本项目（关联目录列表已不含它）
+        // 移除的是激活目录 → 回退本项目（关联目录列表已不含它）。
+        // boot 恢复期豁免（0.4.6 fork-to-worktree 真机竞态，2026-11-14）：gotoSession
+        // 新标签的落位=新 worktree 根，恒不在关联目录集——boot 应答未处理完时守卫
+        // 抢先把 sessionsWorkspace 切回主项目，绑定会话的列表应答被乱序丢弃守卫丢掉
+        // → 恢复跳过 →「新 worktree 分叉开出的标签是空会话且落位主项目」。boot 收尾
+        //（case 'sessions' 尾部）消费 bootRestorePending 时自会兜底切作用域，此处不动
+        !get().bootRestorePending &&
         get().activeWorkspacePath &&
         normalizeWsPath(get().activeWorkspacePath) !== normalizeWsPath(get().projectPath) &&
         !msg.workspaces.some((w) => normalizeWsPath(w) === normalizeWsPath(get().activeWorkspacePath))
@@ -4643,6 +4700,20 @@ export function handleResponse(
         break
       }
       set({ sessionsLoading: false })
+      // worktree 元数据采集（0.4.6）：条目携带 worktree 字段（Java 合并注入）→ meta map，
+      // chip 渲染与打开执行根锚定用；当前打开的会话命中则同步
+      const wtPrev = get().worktreeMetaBySession
+      let wtDirty = false
+      const wtNext = { ...wtPrev }
+      for (const s of msg.sessions) {
+        if (s.worktree) {
+          wtNext[s.sessionId] = s.worktree
+          wtDirty = true
+        }
+      }
+      if (wtDirty) {
+        set({ worktreeMetaBySession: wtNext })
+      }
       // 标题合并优先级：手动重命名（persist）> 服务端正式标题（顺带清临时标题）
       // > 本地临时标题（乐观占位，见 sendMessage）> 上一帧完整标题（防服务端空值
       // 覆盖，见下）> 服务端占位（空/会话 id）
@@ -4752,6 +4823,7 @@ export function handleResponse(
       // 会话从别的目录列表里"恢复"出来（新标签打开关联目录会话按注入目录恢复，同依赖）
       const tabWs = getTabWorkspacePath() || get().projectPath
       const bootScopeOk = !scopeWs || normalizeWsPath(scopeWs) === normalizeWsPath(tabWs)
+      let bootRestored = false
       if (get().currentSessionId === null && bootScopeOk) {
         const initialId = getInitialSessionId()
         const initial = initialId ? merged.find((s) => s.sessionId === initialId) : undefined
@@ -4761,6 +4833,7 @@ export function handleResponse(
           if (!get().skipInitialSessionRestore) {
             console.log(`[store] 恢复标签绑定的会话: ${initialId}`)
             get().selectSession(initial)
+            bootRestored = true
           }
         } else {
           // 待命态 = 新会话（2026-10-08 用户实测拍板"新建标签页=新建会话"）：新标签
@@ -4778,9 +4851,22 @@ export function handleResponse(
       // linkedWorkspaces 守卫回退（标签目录已被移出）时，此处负责把列表切到兜底目录。
       // 切回动作再发一次 listSessions（~百毫秒；bootRestorePending 此处已消费，不会循环）
       if (get().bootRestorePending) {
-        const fallbackWs = get().activeWorkspacePath || get().projectPath
         set({ bootRestorePending: false })
-        if (normalizeWsPath(scopeWs) !== normalizeWsPath(fallbackWs)) {
+        // 恢复失败且落位不在关联目录集（fork-to-worktree 的目录恒不注册；标签目录被
+        // 移出的孤儿场景同理）→ 此刻才兜底回本项目（2026-11-14：回退守卫在 boot 期
+        // 豁免，等应答处理完再定去留——恢复成功则留守 worktree 落位，失败才回退；
+        // 否则守卫抢先切作用域会把绑定会话的列表应答按乱序丢掉，恢复恒失败）
+        if (
+          !bootRestored &&
+          !get().skipInitialSessionRestore &&
+          get().activeWorkspacePath &&
+          normalizeWsPath(get().activeWorkspacePath) !== normalizeWsPath(get().projectPath) &&
+          !get().linkedWorkspaces.some((w) => normalizeWsPath(w) === normalizeWsPath(get().activeWorkspacePath))
+        ) {
+          console.log(`[store] boot 恢复未命中且落位不在关联目录，兜底回本项目: ${get().projectPath}`)
+          get().setActiveWorkspace(get().projectPath)
+        } else if (normalizeWsPath(scopeWs) !== normalizeWsPath(get().activeWorkspacePath || get().projectPath)) {
+          const fallbackWs = get().activeWorkspacePath || get().projectPath
           console.log(`[store] boot 恢复完成，列表作用域切回落位目录: ${fallbackWs}`)
           set({ sessions: [], sessionsWorkspace: fallbackWs, sessionsLoading: true })
           get().loadSessions()
@@ -4789,10 +4875,33 @@ export function handleResponse(
       break
     }
 
+    case 'worktreeState': {
+      // 待命页能力态：supported=false（老版 CLI）整体隐藏；gitOk=false 禁用给原因
+      set({ worktreeStandby: { supported: !!msg.supported, gitOk: !!msg.gitOk } })
+      break
+    }
+    case 'worktreeProgress': {
+      // 创建编排进度：creating=进行中；failed=失败（降级提示行，开关保持原状供重试/关闭）
+      if (msg.phase === 'failed') set({ worktreeCreating: 'failed', worktreeErrorCode: msg.code || '' })
+      else if (msg.phase === 'done') set({ worktreeCreating: null })
+      else set({ worktreeCreating: 'creating', worktreeErrorCode: null })
+      break
+    }
+    case 'worktreePending': {
+      // Java 直推待命绑定（2026-11-15 新建会话懒创建）：标签以「新会话」待命态打开，
+      // 首条消息时 Java 面板拦截 createSession 落既有副本目录（规格面板持有，前端无需
+      // 回传根路径）。meta 供 header ⎇ chip；待命条隐藏（防 ⎇ 开关建新副本的歧义）。
+      // 已有会话（boot 恢复抢先）不覆盖；selectSession/createSession 成功即解除
+      if (get().currentSessionId) break
+      set({ worktreePending: (msg.worktree ?? null) as WorktreeMeta | null })
+      break
+    }
     case 'createSession': {
       // 点 + 新建 / 懒创建完成后切换到新会话（Java 返回 sessionId）。
       // 懒创建暂存的首条消息须在下方 set 清空前取出
       const sid = msg.sessionId
+      // worktree 元数据（0.4.6）：worktree 创建路径 Java 随响应回带，登记 meta map
+      const wtMeta = msg.worktree as WorktreeMeta | undefined
       const pendingFirst = get().pendingFirstMessage
       const pendingFirstAttachments = get().pendingFirstAttachments
       const pendingFirstFireAt = get().pendingFirstScheduledFireAt
@@ -4868,6 +4977,13 @@ export function handleResponse(
             },
             ...get().sessions.filter((x) => x.sessionId !== sid),
           ],
+          // worktree：会话创建成功后待命条收起（开关复位、进度清零）；meta 登记供 chip。
+          // 待命绑定（懒创建）随会话成立解除——chip 改由 worktreeMetaBySession 承载
+          ...(wtMeta ? { worktreeMetaBySession: { ...get().worktreeMetaBySession, [sid]: wtMeta } } : {}),
+          worktreeEnabled: false,
+          worktreePending: null,
+          worktreeCreating: null,
+          worktreeErrorCode: null,
         })
         // 订阅新会话（Java 端 handleSubscribe 内部会先 resume 激活）
         sendToJava({ op: 'subscribe', sessionId: sid, workspacePath: ws })
@@ -4995,8 +5111,10 @@ export function handleResponse(
     }
 
     case 'sessionArchived': {
-      // 归档：从历史列表移除（不删数据，可恢复）。当前会话被归档不清空——
-      // app-server 内存仍在跑，保留对话上下文，恢复后列表重新显示
+      // 归档：从历史列表移除（不删数据，可恢复）。宿主标签联动由 Java 侧收尾
+      //（closeSessionTabs，参照 worktree 移除/删除会话同款）：其他宿主标签关闭、
+      // 选中宿主标签推 sessionDeleted 回待命态——本响应只管列表摘除与归档列表刷新，
+      // 两条消息先后到达收敛一致（摘除幂等）
       set({ sessions: get().sessions.filter((x) => x.sessionId !== msg.sessionId) })
       // 已归档列表已加载则刷新（让归档项出现）；未加载则下次进入 tab 时拉取
       if (get().archivedSessions.length > 0 || get().archivedLoading) {
@@ -5118,18 +5236,29 @@ export function handleResponse(
     case 'sessionForked': {
       // 分叉成功：①自动命名——与 ZCode 官方客户端同款「Fork of 原标题」前缀（fork25
       // sqlite 取证：服务端 fork 落库也自动命名同款），走 renameSession 的 persist 通道
-      //（zcode.sessionTitle.<id>，listSessions 响应时合并、优先于服务端标题，跨重启
+      //（zcode.sessionTitle.<id>，listSessions 响应时合并、优先于服务端标题、跨重启
       // 保留；父标题缺失时只用 "Fork"）；
       // ②新标签打开分叉会话（gotoSession → Java openSessionTab 恢复编排，含 resume/
       // 订阅）；③loadSessions 把分叉条目刷进历史列表
       set({ forkBusy: false })
       if (msg.forkedSessionId) {
+        // worktree 元数据（0.4.6 分叉菜单）：Java 应答回带（here 继承父 worktree /
+        // new 新建），乐观登记 → 新标签立即挂 ⎇ 徽标（等列表刷新同样有数据）
+        const wtMeta = msg.worktree as WorktreeMeta | undefined
+        if (wtMeta) {
+          set({ worktreeMetaBySession: { ...get().worktreeMetaBySession, [msg.forkedSessionId]: wtMeta } })
+        }
         const parentTitle = get()
           .sessions.find((s) => s.sessionId === (msg.parentSessionId ?? get().currentSessionId))
           ?.title?.trim()
         get().renameSession(msg.forkedSessionId, parentTitle ? `Fork of ${parentTitle}` : 'Fork')
-        // fork 会话目录 = 发起标签的激活目录（多目录会话：v4 forkAssistant 轮级语义，父子同库行）
-        get().openSessionNewTab(msg.forkedSessionId, get().activeWorkspacePath || get().projectPath)
+        // fork 会话落位目录（2026-11-14 真机反馈）：归属=worktree 源工作区。worktree
+        // 路径不在目录 chips 列表，落它=「匿名目录」scope（历史页单条、色块无主、chips
+        // 不高亮）——落位/历史页 scope/目录归属全按源目录语义；执行根仍由会话自身目录
+        // 承载（selectSession 后 currentWorkspacePath=worktree cwd，消息/链接化不受影响）。
+        // here 无 worktree 元数据=发起标签的激活目录（原语义不变）
+        const openWs = wtMeta?.sourceWorkspace || msg.workspace || get().activeWorkspacePath || get().projectPath
+        get().openSessionNewTab(msg.forkedSessionId, openWs)
         get().loadSessions()
       }
       break

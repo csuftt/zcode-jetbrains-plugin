@@ -77,6 +77,7 @@
 .ws-header-badge-row {
     flex-basis: 100%;
     display: flex;
+    gap: 4px; // 徽标间距（2026-11-13 反馈：目录+worktree 两枚挨太近）
     margin: 2px 0 0;
     padding-left: 8px;
     min-width: 0;
@@ -417,4 +418,29 @@
     &:active {
         transform: scale(0.92);
     }
+}
+
+/* ===== worktree 徽标（0.4.6）：目录徽标后追加，单击新窗口打开副本 ===== */
+.ws-header-badge--worktree {
+  cursor: pointer;
+
+  .codicon-git-branch {
+    font-size: 11px;
+    margin-right: 3px;
+  }
+}
+
+
+/* ===== worktree 徽标（0.4.6）：固定显眼紫色，不随目录色板（2026-11-13 反馈）===== */
+.ws-header-badge--worktree {
+    --ws-badge-color: #b180d7;
+}
+
+/* 副本已删除（2026-11-15 反馈）：会话保留、chip 灰态只读（不触发定位）。
+   灰 = 换 --ws-badge-color 色轴（badge 底色/文字都由它 color-mix 派生）。
+   不可用 opacity/filter：会在徽标上创建 stacking context，把 absolute 气泡困在
+   徽标层内、被后绘制的聊天区盖住——「灰 chip 悬浮无说明」的根因 */
+.ws-header-badge--worktree-deleted {
+    cursor: default;
+    --ws-badge-color: #9a9aa0;
 }

@@ -53,6 +53,11 @@
         <!-- 状态栏 Widget（监督面入口前移：运行态 + 点击聚焦 + 双击新会话，调研 ③） -->
         <statusBarWidgetFactory id="ZCode.StatusBarWidget"
                                 implementation="com.zcode.ideaplugin.ui.statusbar.ZCodeStatusBarWidgetFactory"/>
+        <!-- worktree（0.4.6，spec #52）：ProjectView ZCGUIWorktrees 专属目录（虚拟节点，
+             不挂 content root；门控=runtime/capabilities worktreeCwd，老 CLI 整体隐藏）+
+             项目态持有（后台快照，树构建零 git/RPC 阻塞） -->
+        <treeStructureProvider implementation="com.zcode.ideaplugin.worktree.WorktreeTreeStructureProvider"/>
+        <projectService serviceImplementation="com.zcode.ideaplugin.worktree.WorktreeProjectState"/>
     </extensions>
 
     <actions>
@@ -123,5 +128,26 @@
                 icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendFileToInput"/>
         </action>
+        <!-- worktree（0.4.6，spec #52）：ZCGUIWorktrees 节点右键动作组（数据由
+             WorktreeTreeStructureProvider.getData 供应，动作只认自己的 key）。
+             2026-11-14 反馈：原 anchor=last 沉底在长菜单里翻不到，上提到系统组
+             （剪切/复制/粘贴）之前；个别 IDE 缺该组时回落 append，最差=原底部位置 -->
+        <group id="ZCode.WorktreeActions" popup="false">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="before" relative-to-action="CutCopyPasteGroup"/>
+            <action id="ZCode.WorktreeNewSession"
+                    class="com.zcode.ideaplugin.worktree.WorktreeNewSessionAction"/>
+            <group id="ZCode.WorktreeOpenSessions" popup="true"
+                   class="com.zcode.ideaplugin.worktree.WorktreeOpenSessionsGroup"/>
+            <action id="ZCode.WorktreeOpen"
+                    class="com.zcode.ideaplugin.worktree.WorktreeOpenAction"/>
+            <action id="ZCode.WorktreeReveal"
+                    class="com.zcode.ideaplugin.worktree.WorktreeRevealAction"/>
+            <action id="ZCode.WorktreeSendToGui"
+                    class="com.zcode.ideaplugin.worktree.WorktreeSendToGuiAction"/>
+            <action id="ZCode.WorktreeDelete"
+                    class="com.zcode.ideaplugin.worktree.WorktreeDeleteAction"/>
+            <action id="ZCode.WorktreeCleanup"
+                    class="com.zcode.ideaplugin.worktree.WorktreeCleanupAction"/>
+        </group>
     </actions>
 </idea-plugin>

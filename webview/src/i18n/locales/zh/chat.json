@@ -187,7 +187,11 @@
     "busy": "回复生成中或编辑重发时无法分叉，请稍后再试",
     "confirmTitle": "从此回复分叉新会话？",
     "confirmMessage": "历史保留到这条回复（含），原会话不受影响。",
-    "confirmOk": "分叉"
+    "confirmOk": "分叉",
+    "here": "在当前目录分叉",
+    "hereWorktree": "在当前 worktree 中分叉",
+    "toWorktree": "在新 worktree 中分叉",
+    "confirmWorktreeMessage": "将新建托管 worktree（当前状态副本）并在其中打开新会话，历史保留到这条回复（含），原会话与当前 worktree 不受影响；不携带未提交的改动。"
   },
   "previewCards": {
     "website": "网站",

@@ -390,6 +390,13 @@ function mockRespond(req: JavaRequest): void {
   }
   console.log('[bridge:mock] 收到请求', req.op)
 
+  // worktree 待命条（0.4.6 dev）：mock 能力态与起点候选
+  if (req.op === 'worktreeState') {
+    setTimeout(() => {
+      listeners.forEach((fn) => fn({ op: 'worktreeState', supported: true, gitOk: true }))
+    }, 0)
+    return
+  }
   // send 文本 "#plan"：模拟 plan 模式下 ExitPlanMode 审批弹窗（验收 PlanApprovalDialog）
   if (req.op === 'send' && req.text.trim() === '#plan') {
     setTimeout(() => {
@@ -1010,6 +1017,9 @@ function mockResponse(req: JavaRequest): JavaResponse | null {
     case 'getLinkedWorkspaces':
       // mock：预置一条关联目录（chips 行 dev 可见可切）
       return { op: 'linkedWorkspaces', workspaces: ['G:/mock-linked/other-project'] }
+    case 'worktreeState':
+      // mock：能力支持 + git ok（待命条 dev 可见）
+      return { op: 'worktreeState', supported: true, gitOk: true }
     case 'getProjectPath':
       // mock：对齐 mockSessions 的 workspacePath——mock 态无 Java 注入（__ZCODE_WORKSPACE__
       // 恒空），不回这条则 projectPath 空串固化、徽标「本项目不显示」判等失真
