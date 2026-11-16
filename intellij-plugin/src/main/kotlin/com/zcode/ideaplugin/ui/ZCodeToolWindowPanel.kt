@@ -3009,7 +3009,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     /**
      * op=worktreeLocate — 定位 ProjectView 的 worktree 节点（chip 单击，2026-11-14 反馈）。
-     * 自根逐层展开匹配 WorktreeEntryNode；命中后选中+滚动可见。
+     * 自根逐层展开匹配 WorktreeEntryNode；命中后展开该层+选中+滚动可见。
+     *
+     * 折叠展开（2026-11-16 反馈三轮收敛）：定位只把「为了看见 worktree 节点」所需的
+     * 层级展开（外层两级/命中本级），提交/未提交组一律钳回折叠。根因=builder 树按自身
+     * 记忆连带恢复后代展开态，且随子级物化异步级联——单次压回会被下一波恢复反超，故
+     * [EntryChildrenClamp] 否决+压回双保险；触发条件=本次定位实际展开过层级或命中本级
+     * 折叠，全链本就可见的命中一字不动。
      *
      * 懒加载坑（2026-11-15 反馈：重启后首次定位只到分组级，要再点一下）：expandPath 只
      * 「请求」AsyncTreeModel 解析子节点，稍后才进树模型——单趟 DFS 撞上未解析层就空手而归，
@@ -3027,11 +3033,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject { put("op", "worktreeLocated") }
     }
 
-    /** 单拍定位尝试（EDT）；未命中且未拍尽则 250ms 后再试，拍尽退回快照刷新 */
-    private fun locateWorktreeAttempt(target: String, round: Int) {
+    /**
+     * 单拍定位尝试（EDT）；未命中且未拍尽则 250ms 后再试，拍尽退回快照刷新。
+     * [expandedAny] 跨拍累积：此前拍里为寻路实际展开过层级则置位——它是钳制触发条件
+     * 之一（另一条件=命中本级折叠），全链本就可见的命中不挂钳制、一字不动。
+     */
+    private fun locateWorktreeAttempt(target: String, round: Int, expandedAny: Boolean = false) {
         if (project.isDisposed) return
         val pane = com.intellij.ide.projectView.ProjectView.getInstance(project).currentProjectViewPane
         val tree = pane?.tree ?: return
+        var expandedByLocate = expandedAny
         fun find(path: javax.swing.tree.TreePath): javax.swing.tree.TreePath? {
             val node = path.lastPathComponent as? javax.swing.tree.DefaultMutableTreeNode ?: return null
             for (i in 0 until node.childCount) {
@@ -3046,7 +3057,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
                 if (uo is com.zcode.ideaplugin.worktree.WorktreesRootNode ||
                     uo is com.zcode.ideaplugin.worktree.WorktreeSourceGroupNode
                 ) {
-                    tree.expandPath(childPath)
+                    if (tree.isCollapsed(childPath)) {
+                        tree.expandPath(childPath)
+                        expandedByLocate = true
+                    }
                     find(childPath)?.let { return it }
                 }
             }
@@ -3055,15 +3069,96 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val hit = find(javax.swing.tree.TreePath(tree.model.root))
         if (hit != null) {
             tree.selectionPath = hit
+            if (expandedByLocate || tree.isCollapsed(hit)) {
+                tree.expandPath(hit)
+                EntryChildrenClamp(target).start()
+            }
             tree.scrollPathToVisible(hit)
             return
         }
         if (round < 12) {
-            val timer = javax.swing.Timer(250) { runCatching { locateWorktreeAttempt(target, round + 1) } }
+            val timer = javax.swing.Timer(250) { runCatching { locateWorktreeAttempt(target, round + 1, expandedByLocate) } }
             timer.isRepeats = false
             timer.start()
         } else {
             com.zcode.ideaplugin.worktree.WorktreeProjectState.getInstance(project).refreshAsync()
+        }
+    }
+
+    /**
+     * 定位展开的子级钳制器（2026-11-16 反馈三轮：外层折叠时点击整簇级联展开）。根因：
+     * builder 树按自身记忆连带恢复后代展开态——worktree 层折叠时 JTree 已忘后代状态而
+     * builder 还记得，恢复又是随子级物化异步级联的，只压回一层会被下一波恢复反超。
+     * 双保险：①TreeWillExpandListener 短窗内否决命中节点的直接子级展开——恢复路径走
+     * expandPath 必过此门，ExpandVetoedException 由 JTree 自吞不外抛；②轮询压回已现形
+     * 的展开子级。子级连续两拍保持折叠即收窗（拍顶 4s），此后用户手动展开不受影响。
+     * 命中判定按 entryRoot value 匹配（抗 15s 快照刷新重建换节点实例）；监听器挂在
+     * 起始那棵树上，若窗内恰好换了 pane 实例则随旧树废弃，自愈。
+     */
+    private inner class EntryChildrenClamp(private val entryRoot: String) :
+        javax.swing.event.TreeWillExpandListener {
+
+        private var round = 0
+        private var settled = 0
+
+        fun start() {
+            currentTree()?.addTreeWillExpandListener(this)
+            poll()
+        }
+
+        override fun treeWillExpand(e: javax.swing.event.TreeExpansionEvent) {
+            val parent = e.path.parentPath?.lastPathComponent as? javax.swing.tree.DefaultMutableTreeNode
+                ?: return
+            val uo = parent.userObject
+            if (uo is com.zcode.ideaplugin.worktree.WorktreeEntryNode &&
+                com.zcode.ideaplugin.worktree.WorktreeRegistry.normalize(uo.entry.root.toString()) == entryRoot
+            ) {
+                throw javax.swing.tree.ExpandVetoException(e)
+            }
+        }
+
+        override fun treeWillCollapse(e: javax.swing.event.TreeExpansionEvent) {}
+
+        private fun currentTree(): javax.swing.JTree? =
+            com.intellij.ide.projectView.ProjectView.getInstance(project).currentProjectViewPane?.tree
+
+        private fun poll() {
+            if (project.isDisposed) return
+            val tree = currentTree()
+            if (tree == null || ++round > 32) {
+                tree?.removeTreeWillExpandListener(this)
+                return
+            }
+            // 只读 DFS 按 value 找命中节点当前实例（不展开、不依赖旧 TreePath）
+            fun find(path: javax.swing.tree.TreePath): javax.swing.tree.TreePath? {
+                val node = path.lastPathComponent as? javax.swing.tree.DefaultMutableTreeNode ?: return null
+                val uo = node.userObject
+                if (uo is com.zcode.ideaplugin.worktree.WorktreeEntryNode &&
+                    com.zcode.ideaplugin.worktree.WorktreeRegistry.normalize(uo.entry.root.toString()) == entryRoot
+                ) {
+                    return path
+                }
+                for (i in 0 until node.childCount) {
+                    find(path.pathByAddingChild(node.getChildAt(i)))?.let { return it }
+                }
+                return null
+            }
+            val hit = find(javax.swing.tree.TreePath(tree.model.root))
+            if (hit != null) {
+                val count = tree.model.getChildCount(hit.lastPathComponent)
+                for (i in 0 until count) {
+                    val childPath = hit.pathByAddingChild(tree.model.getChild(hit.lastPathComponent, i))
+                    if (tree.isExpanded(childPath)) tree.collapsePath(childPath)
+                }
+                // 子级已现形且连续两拍保持折叠（第一拍压回、第二拍确认无反超）才收窗
+                if (count > 0 && ++settled >= 2) {
+                    tree.removeTreeWillExpandListener(this)
+                    return
+                }
+            }
+            val timer = javax.swing.Timer(125) { runCatching { poll() } }
+            timer.isRepeats = false
+            timer.start()
         }
     }
 
