@@ -1543,13 +1543,16 @@ if (!window.__ZCODE_LOG_HOOK__) {
      * 与 webview setTabTitle 推送双通道：推送是 webview 存活时的权威实时源，本方法是
      * 启动/懒加载/清位等 webview 未及场景的兜底，两端口径一致互不冲突。
      */
-    /** 色块取色轴目录：会话标签=归属目录，待命标签=落位目录（同 refreshTabColorIcon 链） */
-    private fun colorAxisWorkspace(): String? =
-        if (currentSessionId != null) {
+    /** 色块取色轴目录：会话标签=归属目录，待命标签=落位目录（同 refreshTabColorIcon 链）；
+     *  命中托管根副本（含注册表缺条目的桌面端副本，git 反解兜底）一律归一源目录取色（缺陷HQ） */
+    private fun colorAxisWorkspace(): String? {
+        val raw = if (currentSessionId != null) {
             lastSessionWorkspace ?: initialWorkspace ?: project.basePath
         } else {
             lastListedWorkspace ?: initialWorkspace ?: project.basePath
         }
+        return raw?.let { worktreeRegistry.resolveSourceWorkspace(it) ?: it }
+    }
 
     private fun refreshTabColorIcon() {
         val content = attachedContent ?: return
@@ -2757,6 +2760,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
             val known = visible.map { it.sessionId }.toSet()
             visible + worktreeExtras.filter { it.sessionId !in known }
         }
+        // 托管根 meta 派生（缺陷HQ 第三腿·显示面）：workspace 落托管根的会话（插件裸建
+        // 孤儿/桌面端未索引），路径结构 + reflog 本地拼 chip 元数据，不依赖注册表/任务索引；
+        // 两腿已注入的条目带 meta 在前，此处自动跳过。baseCache 每根一次 reflog 文件读。
+        val derivedBaseCache = HashMap<String, String>()
+        merged.forEach { s ->
+            if (worktreeMetas[s.sessionId] == null) {
+                s.workspace?.workspacePath?.takeIf { it.isNotBlank() }?.let { ws ->
+                    deriveWorktreeMeta(ws, derivedBaseCache)?.let { worktreeMetas[s.sessionId] = it }
+                }
+            }
+        }
+
         // fork 补查行同样挂 worktree 元数据（2026-11-14 真机反馈）：fork 条目来自 db
         // 补查（sessionKind=fork），不挂 meta 则 boot 恢复的 header chip、worktree 目录
         // 历史列表的 ⎇ 徽标都不显示——切到源目录列表（承接合并带 meta）才出现，观感
@@ -2867,23 +2882,57 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val taskRows = runCatching { client.taskIndex.listWorktreeTasks() }.getOrDefault(emptyList())
             .filter { normalizePath(it.workspacePath) == norm && it.taskId !in hiddenIds }
         val ids = (regEntries.map { it.sessionId } + taskRows.map { it.taskId }).distinct()
-        if (ids.isEmpty()) return emptyList()
-        val details = runCatching { client.listSessionsByIds(ids, workspacePath, timeoutMs = 15_000L) }.getOrDefault(emptyList())
-        return details.mapNotNull { s ->
+        // 第三腿（缺陷HQ）：裸建孤儿注册表/任务索引都够不到（tasks 行只有桌面端写者）——
+        // 扫托管根下与项目目录同名的副本桶，按副本根作用域直查补齐。仅主项目目录列表触发
+        // （关联目录列表不掺入）；桶数少（同名仓库副本），每桶一次 RPC 可承受。孤儿 meta
+        // 由列表装配的托管根派生统一补（含 reflog 起点），此处不抢。
+        val projectBase = project.basePath
+        val orphans = if (!projectBase.isNullOrBlank() && norm == normalizePath(projectBase)) {
+            orphanWorktreeSessions(ids.toSet())
+        } else emptyList()
+        if (ids.isEmpty() && orphans.isEmpty()) return emptyList()
+        val details = if (ids.isEmpty()) emptyList()
+        else runCatching { client.listSessionsByIds(ids, workspacePath, timeoutMs = 15_000L) }.getOrDefault(emptyList())
+        return (details + orphans).mapNotNull { s ->
             if (s.sessionId in hiddenIds) return@mapNotNull null
             val reg0 = regEntries.find { it.sessionId == s.sessionId }
             val row = taskRows.find { it.taskId == s.sessionId }
             val cwd = reg0?.cwd ?: row?.rootPath ?: s.workspace?.workspacePath ?: return@mapNotNull null
             val root = reg0?.worktreeRoot ?: row?.worktreeRoot ?: cwd
-            metas[s.sessionId] = worktreeMetaJson(
-                cwd, root,
-                reg0?.sourceWorkspace ?: workspacePath,
-                reg0?.bucket ?: worktreeBucketOf(root),
-                reg0?.startRef ?: "", reg0?.startSha ?: "",
-                if (reg0 != null) "plugin" else "desktop",
-            )
+            // 孤儿（reg0/row 双空）不在此挂 meta：交给托管根派生（带 reflog 起点，比空
+            // startRef 的「基于 HEAD」更准）
+            if (reg0 != null || row != null) {
+                metas[s.sessionId] = worktreeMetaJson(
+                    cwd, root,
+                    reg0?.sourceWorkspace ?: workspacePath,
+                    reg0?.bucket ?: worktreeBucketOf(root),
+                    reg0?.startRef ?: "", reg0?.startSha ?: "",
+                    if (reg0 != null) "plugin" else "desktop",
+                )
+            }
             s.copy(workspace = com.zcode.ideaplugin.protocol.model.Workspace(cwd))
         }
+    }
+
+    /** 孤儿 worktree 会话直查（缺陷HQ 第三腿）：托管根下与项目目录同名的副本桶按根作用域直查 */
+    private fun orphanWorktreeSessions(excludeIds: Set<String>): List<com.zcode.ideaplugin.protocol.model.SessionInfo> {
+        val base = project.basePath?.takeIf { it.isNotBlank() } ?: return emptyList()
+        val dirName = java.nio.file.Path.of(base).fileName?.toString() ?: return emptyList()
+        val cli = GitWorktreeCli()
+        val managedRoot = cli.managedRoot(cli.dataBaseDir())
+        val roots = runCatching {
+            java.nio.file.Files.list(managedRoot).use { stream ->
+                stream.filter { java.nio.file.Files.isDirectory(it) }
+                    .map { it.resolve(dirName) }
+                    .filter { java.nio.file.Files.isDirectory(it) }
+                    .toList()
+            }
+        }.getOrDefault(emptyList())
+        if (roots.isEmpty()) return emptyList()
+        val client = project.zCodeService().getClient()
+        return roots.flatMap { root ->
+            runCatching { client.listSessions(root.toString()) }.getOrDefault(emptyList())
+        }.filter { it.sessionId !in excludeIds && !it.sessionId.startsWith("sess_subagent") }
     }
 
     /** 桌面端建行的桶名兜底：从路径按托管结构解析（解析失败空串） */
@@ -2893,6 +2942,32 @@ if (!window.__ZCODE_LOG_HOOK__) {
             java.nio.file.Path.of(worktreeRoot),
         )?.bucket
     }.getOrNull() ?: ""
+
+    /**
+     * 托管根会话 meta 派生（缺陷HQ 第三腿·显示面）：workspace 落托管根
+     *（`<dataBase>/.zcode/worktrees/<桶>/<仓库名>`）的会话，注册表/任务索引两腿够不到
+     * 时按路径结构 + reflog（[GitWorktreeCli.creationBaseSha]，一次文件读，[baseCache]
+     * 按根缓存）本地拼 chip 元数据；归属解析不出（跨项目副本）退 workspacePath 本身。
+     */
+    private fun deriveWorktreeMeta(
+        workspacePath: String,
+        baseCache: MutableMap<String, String>,
+    ): JsonObject? {
+        val cli = GitWorktreeCli()
+        val dataBase = cli.dataBaseDir()
+        val parsed = runCatching { cli.parseManagedWorktreePath(dataBase, java.nio.file.Path.of(workspacePath)) }
+            .getOrNull() ?: return null
+        val root = cli.managedRoot(dataBase).resolve(parsed.bucket).resolve(parsed.name)
+        val startSha = baseCache.getOrPut(root.toString()) {
+            runCatching { cli.creationBaseSha(root) }.getOrNull()?.take(7) ?: ""
+        }
+        return worktreeMetaJson(
+            workspacePath, root.toString(),
+            worktreeRegistry.resolveSourceWorkspace(workspacePath) ?: workspacePath,
+            parsed.bucket,
+            "", startSha, "derived",
+        )
+    }
 
     /**
      * op=worktreeReveal — 新窗口打开 worktree（chip 单击）。执行根即项目根，插件在新
@@ -2981,10 +3056,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
             GitWorktreeCli(gitExe = WorktreeGits.executablePath(project), timeoutMs = 10_000L)
                 .isRepository(java.nio.file.Path.of(workspacePath))
         }.getOrDefault(false)
+        // 托管根副本→源工作区反解（缺陷HQ）：待命落位归一数据源（webview 徽标/标签推送/
+        // 建会话请求用它）；普通目录/关联目录未命中缺省，前端回退激活目录。workspacePath
+        // 回显=匹配键：前端仅在「当前落位目录==回显目录」时采信 sourceWorkspace，防切目录
+        // 后旧反解串台（缺陷HQ 三轮真机：挂载瞬间空串探测，后另有目录落定须重探）
+        val sourceWorkspace = runCatching { worktreeRegistry.resolveSourceWorkspace(workspacePath) }.getOrNull()
+        log.info("worktreeState: ws=$workspacePath source=${sourceWorkspace ?: "-"}")
         return buildJsonObject {
             put("op", "worktreeState")
             put("supported", supported)
             put("gitOk", gitOk)
+            put("workspacePath", workspacePath)
+            if (!sourceWorkspace.isNullOrBlank()) put("sourceWorkspace", sourceWorkspace)
         }
     }
 
@@ -3104,6 +3187,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (worktreeReq?.get("enabled")?.jsonPrimitive?.booleanOrNull == true) {
             return handleCreateWorktreeSession(msg, workspacePath, worktreeReq)
         }
+        // 托管根归一（缺陷HQ）：副本作用域标签下「+ 新会话」原样跟随副本根建会话——
+        // directory=副本根、注册表无桌面端条目、tasks-index 无行 → 主列表三腿全空（会话
+        // 「消失」）、色块跟项目不符。普通创建忠于项目目录：命中托管根副本一律归一源目录
+        //（git 反解兜底，桌面端副本也认得）；副本绑定新建唯一入口=worktree 右键菜单
+        //（懒创建 handleCreatePendingWorktreeSession，已在最前拦截）。
+        val createWs = worktreeRegistry.resolveSourceWorkspace(workspacePath) ?: workspacePath
         val client = project.zCodeService().getClient()
         // 待命态预选的思考档随创建落档（缺陷CX 闪最高治本，diag-thoughtlevel-create.py
         // 实证 create 带档合法即生效/非法静默落默认）：否则 create 后的例行 loadSettings
@@ -3116,18 +3205,21 @@ if (!window.__ZCODE_LOG_HOOK__) {
             log.info("Computer Use: injecting ${com.zcode.ideaplugin.cua.CuaFeature.SERVER_NAME} into new session")
         }
         val sid = client.createSession(
-            com.zcode.ideaplugin.protocol.model.Workspace(workspacePath),
+            com.zcode.ideaplugin.protocol.model.Workspace(createWs),
             // 权限模式恒 YOLO（跟随用户在会话底栏自行切换；CUA 审批自动切换已按用户
             // 决策撤出——官方 ZCode 客户端也无此机制）
             com.zcode.ideaplugin.protocol.model.PermissionMode.YOLO,
             thoughtLevel = thoughtLevel,
             mcpServers = cuaSpec
         )
-        lastSessionWorkspace = workspacePath
+        lastSessionWorkspace = createWs
         refreshTabColorIcon() // 会话归属目录确定 → 色块跟随（createSession 落位目录）
         return buildJsonObject {
             put("op", "createSession")
             put("sessionId", sid)
+            // 实际落点回带（缺陷HQ）：托管根归一后可能与请求携带的 workspace 不同，webview
+            // 按它校正 ws chip/乐观插入/订阅作用域（响应缺省=未归一，webview 回退请求目录）
+            put("workspacePath", createWs)
         }
     }
 

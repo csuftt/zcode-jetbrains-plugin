@@ -149,6 +149,20 @@ class GitWorktreeCliTest {
     }
 
     @Test
+    fun `源工作区反解 副本指回主仓 非仓库目录 null`() {
+        val repo = initRepo()
+        val base = base()
+        val wt = cli.createManagedWorktree(repo, base, "HEAD")
+        // 副本根/副本内子路径都反解回主仓工作树（缺陷HQ：注册表缺条目的桌面端副本兜底，
+        // --git-common-dir 指回主仓 .git 的 parent）
+        assertEquals(repo.toRealPath(), cli.resolveSourceWorkspace(wt.root)?.toRealPath())
+        val sub = Files.createDirectories(wt.root.resolve("sub"))
+        assertEquals(repo.toRealPath(), cli.resolveSourceWorkspace(sub)?.toRealPath())
+        // 非仓库目录 fail-soft null
+        assertNull(cli.resolveSourceWorkspace(base))
+    }
+
+    @Test
     fun `创建起点 reflog 缺失或非创建条目返回 null`() {
         val repo = initRepo()
         val wt = cli.createManagedWorktree(repo, base(), "HEAD")

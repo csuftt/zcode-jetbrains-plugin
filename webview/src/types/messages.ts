@@ -1370,9 +1370,13 @@ export interface AutoArchiveRecord {
 
 export type JavaResponse =
   /** workspacePath=请求作用域回显：前端丢弃晚到的旧目录响应（快速连切防串台）*/
-  | { op: 'listSessions'; sessions: SessionInfo[]; workspacePath?: string }  | { op: 'createSession'; sessionId: string; worktree?: WorktreeMeta }
-  /** worktree 能力态（0.4.6 待命页门控；supported=false 老版 CLI 整体隐藏）*/
-  | { op: 'worktreeState'; supported: boolean; gitOk: boolean }
+  | { op: 'listSessions'; sessions: SessionInfo[]; workspacePath?: string }
+  /** workspacePath=实际落点回带（缺陷HQ）：托管根归一后与请求目录可能不同，前端据此校正 ws 显示与订阅作用域 */
+  | { op: 'createSession'; sessionId: string; worktree?: WorktreeMeta; workspacePath?: string }
+  /** worktree 能力态（0.4.6 待命页门控；supported=false 老版 CLI 整体隐藏）；
+   *  sourceWorkspace=探测目录命中托管根副本时 Java 反解的源工作区（缺陷HQ 待命落位归一，未命中缺省）；
+   *  workspacePath=探测作用域回显（匹配键，前端仅在与当前落位目录一致时采信反解）*/
+  | { op: 'worktreeState'; supported: boolean; gitOk: boolean; sourceWorkspace?: string; workspacePath?: string }
   /** worktree 起点候选（开启开关时懒加载；ok=false 目录不可解析）*/
   /** worktree 创建编排进度（creating/failed/done；failed 带 code，前端降级三键提示）*/
   | { op: 'worktreeProgress'; phase: 'creating' | 'failed' | 'done'; code?: string; sessionId?: string }

@@ -22,6 +22,7 @@ import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamRedu
 import { classifyQuotaError, bannerTriggerKey, providerLimitedMessage } from '@/utils/quotaWindows'
 import type { QuotaBannerTrigger } from '@/utils/quotaWindows'
 import { isDefaultSessionTitle } from '@/utils/format'
+import { resolveWorktreeSource } from '@/utils/worktreeSource'
 import { mergeSessionsIndex } from '@/utils/sessionIndexMerge'
 import type { SessionIndexEntry } from '@/types/messages'
 import { validateAddSelection } from '@/utils/conversationSelections'
@@ -1179,8 +1180,10 @@ interface StoreState {
   /** ============ worktree（0.4.6，spec #52） ============ */
   /** worktree 会话元数据（Java 列表合并/创建响应注入），chip 渲染与打开锚定用 */
   worktreeMetaBySession: Record<string, WorktreeMeta>
-  /** 待命页 worktree 能力态（null=未拉取；supported=false 老版 CLI 整体隐藏） */
-  worktreeStandby: { supported: boolean; gitOk: boolean } | null
+  /** 待命页 worktree 能力态（null=未拉取；supported=false 老版 CLI 整体隐藏）；
+   *  sourceWorkspace=探测目录命中托管根副本时 Java 反解的源工作区；resolvedFor=探测回显
+   *  目录（匹配键，仅当前落位目录一致时采信——缺陷HQ 待命落位归一） */
+  worktreeStandby: { supported: boolean; gitOk: boolean; sourceWorkspace?: string; resolvedFor?: string } | null
   /** 待命页 worktree 开关（默认关、不记忆——worktree 是例外场景，防误建目录） */
   worktreeEnabled: boolean
   /** 待命绑定既有副本（新建会话右键动作直推，2026-11-15 懒创建）：非空=本标签以「新会话」
@@ -3035,17 +3038,21 @@ export const useStore = create<StoreState>((set, get) => ({
     // worktree 创建（0.4.6）：待命页开关开启且能力支持时随创建下发，Java 侧拦截
     // 编排（起点发送时刻定版）；worktreeCreating 进度提示由 worktreeProgress 推送驱动
     const wtEnabled = get().worktreeEnabled && !!get().worktreeStandby?.supported
+    // 落位目录：探测目录是托管根副本时归一到源工作区（缺陷HQ）——本地 meta 映射同步命中，
+    // worktreeState 反解兜底；Java handleCreateSession 归一为第二道网。普通目录原样
+    const standbySource = resolveWorktreeSource(get())
     sendToJava({
       op: 'createSession',
       // 新会话落在激活目录（多目录会话·变体A：历史页 chips 切换；Java 侧归一原生分隔符）
-      workspacePath: get().activeWorkspacePath || get().projectPath,
+      workspacePath: standbySource || get().activeWorkspacePath || get().projectPath,
       ...(tl?.enabled && tl.current ? { thoughtLevel: tl.current } : {}),
       ...(wtEnabled ? { worktree: { enabled: true } } : {}),
     })
   },
 
   loadWorktreeState: () => {
-    sendToJava({ op: 'worktreeState' })
+    // 携带激活目录：Java 反解托管根副本→源工作区随响应回带（缺陷HQ 待命落位归一数据源）
+    sendToJava({ op: 'worktreeState', workspacePath: get().activeWorkspacePath || get().projectPath })
   },
 
   setWorktreeEnabled: (enabled) => {
@@ -3084,9 +3091,12 @@ export const useStore = create<StoreState>((set, get) => ({
     const prevSessionId = get().currentSessionId
     const prevWorkspacePath = get().currentWorkspacePath
     get().requeueScheduledQueuesFor(prevSessionId)
+    // 落位归一（缺陷HQ 四轮真机：新建会话后 chip 先副本后项目）：覆盖前会话在副本执行根时，
+    // 落位先归一到源工作区再同步——点「+」的瞬间 scope/徽标就是项目目录，无翻转过程
+    const prevLandingWs = prevWorkspacePath ? (resolveWorktreeSource(get(), prevWorkspacePath) ?? prevWorkspacePath) : null
     set({
       currentSessionId: null,
-      ...(prevSessionId && prevWorkspacePath ? { activeWorkspacePath: prevWorkspacePath } : {}),
+      ...(prevSessionId && prevLandingWs ? { activeWorkspacePath: prevLandingWs } : {}),
       // 切换会话置位的首拉标志必须在此解除：首拉快照回来会被 case 'messages' 的
       // sessionId 守卫整包丢弃（currentSessionId 已是 null），applyMessagesSnapshot
       // 永不执行，「加载消息中」永久卡死（缺陷FH：加载中点 + 覆盖当前标签 → 标签假死）
@@ -4876,8 +4886,18 @@ export function handleResponse(
     }
 
     case 'worktreeState': {
-      // 待命页能力态：supported=false（老版 CLI）整体隐藏；gitOk=false 禁用给原因
-      set({ worktreeStandby: { supported: !!msg.supported, gitOk: !!msg.gitOk } })
+      // 待命页能力态：supported=false（老版 CLI）整体隐藏；gitOk=false 禁用给原因。
+      // sourceWorkspace=探测目录命中托管根副本时 Java 反解的源工作区（缺陷HQ 待命落位
+      // 归一：徽标/标签推送/建会话请求改用它）；resolvedFor=探测回显目录（匹配键）——
+      // 消费侧只在「当前落位目录==resolvedFor」时采信，切目录后旧反解不串台
+      set({
+        worktreeStandby: {
+          supported: !!msg.supported,
+          gitOk: !!msg.gitOk,
+          sourceWorkspace: (typeof msg.sourceWorkspace === 'string' && msg.sourceWorkspace) || undefined,
+          resolvedFor: (typeof msg.workspacePath === 'string' && msg.workspacePath) || undefined,
+        },
+      })
       break
     }
     case 'worktreeProgress': {
@@ -4930,11 +4950,25 @@ export function handleResponse(
         break
       }
       if (sid) {
-        // 会话落位目录 = 创建请求实际携带的 workspace（多目录会话：可能是激活的关联目录）
-        const ws = get().activeWorkspacePath || get().projectPath
+        // 会话落位目录 = Java 实际落库目录（缺陷HQ：副本作用域标签建会话会被托管根归一
+        // 源目录，请求携带的 workspace ≠ 实际落点——以响应回带为准，ws chip/乐观插入/
+        // 订阅作用域才不与归属脱节；缺省回退请求目录=未归一情形）
+        const ws =
+          (typeof msg.workspacePath === 'string' && msg.workspacePath) ||
+          get().activeWorkspacePath ||
+          get().projectPath
+        // 列表 scope 与会话落点对齐（缺陷HQ 四轮真机：发消息后 header 变 sess 前缀、
+        // 历史页停在副本 scope 看到的是旧会话）：落点经托管根归一后可能≠当前激活目录，
+        // 列表若不切过去，刷新就把乐观条目挤掉（也是 sess 前缀的直接来因），历史页
+        // chips 仍停在副本作用域。落点=新会话归属目录，切过去与「选会话跟随归属」同语义
+        const scopeBefore = get().activeWorkspacePath || get().projectPath
+        const scopeNeedsSync = !!ws && ws !== scopeBefore
         set({
           currentSessionId: sid,
           currentWorkspacePath: ws,
+          // 落点≠当前列表目录时同步 scope（连同下方 loadSessions 重拉该目录列表），
+          // 历史页 chips/徽标随会话归属——语义同 selectSession 跟随归属目录
+          ...(scopeNeedsSync ? { activeWorkspacePath: ws } : {}),
           creatingSession: false,
           // 新会话无历史：解除可能在途的首拉标志（触发路径刁钻但补清无害，缺陷FH 同族）
           loadingMessages: false,

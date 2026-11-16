@@ -296,10 +296,14 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const worktreeVisible = !sessionId && !!worktreeStandby?.supported && !worktreePending
   // 起点说明气泡钉住态（2026-11-13 反馈：悬浮之外点击也要能看到文字）
   const [worktreeNoteOpen, setWorktreeNoteOpen] = useState(false)
+  // 探测作用域 = 待命落位目录（缺陷HQ 三轮真机：挂载瞬间 store 尚未 init，激活目录还是
+  // 空串——空串探测只能回退项目根，副本作用域反解丢失；目录落定/chips 切换须重探）
+  const worktreeProbeWs = useStore((s) => s.activeWorkspacePath || s.projectPath || '')
   useEffect(() => {
-    // 待命态挂载即探测一次（client 实例级缓存，重复调用零开销）
+    // 待命态挂载即探测一次，落位目录变化重探（client 实例级缓存 supported，开销仅 git 检查）
+    if (!worktreeProbeWs) return
     loadWorktreeState()
-  }, [loadWorktreeState])
+  }, [loadWorktreeState, worktreeProbeWs])
   // 待执行定时任务总数（全项目，Java 权威列表镜像）——日历按钮角标
   const scheduledCount = useStore((s) => s.scheduledMessages.length)
   // 引导中的插队消息（排队卡片「引导」按钮发起，事件驱动清除）——chip 展示

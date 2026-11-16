@@ -41,6 +41,7 @@ import { firstCharUpper } from '@/utils/format'
 import { resolveWsColorIndex } from '@/utils/wsColors'
 import { readNewSessionConfig } from '@/utils/newSessionConfig'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
+import { resolveWorktreeSource } from '@/utils/worktreeSource'
 import { APP_VERSION } from '@/version/version'
 import './styles/global.less'
 import './styles/buttons.less'
@@ -82,6 +83,10 @@ export default function App() {
   // （worktree 内 cwd，链接化/产物卡锚定用），归属轴=源工作区——徽标/标签色块推送
   // 都按归属目录，否则色块落「匿名目录」（worktree 路径不在目录列表）
   const wtMetaForCurrent = useStore((s) => (s.currentSessionId ? s.worktreeMetaBySession[s.currentSessionId] : undefined))
+  // 待命落位归一（缺陷HQ）：探测目录是托管根副本时反解源工作区——待命徽标/标签推送/
+// 新标签落位改用它，新会话忠于项目目录。解析两路：worktree meta 映射（同步，零延迟，
+// 消除「先副本后项目」的 chip 翻转）→ worktreeState 反解（回显匹配键守卫，RPC 兜底）
+  const standbySource = useStore((s) => resolveWorktreeSource(s))
   const projectPath = useStore((s) => s.projectPath)
   const switchWorkspace = useStore((s) => s.setActiveWorkspace)
   const addLinkedWorkspace = useStore((s) => s.addLinkedWorkspace)
@@ -276,20 +281,22 @@ export default function App() {
   const handleNewTab = () => {
     const expected = currentSessionId
       ? currentWorkspacePath || projectPath
-      : linkedActiveWorkspacePath || projectPath
+      : standbySource || linkedActiveWorkspacePath || projectPath
     sendToJava({ op: 'createTab', workspacePath: expected })
   }
 
-  // 标题：列表里的标题（CLI 会随对话更新）→ 会话 id 前缀（列表尚未刷新时）→ 空
   // 标题 fallback 链：列表内标题 > 手动改名持久化 > 最后已知标题缓存（跨目录浏览，
-  // 多目录会话切目录后当前会话不在列表里）> sessionId 前缀。
-  // 后两层兜"切目录浏览"场景（多目录会话）：sessions 随激活目录全量替换后当前会话
-  // 不在新目录列表里，没有兜底层标题会闪回 sess_ 前缀（真机 2026-10-27 实测）
-  const sessionTitle =
+  // 多目录会话切目录后当前会话不在列表里）> 「新会话」占位 > sessionId 前缀。
+  // 「新会话」占位（缺陷HQ 四轮真机：发消息后 header 变 sess_ 前缀）：新会话落目录
+  // 合法但列表 scope 尚未切到落点时 currentSession 缺失，此前直接掉到 sess 前缀——
+  // 空标题一律走 i18n 「新会话」占位，与 Java 标签 tooltip 同语义
+  const rawSessionTitle =
     currentSession?.title ??
     (currentSessionId ? getPersisted(`zcode.sessionTitle.${currentSessionId}`) : null) ??
     (currentSessionId ? peekSessionTitle(currentSessionId) : null) ??
-    (currentSessionId ? currentSessionId.slice(0, 12) : '')
+    ''
+  const sessionTitle =
+    rawSessionTitle || (currentSessionId ? t('chat.header.untitled') : '')
 
   // 目录徽标（多目录会话·变体A·方案A）：语义两态——有会话=会话归属目录（不随 chips
   // 漂移），待命=落位目录（随 chips 切换；取值链同 createSession/listSessions 的
@@ -303,14 +310,15 @@ export default function App() {
   // 会话归属目录：worktree 会话=源工作区（meta 缺失时回落执行根，等列表刷新补 meta）
   const ownershipWs = wtMetaForCurrent?.sourceWorkspace || currentWorkspacePath
   const wsBadge = useMemo<{ dir: string; isProject: boolean; colorIndex: number | null } | null>(() => {
-    const dir = currentSessionId ? ownershipWs : linkedActiveWorkspacePath || projectPath
+    // 待命落位归一（缺陷HQ）：托管根副本待命显示源工作区（反解未达短暂回退激活目录）
+    const dir = currentSessionId ? ownershipWs : standbySource || linkedActiveWorkspacePath || projectPath
     if (!dir) return null
     const isProject =
       dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() ===
       projectPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
     if (isProject && linkedWorkspaces.length === 0) return null
     return { dir, isProject, colorIndex: isProject ? null : resolveWsColorIndex(dir, wsColors) }
-  }, [currentSessionId, ownershipWs, linkedActiveWorkspacePath, projectPath, linkedWorkspaces, wsColors])
+  }, [currentSessionId, ownershipWs, standbySource, linkedActiveWorkspacePath, projectPath, linkedWorkspaces, wsColors])
 
   // AI 重新生成标题：有真实用户消息才可生成；失败提示 6s 自动消失
   const canRegenerateTitle = useMemo(() => extractTitleExcerpt(messages) !== null, [messages])
@@ -328,8 +336,10 @@ export default function App() {
   // 变化时防抖 500ms；只在本 webview 连接 Java 时发送（mock 丢弃）
   const lastPushedKeyRef = useRef('')
   // 推送目录轴：会话=归属目录（worktree 会话=源工作区，Java 据此算色块/tooltip chip）；
-  // 待命=落位（与 createSession/listSessions 同一取值链）
-  const pushWsPath = currentSessionId ? ownershipWs || projectPath : linkedActiveWorkspacePath || projectPath
+  // 待命=落位（托管根副本归一源目录，缺陷HQ；与 wsBadge/createSession 同源）
+  const pushWsPath = currentSessionId
+    ? ownershipWs || projectPath
+    : standbySource || linkedActiveWorkspacePath || projectPath
   useEffect(() => {
     const effective = sessionTitle || (currentSessionId ? currentSessionId.slice(0, 12) : '')
     if (!effective && !pushWsPath) {

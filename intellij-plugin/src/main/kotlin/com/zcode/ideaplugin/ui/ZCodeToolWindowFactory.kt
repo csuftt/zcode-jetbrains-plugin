@@ -272,12 +272,14 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             /** 待命绑定既有副本（2026-11-15 新建会话懒创建，见 panel 构造参数注释） */
             pendingWorktree: com.zcode.ideaplugin.worktree.WorktreeRegistryStore.WorktreeSessionInfo? = null,
         ): Content {
-            // worktree 归属归一（2026-11-14 真机反馈）：初始目录是注册表在册的 worktree
-            // 执行根时改用源工作区——boot 历史页 scope/色块轴/持久化恢复全按归属目录语义
-            // （旧版本落位曾写 worktree cwd，重启恢复的旧标签同样在此被归一）。kv 查询
-            // EDT 安全；未登记（普通目录/桌面端建副本）原样
+            // worktree 归属归一（2026-11-14 真机反馈；缺陷HQ 扩到桌面端副本）：初始目录是
+            // worktree 执行根时改用源工作区——boot 历史页 scope/色块轴/持久化恢复全按归属
+            // 目录语义（旧版本落位曾写 worktree cwd，重启恢复的旧标签同样在此被归一）。
+            // resolveSourceWorkspace=注册表反查 + git 反解兜底（桌面端建的副本无注册条目，
+            // --git-common-dir 指回主仓）；仅托管根路径才起 git（普通目录纯路径判断零开销，
+            // 托管路径一次 rev-parse 约百毫秒，开标签一次性成本可接受）。普通目录原样
             val normalizedWorkspace = initialWorkspace?.takeIf { it.isNotBlank() }?.let { ws ->
-                runCatching { com.zcode.ideaplugin.worktree.WorktreeRegistry(project).sourceWorkspaceOf(ws) }
+                runCatching { com.zcode.ideaplugin.worktree.WorktreeRegistry(project).resolveSourceWorkspace(ws) }
                     .getOrNull() ?: ws
             } ?: initialWorkspace
             val panel: JComponent = try {
