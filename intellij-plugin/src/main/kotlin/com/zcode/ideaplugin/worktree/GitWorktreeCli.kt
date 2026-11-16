@@ -29,13 +29,6 @@ class GitWorktreeCli(private val gitExe: String = "git", private val timeoutMs: 
         val ok: Boolean get() = exitCode == 0 && !timedOut
     }
 
-    data class StartRefs(
-        val headSha: String?,
-        val headBranch: String?,
-        val localBranches: List<String>,
-        val remoteBranches: List<String>,
-    )
-
     data class WorktreeEntry(
         val path: Path,
         val headSha: String?,
@@ -79,22 +72,6 @@ class GitWorktreeCli(private val gitExe: String = "git", private val timeoutMs: 
     fun headBranch(dir: Path): String? {
         val r = run(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
         return if (r.ok) r.output.trim().ifEmpty { null } else null
-    }
-
-    /** 起点候选：当前 HEAD + 本地分支 + 远端分支（远端剔除各 remote 的 HEAD 指针引用） */
-    fun listStartRefs(dir: Path): StartRefs {
-        val refs = run(dir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
-        val local = mutableListOf<String>()
-        val remote = mutableListOf<String>()
-        if (refs.ok) {
-            refs.output.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.forEach { ref ->
-                when {
-                    ref.startsWith("refs/heads/") -> local.add(ref.removePrefix("refs/heads/"))
-                    ref.startsWith("refs/remotes/") && !ref.endsWith("/HEAD") -> remote.add(ref.removePrefix("refs/remotes/"))
-                }
-            }
-        }
-        return StartRefs(headSha(dir), headBranch(dir), local, remote)
     }
 
     /** 桶内目录名：仓库目录名（桌面端同款，取 basename） */

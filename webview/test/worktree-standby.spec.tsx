@@ -3,7 +3,7 @@
  *
  * 锁定行为：
  * 1. 老 CLI（supported=false）→ 待命条整体不渲染（门控降级矩阵）
- * 2. 支持时渲染开关；开启 → 下拉出现并下发 worktreeStartRefs 拉起点候选
+ * 2. 支持时渲染开关（起点恒当前 HEAD，下拉已随 2026-11-14 简化退役）
  * 3. worktreeProgress 驱动 creating/failed 状态
  * 4. listSessions 条目携带 worktree 元数据 → meta map 登记（chip 数据源）
  */

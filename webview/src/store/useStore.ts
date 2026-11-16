@@ -1197,6 +1197,14 @@ interface StoreState {
   loadWorktreeState: () => void
   /** 待命页开关 */
   setWorktreeEnabled: (enabled: boolean) => void
+  /** 创建失败三键（spec #52 Story 4）：重试=保草稿重走懒创建全流程 */
+  retryWorktreeFailed: () => void
+  /** 放弃 worktree 直接发送：关开关并按普通创建发出暂存草稿 */
+  sendWithoutWorktree: () => void
+  /** 取消：解除失败态与 worktree 意图（草稿由 InputBox 回填输入框后 discardPendingFirst） */
+  cancelWorktreeFailed: () => void
+  /** 清懒创建暂存草稿（取消回填后调用，防后续误复用） */
+  discardPendingFirst: () => void
   /** 懒创建暂存的首条消息：无会话时发送 → 先建会话，createSession 响应后自动发出 */
   pendingFirstMessage: string | null
   /** 懒创建暂存的首条消息的附件（与 pendingFirstMessage 同生命周期）*/
@@ -3057,6 +3065,38 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setWorktreeEnabled: (enabled) => {
     set({ worktreeEnabled: enabled, worktreeCreating: null, worktreeErrorCode: null })
+  },
+
+  // 创建失败三键（spec #52 Story 4：重试 / 放弃 worktree 直接发送 / 取消）。失败时通用
+  // 错误处理保草稿（见 Java 错误 case 的 worktreeCreating==='failed' 守卫），此处消费：
+  // 重试/直发走 sendMessage 懒创建全流程（看门狗基准/streaming 置位随行），草稿/附件/
+  // 定时标记原样传回——此前仅重 Arms 开关且草稿已被清空，两键都空转（评审缺陷）
+  retryWorktreeFailed: () => {
+    const s = get()
+    const draft = s.pendingFirstMessage
+    set({ worktreeEnabled: true, worktreeCreating: null, worktreeErrorCode: null })
+    if (draft && !s.currentSessionId && !s.creatingSession) {
+      const fireAt = s.pendingFirstScheduledFireAt
+      s.sendMessage(draft, s.pendingFirstAttachments ?? undefined, fireAt != null ? { scheduledFireAt: fireAt } : undefined)
+    }
+  },
+
+  sendWithoutWorktree: () => {
+    const s = get()
+    const draft = s.pendingFirstMessage
+    set({ worktreeEnabled: false, worktreeCreating: null, worktreeErrorCode: null })
+    if (draft && !s.currentSessionId && !s.creatingSession) {
+      const fireAt = s.pendingFirstScheduledFireAt
+      s.sendMessage(draft, s.pendingFirstAttachments ?? undefined, fireAt != null ? { scheduledFireAt: fireAt } : undefined)
+    }
+  },
+
+  cancelWorktreeFailed: () => {
+    set({ worktreeEnabled: false, worktreeCreating: null, worktreeErrorCode: null })
+  },
+
+  discardPendingFirst: () => {
+    set({ pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null })
   },
 
   createSessionForSchedule: (text, fireAt, providerId?, modelId?, keepCurrent?) => {
@@ -5912,7 +5952,18 @@ export function handleResponse(
         forkBusy: false,
         // 浏览器设置请求失败（如插件未安装）：页面内联提示（browserBusy 在途时才归属该页）
         ...(get().browserBusy ? { browserBusy: null, browserError: msg.message } : {}),
-        ...(get().creatingSession ? { creatingSession: false, pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null, pendingScheduleCreation: null, pendingGoalCreation: null } : {}),
+        // worktree 创建失败（worktreeProgress failed 先于本错误回执到达，Java 先推后应答）：
+        // 草稿保留给失败三键（重试/直发/取消回填）消费，其余创建失败仍清暂存防卡死
+        ...(get().creatingSession
+          ? {
+              creatingSession: false,
+              ...(get().worktreeCreating === 'failed'
+                ? {}
+                : { pendingFirstMessage: null, pendingFirstAttachments: null, pendingFirstScheduledFireAt: null }),
+              pendingScheduleCreation: null,
+              pendingGoalCreation: null,
+            }
+          : {}),
       })
       console.error('[store] Java 错误:', msg.message)
       // 错误清 streaming 后继续发队列下一条（排队意图明确；持续失败时用户可删队列项）；

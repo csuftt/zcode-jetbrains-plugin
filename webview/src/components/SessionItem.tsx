@@ -161,18 +161,26 @@ function SessionItemInner({
           {session.worktree && (() => {
             // 「基于 分支@提交」（同 ChatHeader，2026-11-14 简化定案）；单击=定位
             // ProjectView 节点（2026-11-14 反馈：chip 不再开新窗，打开走目录树右键）。
-            // 副本已删除（2026-11-15 反馈：会话保留）：chip 灰态只读，不触发定位
+            // 副本已删除（2026-11-15 反馈：会话保留）：chip 灰态只读，不触发定位。
+            // 起点缺失不兜底 'HEAD'（spec #52 追评「拿不到就不显示」）：双空时整段隐藏
             const wt = session.worktree
-            const refName = wt.startRef || 'HEAD'
-            const refDisp = wt.startSha ? `${refName}@${wt.startSha.slice(0, 7)}` : refName
+            const refDisp = wt.startSha
+              ? `${wt.startRef || 'HEAD'}@${wt.startSha.slice(0, 7)}`
+              : wt.startRef || ''
             const deleted = wt.deleted === true
             return (
               <span
                 className={`ws-header-badge ws-header-badge--worktree session-item__worktree-chip${deleted ? ' ws-header-badge--worktree-deleted' : ''}`}
-                title={deleted ? t('common.worktree.chipDeletedTooltip') : t('common.worktree.chipTooltip', { source: wt.sourceWorkspace })}
+                title={
+                  deleted
+                    ? t('common.worktree.chipDeletedTooltip')
+                    : `${wt.worktreeRoot}\n${t('common.worktree.chipTooltip', { source: wt.sourceWorkspace })}`
+                }
                 onClick={deleted ? undefined : () => sendToJava({ op: 'worktreeLocate', worktreeRoot: wt.worktreeRoot })}
               >
-                {`⎇ ${wt.bucket ? `${wt.bucket} · ` : ''}${t('common.worktree.chipFrom')} ${refDisp}`}
+                {`⎇ ${[wt.bucket, refDisp && `${t('common.worktree.chipFrom')} ${refDisp}`]
+                  .filter(Boolean)
+                  .join(' · ')}`}
               </span>
             )
           })()}

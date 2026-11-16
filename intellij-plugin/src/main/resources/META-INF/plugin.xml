@@ -55,9 +55,9 @@
                                 implementation="com.zcode.ideaplugin.ui.statusbar.ZCodeStatusBarWidgetFactory"/>
         <!-- worktree（0.4.6，spec #52）：ProjectView ZCGUIWorktrees 专属目录（虚拟节点，
              不挂 content root；门控=runtime/capabilities worktreeCwd，老 CLI 整体隐藏）+
-             项目态持有（后台快照，树构建零 git/RPC 阻塞） -->
+             项目态持有（后台快照，树构建零 git/RPC 阻塞）。WorktreeProjectState 注册走
+             类上 @Service(Service.Level.PROJECT) 注解（本项目其余服务同款），勿加 XML 重复注册 -->
         <treeStructureProvider implementation="com.zcode.ideaplugin.worktree.WorktreeTreeStructureProvider"/>
-        <projectService serviceImplementation="com.zcode.ideaplugin.worktree.WorktreeProjectState"/>
     </extensions>
 
     <actions>

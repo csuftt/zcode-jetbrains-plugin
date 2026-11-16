@@ -115,8 +115,8 @@ _Avoid_: 文件引用, completion
 ### 工作区与 worktree
 
 **托管 worktree（Managed worktree）**:
-在约定根 `~/.zcode/worktrees/<桶>/<仓库名>` 下按约定结构创建的 git worktree；只有这种结构会被 CLI 识别，并把记忆、hooks 信任映射回源工作区。
-_Avoid_: 临时目录, 副本, worktree 目录
+在约定根 `~/.zcode/worktrees/<桶>/<仓库名>` 下按约定结构创建的 git worktree；只有这种结构会被 CLI 识别，并把记忆、hooks 信任映射回源工作区。UI 文案与注释可用「worktree 副本/副本」作口语指代（对用户更直白），规范语域（ADR/spec/本表）统一用本词条。
+_Avoid_: 临时目录, worktree 目录
 
 **源工作区（Source workspace）**:
 worktree 派生自的那个工作区（本项目或关联目录）；worktree 的归属、展示与回收都以它为准。
@@ -135,11 +135,11 @@ _Avoid_: 隔离会话, 副本会话
 _Avoid_: 索引, 缓存, 登记表
 
 **起点（Start point）**:
-worktree 会话创建时刻定版的基准提交（完整 sha 快照），恒为创建时刻的当前 HEAD；「基于 xxx」标识与起点变更对比都以它为基准。桌面端自建副本缺失该快照时以 merge-base 现算兜底。
+worktree 会话创建时刻定版的基准提交（注册表存完整 sha，展示取短位），恒为创建时刻的当前 HEAD；「基于 xxx」标识与起点变更对比都以它为基准。桌面端自建副本缺失该快照时以 worktree 专属 HEAD reflog 首条（`worktree add` 落笔的历史事实，免疫主分支 rebase 改写）推断；仍拿不到就不显示——不拿推算值（merge-base 动态推算已于 2026-11-14 弃用）凑数。
 _Avoid_: 基点, 起始提交, base 分支
 
 **起点变更（Changes since start point）**:
-worktree 当前 HEAD 相对起点的全部新增提交与未提交改动；ProjectView 右键「查看起点变更…」的展示对象。
+worktree 当前 HEAD 相对起点的全部新增提交与未提交改动；ProjectView worktree 节点树内展开（「提交 (N)」+「未提交改动 (M)」两段，30→15s 轮询+回合事件驱动刷新）的展示对象。
 _Avoid_: 变更历史, 提交日志, diff 记录
 
 ### 渠道与模型

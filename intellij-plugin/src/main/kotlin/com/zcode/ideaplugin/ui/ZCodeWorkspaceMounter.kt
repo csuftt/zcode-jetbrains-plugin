@@ -65,9 +65,11 @@ object ZCodeLinkedWorkspaces {
     @Synchronized
     fun colorIndexFor(project: Project, path: String): Int {
         // worktree 执行根 → 源工作区（0.4.6）：worktree 会话的色块必须与主分支同色，
-        // 否则同项目两色（2026-11-13 反馈）；注册表未登记的（桌面端建的）不映射
+        // 否则同项目两色（2026-11-13 反馈）。resolveSourceWorkspace=注册表反查 + git 反解
+        // 兜底（--git-common-dir 指回主仓，桌面端建的副本无注册条目也能归一，缺陷HQ 口径；
+        // 进程级缓存吸收高频调用，仅托管根路径才起 git）
         val effectivePath = runCatching {
-            com.zcode.ideaplugin.worktree.WorktreeRegistry(project).sourceWorkspaceOf(path) ?: path
+            com.zcode.ideaplugin.worktree.WorktreeRegistry(project).resolveSourceWorkspace(path) ?: path
         }.getOrDefault(path)
         positionalColorIndex(read(project), effectivePath)?.let { return it }
         val props = PropertiesComponent.getInstance(project)

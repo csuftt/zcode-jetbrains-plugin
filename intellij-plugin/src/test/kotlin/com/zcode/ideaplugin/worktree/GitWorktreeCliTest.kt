@@ -105,9 +105,8 @@ class GitWorktreeCliTest {
         val dir = Files.createDirectory(tmp.resolve("plain"))
         assertFalse(cli.isRepository(dir))
         assertNull(cli.toplevel(dir))
-        val refs = cli.listStartRefs(dir)
-        assertNull(refs.headSha)
-        assertTrue(refs.localBranches.isEmpty() && refs.remoteBranches.isEmpty())
+        assertNull(cli.headSha(dir))
+        assertNull(cli.headBranch(dir))
         val ex = assertIs<GitWorktreeCli.GitWorktreeException>(runCatching {
             cli.createManagedWorktree(dir, base())
         }.exceptionOrNull())
@@ -118,15 +117,20 @@ class GitWorktreeCliTest {
     fun `创建 detached worktree 不占分支`() {
         val repo = initRepo()
         val base = base()
+        // 不占分支：创建前后仓库本地分支集合不变（起点下拉退役后 listStartRefs 已删，
+        // 用 for-each-ref 直证；worktree 与主仓共享 refs，对照须取创建前后）
+        val branchSet: () -> List<String> = {
+            git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+                .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        }
+        val branchesBefore = branchSet()
         val wt = cli.createManagedWorktree(repo, base, "HEAD")
         assertEquals(4, wt.bucket.length, "桶为 4 位 hex")
         assertTrue(Files.exists(wt.root), "worktree 根已创建")
         assertTrue(Files.isRegularFile(wt.root.resolve(".git")), "worktree 的 .git 是指针文件")
         assertEquals(cli.headSha(repo), cli.headSha(wt.root), "HEAD 指到起点提交")
         assertNull(cli.headBranch(wt.root), "detached 无分支")
-        // 起点候选里没有新分支（不占分支）
-        val refs = cli.listStartRefs(repo)
-        assertTrue(refs.localBranches.none { it.startsWith(wt.bucket) })
+        assertEquals(branchesBefore, branchSet(), "本地分支集合不变（worktree 恒 detached，不建新分支）")
         // 托管结构解析回环
         val parsed = cli.parseManagedWorktreePath(base, wt.root)
         assertEquals(wt.bucket, parsed?.bucket)

@@ -104,7 +104,13 @@ class WorktreeNewSessionAction : AnAction(ZCodeBundle.message("worktree.menu.new
     override fun actionPerformed(e: AnActionEvent) {
         val entry = selectedEntries(e).firstOrNull() ?: return
         val project = e.project ?: return
-        // 只开待命标签零 RPC，EDT 直调；startRef/startSha 沿用节点快照（桌面端条目退 HEAD/headSha）
+        // 只开待命标签零 RPC，EDT 直调。起点沿用节点快照：注册表 startSha 优先，桌面端
+        // 副本退 reflog 首条（inferredBaseSha，创建时刻历史事实）。都缺留空（chip 不显示
+        // 起点），绝不拿当前 headSha 冒充——headSha 兜底会把该条目登记成「起点=现在」，此后
+        // log startSha..HEAD 恒空、变更计数清零（spec #52 追评：不拿推算值凑数）
+        val startSha = entry.startSha?.takeIf { it.isNotEmpty() }
+            ?: entry.inferredBaseSha?.takeIf { it.isNotEmpty() }
+            ?: ""
         com.zcode.ideaplugin.ui.ZCodeToolWindowFactory.openPendingWorktreeTab(
             project,
             WorktreeRegistryStore.WorktreeSessionInfo(
@@ -112,8 +118,9 @@ class WorktreeNewSessionAction : AnAction(ZCodeBundle.message("worktree.menu.new
                 worktreeRoot = entry.root.toString(),
                 cwd = entry.root.toString(),
                 sourceWorkspace = entry.sourceDir.toString(),
-                startRef = entry.startRef?.takeIf { it.isNotBlank() } ?: "HEAD",
-                startSha = entry.startSha ?: entry.headSha ?: "",
+                startRef = entry.startRef?.takeIf { it.isNotBlank() }
+                    ?: if (startSha.isNotEmpty()) "HEAD" else "",
+                startSha = startSha,
                 bucket = entry.bucket,
                 createdAt = System.currentTimeMillis(),
             ),

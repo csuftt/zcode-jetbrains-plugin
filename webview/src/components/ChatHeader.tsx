@@ -178,9 +178,11 @@ export function ChatHeader({
             {wt && (() => {
               // 「基于 分支@提交」（2026-11-14 简化定案：起点恒 HEAD，startRef 落创建
               // 时刻分支名——游离时 HEAD；老条目无 sha 退化只显 ref）。
-              // 副本已删除（2026-11-15 反馈：会话保留）：chip 灰态只读，不触发定位
-              const refName = wt.startRef || 'HEAD'
-              const refDisp = wt.startSha ? `${refName}@${wt.startSha.slice(0, 7)}` : refName
+              // 起点缺失不兜底 'HEAD'（spec #52 追评「拿不到就不显示」）：HEAD 随副本
+              // 演进漂移，渲染出来是假起点；startRef/startSha 双空时「基于 X」整段隐藏
+              const refDisp = wt.startSha
+                ? `${wt.startRef || 'HEAD'}@${wt.startSha.slice(0, 7)}`
+                : wt.startRef || ''
               const deleted = wt.deleted === true
               return (
               <span
@@ -188,7 +190,9 @@ export function ChatHeader({
                 onClick={deleted ? undefined : () => sendToJava({ op: 'worktreeLocate', worktreeRoot: wt.worktreeRoot })}
               >
                 <span className="ws-header-badge__name">
-                  {`⎇ ${wt.bucket ? `${wt.bucket} · ` : ''}${t('common.worktree.chipFrom')} ${refDisp}`}
+                  {`⎇ ${[wt.bucket, refDisp && `${t('common.worktree.chipFrom')} ${refDisp}`]
+                    .filter(Boolean)
+                    .join(' · ')}`}
                 </span>
                 <span className="ws-header-badge__tip" aria-hidden="true">
                   <span className="ws-header-badge__tip-path">

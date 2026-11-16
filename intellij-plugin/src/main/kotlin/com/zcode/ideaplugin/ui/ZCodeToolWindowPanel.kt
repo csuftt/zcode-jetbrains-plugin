@@ -2893,6 +2893,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         if (ids.isEmpty() && orphans.isEmpty()) return emptyList()
         val details = if (ids.isEmpty()) emptyList()
         else runCatching { client.listSessionsByIds(ids, workspacePath, timeoutMs = 15_000L) }.getOrDefault(emptyList())
+        val desktopBaseByRoot = HashMap<String, String>() // 桌面行起点缓存：同根多会话只读一次 reflog
         return (details + orphans).mapNotNull { s ->
             if (s.sessionId in hiddenIds) return@mapNotNull null
             val reg0 = regEntries.find { it.sessionId == s.sessionId }
@@ -2902,11 +2903,18 @@ if (!window.__ZCODE_LOG_HOOK__) {
             // 孤儿（reg0/row 双空）不在此挂 meta：交给托管根派生（带 reflog 起点，比空
             // startRef 的「基于 HEAD」更准）
             if (reg0 != null || row != null) {
+                // 桌面行（reg0 空）起点：worktree 专属 reflog 首条，与树节点 inferredBaseSha
+                // 同源（历史事实非推算）；拿不到留空，前端对空起点不渲染「基于 HEAD」
+                //（spec #52 追评：不拿推算值凑数）。此前传空串导致 chip「基于 HEAD」与
+                // 树节点 reflog sha 两个口径并存
+                val desktopBase = if (reg0 != null) ""
+                else desktopBaseByRoot.getOrPut(root) { worktreeReflogBaseSha(root)?.take(7) ?: "" }
                 metas[s.sessionId] = worktreeMetaJson(
                     cwd, root,
                     reg0?.sourceWorkspace ?: workspacePath,
                     reg0?.bucket ?: worktreeBucketOf(root),
-                    reg0?.startRef ?: "", reg0?.startSha ?: "",
+                    reg0?.startRef ?: if (desktopBase.isNotEmpty()) "HEAD" else "",
+                    reg0?.startSha ?: desktopBase,
                     if (reg0 != null) "plugin" else "desktop",
                 )
             }
@@ -2935,13 +2943,24 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }.filter { it.sessionId !in excludeIds && !it.sessionId.startsWith("sess_subagent") }
     }
 
-    /** 桌面端建行的桶名兜底：从路径按托管结构解析（解析失败空串） */
+    /** 桌面端建行的桶名兜底：从路径按托管结构解析（解析失败空串）。数据根走
+     *  [GitWorktreeCli.dataBaseDir]（env 感知，ADR-0012 托管根约定），勿退 user.home——
+     *  setting.json 重定向后 user.home 是冻结旧根，解析必落空 */
     private fun worktreeBucketOf(worktreeRoot: String): String = runCatching {
-        GitWorktreeCli().parseManagedWorktreePath(
-            java.nio.file.Path.of(System.getProperty("user.home")),
+        val cli = GitWorktreeCli()
+        cli.parseManagedWorktreePath(
+            cli.dataBaseDir(),
             java.nio.file.Path.of(worktreeRoot),
         )?.bucket
     }.getOrNull() ?: ""
+
+    /** 桌面端副本起点（显示面）：worktree 专属 HEAD reflog 首条（创建时刻历史事实，
+     *  非推算，spec #52 追评口径）。reflog 缺失（core.logAllRefUpdates=false 等场景）
+     *  返回 null——调用方按「起点未知不显示」处理，绝不拿当前 HEAD 冒充 */
+    private fun worktreeReflogBaseSha(worktreeRoot: String): String? = runCatching {
+        GitWorktreeCli(gitExe = WorktreeGits.executablePath(project))
+            .creationBaseSha(java.nio.file.Path.of(worktreeRoot))
+    }.getOrNull()
 
     /**
      * 托管根会话 meta 派生（缺陷HQ 第三腿·显示面）：workspace 落托管根
@@ -2953,7 +2972,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
         workspacePath: String,
         baseCache: MutableMap<String, String>,
     ): JsonObject? {
-        val cli = GitWorktreeCli()
+        // creationBaseSha 要跑 git rev-parse：走 git4idea 解析通道（WorktreeRegistry 同款，
+        // 防 IDE 环境 PATH 缺 git 时静默失败）；数据根 env 感知（ADR-0012）
+        val cli = GitWorktreeCli(gitExe = WorktreeGits.executablePath(project))
         val dataBase = cli.dataBaseDir()
         val parsed = runCatching { cli.parseManagedWorktreePath(dataBase, java.nio.file.Path.of(workspacePath)) }
             .getOrNull() ?: return null
@@ -3093,11 +3114,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
             put("phase", "creating")
             put("workspacePath", workspacePath)
         })
+        val cli = GitWorktreeCli(gitExe = WorktreeGits.executablePath(project))
         val creator = WorktreeSessionCreator(
-            GitWorktreeCli(gitExe = WorktreeGits.executablePath(project)),
-            // 数据根恒 homedir（主 app-server 不注入 ZCODE_DATA_BASE_DIR，ADR-0011/0012：
-            // CLI 侧托管根映射按 homedir 解析，两端一致）
-            java.nio.file.Path.of(System.getProperty("user.home")),
+            cli,
+            // 数据根统一走 dataBaseDir()（env 感知，ADR-0012 与探测/派生/孤儿扫描同口径）：
+            // env 未注入时即 homedir（主线路径零变化）；重定向时创建与发现同根，
+            // 不再「创建落 home、发现读 env 根」的双口径撕裂
+            cli.dataBaseDir(),
         )
         val result = try {
             creator.create(source, startRef, createSession = { cwd ->
@@ -3403,7 +3426,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         val startSha = cli.headSha(parentDir) ?: "HEAD"
         val wt = cli.createManagedWorktree(
             java.nio.file.Path.of(source),
-            java.nio.file.Path.of(System.getProperty("user.home")),
+            cli.dataBaseDir(), // 托管根跟随数据根（ADR-0012）：user.home 在重定向后与桌面端/记忆映射脱钩
             startSha,
         )
         val childSessionId = "sess_" + java.util.UUID.randomUUID()
@@ -4646,8 +4669,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         // 归位，不损数据；新包删除已不清注册表，该兜底只救历史孤儿）
                         runCatching {
                             val wr = row.worktreeRoot ?: return@runCatching false
-                            val parsed = GitWorktreeCli().parseManagedWorktreePath(
-                                java.nio.file.Path.of(System.getProperty("user.home")),
+                            val cli0 = GitWorktreeCli()
+                            val parsed = cli0.parseManagedWorktreePath(
+                                cli0.dataBaseDir(), // 数据根 env 感知（ADR-0012）：重定向后 user.home 是冻结旧根，解析必落空
                                 java.nio.file.Path.of(wr),
                             )
                             val hit = parsed?.name?.equals(
@@ -7342,8 +7366,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 会话所属目录随切换演进（persistTabs 恢复依据，见 lastSessionWorkspace 注释）。
         // 请求 workspacePath 是执行根语义（worktree 会话=worktree 内 cwd，缺陷HF 规则），
         // 归属轴反解到源工作区——色块/tooltip/持久化按归属目录（落 worktree cwd=无主色块
-        // + 匿名 scope，2026-11-14 真机反馈）；未登记（非 worktree/桌面端建无注册）原样
-        lastSessionWorkspace = worktreeRegistry.sourceWorkspaceOf(workspacePath) ?: workspacePath
+        // + 匿名 scope，2026-11-14 真机反馈）。resolveSourceWorkspace=注册表反查 + git 反解
+        // 兜底（缺陷HQ 口径：桌面端建的副本无注册条目也归一，色块与主目录同色）
+        lastSessionWorkspace = worktreeRegistry.resolveSourceWorkspace(workspacePath) ?: workspacePath
         refreshTabColorIcon() // 跨目录切会话 → 色块跟随归属目录
 
         val messages = resumeAndReadMessages(sessionId, workspacePath)

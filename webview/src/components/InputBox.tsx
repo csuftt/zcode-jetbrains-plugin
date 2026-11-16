@@ -292,6 +292,12 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
   const worktreeCreating = useStore((s) => s.worktreeCreating)
   const worktreeErrorCode = useStore((s) => s.worktreeErrorCode)
   const setWorktreeEnabled = useStore((s) => s.setWorktreeEnabled)
+  const retryWorktreeFailed = useStore((s) => s.retryWorktreeFailed)
+  const sendWithoutWorktree = useStore((s) => s.sendWithoutWorktree)
+  const cancelWorktreeFailed = useStore((s) => s.cancelWorktreeFailed)
+  const discardPendingFirst = useStore((s) => s.discardPendingFirst)
+  const pendingFirstMessage = useStore((s) => s.pendingFirstMessage)
+  const pendingFirstAttachments = useStore((s) => s.pendingFirstAttachments)
   const loadWorktreeState = useStore((s) => s.loadWorktreeState)
   const worktreeVisible = !sessionId && !!worktreeStandby?.supported && !worktreePending
   // 起点说明气泡钉住态（2026-11-13 反馈：悬浮之外点击也要能看到文字）
@@ -1933,11 +1939,40 @@ export function InputBox({ onSend, isStreaming = false, onStop, disabled = false
                 {t('common.worktree.failed')}
                 {worktreeErrorCode ? `（${worktreeErrorCode}）` : ''}
               </span>
-              <button type="button" className="worktree-bar__btn" onClick={() => setWorktreeEnabled(true)}>
+              {/* 失败三键（spec #52 Story 4）：重试=保草稿重走懒创建；直发=关开关按普通
+                  创建发出暂存草稿；取消=放弃 worktree 意图并把草稿回填输入框（文本回填
+                  为纯文本——@引用块不重解析成 chip，图片按 base64 复原）。此前重试仅重
+                  Arms 开关且草稿已被通用错误处理清空，两键都空转（评审缺陷HS 同批） */}
+              <button type="button" className="worktree-bar__btn" onClick={retryWorktreeFailed}>
                 {t('common.worktree.retry')}
               </button>
-              <button type="button" className="worktree-bar__btn" onClick={() => setWorktreeEnabled(false)}>
+              <button type="button" className="worktree-bar__btn" onClick={sendWithoutWorktree}>
                 {t('common.worktree.sendWithout')}
+              </button>
+              <button
+                type="button"
+                className="worktree-bar__btn"
+                onClick={() => {
+                  if (pendingFirstMessage) setTextFromHistory(pendingFirstMessage)
+                  const failedImages = (pendingFirstAttachments ?? []).filter(
+                    (a): a is ImageAttachmentInput => a.kind === 'image',
+                  )
+                  if (failedImages.length) {
+                    setImages(failedImages.map((a, i) => ({
+                      id: `img_wtfail_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+                      filename: a.filename,
+                      mediaType: a.mimeType,
+                      base64: a.dataBase64,
+                      sizeBytes: a.sizeBytes,
+                      width: 0,
+                      height: 0,
+                    })))
+                  }
+                  cancelWorktreeFailed()
+                  discardPendingFirst()
+                }}
+              >
+                {t('common.confirm.cancel')}
               </button>
             </div>
           ) : worktreeCreating === 'creating' ? (
