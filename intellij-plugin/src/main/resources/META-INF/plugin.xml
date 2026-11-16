@@ -34,6 +34,11 @@
          缺失时仅提交框按钮缺席，其余功能不受影响）。Action 注册在可选配置文件，
          无 git4idea 的 IDE 不加载该类（类体内引用 git4idea，不随主配置强载） -->
     <depends optional="true" config-file="git4idea-dependency.xml">Git4Idea</depends>
+    <!-- MD 预览（阅读模式）划选右键发引用：经 markdown 插件官方 EP 注入采集脚本 + 运行时
+         把 action 注入 Markdown.PreviewGroup 右键菜单组（机制考据见 design-research 2026-11-16）。
+         markdown 插件缺席（被禁用/无捆绑）时仅此功能缺席；markdown 类引用全部隔离在
+         mdpreview 包（仅 EP 实例化时加载），主配置 action 不触碰。 -->
+    <depends optional="true" config-file="md-preview-dependency.xml">org.intellij.plugins.markdown</depends>
 
     <!-- 原生 UI 文案 bundle（messages/ZCodeBundle*.properties，默认中文 + en/ja/ko） -->
     <resource-bundle>messages.ZCodeBundle</resource-bundle>
@@ -107,6 +112,12 @@
                 icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
             <add-to-group group-id="ConsoleEditorPopupMenu" anchor="after" relative-to-action="ZCode.SendConsoleTextToInput"/>
         </action>
+        <!-- MD 预览（阅读模式）右键「发送选中内容」（不入任何静态组，运行时由
+             ZcodeMdSelectionRefExtension 注入 markdown 插件 Markdown.PreviewGroup 菜单组；
+             233 无该组则本项永不显示）。文案构造器取值（同上，不走 XML %key%） -->
+        <action id="ZCode.MdPreviewSelectionToInput"
+                class="com.zcode.ideaplugin.action.MdPreviewSelectionToInputAction"
+                icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui"/>
         <!-- 测试树右键「让 ZC GUI 解释此次失败」（调研 ④ 加分项）：
              TestTreePopupMenu 是 SM 树共用组（2023.3 常量池探针实证），testProxy 按名取 -->
         <action id="ZCode.ExplainTestFailure"

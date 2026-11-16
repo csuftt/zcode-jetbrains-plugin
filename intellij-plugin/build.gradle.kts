@@ -132,8 +132,10 @@ intellij {
     type.set("IC")  // IC = Idea Community
 
     // 用到的插件（Bundled）：Git4Idea = AI Commit Message 的真 diff 源（各家 IDE 均内置；
-    // plugin.xml 以 optional depends 声明，运行期缺失不致命、仅提交框按钮缺席）
-    plugins.set(listOf("Git4Idea"))
+    // plugin.xml 以 optional depends 声明，运行期缺失不致命、仅提交框按钮缺席）。
+    // org.intellij.plugins.markdown = MD 预览划选发引用（官方 EP browserPreviewExtensionProvider
+    // 编译面；捆绑插件各 IDE 均有，233/262 接口同构，optional depends 缺席不致命）
+    plugins.set(listOf("Git4Idea", "org.intellij.plugins.markdown"))
 
     // 不每次都更新 plugin
     updateSinceUntilBuild.set(false)

@@ -1,0 +1,11 @@
+<!-- Markdown 插件可选依赖的扩展注册（主 plugin.xml 以 optional depends 引入）。
+     MD 预览划选右键发引用：经官方 EP browserPreviewExtensionProvider 挂进预览面板，
+     注入选区采集脚本（类相对资源 zcodeMdSelectionRef.js，随预览页面构建自动带上），
+     并在运行时把「发送选中内容到 ZC GUI」action 注入 Markdown.PreviewGroup 菜单组
+     （该组 2024.x 起才有；233 无此组时注入静默跳过，功能仅缺席不报错）。
+     EP 命名空间是 org.intellij.markdown（扩展点 qualifiedName 前缀），非插件 id 本身。 -->
+<idea-plugin>
+    <extensions defaultExtensionNs="org.intellij.markdown">
+        <browserPreviewExtensionProvider implementation="com.zcode.ideaplugin.mdpreview.ZcodeMdSelectionRefExtension$Provider"/>
+    </extensions>
+</idea-plugin>
