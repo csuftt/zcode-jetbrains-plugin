@@ -243,6 +243,108 @@ class WorktreeSendToGuiAction : AnAction(
     }
 }
 
+/**
+ * 打开原文件（2026-11-17 反馈：文件行点/双击只有 diff，缺「直接看原文件」的入口）：
+ * 变更树文件行（提交内/未提交组）右键菜单——未提交组打开副本目录里的工作文件
+ * （真实可编辑）；提交内打开该提交时刻的快照（内存只读 LightVirtualFile，标签名带
+ * 提交短 hash 标识历史版本）。D 状态置灰：未提交 D=磁盘已无此文件，提交内 D=该提交
+ * 删的（blob 在该提交树上不存在）。
+ *
+ * 选区解析走 SELECTED_ITEMS（WorktreeOpenSessionsGroup 同款双路兜底）：文件行不是
+ * EntryNode，provider 的 SELECTED_ENTRIES 不供给；自定义 DataKey 在 BGT update 下
+ * 会整项消失（2026-11-16 实锤），SELECTED_ITEMS pane 直接应答两线程都稳。
+ */
+class WorktreeOpenFileAction : AnAction(ZCodeBundle.message("worktree.file.open"), null, ZCodeIcons.ZcGui) {
+
+    private fun selectedFileNodes(e: AnActionEvent): List<WorktreeFileNode> {
+        // ① SELECTED_ITEMS（pane 快照应答，EDT/BGT 均可靠）
+        e.dataContext.getData(com.intellij.openapi.actionSystem.PlatformCoreDataKeys.SELECTED_ITEMS)
+            ?.filterIsInstance<WorktreeFileNode>()?.takeIf { it.isNotEmpty() }?.let { return it }
+        val project = e.project ?: return emptyList()
+        // ② 当前视图树直读：DefaultMutableTreeNode.userObject 解包（selectedEntries 同款）
+        return runCatching {
+            com.intellij.ide.projectView.ProjectView.getInstance(project).currentProjectViewPane?.tree
+                ?.selectionPaths
+                ?.mapNotNull { p -> (p.lastPathComponent as? javax.swing.tree.DefaultMutableTreeNode)?.userObject }
+                ?.filterIsInstance<WorktreeFileNode>()
+                ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
+    override fun update(e: AnActionEvent) {
+        val nodes = selectedFileNodes(e)
+        e.presentation.isVisible = nodes.isNotEmpty()
+        e.presentation.isEnabled = nodes.all { it.file.status != 'D' }
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val nodes = selectedFileNodes(e)
+        if (nodes.isEmpty()) return
+        val app = com.intellij.openapi.application.ApplicationManager.getApplication()
+        // blob 拉取/磁盘 VFS 刷新放后台，EDT 只做打开（WorktreeDiffOpener 同款节奏）
+        app.executeOnPooledThread {
+            val failures = mutableListOf<String>()
+            val binaries = mutableListOf<String>()
+            val opened = mutableListOf<com.intellij.openapi.vfs.VirtualFile>()
+            for (node in nodes) {
+                val ioFile = node.entry.root.resolve(node.file.path).toFile()
+                if (node.commit == null) {
+                    val vf = runCatching {
+                        com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
+                    }.getOrNull()
+                    if (vf == null) failures += node.file.path else opened += vf
+                } else {
+                    val bytes = runCatching {
+                        GitWorktreeCli(gitExe = WorktreeGits.executablePath(project), timeoutMs = 30_000L)
+                            .blobBytes(node.entry.root, "${node.commit.sha}:${node.file.path}")
+                    }.getOrNull()
+                    if (bytes == null) {
+                        failures += node.file.path
+                        continue
+                    }
+                    // 内容通道：LightVirtualFile 全 CharSequence 化（233 javap 实锤，无 byte[] 构造），
+                    // 编码检测复用 DiffContentFactory.createFromBytes（diff 视图同款，UTF-8/GBK 自动识别），
+                    // 文本取解码后的 document.text；二进制快照不硬塞文本编辑器，单独提示
+                    val fileName = node.file.path.substringAfterLast('/')
+                    val content = runCatching {
+                        com.intellij.diff.DiffContentFactory.getInstance().createFromBytes(
+                            project, bytes,
+                            com.intellij.openapi.fileTypes.FileTypeManager.getInstance().getFileTypeByFileName(fileName),
+                            fileName,
+                        )
+                    }.getOrNull()
+                    val text = (content as? com.intellij.diff.contents.DocumentContent)?.document?.text
+                    if (text == null) {
+                        binaries += node.file.path
+                    } else {
+                        opened += com.intellij.testFramework.LightVirtualFile(
+                            "$fileName @ ${node.commit.sha.take(7)}",
+                            com.intellij.openapi.fileTypes.FileTypeManager.getInstance().getFileTypeByFileName(fileName),
+                            text,
+                        ).apply { setWritable(false) }
+                    }
+                }
+            }
+            app.invokeLater {
+                if (project.isDisposed) return@invokeLater
+                val fem = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                for (vf in opened) {
+                    runCatching { fem.openFile(vf, true) }
+                }
+                if (failures.isNotEmpty()) {
+                    notify(project, ZCodeBundle.message("worktree.file.openFailed", failures.joinToString("、")))
+                }
+                if (binaries.isNotEmpty()) {
+                    notify(project, ZCodeBundle.message("worktree.file.binary", binaries.joinToString("、")))
+                }
+            }
+        }
+    }
+
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+}
+
 class WorktreeDeleteAction : AnAction(ZCodeBundle.message("worktree.menu.delete"), null, ZCodeIcons.ZcGui) {
     override fun update(e: AnActionEvent) {
         val items = selectedEntries(e)

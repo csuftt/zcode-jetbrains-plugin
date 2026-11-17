@@ -325,14 +325,15 @@ class WorktreeCommitNode(
 }
 
 /** 文件行（叶子）；双击 → 单文件 diff（编辑器 tab）。commit 上下文决定旧侧：提交内=父提交，未提交=HEAD/磁盘。
- *  value=文件路径（稳定键）：状态变化（M→D 等）同键匹配，行样式原地更新不折叠 */
+ *  value=文件路径（稳定键）：状态变化（M→D 等）同键匹配，行样式原地更新不折叠。
+ *  entry/commit 公开（右键「打开原文件」动作按节点取上下文，WorktreeOpenFileAction） */
 class WorktreeFileNode(
     project: Project,
-    private val entry: WorktreeProjectState.Entry,
+    val entry: WorktreeProjectState.Entry,
     val file: GitWorktreeCli.FileChange,
     private val viewSettings: ViewSettings,
     order: Int,
-    private val commit: GitWorktreeCli.CommitChange? = null,
+    val commit: GitWorktreeCli.CommitChange? = null,
 ) : WorktreeNodeBase<String>(project, file.path, viewSettings, order) {
 
     override fun update(presentation: PresentationData) {

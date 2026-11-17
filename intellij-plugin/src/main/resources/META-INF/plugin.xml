@@ -163,6 +163,11 @@
                     class="com.zcode.ideaplugin.worktree.WorktreeDeleteAction"/>
             <action id="ZCode.WorktreeCleanup"
                     class="com.zcode.ideaplugin.worktree.WorktreeCleanupAction"/>
+            <!-- 文件行（提交内/未提交组）右键「打开原文件」（2026-11-17）：文件行选中时
+                 上面全部动作隐藏（它们只认 WorktreeEntryNode），本项 visible；副本节点
+                 选中时本项隐藏——菜单随选区形态二选一，无残留 -->
+            <action id="ZCode.WorktreeOpenFile"
+                    class="com.zcode.ideaplugin.worktree.WorktreeOpenFileAction"/>
             <separator/>
         </group>
     </actions>
