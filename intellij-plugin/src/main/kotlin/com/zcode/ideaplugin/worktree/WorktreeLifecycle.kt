@@ -78,16 +78,18 @@ class WorktreeLifecycle(private val project: Project) {
     enum class DeleteOutcome { REMOVED, DIR_LEFT }
 
     /**
-     * 执行删除（守卫已由调用方过完）。卸载本插件打开的该 worktree 会话（聊天记录保留，
-     * 不删库——与插件「删除会话」语义不同），git remove（force 由调用方按确认结果传）。
-     * 注册表条目保留（2026-11-15 反馈：会话不连带消失，chip 灰态）。桌面端的任务索引
-     * 行不动（只读边界），其会话卸载由桌面端自身处理。
+     * 执行删除（守卫已由调用方过完）。轻量卸载本插件打开的该 worktree 会话（聊天记录
+     * 保留，不删库——与插件「删除会话」语义不同；close 直发不 resume，避免把 pending
+     * 会话的 runtime 物化出来反手锁住待删目录，2026-11-17 排查），git remove（force
+     * 由调用方按确认结果传）。注册表条目保留（2026-11-15 反馈：会话不连带消失，
+     * chip 灰态）。桌面端的任务索引行不动（只读边界），其会话卸载由桌面端自身处理。
      *
      * Windows 占用兜底（2026-11-13 真机：git failed to delete … Permission denied）：
      * ① 删除前先关掉以该 worktree（或其子目录）为根的 IDE 项目窗口——「打开」功能开的
      * 新窗口持有句柄，git 删不动；② git remove 仍失败 → 文件系统递归强删（清只读）+
-     * prune 清 git 管理区；③ 只剩空目录（真机实证：会话进程 cwd 停在目录里，Windows 对
-     * cwd 目录拒删）→ 视为删除成功，记录照清、列表收敛，通知空目录暂留可手删；
+     * prune 清 git 管理区；③ 只剩空目录（真机实证：物化过的会话 runtime / IDE 句柄
+     * 停在目录里，Windows 拒删）→ 视为删除成功，记录照清、列表收敛，通知空目录暂留
+     * 可手删（30s 空桶清扫会在锁释放后自动收走）；
      * ④ 还有文件删不掉 → in-use 指引 + 残留诊断日志。
      */
     fun delete(worktreeRoot: Path, sourceWorkspace: Path, force: Boolean): DeleteOutcome {

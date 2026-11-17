@@ -4076,19 +4076,19 @@ class ZCodeProtocolClient private constructor(
      * 仅卸载运行时会话（app-server 内存/索引），**不删 db.sqlite 记录**——worktree
      * 删除编排用（桌面同语义：删除 worktree 后任务保留、变只读）。与 [closeSession]
      * （插件删除会话=卸载+删库）语义不同，勿混用。
+     *
+     * 不 resume 直接 close（2026-11-17 删除慢排查）：旧实现 resume 先行，会把 pending
+     * 会话的 runtime 现场物化——进程拉起、cwd 落进 worktree，待删根目录反被锁死
+     * （Windows 对进程 cwd 拒删），还白付数秒物化时间。close 的 -32004（inactive /
+     * runtime 未 ready）即「无运行态可卸载」，按已卸载返回。
      */
     fun unloadSession(sessionId: String, timeoutMs: Long = 15000) {
-        try {
-            resumeSession(sessionId, timeoutMs)
-        } catch (e: Exception) {
-            println("[ZCodeProtocolClient] unload resume failed (ignorable): ${LogRedactor.redact(e.message ?: "")}")
-        }
         try {
             val params = buildJsonObject { put("sessionId", sessionId) }
             requireOk(request("session/close", params, timeoutMs))
         } catch (e: ZCodeProtocolException) {
             if (e.code != -32004) throw e
-            println("[ZCodeProtocolClient] unload skipped (session already inactive): ${e.message}")
+            println("[ZCodeProtocolClient] unload skipped (no active runtime): ${LogRedactor.redact(e.message ?: "")}")
         }
     }
 

@@ -394,12 +394,12 @@ class WorktreeDeleteAction : AnAction(ZCodeBundle.message("worktree.menu.delete"
                                 // Path 实现了 Iterable<Path>，+= 会二义解析成集合相加，这里必须显式 add
                                 if (outcome == WorktreeLifecycle.DeleteOutcome.DIR_LEFT) leftEmpty.add(entry.root) else removed.add(entry)
                                 // 乐观移除（2026-11-14 反馈：全量 rebuild 带变更查询十几秒，
-                                // 树迟迟不移除）——每删一个立即摘节点，全量 rebuild 收尾校准
-                                if (outcome == WorktreeLifecycle.DeleteOutcome.REMOVED) {
-                                    app.invokeLater {
-                                        if (!project.isDisposed) {
-                                            WorktreeProjectState.getInstance(project).removeEntry(entry.root.toString())
-                                        }
+                                // 树迟迟不移除）——每删一个立即摘节点，全量 rebuild 收尾校准。
+                                // DIR_LEFT 同摘（2026-11-17 删除慢排查）：prune 已清 git 记录，
+                                // rebuild 后节点本就不复存在，不必陪跑十几秒
+                                app.invokeLater {
+                                    if (!project.isDisposed) {
+                                        WorktreeProjectState.getInstance(project).removeEntry(entry.root.toString())
                                     }
                                 }
                             }
