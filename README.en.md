@@ -52,6 +52,8 @@ This project has exactly one goal: **use ZCode's core capabilities where you wri
 
 **Multi-workspace** — manage multiple projects from one tool window: mount another project's directory into a session tab of the current IDE (same mechanism as the official Attach; the plugin auto-creates a hosting module, idempotent and re-entrant), cross-directory sessions appear in one history list grouped by directory chips (draggable persistent ordering, per-directory color blocks at a glance, title badges follow the directory colors); right-click in the editor / project view to send a file or selected code straight to another workspace tab's input box (multiple targets collapse into a submenu; a missing target tab is created automatically); the mobile client supports multi-workspace too, so mounted projects and sessions can be operated remotely
 
+**Worktree isolation** — flip the Worktree toggle on the standby page and the session runs inside an isolated git worktree copy (a detached copy created from a snapshot of the current HEAD; no branch is occupied and uncommitted changes are not carried over), leaving the original directory untouched; a **ZCGUIWorktrees** node in the project tree manages all copies: the node summarizes "based on <start> · N commits · M uncommitted" with recent activity, expands in-tree to commit lists and uncommitted files (double-click opens the diff in the editor, merged commits get a green check), and the right-click menu covers everything — new session (lazy: a standby tab first, persisted on the first message), open existing session, send a copy summary to the input box, open in a new window / file manager, delete (three guards: reject while running, confirm uncommitted changes, warn on unmerged commits), clean up stale records; the session header ⎇ chip shows the source workspace and start point, click it to locate the copy in the project tree; deleting a copy keeps the session history (chip goes gray); hidden automatically when the CLI lacks support
+
 **Mobile remote sessions** — view and control desktop IDE sessions from the Z.ai mobile app: task list, model selection and device naming work end to end; HTTP proxy environments are supported
 
 **Environment check** — on startup verifies Node.js (≥18) / ZCode CLI / login credentials; on failure the top bar shows a notice with per-item fix entry points and a re-check button (missing credentials no longer block startup — a hint is shown instead); paths can be configured manually and are auto-detected when left blank
@@ -114,6 +116,20 @@ It is more than a built-in browser — the plugin implements the ZCode app-serve
 | Parallel session tabs: directory color blocks (solid = has session / hollow = empty tab), title badges follow directory colors | History grouped by directory chips: persistent drag-to-reorder, colors tell directories apart at a glance |
 | :---: | :---: |
 | ![Multi-workspace tabs](docs/screenshots/multi-workspace-tabs.png) | ![History directory chips](docs/screenshots/history-directory-chips.png) |
+
+**Worktree isolation (AI works in a copy, merge back to the original branch)**
+
+Flip the Worktree toggle on the standby page to start a copy session (detached copy, original directory untouched); the **ZCGUIWorktrees** node in the project tree manages everything: in-tree change listing, double-click for diffs, one right-click menu for all actions.
+
+| **Standby-page Worktree toggle: one click above the input box (hover for a hint); the first message starts the session inside the copy** | **Working in a copy: files the AI creates land in the worktree, the project tree summarizes "1 uncommitted", double-click a file row for the HEAD → working-tree diff** |
+| :---: | :---: |
+| ![Standby-page Worktree toggle](docs/screenshots/worktree-standby-toggle.png) | ![Working in a worktree copy, uncommitted changes in the project tree](docs/screenshots/worktree-uncommitted.png) |
+| **Commit inside the copy: commits and file rows expand in-tree; hover shows the managed root path and source workspace** | **Merge back to the original branch: ask in the session, node and commit rows get a green "merged" check** |
+| ![Commit inside the copy, in-tree commit and file rows](docs/screenshots/worktree-commit.png) | ![Merged back to the original branch with green checkmarks](docs/screenshots/worktree-merge-back.png) |
+
+| **Right-click a copy node: new session / open existing session / send to input box / new window / file manager / delete / cleanup** |
+| :---: |
+| ![Worktree node context menu](docs/screenshots/worktree-context-menu.png) |
 
 **Input enhancements & multi-tasking**
 
