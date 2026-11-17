@@ -6,6 +6,36 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.4.6-beta.1] - 2026-11-17
+
+中文:
+
+### 新增
+
+- **Worktree 副本隔离**（issue #52）：待命页一键开启 Worktree，AI 会话在独立的 git worktree 副本中干活——游离副本不占分支、不带入未提交改动，原目录零改动，多个任务随时并行；项目树新增「ZCGUIWorktrees」节点统一管理全部副本：节点行汇总「基于起点 · N 提交 · M 未提交」，展开可看提交与文件明细、双击看 diff、右键打开原文件；右键副本一站式操作——新建会话、打开既有会话、把副本摘要发送到输入框、新窗口 / 资源管理器打开、删除（运行中拒绝、未提交确认、未合并提醒三重守卫）、清理失效记录；合并回原分支后提交行显示绿勾「已合并」；会话的 ⎇ 徽标显示归属与起点，单击在项目树中定位副本，删除副本后会话记录保留（徽标置灰）。需 ZCode CLI 0.17.1 及以上（ZCode 桌面端 3.18 起提供的副本能力），旧版本自动隐藏入口。
+- **Markdown 预览划词发送行引用**：在 Markdown 预览中划选文本后右键，即可把「文件 + 行号范围」的引用发送到 ZC GUI 输入框，让 AI 精确定位文档片段。需 IDE 2024.3 及以上（依赖预览右键菜单组），旧版本右键菜单中不出现该项。
+- **额度趋势跨 IDE 共享**：额度历史趋势的本地采样在多个 IDE 之间共享一份，并自动整合已记录的历史数据，多 IDE 并开时曲线不再各记各的。
+- **技能徽标显示短名**：输入框的技能引用徽标剥去插件命名空间前缀，直接显示技能短名。
+
+### 修复
+
+- 修复根项目目录徽标双击定位偶发静默空转的问题。
+- 修复会话生成期间输入框「润色」按钮被误置灰的问题。
+
+English:
+
+### Added
+
+- **Worktree isolation** (issue #52): flip the Worktree toggle on the standby page and the AI session runs inside an isolated git worktree copy — a detached copy that occupies no branch, carries no uncommitted changes, and leaves the original directory untouched, so multiple tasks can proceed in parallel; a new "ZCGUIWorktrees" node in the project tree manages all copies: the node summarizes "based on <start> · N commits · M uncommitted", expands to commit and file details, double-click opens the diff, right-click opens the original file; the right-click menu on a copy covers everything — new session, open existing session, send a copy summary to the input box, open in a new window / file manager, delete (three guards: reject while running, confirm uncommitted changes, warn on unmerged commits), clean up stale records; commits merged back to the original branch get a green "merged" check; the session's ⎇ badge shows the source workspace and start point, click it to locate the copy in the project tree, and deleting a copy keeps the session history (badge goes gray). Requires ZCode CLI 0.17.1+ (the copy capability shipped with ZCode Desktop 3.18); the entry is hidden automatically on older versions.
+- **Send line references from Markdown preview selection**: select text in a Markdown preview, right-click, and send a "file + line range" reference to the ZC GUI input box so the AI can pinpoint the exact fragment. Requires IDE 2024.3+ (relies on the preview context-menu group); on older IDEs the item does not appear in that menu.
+- **Quota trend shared across IDEs**: the local sampling behind the quota history trend is now shared across IDEs and automatically integrates previously recorded data, so curves are no longer tracked separately per IDE.
+- **Skill chips show short names**: skill reference chips in the input box strip the plugin namespace prefix and show the short skill name.
+
+### Fixed
+
+- Fixed double-click locate on the root project directory badge intermittently doing nothing.
+- Fixed the input box "polish" button being wrongly disabled while a session is generating.
+
 ## [0.4.5.1] - 2026-11-13
 
 中文:
