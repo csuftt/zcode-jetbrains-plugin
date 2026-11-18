@@ -50,6 +50,9 @@ class ZCodeProtocolClient private constructor(
     val generation: ProtocolGeneration = ProtocolGeneration.OLD,
     /** spawn 前 `--version` 探测结果（null=探测失败；协议参数版本门控用，见 supportsIncludeArchivedParam） */
     val appVersion: String? = null,
+    /** 官方服务 origin：与 spawn 时注入 app-server env 的 ZCODE_BASE_URL 同值，
+     *  官方 MCP 鉴权反向请求（requestOfficialMcpAuthHeaders）的信任锚 */
+    private val officialOrigin: String = OfficialMcpAuth.resolveOrigin(),
     /** stdin 写阻塞判死时限（毫秒）：写入被对端挂死对端卡住的封顶等待，见 StdinWriteGate */
     private val stdinWriteTimeoutMs: Long = 30_000L,
 ) : AutoCloseable {
@@ -442,6 +445,16 @@ class ZCodeProtocolClient private constructor(
             // 逐字符对齐（不匹配则 Registry 冻结不发布，账号渠道激活整个失效）；顺带绕开
             // 多进程共享物化缓存的版本撕裂（0.3.x 实踩 -32603）。OLD 代无此机制不注入。
             val generation = ProtocolGenerations.detect(zcodePath)
+            // 官方插件 MCP（video-generation / image-search 等）只认 env ZCODE_BASE_URL 拼
+            // `/api/v1/toolhub/...`；CLI 起 stdio MCP 子进程时全量透传 app-server env（kEo），
+            // 注入即可到达 server。NEW 代该变量的语义是「ZCode 服务 origin」（zcode.cjs px()），
+            // 旧凭证链塞进来的 provider baseURL 会把它指向模型网关，必须用官方 origin 覆盖
+            // （模型走向由 provider 注册表决定，不受影响）。OLD 代 ZCODE_BASE_URL 仍是模型
+            // 端点语义（Credentials 三件套），不注入以免打乱旧链路。
+            val officialOrigin = OfficialMcpAuth.resolveOrigin()
+            if (generation == ProtocolGeneration.NEW) {
+                env["ZCODE_BASE_URL"] = officialOrigin
+            }
             if (generation == ProtocolGeneration.NEW) {
                 val providerEnv = AccountProviderBridge.buildProviderFileEnv(zcodePath)
                 if (providerEnv.isNotEmpty()) {
@@ -467,7 +480,11 @@ class ZCodeProtocolClient private constructor(
 
             // 代际已提前判定（spawn 侧同款判据）：进程已在跑，文件即权威
             println("[ZCodeProtocolClient] CLI generation = $generation (zcode.cjs=${zcodePath.fileName})")
-            val client = ZCodeProtocolClient(process, stdin, stdout, zcodePath, nodePath, credentials, proxyConfig, generation, appVersion, stdinWriteTimeoutMs)
+            val client = ZCodeProtocolClient(
+                process, stdin, stdout, zcodePath, nodePath, credentials, proxyConfig, generation, appVersion,
+                officialOrigin = officialOrigin,
+                stdinWriteTimeoutMs = stdinWriteTimeoutMs,
+            )
             // 排障主线索（issue #12 用户实测三态：坏地址失败/清空直连/好地址成功——
             // 没有这行日志时分不清「代理坏了」还是「没注入」）：代理地址 userinfo 脱敏
             println("[ZCodeProxy] app-server spawn ${proxyConfig?.logSummary ?: "<no proxy, direct>"}")
@@ -855,15 +872,28 @@ class ZCodeProtocolClient private constructor(
             }
         }
         // 官方 MCP 鉴权头（interaction/requestOfficialMcpAuthHeaders）：官方插件 server
-        // （browser-use 等）的官方市场鉴权取数口。插件无 Coding Plan 官方身份，固定按
-        // 「不可用」拒绝（应答 schema discriminatedUnion("ok")，reason 枚举取
-        // official_auth_unavailable；diag-cua-inject.py 实证 -32601 拒绝也能容错跑通，
-        // 结构化拒绝更干净——server 置 failed 而非协议崩溃）
+        // （video-generation / image-search / document-skills 等）的官方市场鉴权取数口。
+        // 材料 = credentials.json 的 zcodejwttoken + 当前套餐 access_token（解密见
+        // AccountProviderBridge/CredentialCipher），与桌面 resolveOfficialMcpCredentials
+        // 同源。异步应答：解密 v2 os 密钥环首读要起 PowerShell，禁止卡 reader 线程
+        // （同 requestUserInput/browserExecute 约束）。未登录/无套餐/非官方 origin 由
+        // [OfficialMcpAuth] 按 CLI 的 strict 枚举回结构化失败（server 置 failed 而非崩溃）。
         else if (method == "interaction/requestOfficialMcpAuthHeaders") {
-            respondToServer(id, buildJsonObject {
-                put("ok", false)
-                put("reason", "official_auth_unavailable")
-            })
+            reverseRequestExecutor.execute {
+                val reply = try {
+                    OfficialMcpAuth.resolveReply(params, officialOrigin)
+                } catch (e: Exception) {
+                    println("[ZCodeProtocolClient] officialMcpAuth error (${e.javaClass.simpleName}): ${e.message}")
+                    OfficialMcpAuth.Reply(false, reason = OfficialMcpAuth.REASON_UNAVAILABLE)
+                }
+                // 只记头名不记值（身份头是 bearer token，严禁进日志）
+                println(
+                    "[ZCodeProtocolClient] officialMcpAuth: plugin=${params["pluginId"]?.jsonPrimitive?.contentOrNull} " +
+                        "consumer=${params["consumer"]?.jsonPrimitive?.contentOrNull ?: "mcp-server"} " +
+                        (if (reply.ok) "ok headers=${reply.headers.keys.joinToString(",")}" else "rejected reason=${reply.reason}")
+                )
+                respondToServer(id, OfficialMcpAuth.toJson(reply))
+            }
         }
         // 宿主浏览器反向请求（browser-use）：异步执行——navigate/screenshot 可能秒级耗时，
         // 与 requestUserInput 同理禁止阻塞 reader 线程
