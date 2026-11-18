@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -141,4 +142,43 @@ class McpConfigReaderTest {
 
     private fun JsonObject.str(key: String): String? =
         runCatching { this[key]!!.jsonPrimitive.content }.getOrNull()
+
+    // ============ 官方 HTTP MCP：URL 占位符 + 探针身份头（0.4.6） ============
+
+    private fun officialHttpEntry(url: String, pluginName: String?) = McpConfigReader.McpServerInfo(
+        name = "image_search", scope = "plugin", transport = "http", command = null,
+        args = emptyList(), url = url, envKeys = emptyList(),
+        envValues = emptyMap(), headerValues = emptyMap(),
+        enabled = true, configPath = "C:/x/.mcp.json", pluginName = pluginName,
+        raw = buildJsonObject {
+            put("type", "http")
+            put("url", url)
+            put("auth", buildJsonObject { put("type", "zcode_official") })
+        },
+        status = null, toolCount = null, statusError = null, updatedAt = null,
+    )
+
+    @Test
+    fun `ZCODE_BASE_URL 占位符展开为官方 origin 且身份头注入`() {
+        val entry = officialHttpEntry("\${ZCODE_BASE_URL}/api/v1/mcp/server/image_search", "image-search")
+        var seenUrl = ""
+        val param = assertNotNull(
+            McpConfigReader.toProtocolParam(entry, "E:/ws") { _, url ->
+                seenUrl = url
+                mapOf("Authorization" to "Bearer test-jwt")
+            }
+        )
+        val json = param.toString()
+        assertFalse(json.contains("\${ZCODE_BASE_URL}"), "占位符必须展开：$json")
+        assertEquals("https://zcode.z.ai/api/v1/mcp/server/image_search", seenUrl)
+        assertTrue(json.contains("Authorization"), "官方 MCP 探针应带身份头：$json")
+        assertTrue(json.contains("Bearer test-jwt"))
+    }
+
+    @Test
+    fun `非官方 origin 不下发身份头`() {
+        val entry = officialHttpEntry("https://evil.example.com/mcp", "image-search")
+        val json = McpConfigReader.toProtocolParam(entry, "E:/ws").toString()
+        assertFalse(json.contains("Authorization"), "跨 origin 不得携带身份头：$json")
+    }
 }

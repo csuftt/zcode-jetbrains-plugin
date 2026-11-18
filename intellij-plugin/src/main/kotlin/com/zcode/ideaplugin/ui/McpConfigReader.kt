@@ -1,5 +1,6 @@
 package com.zcode.ideaplugin.ui
 
+import com.zcode.ideaplugin.protocol.OfficialMcpAuth
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -207,8 +208,16 @@ object McpConfigReader {
         val pluginRoot = File(s.configPath).parentFile?.absolutePath ?: ""
         return v
             .replace("\${CLAUDE_PLUGIN_ROOT}", pluginRoot)
+            .replace("\${ZCODE_PLUGIN_ROOT}", pluginRoot)
             .replace("\${CLAUDE_PROJECT_DIR}", workspacePath)
+            .replace("\${ZCODE_PROJECT_DIR}", workspacePath)
             .replace("\${CLAUDE_PLUGIN_DATA}", pluginDataDir(s))
+            .replace("\${ZCODE_PLUGIN_DATA}", pluginDataDir(s))
+            // 官方 HTTP MCP（image_search 等）URL 模板：CLI 运行时按 app 环境展开
+            // ${ZCODE_BASE_URL}（zcode.cjs 插件变量展开），面板探针此前只认 CLAUDE_*
+            // 占位符 → URL 原样进 new URL() 报 Invalid URL（0.4.6 真机）。
+            .replace("\${ZCODE_BASE_URL}", OfficialMcpAuth.resolveOrigin())
+            .replace("\${ZCODE_ENDPOINT_ORIGIN}", OfficialMcpAuth.resolveOrigin())
             .replace(USER_CONFIG_PLACEHOLDER, "")
     }
 
@@ -226,11 +235,16 @@ object McpConfigReader {
         )
     }
 
-    /** http/sse 服务器替换后的 url 与 headers（McpToolsClient 请求用；url 缺失返回 null） */
+/** http/sse 服务器替换后的 url 与 headers（McpToolsClient 请求用；url 缺失返回 null）。
+     *  官方 MCP 同时补当前身份头（与 connect 探针同源，否则工具列表恒 401） */
     fun resolvedHttpTarget(s: McpServerInfo, workspacePath: String): Pair<String, Map<String, String>>? {
         val url = s.url ?: return null
         fun sub(v: String) = substitute(s, workspacePath, v)
-        return sub(url) to s.headerValues.entries.associate { (k, v) -> k to sub(v) }
+        val resolvedUrl = sub(url)
+        val headers = LinkedHashMap<String, String>()
+        s.headerValues.forEach { (k, v) -> headers[k] = sub(v) }
+        if (isOfficialAuth(s)) officialAuthHeaders(s, resolvedUrl).forEach { (k, v) -> headers[k] = v }
+        return resolvedUrl to headers
     }
 
     /** stdio 进程工作目录（配置 cwd 替换后；缺省 null=继承当前进程） */
@@ -245,7 +259,11 @@ object McpConfigReader {
      * （stdio 缺 command / 远程缺 url）返回 null。host 条目（browser-use 的
      * node_repl 等）由 CLI 会话自动拉起，显式传参只会多起一个重复进程。
      */
-    fun toProtocolParam(s: McpServerInfo, workspacePath: String): kotlinx.serialization.json.JsonObject? {
+    fun toProtocolParam(
+        s: McpServerInfo,
+        workspacePath: String,
+        officialHeaders: (McpServerInfo, String) -> Map<String, String> = ::officialAuthHeaders,
+    ): kotlinx.serialization.json.JsonObject? {
         if (!s.enabled) return null
         if (s.scope == "host") return null
         fun sub(v: String) = substitute(s, workspacePath, v)
@@ -265,18 +283,53 @@ object McpConfigReader {
             }
         } else {
             val url = s.url ?: return null
+            val resolvedUrl = sub(url)
+            // 官方 HTTP MCP（image_search 等）探针：CLI 把显式 mcpServers 当用户配置，
+            // 不走插件 official auth 反向请求，宿主须把当前身份头直接放进 headers，
+            // 否则「检测连接」恒 401（0.4.6 真机：无头探针报 no permission）。
+            val headers = LinkedHashMap<String, String>()
+            s.headerValues.forEach { (k, v) -> headers[k] = sub(v) }
+            if (isOfficialAuth(s)) officialHeaders(s, resolvedUrl).forEach { (k, v) -> headers[k] = v }
             kotlinx.serialization.json.buildJsonObject {
                 put("name", s.name)
                 put("type", if (s.transport == "sse") "sse" else "http")
-                put("url", sub(url))
-                put("headers", kotlinx.serialization.json.JsonArray(s.headerValues.entries.map { (k, v) ->
+                put("url", resolvedUrl)
+                put("headers", kotlinx.serialization.json.JsonArray(headers.map { (k, v) ->
                     kotlinx.serialization.json.buildJsonObject {
                         put("name", k)
-                        put("value", sub(v))
+                        put("value", v)
                     }
                 }))
             }
         }
+    }
+
+    /** 插件 MCP 的官方鉴权声明（plugin.json / .mcp.json 的 auth.type=zcode_official） */
+    private fun isOfficialAuth(s: McpServerInfo): Boolean = try {
+        s.raw?.get("auth")?.jsonObject?.get("type")?.jsonPrimitive?.content == "zcode_official"
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * 官方 MCP 探针身份头：与反向请求 `requestOfficialMcpAuthHeaders` 同源材料
+     * （[OfficialMcpAuth]）。只对官方 origin 生效——settings 页的探针会把插件定义
+     * 当用户 MCP 传给 CLI，targetOrigin 必须防泄漏；凭据缺失返回空，探针按真实
+     * 未授权失败。
+     */
+    private fun officialAuthHeaders(s: McpServerInfo, resolvedUrl: String): Map<String, String> {
+        val origin = OfficialMcpAuth.resolveOrigin()
+        if (OfficialMcpAuth.normalizeOrigin(resolvedUrl) != OfficialMcpAuth.normalizeOrigin(origin)) return emptyMap()
+        val pluginId = s.pluginName?.takeIf { it.isNotBlank() }
+            ?.plus(OfficialMcpAuth.OFFICIAL_MARKETPLACE_SUFFIX) ?: return emptyMap()
+        val reply = OfficialMcpAuth.resolveReply(
+            kotlinx.serialization.json.buildJsonObject {
+                put("pluginId", pluginId)
+                put("targetOrigin", origin)
+            },
+            origin,
+        )
+        return if (reply.ok) reply.headers else emptyMap()
     }
 
     /** ${CLAUDE_PLUGIN_DATA} 的目标（~/.zcode/cli/plugins/data/<plugin>；推断失败回退插件根） */

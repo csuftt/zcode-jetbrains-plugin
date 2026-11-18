@@ -9705,6 +9705,25 @@ if (!window.__ZCODE_LOG_HOOK__) {
             ?.takeIf { it.isNotBlank() } ?: project.basePath
         val servers = McpConfigReader.scan(basePath).toMutableList()
 
+        // 插件条目与 CLI 运行时清单对齐（0.4.6）：磁盘扫描口径是「未显式禁用即启用」，
+        // 会把 CLI 根本不加载的种子插件（如 document-skills 里那份 image_search）也列
+        // 出来，connect 探针拿它去连只会得到 Invalid URL / 假失败。plugins/list 是运行
+        // 时权威（enabled 字段）：插件名不在启用集合的插件条目不展示；RPC 失败时不
+        // 过滤（fail-soft，宁可多列也不误隐藏用户配置）。
+        if (basePath != null) {
+            val enabledPluginNames = runCatching {
+                project.zCodeService().getClient().listPlugins(basePath)["plugins"]?.jsonArray
+                    ?.mapNotNull { el ->
+                        val p = runCatching { el.jsonObject }.getOrNull() ?: return@mapNotNull null
+                        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                        name.takeIf { runCatching { p["enabled"]?.jsonPrimitive?.boolean }.getOrNull() == true }
+                    }?.toSet()
+            }.getOrNull()
+            if (enabledPluginNames != null) {
+                servers.removeAll { it.scope == "plugin" && it.pluginName !in enabledPluginNames }
+            }
+        }
+
         // 0. 宿主内置插件 MCP（CLI 内置注册表声明的 hostMcpServerNames，如
         // browser-use → node_repl）：定义不在任何磁盘配置里（注册表硬编码在
         // zcode.cjs），按 plugins/list 补齐；RPC 失败静默降级不影响磁盘条目
