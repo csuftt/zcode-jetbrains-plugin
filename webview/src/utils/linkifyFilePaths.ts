@@ -56,6 +56,9 @@ const KNOWN_EXTENSIONS = new Set([
   'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
   'sql', 'graphql', 'proto', 'wasm',
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'pdf', 'zip', 'jar', 'war', 'iml',
+  // 音视频（0.4.6 补：视频/音频产物路径此前整类漏链——`.mp4` 不在白名单，
+  // 正文全路径不出现 chip；与 previewArtifacts 的 MEDIA_FORMATS 保持同集）
+  'mp4', 'mov', 'webm', 'm4v', 'mp3', 'wav', 'm4a', 'ogg', 'opus', 'flac', 'weba',
   'gitignore', 'editorconfig', 'lock',
 ])
 

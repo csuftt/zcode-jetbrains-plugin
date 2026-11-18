@@ -6214,18 +6214,52 @@ if (!window.__ZCODE_LOG_HOOK__) {
             val f = java.io.File(filePath)
             if (!f.exists()) {
                 log.warn("Open file (system) failed: not found $filePath")
+                revealInSystemFileManager(f)
                 return@invokeLater
             }
-            runCatching {
+            val opened = runCatching {
                 if (ext == "html" || ext == "htm") {
                     BrowserUtil.browse(f.toURI())
                 } else {
                     java.awt.Desktop.getDesktop().open(f)
                 }
-            }.onFailure { log.warn("Open file (system) failed: ${it.message}") }
+            }.onFailure { log.warn("Open file (system) failed: ${it.message}") }.isSuccess
+            if (opened) return@invokeLater
+            // 系统打开失败降级（0.4.6 真机：机器无 .mp4 关联应用，Desktop.open 抛
+            // 「找不到应用程序」，旧实现只写日志 → 用户看到的是点击无反应）。改为
+            // 资源管理器定位选中 + 气球提示说明原因，点击至少落到一个可见结果。
+            if (revealInSystemFileManager(f)) {
+                com.intellij.notification.NotificationGroupManager.getInstance()
+                    .getNotificationGroup("ZCode")
+                    .createNotification(
+                        com.zcode.ideaplugin.ZCodeBundle.message("turnfile.notify.systemOpenFallbackTitle"),
+                        com.zcode.ideaplugin.ZCodeBundle.message("turnfile.notify.systemOpenFallback", f.name),
+                        com.intellij.notification.NotificationType.WARNING,
+                    )
+                    .notify(project)
+            }
         }
         return buildJsonObject { put("op", "fileOpened") }
     }
+
+    /**
+     * 系统文件管理器定位兜底（openFileSystem 打开失败/文件不存在时）：
+     * Windows `explorer /select` 选中文件，macOS `open -R`，Linux 开父目录。
+     * 只 start 不等退出——explorer 成功也返回非 0 退出码，等待退出会误判失败。
+     */
+    private fun revealInSystemFileManager(file: java.io.File): Boolean = runCatching {
+        val os = System.getProperty("os.name")?.lowercase() ?: ""
+        val target = if (file.exists()) file else file.parentFile ?: file
+        when {
+            os.contains("win") ->
+                ProcessBuilder("explorer.exe", "/select,${target.absolutePath}").start()
+            os.contains("mac") || os.contains("darwin") ->
+                ProcessBuilder("open", "-R", target.absolutePath).start()
+            else ->
+                ProcessBuilder("xdg-open", target.parentFile?.absolutePath ?: target.absolutePath).start()
+        }
+        true
+    }.getOrDefault(false)
 
     /**
      * 目录在 IDE Project View 中定位并展开（openFile 目录路由：消息内目录链接 /

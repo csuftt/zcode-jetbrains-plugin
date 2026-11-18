@@ -48,6 +48,9 @@ describe('resolveFileLink 解析与从严校验', () => {
     ['目录相对', 'webview/src/', 'E:/ws/webview/src/', undefined],
     ['目录 Windows 绝对', 'E:/proj/a/b/', 'E:/proj/a/b/', undefined],
     ['目录相对带尾反斜杠（归一为正斜杠）', 'webview\\src\\', 'E:/ws/webview/src/', undefined],
+    // 0.4.6：音视频产物路径（`.mp4` 等此前不在扩展名白名单，正文全路径不链）
+    ['视频产物全路径（mp4 + CJK + 连字符）', 'E:\\1-软件项目\\23-新平台部署\\generated-videos\\20261118-025938-一个七八岁的小男孩在室外篮球场上运球然后投篮-穿.mp4', 'E:/1-软件项目/23-新平台部署/generated-videos/20261118-025938-一个七八岁的小男孩在室外篮球场上运球然后投篮-穿.mp4', undefined],
+    ['音频产物路径（mp3）', 'E:/proj/out/narration.mp3', 'E:/proj/out/narration.mp3', undefined],
   ])('%s：%s', (_name, raw, absPath, line) => {
     const target = resolveFileLink(raw, ROOT)
     expect(target).not.toBeNull()
@@ -255,6 +258,23 @@ describe('openFileLinkFromEvent 点击委托', () => {
     const handled = fire('<p><span>plain</span></p>', 'span')
     expect(handled).toBe(false)
     expect(sendToJavaMock).not.toHaveBeenCalled()
+  })
+
+  it('音视频路径走系统打开（0.4.6：IDE 编辑器打不开）', () => {
+    const handled = fire(
+      '<span class="md-file-link" data-file-path="E:/proj/generated-videos/a.mp4">a.mp4</span>',
+      '.md-file-link',
+    )
+    expect(handled).toBe(true)
+    expect(sendToJavaMock).toHaveBeenCalledWith({ op: 'openFileSystem', filePath: 'E:/proj/generated-videos/a.mp4' })
+  })
+
+  it('音频路径同样走系统打开', () => {
+    fire(
+      '<span class="md-file-link" data-file-path="E:/proj/a.mp3">a.mp3</span>',
+      '.md-file-link',
+    )
+    expect(sendToJavaMock).toHaveBeenCalledWith({ op: 'openFileSystem', filePath: 'E:/proj/a.mp3' })
   })
 })
 
