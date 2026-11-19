@@ -57,13 +57,20 @@ object WorktreeRegistryStore {
             }
         }))
 
-    /** 损坏/缺必填字段按条丢弃；输出稳定按输入序 */
-    fun parse(raw: String?): List<WorktreeSessionInfo> {
+    /** 损坏/缺必填字段按条丢弃；整体非法按空表（旧 kv 只读语义，fail-soft） */
+    fun parse(raw: String?): List<WorktreeSessionInfo> = parseStrict(raw) ?: emptyList()
+
+    /**
+     * 严格解析：整体 JSON 非法返回 null（与「空表」区分）。全局文件写前用它判断
+     * 是否损坏——损坏时不能拿空表直接覆盖，得先备份/隔离（缺陷HU）。
+     * 单条缺必填字段仍按条丢弃（局部损坏不拖垮整表）。
+     */
+    fun parseStrict(raw: String?): List<WorktreeSessionInfo>? {
         if (raw.isNullOrBlank()) return emptyList()
         val array = try {
             Json.parseToJsonElement(raw).jsonArray
         } catch (_: Exception) {
-            return emptyList()
+            return null
         }
         return array.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
@@ -90,6 +97,24 @@ object WorktreeRegistryStore {
 
     fun remove(list: List<WorktreeSessionInfo>, sessionId: String): List<WorktreeSessionInfo> =
         list.filter { it.sessionId != sessionId }
+
+    /**
+     * 主源优先的按 id 并集（缺陷HU 迁移/双读）：primary（全局）同 id 覆盖 secondary
+     * （项目旧 kv），secondary 只补缺失；输出稳定按 primary 序 + secondary 新增序。
+     */
+    fun mergeById(
+        primary: List<WorktreeSessionInfo>,
+        secondary: List<WorktreeSessionInfo>,
+    ): List<WorktreeSessionInfo> {
+        if (secondary.isEmpty()) return primary
+        val seen = primary.mapTo(HashSet()) { it.sessionId }
+        return primary + secondary.filter { it.sessionId !in seen }
+    }
+
+    /** 条数硬顶：超限按 createdAt 新→旧保留（0 值旧条目最先淘汰，防异常增长） */
+    fun capByCreatedAt(list: List<WorktreeSessionInfo>, max: Int): List<WorktreeSessionInfo> =
+        if (list.size <= max) list
+        else list.sortedByDescending { it.createdAt }.take(max.coerceAtLeast(0))
 
     private fun str(o: JsonObject, key: String): String? =
         (o[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }

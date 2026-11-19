@@ -131,7 +131,7 @@ _Avoid_: 工作目录, cwd, 项目根
 _Avoid_: 隔离会话, 副本会话
 
 **worktree 注册表（Worktree registry）**:
-插件侧持久化的「会话 ↔ worktree ↔ 源工作区」对应关系，用于历史列表合并、标识展示与删除守卫。
+插件侧持久化的「会话 ↔ worktree ↔ 源工作区」对应关系（全局文件 `~/.zcgui/worktree-sessions.v1.json`，同机各项目/IDE 共享），用于历史列表合并、标识展示与删除守卫。
 _Avoid_: 索引, 缓存, 登记表
 
 **起点（Start point）**:

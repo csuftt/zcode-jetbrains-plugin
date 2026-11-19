@@ -173,11 +173,13 @@ class WorktreeProjectState(private val project: Project) {
         // 第一遍：基础快照（worktree list ∩ 托管根 + 注册表合并），变更占位
         data class Draft(val group: String, val dir: Path, val regStartSha: String?, val entry: Entry)
         val drafts = mutableListOf<Draft>()
+        // 注册表一次读全（此前每个 worktree 都 list() 一遍，JSON 重复解析）
+        val regEntries = registry.list()
         for ((name, dir) in sources) {
             if (!dir.exists()) continue
             for (e in cli.listManagedWorktrees(dir, dataBase)) {
                 val normRoot = WorktreeRegistry.normalize(e.path.toString())
-                val reg = registry.list().firstOrNull { WorktreeRegistry.normalize(it.worktreeRoot) == normRoot }
+                val reg = regEntries.firstOrNull { WorktreeRegistry.normalize(it.worktreeRoot) == normRoot }
                 drafts.add(
                     Draft(
                         name, dir, reg?.startSha?.takeIf { it.isNotEmpty() },
@@ -320,12 +322,17 @@ class WorktreeProjectState(private val project: Project) {
         val client = runCatching { project.zCodeService().getClient() }.getOrNull() ?: return
         val rows = runCatching { client.taskIndex.listWorktreeTasks() }.getOrDefault(emptyList())
         if (rows.isEmpty()) return
-        val cli = GitWorktreeCli()
+        val cli = GitWorktreeCli(gitExe = WorktreeGits.executablePath(project), timeoutMs = 8_000L)
         for (row in rows) {
             val wr = row.worktreeRoot ?: continue
             if (registry.findBySession(row.taskId) != null) continue
             val parsed = runCatching { cli.parseManagedWorktreePath(dataBase, Path.of(wr)) }.getOrNull() ?: continue
             val source = sources[parsed.name] ?: continue
+            // 缺陷HU：注册表已全局化，按目录名猜写会让同名仓库的条目跨项目扩散——
+            // git 反解必须确认副本属于当前源目录所在仓库才登记（同名克隆不互认）
+            val resolved = runCatching { registry.resolveSourceWorkspace(wr) }.getOrNull() ?: continue
+            val sourceTop = runCatching { cli.toplevel(source) }.getOrNull() ?: continue
+            if (WorktreeRegistry.normalize(resolved) != WorktreeRegistry.normalize(sourceTop.toString())) continue
             registry.upsert(
                 WorktreeRegistryStore.WorktreeSessionInfo(
                     sessionId = row.taskId,

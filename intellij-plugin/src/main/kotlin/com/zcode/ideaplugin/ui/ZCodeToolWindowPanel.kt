@@ -56,8 +56,9 @@ import com.zcode.ideaplugin.protocol.model.SessionInfo
 import com.zcode.ideaplugin.protocol.model.V4AttachmentRef
 import com.zcode.ideaplugin.worktree.GitWorktreeCli
 import com.zcode.ideaplugin.worktree.WorktreeGits
-import com.zcode.ideaplugin.worktree.WorktreeRegistry
 import com.zcode.ideaplugin.worktree.WorktreeProjectState
+import com.zcode.ideaplugin.worktree.WorktreeRegistry
+import com.zcode.ideaplugin.worktree.WorktreeRepoScan
 import com.zcode.ideaplugin.worktree.WorktreeSessionCreator
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -339,6 +340,14 @@ class ZCodeToolWindowPanel(
         @Volatile private var cachedStats: Map<String, SessionStat>? = null
         @Volatile private var cachedStatsAt = 0L
         private val statsComputing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        /**
+         * worktree 起点 reflog 缓存（缺陷HU）：`creationBaseSha` 是一次 git 进程，列表每次
+         * 切目录都会为每个副本调用。桶名随机不复用、reflog 创建后不变，进程级缓存无
+         * 失效面；Optional 包装允许缓存 null（CHM 禁 null value，同 WorktreeRegistry 纪律）。
+         */
+        private val creationBaseShaCache =
+            java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<String>>()
 
         /** 标签「回合结束待查看」标记的 displayName 后缀（与 ● 生成中互斥、● 优先）。
          *  演变：✓(U+2713) → 实测期 ✓✅ 并排（Swing 不渲染 emoji 彩色，✅ 退化单色勾）→
@@ -2761,13 +2770,13 @@ if (!window.__ZCODE_LOG_HOOK__) {
             visible + worktreeExtras.filter { it.sessionId !in known }
         }
         // 托管根 meta 派生（缺陷HQ 第三腿·显示面）：workspace 落托管根的会话（插件裸建
-        // 孤儿/桌面端未索引），路径结构 + reflog 本地拼 chip 元数据，不依赖注册表/任务索引；
-        // 两腿已注入的条目带 meta 在前，此处自动跳过。baseCache 每根一次 reflog 文件读。
-        val derivedBaseCache = HashMap<String, String>()
+        // 孤儿/桌面端未索引/跨项目发现），路径结构 + reflog 本地拼 chip 元数据，不依赖
+        // 注册表/任务索引；两条精确腿已注入的条目带 meta 在前，此处自动跳过。
+        // sourceHint=当前被列目录：git 反解不出时 chip 回退到「你正在看的目录」而不是副本自身
         merged.forEach { s ->
             if (worktreeMetas[s.sessionId] == null) {
                 s.workspace?.workspacePath?.takeIf { it.isNotBlank() }?.let { ws ->
-                    deriveWorktreeMeta(ws, derivedBaseCache)?.let { worktreeMetas[s.sessionId] = it }
+                    deriveWorktreeMeta(ws, workspacePath)?.let { worktreeMetas[s.sessionId] = it }
                 }
             }
         }
@@ -2876,25 +2885,50 @@ if (!window.__ZCODE_LOG_HOOK__) {
         metas: MutableMap<String, JsonObject>,
     ): List<com.zcode.ideaplugin.protocol.model.SessionInfo> {
         if (workspacePath.isBlank()) return emptyList()
+        return runCatching { collectWorktreeExtras(workspacePath, hiddenIds, metas) }
+            .onFailure { log.warn("worktree extras failed, keeping main list: ${it.message}") }
+            .getOrDefault(emptyList())
+    }
+
+    /**
+     * worktree 承接条目（0.4.6，缺陷HU 扩到跨项目）：三条腿互补——
+     * ① 注册表（全局文件，插件自建，含已删除副本的保留条目）；
+     * ② tasks-index worktree 行（桌面端建，全局库）；
+     * ③ git 仓库事实发现（任意被列目录所在仓库的托管副本，按副本内执行根直查）。
+     * ①② 按 id 走 session/list sessionIds 通道拉详情（CLI worktree 归属校验放行），
+     * 执行根改写为 worktree 内 cwd（产物卡/更改条锚 currentWorkspacePath=执行根，缺陷HF）。
+     * 各腿独立 fail-soft（外层再兜一层），任一失败只丢该腿，主列表照常返回。
+     */
+    private fun collectWorktreeExtras(
+        workspacePath: String,
+        hiddenIds: Set<String>,
+        metas: MutableMap<String, JsonObject>,
+    ): List<com.zcode.ideaplugin.protocol.model.SessionInfo> {
         val client = project.zCodeService().getClient()
         val norm = normalizePath(workspacePath)
         val regEntries = worktreeRegistry.bySourceWorkspace(workspacePath).filter { it.sessionId !in hiddenIds }
         val taskRows = runCatching { client.taskIndex.listWorktreeTasks() }.getOrDefault(emptyList())
             .filter { normalizePath(it.workspacePath) == norm && it.taskId !in hiddenIds }
         val ids = (regEntries.map { it.sessionId } + taskRows.map { it.taskId }).distinct()
-        // 第三腿（缺陷HQ）：裸建孤儿注册表/任务索引都够不到（tasks 行只有桌面端写者）——
-        // 扫托管根下与项目目录同名的副本桶，按副本根作用域直查补齐。仅主项目目录列表触发
-        // （关联目录列表不掺入）；桶数少（同名仓库副本），每桶一次 RPC 可承受。孤儿 meta
-        // 由列表装配的托管根派生统一补（含 reflog 起点），此处不抢。
-        val projectBase = project.basePath
-        val orphans = if (!projectBase.isNullOrBlank() && norm == normalizePath(projectBase)) {
-            orphanWorktreeSessions(ids.toSet())
-        } else emptyList()
-        if (ids.isEmpty() && orphans.isEmpty()) return emptyList()
+        // by-ids 双形态（原生/正斜杠）：CLI 按 directory 精确匹配，形态撕裂时整批查空
+        val nativeWs = workspacePath.replace('/', java.io.File.separatorChar)
+        val altWs = workspacePath.replace('\\', '/')
         val details = if (ids.isEmpty()) emptyList()
-        else runCatching { client.listSessionsByIds(ids, workspacePath, timeoutMs = 15_000L) }.getOrDefault(emptyList())
+        else runCatching {
+            client.listSessionsByIds(ids, nativeWs, altWs, timeoutMs = 15_000L)
+        }.getOrDefault(emptyList())
+        // 第三腿（缺陷HU）：任意被列目录按仓库事实发现——`git worktree list` 只回该仓库
+        // 自己的副本（同名克隆不互串），非 git 目录零开销。被列目录本身在托管根内
+        //（worktree 作用域标签）时短路，不展开兄弟副本。
+        // 已有精确腿会话的副本根跳过直查（每根一次 session/list 会起 node 子进程读
+        // fork/goal 补行，是列表热路径成本）；只有完全没被覆盖的副本才需要兜底发现。
+        val coveredRoots = details.mapNotNull { s ->
+            s.workspace?.workspacePath?.takeIf { it.isNotBlank() }?.let { managedRootKeyOf(it) }
+        }.toSet()
+        val discovered = discoveredWorktreeSessions(workspacePath, ids.toSet() + hiddenIds, coveredRoots)
+        if (ids.isEmpty() && discovered.isEmpty()) return emptyList()
         val desktopBaseByRoot = HashMap<String, String>() // 桌面行起点缓存：同根多会话只读一次 reflog
-        return (details + orphans).mapNotNull { s ->
+        return (details + discovered).distinctBy { it.sessionId }.mapNotNull { s ->
             if (s.sessionId in hiddenIds) return@mapNotNull null
             val reg0 = regEntries.find { it.sessionId == s.sessionId }
             val row = taskRows.find { it.taskId == s.sessionId }
@@ -2905,8 +2939,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             if (reg0 != null || row != null) {
                 // 桌面行（reg0 空）起点：worktree 专属 reflog 首条，与树节点 inferredBaseSha
                 // 同源（历史事实非推算）；拿不到留空，前端对空起点不渲染「基于 HEAD」
-                //（spec #52 追评：不拿推算值凑数）。此前传空串导致 chip「基于 HEAD」与
-                // 树节点 reflog sha 两个口径并存
+                //（spec #52 追评：不拿推算值凑数）
                 val desktopBase = if (reg0 != null) ""
                 else desktopBaseByRoot.getOrPut(root) { worktreeReflogBaseSha(root)?.take(7) ?: "" }
                 metas[s.sessionId] = worktreeMetaJson(
@@ -2922,26 +2955,47 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** 孤儿 worktree 会话直查（缺陷HQ 第三腿）：托管根下与项目目录同名的副本桶按根作用域直查 */
-    private fun orphanWorktreeSessions(excludeIds: Set<String>): List<com.zcode.ideaplugin.protocol.model.SessionInfo> {
-        val base = project.basePath?.takeIf { it.isNotBlank() } ?: return emptyList()
-        val dirName = java.nio.file.Path.of(base).fileName?.toString() ?: return emptyList()
-        val cli = GitWorktreeCli()
-        val managedRoot = cli.managedRoot(cli.dataBaseDir())
-        val roots = runCatching {
-            java.nio.file.Files.list(managedRoot).use { stream ->
-                stream.filter { java.nio.file.Files.isDirectory(it) }
-                    .map { it.resolve(dirName) }
-                    .filter { java.nio.file.Files.isDirectory(it) }
-                    .toList()
-            }
-        }.getOrDefault(emptyList())
-        if (roots.isEmpty()) return emptyList()
+    /**
+     * 发现腿（缺陷HU）：被列目录 → 所在仓库 → 该仓库的托管副本 → 按副本内对应执行根
+     * 直查会话。此前只覆盖「项目主目录 + 按目录名撞托管桶」：换一个项目关联同一源目录
+     * 时，project 级注册表带不过去、任务索引又没有插件建会话的行，列表就空了。
+     */
+    private fun discoveredWorktreeSessions(
+        workspacePath: String,
+        excludeIds: Set<String>,
+        coveredRoots: Set<String>,
+    ): List<com.zcode.ideaplugin.protocol.model.SessionInfo> {
+        // 副本作用域标签（被列目录本身在托管根内）：只显示该副本自己的会话，
+        // 不把兄弟副本拉进来（否则在副本窗口能看到别的任务的会话）
+        if (isManagedWorktreeDir(workspacePath)) return emptyList()
+        val scan = worktreeRepoScan.scan(java.nio.file.Path.of(workspacePath))
+        if (!scan.isRepository || scan.roots.isEmpty()) return emptyList()
         val client = project.zCodeService().getClient()
-        return roots.flatMap { root ->
-            runCatching { client.listSessions(root.toString()) }.getOrDefault(emptyList())
-        }.filter { it.sessionId !in excludeIds && !it.sessionId.startsWith("sess_subagent") }
+        return scan.roots
+            .filter { WorktreeRegistry.normalize(it.root.toString()) !in coveredRoots }
+            .flatMap { root ->
+                val execRoot = scan.execRootFor(root)
+                runCatching { client.listSessions(execRoot.toString()) }.getOrDefault(emptyList())
+            }.filter { it.sessionId !in excludeIds && !it.sessionId.startsWith("sess_subagent") }
+            .distinctBy { it.sessionId }
     }
+
+    /** 被列目录是否落在托管根（`<dataBaseDir>/.zcode/worktrees/<桶>/<仓库名>`）内 */
+    private fun isManagedWorktreeDir(path: String): Boolean = runCatching {
+        val cli = GitWorktreeCli()
+        cli.parseManagedWorktreePath(cli.dataBaseDir(), java.nio.file.Path.of(path)) != null
+    }.getOrDefault(false)
+
+    /** 路径 → 其所属托管副本根（归一键）；非托管路径返回 null */
+    private fun managedRootKeyOf(path: String): String? = runCatching {
+        val cli = GitWorktreeCli()
+        val dataBase = cli.dataBaseDir()
+        val parsed = cli.parseManagedWorktreePath(dataBase, java.nio.file.Path.of(path))
+            ?: return@runCatching null
+        WorktreeRegistry.normalize(
+            cli.managedRoot(dataBase).resolve(parsed.bucket).resolve(parsed.name).toString(),
+        )
+    }.getOrNull()
 
     /** 桌面端建行的桶名兜底：从路径按托管结构解析（解析失败空串）。数据根走
      *  [GitWorktreeCli.dataBaseDir]（env 感知，ADR-0012 托管根约定），勿退 user.home——
@@ -2957,34 +3011,49 @@ if (!window.__ZCODE_LOG_HOOK__) {
     /** 桌面端副本起点（显示面）：worktree 专属 HEAD reflog 首条（创建时刻历史事实，
      *  非推算，spec #52 追评口径）。reflog 缺失（core.logAllRefUpdates=false 等场景）
      *  返回 null——调用方按「起点未知不显示」处理，绝不拿当前 HEAD 冒充 */
-    private fun worktreeReflogBaseSha(worktreeRoot: String): String? = runCatching {
-        GitWorktreeCli(gitExe = WorktreeGits.executablePath(project))
-            .creationBaseSha(java.nio.file.Path.of(worktreeRoot))
-    }.getOrNull()
+    private fun worktreeReflogBaseSha(worktreeRoot: String): String? =
+        creationBaseShaCached(java.nio.file.Path.of(worktreeRoot))
+
+    /** reflog 首条 sha 的进程级缓存（列表/派生/桌面行三处共用；8s 超时防挂死） */
+    private fun creationBaseShaCached(root: java.nio.file.Path): String? =
+        creationBaseShaCache.computeIfAbsent(root.toString()) {
+            java.util.Optional.ofNullable(
+                runCatching {
+                    GitWorktreeCli(gitExe = WorktreeGits.executablePath(project), timeoutMs = 8_000L)
+                        .creationBaseSha(root)
+                }.getOrNull(),
+            )
+        }.orElse(null)
 
     /**
-     * 托管根会话 meta 派生（缺陷HQ 第三腿·显示面）：workspace 落托管根
-     *（`<dataBase>/.zcode/worktrees/<桶>/<仓库名>`）的会话，注册表/任务索引两腿够不到
-     * 时按路径结构 + reflog（[GitWorktreeCli.creationBaseSha]，一次文件读，[baseCache]
-     * 按根缓存）本地拼 chip 元数据；归属解析不出（跨项目副本）退 workspacePath 本身。
+     * 托管根会话 meta 派生（缺陷HQ 第三腿·显示面，缺陷HU 扩 sourceHint）：workspace 落
+     * 托管根（`<dataBase>/.zcode/worktrees/<桶>/<仓库名>`）的会话，注册表/任务索引两腿
+     * 够不到时按路径结构 + reflog 本地拼 chip 元数据。
+     *
+     * @param sourceHint 当前被列目录：git 反解不出时回退到「你正在看的目录」而不是副本
+     *   自身；被列目录是仓库子目录时，hint 比反解到的仓库根更精确（chip 不显示错来源）
      */
     private fun deriveWorktreeMeta(
         workspacePath: String,
-        baseCache: MutableMap<String, String>,
+        sourceHint: String? = null,
     ): JsonObject? {
         // creationBaseSha 要跑 git rev-parse：走 git4idea 解析通道（WorktreeRegistry 同款，
         // 防 IDE 环境 PATH 缺 git 时静默失败）；数据根 env 感知（ADR-0012）
-        val cli = GitWorktreeCli(gitExe = WorktreeGits.executablePath(project))
+        val cli = GitWorktreeCli(gitExe = WorktreeGits.executablePath(project), timeoutMs = 8_000L)
         val dataBase = cli.dataBaseDir()
         val parsed = runCatching { cli.parseManagedWorktreePath(dataBase, java.nio.file.Path.of(workspacePath)) }
             .getOrNull() ?: return null
         val root = cli.managedRoot(dataBase).resolve(parsed.bucket).resolve(parsed.name)
-        val startSha = baseCache.getOrPut(root.toString()) {
-            runCatching { cli.creationBaseSha(root) }.getOrNull()?.take(7) ?: ""
+        val startSha = creationBaseShaCached(root)?.take(7) ?: ""
+        val resolved = worktreeRegistry.resolveSourceWorkspace(workspacePath)
+        val source = when {
+            resolved == null -> sourceHint ?: workspacePath
+            sourceHint != null &&
+                normalizePath(sourceHint).startsWith(normalizePath(resolved) + "/") -> sourceHint
+            else -> resolved
         }
         return worktreeMetaJson(
-            workspacePath, root.toString(),
-            worktreeRegistry.resolveSourceWorkspace(workspacePath) ?: workspacePath,
+            workspacePath, root.toString(), source,
             parsed.bucket,
             "", startSha, "derived",
         )
@@ -3265,8 +3334,27 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
     }
 
-    /** worktree 注册表（project 级 kv 薄封装，懒加载） */
+    /** worktree 注册表（全局文件 + 旧项目 kv 双读，懒加载） */
     private val worktreeRegistry by lazy { WorktreeRegistry(project) }
+
+    /**
+     * 被列目录 → 所在仓库 → 托管副本发现（缺陷HU）：跨项目/关联目录可见性的主修复。
+     * 30s TTL 缓存（创建/删除副本经 [WorktreeRepoScan.bumpGeneration] 主动失效）；
+     * git 走 git4idea 解析通道 + 8s 超时，防 IDE 环境 PATH 缺 git 或挂死拖住列表。
+     */
+    private val worktreeRepoScan by lazy {
+        val git = {
+            GitWorktreeCli(gitExe = WorktreeGits.executablePath(project), timeoutMs = 8_000L)
+        }
+        val dataBase = runCatching { git().dataBaseDir() }.getOrNull()
+        WorktreeRepoScan(
+            toplevelOf = { dir -> runCatching { git().toplevel(dir) }.getOrNull() },
+            rootsOf = { repo ->
+                if (dataBase == null) emptyList()
+                else runCatching { git().listManagedWorktreeRoots(repo, dataBase) }.getOrDefault(emptyList())
+            },
+        )
+    }
 
     // ============ 会话统计缓存（切目录慢修复，2026-10-27）============
     // stats 是全库级直读（与目录无关），TTL 内跨目录/跨标签复用；字段挂已有 companion
@@ -4751,6 +4839,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
             emptyList()
         } else {
             val norm = normalizePath(workspacePath)
+            // 仓库事实集合（缺陷HU）：被列目录所在仓库的托管副本根。注册表丢条目的历史
+            // 孤儿仍能认领，但同名仓库/别家副本不会再被写进全局注册表
+            val scanRoots = runCatching {
+                worktreeRepoScan.scan(java.nio.file.Path.of(workspacePath))
+                    .roots.mapTo(HashSet<String>()) { WorktreeRegistry.normalize(it.root.toString()) }
+            }.getOrDefault(emptySet<String>())
             val wtArchivedIds = runCatching { client.taskIndex.listWorktreeTasks() }.getOrDefault(emptyList())
                 .filter { it.archived && !it.deleted }
                 .filter { row ->
@@ -4759,41 +4853,43 @@ if (!window.__ZCODE_LOG_HOOK__) {
                             ?.let { normalizePath(it.sourceWorkspace) == norm } == true ||
                         // 注册表丢条目兜底（2026-11-16 真机：旧版「删除 worktree 清注册表」
                         // 清掉的条目救不回来，此后这些会话归档/查归档页归属反查全断）：
-                        // 托管结构解析仓库名=源目录名的启发式归属——命中即视为本源目录
-                        // 的副本会话并自愈写回注册表（同仓库名跨项目误归属仅影响显示
-                        // 归位，不损数据；新包删除已不清注册表，该兜底只救历史孤儿）
+                        // 副本根必须出现在当前仓库的 `git worktree list` 才认领（缺陷HU：
+                        // 注册表全局化后不能再按目录名猜，否则别家同名仓库会被误写）；
+                        // 命中即自愈写回全局注册表
                         runCatching {
                             val wr = row.worktreeRoot ?: return@runCatching false
-                            val cli0 = GitWorktreeCli()
+                            if (WorktreeRegistry.normalize(wr) !in scanRoots) return@runCatching false
+                            val cli0 = GitWorktreeCli(gitExe = WorktreeGits.executablePath(project), timeoutMs = 8_000L)
                             val parsed = cli0.parseManagedWorktreePath(
                                 cli0.dataBaseDir(), // 数据根 env 感知（ADR-0012）：重定向后 user.home 是冻结旧根，解析必落空
                                 java.nio.file.Path.of(wr),
                             )
-                            val hit = parsed?.name?.equals(
-                                java.nio.file.Path.of(workspacePath).fileName?.toString(), ignoreCase = true,
-                            ) == true
-                            if (hit) {
-                                worktreeRegistry.upsert(
-                                    com.zcode.ideaplugin.worktree.WorktreeRegistryStore.WorktreeSessionInfo(
-                                        sessionId = row.taskId,
-                                        worktreeRoot = wr,
-                                        cwd = row.rootPath ?: row.workspacePath,
-                                        sourceWorkspace = workspacePath,
-                                        startRef = "", startSha = "",
-                                        bucket = parsed?.bucket ?: "",
-                                        createdAt = row.updatedAt,
-                                    ),
-                                )
-                            }
-                            hit
+                            worktreeRegistry.upsert(
+                                com.zcode.ideaplugin.worktree.WorktreeRegistryStore.WorktreeSessionInfo(
+                                    sessionId = row.taskId,
+                                    worktreeRoot = wr,
+                                    cwd = row.rootPath ?: row.workspacePath,
+                                    sourceWorkspace = workspacePath,
+                                    startRef = "", startSha = "",
+                                    bucket = parsed?.bucket ?: "",
+                                    createdAt = row.updatedAt,
+                                ),
+                            )
+                            true
                         }.getOrDefault(false)
                 }
                 .map { it.taskId }
             if (wtArchivedIds.isEmpty()) {
                 emptyList()
             } else {
-                runCatching { client.listSessionsByIds(wtArchivedIds, workspacePath, timeoutMs = 15_000L) }
-                    .getOrDefault(emptyList())
+                runCatching {
+                    client.listSessionsByIds(
+                        wtArchivedIds,
+                        workspacePath.replace('/', java.io.File.separatorChar),
+                        workspacePath.replace('\\', '/'),
+                        timeoutMs = 15_000L,
+                    )
+                }.getOrDefault(emptyList())
                     .map { it.copy(archivedAt = it.archivedAt ?: it.updatedAt) }
             }
         }

@@ -36,6 +36,8 @@ class WorktreeSessionCreator(private val git: GitWorktreeCli, private val dataBa
         onPhase(Phase.PREPARING)
         onPhase(Phase.CREATING)
         val wt = git.createManagedWorktree(sourceWorkspace, dataBaseDir, startRef)
+        // 新副本已落 git 注册：让各面板的发现缓存（30s TTL）立即重扫，切目录即可见
+        WorktreeRepoScan.bumpGeneration()
         val cwd = if (wt.relativeCwd == ".") wt.root else wt.root.resolve(wt.relativeCwd)
         onPhase(Phase.STARTING)
         val sessionId = createSession(cwd)

@@ -2,6 +2,8 @@ package com.zcode.ideaplugin.worktree
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -36,6 +38,37 @@ class WorktreeRegistryStoreTest {
         assertTrue(WorktreeRegistryStore.parse("").isEmpty())
         assertTrue(WorktreeRegistryStore.parse("{not-json").isEmpty())
         assertTrue(WorktreeRegistryStore.parse("{\"a\":1}").isEmpty(), "对象而非数组 → 空")
+    }
+
+    @Test
+    fun `parseStrict distinguishes corrupt from empty`() {
+        assertEquals(emptyList<WorktreeRegistryStore.WorktreeSessionInfo>(), WorktreeRegistryStore.parseStrict(null))
+        assertEquals(emptyList<WorktreeRegistryStore.WorktreeSessionInfo>(), WorktreeRegistryStore.parseStrict(""))
+        assertNull(WorktreeRegistryStore.parseStrict("{not-json"), "整体非法 → null（不能当空表覆盖）")
+        assertNull(WorktreeRegistryStore.parseStrict("{\"a\":1}"))
+        assertNotNull(WorktreeRegistryStore.parseStrict(WorktreeRegistryStore.serialize(listOf(info()))))
+    }
+
+    @Test
+    fun `mergeById primary wins and secondary only fills missing`() {
+        val global = listOf(info(startRef = "global"), info(sessionId = "sess_2"))
+        val legacy = listOf(
+            info(startRef = "legacy", createdAt = 999L), // 同 id：全局优先
+            info(sessionId = "sess_3", createdAt = 300L), // 缺失：旧 kv 补入
+        )
+        val merged = WorktreeRegistryStore.mergeById(global, legacy)
+        assertEquals(listOf("sess_1", "sess_2", "sess_3"), merged.map { it.sessionId })
+        assertEquals("global", merged.first { it.sessionId == "sess_1" }.startRef)
+        assertTrue(WorktreeRegistryStore.mergeById(global, emptyList()) === global)
+    }
+
+    @Test
+    fun `capByCreatedAt keeps newest entries`() {
+        val list = (1..5).map { info(sessionId = "sess_$it", createdAt = it.toLong()) }
+        val capped = WorktreeRegistryStore.capByCreatedAt(list, 3)
+        assertEquals(3, capped.size)
+        assertEquals(setOf("sess_3", "sess_4", "sess_5"), capped.map { it.sessionId }.toSet())
+        assertEquals(list, WorktreeRegistryStore.capByCreatedAt(list, 10), "未超限原样返回")
     }
 
     @Test

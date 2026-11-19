@@ -252,6 +252,64 @@ class GitWorktreeCliTest {
     }
 
     @Test
+    fun `托管副本根清单 只回本仓库并支持子目录`() {
+        val repoA = initRepo()
+        val repoB = initRepo()
+        val base = base()
+        val wtA = cli.createManagedWorktree(repoA, base, "HEAD")
+        val wtB = cli.createManagedWorktree(repoB, base, "HEAD")
+
+        assertEquals(listOf(wtA.root), cli.listManagedWorktreeRoots(repoA, base).map { it.root },
+            "只回本仓库副本，不按名字扫全托管根")
+        assertEquals(listOf(wtB.root), cli.listManagedWorktreeRoots(repoB, base).map { it.root })
+        assertTrue(cli.listManagedWorktreeRoots(repoA, base).all { it.exists })
+
+        // 仓库子目录调用：git worktree list 从 toplevel 出发，仍回该仓库副本
+        val sub = Files.createDirectory(repoA.resolve("sub"))
+        Files.writeString(sub.resolve("b.txt"), "x")
+        git(repoA, "add", "-A")
+        git(repoA, "commit", "-m", "sub")
+        assertEquals(listOf(wtA.root), cli.listManagedWorktreeRoots(sub, base).map { it.root })
+
+        // 非 git 目录：空（发现腿直接短路）
+        val plain = Files.createDirectory(tmp.resolve("plain-roots"))
+        assertTrue(cli.listManagedWorktreeRoots(plain, base).isEmpty())
+    }
+
+    @Test
+    fun `托管副本根清单 同名克隆互不串`() {
+        val cloneA = Files.createDirectories(tmp.resolve("a/demo"))
+        val cloneB = Files.createDirectories(tmp.resolve("b/demo"))
+        for (dir in listOf(cloneA, cloneB)) {
+            git(dir, "init")
+            git(dir, "config", "user.email", "t@example.com")
+            git(dir, "config", "user.name", "t")
+            Files.writeString(dir.resolve("a.txt"), "hello")
+            git(dir, "add", ".")
+            git(dir, "commit", "-m", "init")
+        }
+        val base = base()
+        val wtA = cli.createManagedWorktree(cloneA, base, "HEAD")
+        val wtB = cli.createManagedWorktree(cloneB, base, "HEAD")
+        assertNotEquals(wtA.root, wtB.root)
+        assertEquals(listOf(wtA.root), cli.listManagedWorktreeRoots(cloneA, base).map { it.root })
+        assertEquals(listOf(wtB.root), cli.listManagedWorktreeRoots(cloneB, base).map { it.root })
+    }
+
+    @Test
+    fun `托管副本根清单 目录缺失仍返回 exists=false`() {
+        val repo = initRepo()
+        val base = base()
+        val wt = cli.createManagedWorktree(repo, base, "HEAD")
+        deleteAll(wt.root)
+        val roots = cli.listManagedWorktreeRoots(repo, base)
+        assertEquals(1, roots.size, "prune 前记录仍在")
+        assertFalse(roots[0].exists, "已删未 prune 的副本仍可发现（会话记录还能找回）")
+        cli.prune(repo)
+        assertTrue(cli.listManagedWorktreeRoots(repo, base).isEmpty())
+    }
+
+    @Test
     fun `起点子目录缺失报 start-ref-missing-subdir`() {
         val repo = initRepo()
         val sub = Files.createDirectory(repo.resolve("sub"))

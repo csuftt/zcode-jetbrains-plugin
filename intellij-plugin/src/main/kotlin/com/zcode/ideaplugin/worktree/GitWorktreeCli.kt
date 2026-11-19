@@ -50,6 +50,14 @@ class GitWorktreeCli(private val gitExe: String = "git", private val timeoutMs: 
         val state: String,
     )
 
+    /** 托管副本根（轻量：列表发现用，不查 dirty；exists=false 覆盖已删未 prune 的副本） */
+    data class ManagedRootInfo(
+        val bucket: String,
+        val name: String,
+        val root: Path,
+        val exists: Boolean,
+    )
+
     private val random = SecureRandom()
 
     // ============ 定位与解析 ============
@@ -119,6 +127,7 @@ class GitWorktreeCli(private val gitExe: String = "git", private val timeoutMs: 
     fun removeManagedWorktree(sourceDir: Path, worktreeRoot: Path, force: Boolean) {
         if (!Files.exists(worktreeRoot)) {
             prune(sourceDir)
+            WorktreeRepoScan.bumpGeneration()
             return
         }
         val args = mutableListOf("worktree", "remove")
@@ -127,6 +136,8 @@ class GitWorktreeCli(private val gitExe: String = "git", private val timeoutMs: 
         val r = run(sourceDir, *args.toTypedArray())
         if (!r.ok) throw GitWorktreeException("git-failed", r.output.takeLast(2000))
         deleteRecursively(worktreeRoot)
+        // 副本已从 git 注册移除：发现缓存立即失效（已删会话仍靠全局注册表条目保留）
+        WorktreeRepoScan.bumpGeneration()
     }
 
     fun prune(sourceDir: Path) {
@@ -192,6 +203,26 @@ class GitWorktreeCli(private val gitExe: String = "git", private val timeoutMs: 
         if (fields.size < 2) return null
         if (!fields[0].matches(Regex("^0{40}$"))) return null
         return fields[1].takeIf { it.matches(Regex("^[0-9a-f]{40}$")) }
+    }
+
+    /**
+     * 托管副本根清单（轻量发现版，0.4.6 跨项目会话发现）：与 [listManagedWorktrees]
+     * 同源过滤（`worktree list --porcelain -z` ∩ 托管根，只收桶根），但不跑 isDirty——
+     * 历史列表每次切换目录都会调用，dirty 是每个副本一次 git 进程且与列表无关。
+     *
+     * 关键语义：`worktree list` 从**当前仓库**出发，天然只返回该仓库的副本，
+     * 同名仓库克隆不会互相污染（旧实现按目录名扫全托管根做不到这点）。
+     * 目录已删但未 prune 的副本仍会列出（exists=false），会话记录还能靠它找回。
+     */
+    fun listManagedWorktreeRoots(sourceDir: Path, dataBaseDir: Path): List<ManagedRootInfo> {
+        val raw = run(sourceDir, "worktree", "list", "--porcelain", "-z")
+        if (!raw.ok) return emptyList()
+        return parseWorktreeListPorcelain(raw.output).mapNotNull { e ->
+            if (e.bare) return@mapNotNull null
+            val parsed = parseManagedWorktreePath(dataBaseDir, e.path) ?: return@mapNotNull null
+            if (parsed.relativePath.isNotEmpty()) return@mapNotNull null
+            ManagedRootInfo(parsed.bucket, parsed.name, e.path, Files.exists(e.path))
+        }
     }
 
     /** 托管 worktree 清单：`worktree list --porcelain -z` ∩ 托管根（含桌面端建的），只收桶根 */
@@ -479,12 +510,25 @@ class GitWorktreeCli(private val gitExe: String = "git", private val timeoutMs: 
             }
         }
         val p = pb.start()
-        val bytes = p.inputStream.readBytes()
+        // 读流与等待必须并行：先 waitFor 再读会被管道缓冲写满互锁；先 readBytes 再
+        // waitFor 则超时被读阻塞架空——挂死的 git（网络盘/凭据交互）永不返回，
+        // 历史列表/发现链跟着卡死。独立守护线程收集输出，waitFor 真正管超时。
+        var bytes: ByteArray = ByteArray(0)
+        val reader = Thread {
+            bytes = runCatching { p.inputStream.use { it.readBytes() } }.getOrDefault(ByteArray(0))
+        }.apply {
+            isDaemon = true
+            name = "zcode-git-reader"
+            start()
+        }
         val finished = p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
         if (!finished) {
             p.destroyForcibly()
+            reader.join(500)
             return Triple(-1, bytes, true)
         }
+        // 进程已退出，流即将 EOF；留 1s 收尾（join 建立 happens-before，读到完整 bytes）
+        reader.join(1000)
         return Triple(p.exitValue(), bytes, false)
     }
 

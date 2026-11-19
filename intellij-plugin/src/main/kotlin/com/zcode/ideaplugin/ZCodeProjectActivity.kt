@@ -8,6 +8,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import com.zcode.ideaplugin.protocol.V1BuiltinMigrator
 import com.zcode.ideaplugin.ui.ZCodeAutoArchiveService
+import com.zcode.ideaplugin.worktree.WorktreeRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -26,6 +27,12 @@ class ZCodeProjectActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         ZCodeAutoArchiveService.getInstance(project)
         withContext(Dispatchers.IO) { migrateV1BuiltinsOnce(project) }
+        // worktree 会话注册表全局化迁移（缺陷HU）：旧 project kv 一次性并入
+        // ~/.zcgui/worktree-sessions.v1.json。只影响归属元数据，失败保留旧 key
+        // 下次启动重试（双读期间列表可见性不受影响），不阻塞项目打开。
+        withContext(Dispatchers.IO) {
+            runCatching { WorktreeRegistry(project).migrateLegacyOnce() }
+        }
         // 关联目录 → Project View 挂载（2026-10-28）：kv 为唯一权威的幂等投影，
         // 重启自愈（被构建同步/手动摘除的根补回、盘上失效的根清理）；无关联目录零足迹。
         // 内部跳 EDT 做模型变更，此处仅 IO 读 kv + 盘存在性过滤。
