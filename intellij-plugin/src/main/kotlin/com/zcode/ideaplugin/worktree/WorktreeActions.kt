@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.DataKey
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -27,8 +28,8 @@ import java.nio.file.Path
  * 「在终端打开」deferred：需 terminal 插件依赖与 API 验证，0.4.7 候选。
  */
 private fun selectedEntries(e: AnActionEvent): List<WorktreeProjectState.Entry> {
-    // ① provider getData 通路（树构建方供应）
-    (e.dataContext.getData(WorktreeDataKeys.SELECTED_ENTRIES) as? List<WorktreeProjectState.Entry>)?.let { return it }
+    // ① provider getData 通路（树构建方供应，DataKey 公开通道）
+    WorktreeDataKeys.SELECTED_ENTRIES.getData(e.dataContext)?.let { return it }
     val project = e.project ?: return emptyList()
     // ② 当前视图树直读选中节点：DefaultMutableTreeNode.userObject 解包 + 裸节点兼容
     val tree = runCatching {
@@ -529,7 +530,7 @@ class WorktreeOpenSessionsGroup : DefaultActionGroup(ZCodeBundle.message("worktr
         // → entry==null → isVisible=false）。兜底 = SELECTED_ITEMS：pane 直接应答、
         // BGT 稳定（AbstractProjectViewPane.getData 快照），元素=树节点 user object
         // =自家 WorktreeEntryNode 实例
-        val entries = e.dataContext.getData(WorktreeDataKeys.SELECTED_ENTRIES) as? List<WorktreeProjectState.Entry>
+        val entries = WorktreeDataKeys.SELECTED_ENTRIES.getData(e.dataContext)
             ?: e.dataContext.getData(com.intellij.openapi.actionSystem.PlatformCoreDataKeys.SELECTED_ITEMS)
                 ?.filterIsInstance<WorktreeEntryNode>()?.map { it.entry }
         val entry = entries?.firstOrNull()

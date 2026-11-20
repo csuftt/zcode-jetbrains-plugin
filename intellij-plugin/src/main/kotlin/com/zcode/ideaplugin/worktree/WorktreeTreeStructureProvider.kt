@@ -6,6 +6,7 @@ import com.intellij.ide.projectView.TreeStructureProvider
 import com.intellij.ide.projectView.ViewSettings
 import com.intellij.ide.util.treeView.AbstractTreeNode
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.DataKey
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.SimpleTextAttributes
@@ -55,15 +56,21 @@ class WorktreeTreeStructureProvider : TreeStructureProvider {
 
     /** 给右键动作供数据：选中的 worktree 叶节点条目 */
     override fun getData(selected: MutableCollection<out AbstractTreeNode<*>>, dataId: String): Any? {
-        if (dataId != WorktreeDataKeys.SELECTED_ENTRIES) return null
+        if (dataId != WorktreeDataKeys.SELECTED_ENTRIES_ID) return null
         val items = selected.filterIsInstance<WorktreeEntryNode>().map { it.entry }
         return if (items.isEmpty()) null else items
     }
 }
 
 object WorktreeDataKeys {
-    /** ProjectView 右键：选中的 worktree 条目（WorktreeProjectState.Entry 列表） */
-    const val SELECTED_ENTRIES = "zcode.worktree.selectedEntries"
+    /** ProjectView 右键：选中的 worktree 条目（WorktreeProjectState.Entry 列表）。
+     *  供给侧（[WorktreeTreeStructureProvider.getData]）按平台协议收字符串 id，常量保留；消费侧
+     *  统一走 [SELECTED_ENTRIES] 的 DataKey 公开通道——`DataContext.getData(String)` 是
+     *  @ApiStatus.Internal，Marketplace verifier 报 Problem（0.4.6 实踩 2 处）。 */
+    const val SELECTED_ENTRIES_ID = "zcode.worktree.selectedEntries"
+
+    /** 与 [SELECTED_ENTRIES_ID] 同串名：DataKey.getData(context) 平台内部仍按字符串 id 解析，供给链不变 */
+    val SELECTED_ENTRIES: DataKey<List<WorktreeProjectState.Entry>> = DataKey.create(SELECTED_ENTRIES_ID)
 }
 
 /** 分组节点稳定身份键（树元素 equals=类+value；同父下两段互异即可，跨父链不相遇） */
