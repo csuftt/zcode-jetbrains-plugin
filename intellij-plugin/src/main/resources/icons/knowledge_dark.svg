@@ -1,0 +1,10 @@
+<svg viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <!-- ZCode 知识库（暗色主题 #CED0D6）：knowledge.svg 的同形变体，仅换描边色。
+       IntelliJ 在暗色主题下按 *_dark 后缀自动加载本文件。 -->
+  <g fill="none" stroke="#CED0D6" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 8 3.05 C 6.5 2.5 4.6 3.1 2.15 3.6 L 2.15 12.3 C 4.6 11.9 6.5 12.5 8 13.2 C 9.5 12.5 11.4 11.9 13.85 12.3 L 13.85 3.6 C 11.4 3.1 9.5 2.5 8 3.05 Z"/>
+    <path d="M 8 3.1 L 8 13.2"/>
+  </g>
+  <path d="M 4.0 6.2 H 6.15 L 4.0 8.55 H 6.15" fill="none" stroke="#CED0D6" stroke-width="1.1"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
