@@ -224,6 +224,9 @@ dependencies {
     // 依赖协议客户端模块
     implementation(project(":protocol-client"))
 
+    // 知识库核心（存储/提取/MCP server，含 sqlite-jdbc/pdfbox/jsoup 依赖，随 zip lib/ 分发）
+    implementation(project(":knowledge-core"))
+
     // kotlinx serialization（运行时也需要）
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 

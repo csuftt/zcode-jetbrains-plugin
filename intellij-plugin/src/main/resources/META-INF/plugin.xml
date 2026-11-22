@@ -53,6 +53,15 @@
                     canCloseContents="true"/>
         <!-- 编辑器右键动作的气泡通知（复制AI引用结果反馈） -->
         <notificationGroup id="ZCode" displayType="BALLOON"/>
+        <!-- 知识库 ToolWindow（issue#54，独立停靠左侧）：浏览/检索/预览/拖拽收录。
+             图标为线稿开本书 + 左页小 Z（knowledge.svg / knowledge_dark.svg，
+             跟随原生工具窗图标的灰色描边），不复用 ZCode 主窗的 zcgui 图标 -->
+        <!-- secondary=true：条带下组（与项目图标间平台自动画分隔线，2026-11-21 用户要求上下分段） -->
+        <toolWindow id="ZC GUI知识库"
+                    anchor="left"
+                    factoryClass="com.zcode.ideaplugin.kb.KnowledgeToolWindowFactory"
+                    icon="com.zcode.ideaplugin.ZCodeIcons.Knowledge"
+                    secondary="true"/>
         <!-- 项目启动即预热自动归档调度器（缺陷BH：懒加载导致重启后不碰归档 tab 就静默不跑） -->
         <postStartupActivity implementation="com.zcode.ideaplugin.ZCodeProjectActivity"/>
         <!-- 状态栏 Widget（监督面入口前移：运行态 + 点击聚焦 + 双击新会话，调研 ③） -->
@@ -169,6 +178,18 @@
             <action id="ZCode.WorktreeOpenFile"
                     class="com.zcode.ideaplugin.worktree.WorktreeOpenFileAction"/>
             <separator/>
+        </group>
+        <!-- 知识库（issue#54）：右键收录文档（多选支持；update 按选中扩展名+开关过滤显示）。
+             挂在「发送到 ZC GUI 输入框」组之后（用户指定：两入口相邻成对，组边界自然分隔）；
+             图标用 ZcGui 品牌图标（knowledge 图标是工具窗专用，2026-11-21 用户指定）。
+             文案构造器取值（不走 XML %key%，同上约定） -->
+        <group id="ZCode.KnowledgeAddGroup"
+               popup="false"
+               class="com.zcode.ideaplugin.kb.KbAddFilesGroup">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="ZCode.SendToWorkspaceGroup"/>
+            <add-to-group group-id="EditorTabPopupMenu" anchor="after" relative-to-action="ZCode.SendToWorkspaceGroup"/>
+            <add-to-group group-id="ChangesViewPopupMenu" anchor="after" relative-to-action="ZCode.SendToWorkspaceGroup"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendToWorkspaceGroup"/>
         </group>
     </actions>
 </idea-plugin>

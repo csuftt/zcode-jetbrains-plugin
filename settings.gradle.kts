@@ -1,6 +1,7 @@
 rootProject.name = "zcode-idea-plugin"
 
 include("protocol-client")
+include("knowledge-core")
 include("intellij-plugin")
 
 pluginManagement {

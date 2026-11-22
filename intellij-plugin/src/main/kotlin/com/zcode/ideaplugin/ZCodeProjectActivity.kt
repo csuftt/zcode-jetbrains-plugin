@@ -48,6 +48,23 @@ class ZCodeProjectActivity : ProjectActivity {
         // 手机远程重启恢复（2026-09-24 用户需求）：上次退出时开着 → 自动重连。
         // 服务内部自判开关+凭据、后台线程执行；多项目打开幂等（connect 已运行守卫短路）
         com.zcode.ideaplugin.remote.ZCodeRemoteService.getInstance().restoreIfEnabled()
+        // 知识库轮询对账（2026-11-20）：首个打开的项目把 sweep 循环拉起（幂等短路），
+        // 源文件漂移 20s 内重索引、失联检测与恢复；空库时轮询为纯 stat 空转。
+        withContext(Dispatchers.IO) {
+            runCatching { com.zcode.ideaplugin.kb.KbManagerService.instance.startSweep() }
+        }
+        // 知识库工具窗初始可用性（缺陷HW续三轮）：EP 恒注册（isApplicable=false 会被平台
+        // 跳过注册，运行时开开关后 getToolWindow 拿 null 永远无法恢复），关闭态启动时
+        // 在此 setAvailable(false) 隐藏条带按钮；运行时切换走 KbManagerService 的广播订阅。
+        if (!com.zcode.ideaplugin.kb.KbFeature.isEnabled()) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                runCatching {
+                    com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+                        .getToolWindow(com.zcode.ideaplugin.kb.KbFeature.TOOLWINDOW_ID)
+                        ?.setAvailable(false, null)
+                }
+            }
+        }
     }
 
     companion object {
