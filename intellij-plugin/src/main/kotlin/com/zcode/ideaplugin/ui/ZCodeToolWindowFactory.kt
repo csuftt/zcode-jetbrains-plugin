@@ -1,5 +1,7 @@
 package com.zcode.ideaplugin.ui
 
+import com.intellij.ide.plugins.PluginManagerConfigurable
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.actionSystem.ActionPlaces
@@ -18,8 +20,16 @@ import com.zcode.ideaplugin.action.DetachTabAction
 import com.zcode.ideaplugin.action.RenameTabAction
 import com.zcode.ideaplugin.action.pushRefs
 import com.zcode.ideaplugin.zCodeService
+import java.awt.BorderLayout
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
+import java.awt.Insets
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import javax.swing.JComponent
+import javax.swing.JButton
 import javax.swing.JLabel
+import javax.swing.JPanel
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
@@ -282,7 +292,12 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 runCatching { com.zcode.ideaplugin.worktree.WorktreeRegistry(project).resolveSourceWorkspace(ws) }
                     .getOrNull() ?: ws
             } ?: initialWorkspace
-            val panel: JComponent = try {
+            val panel: JComponent = if (!JcefGuard.available()) {
+                // issue#55：AS 2026.2 等无 jcef 模块的 IDE 上，panel 类的方法签名引用
+                // JCEF 类型，构造即 NoClassDefFoundError（AWT checkCoalescing 反射枚举方法
+                // 时连锁炸）——构造前拦截，展示安装引导而非错误堆栈
+                buildJcefMissingPlaceholder(project)
+            } else try {
                 ZCodeToolWindowPanel(
                     project, initialSessionId, lazyStart = lazy, initialWorkspace = normalizedWorkspace,
                     pendingWorktree = pendingWorktree,
@@ -293,7 +308,12 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 // 两次实锤）。降级为错误占位标签：工具窗保活、其余标签恢复不受影响
                 com.intellij.openapi.diagnostic.Logger.getInstance("ZCodePlugin")
                     .error("ZCode panel creation failed, degrading tab to error placeholder", t)
-                buildPanelErrorPlaceholder(t)
+                // 漏网双保险：探测与构造间隙 JCEF 变不可用（NoClassDefFoundError）→ 同款引导
+                if (t is NoClassDefFoundError && (t.message ?: "").contains("jcef")) {
+                    buildJcefMissingPlaceholder(project)
+                } else {
+                    buildPanelErrorPlaceholder(t)
+                }
             }
             val content = ContentFactory.getInstance().createContent(panel, tabName, false)
             content.isCloseable = true
@@ -325,6 +345,48 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             label.verticalAlignment = SwingConstants.CENTER
             label.horizontalAlignment = SwingConstants.CENTER
             return label
+        }
+
+        /** JCEF 环境缺失占位（issue#55）：给安装引导而非错误堆栈；聊天/浏览器标签通用 */
+        private fun buildJcefMissingPlaceholder(project: Project): JComponent {
+            val label = JLabel()
+            label.verticalAlignment = SwingConstants.CENTER
+            label.horizontalAlignment = SwingConstants.CENTER
+            // 文案宽度自适应：随工具窗宽度收缩换行（上限 560，超宽不无限拉长），窗口调窄
+            // 不再溢出裁剪。Swing 对 HTML label 不定宽时首选宽度按窄换行计算（GridBag 下
+            // 挤成竖条）、硬定宽则窄窗溢出——故按容器宽动态重写 HTML 的 width
+            fun applyHtml(width: Int) {
+                label.text = message("panel.jcefMissing.html", width.coerceIn(120, 560))
+            }
+            applyHtml(560)
+            // 一键直达 Settings → Plugins 的 Marketplace 页并预填搜索词，用户点安装重启即恢复。
+            // openMarketplaceTab 在对话框组件未建时仅记录搜索词/落 tab（字节码实证：写
+            // myLaterSearchQuery + myShowMarketplaceTab，createComponent 时消费），UI 已建则
+            // 立即切 tab 并弹搜索面板——两个时机都正确；233~262 全版本捆绑 API
+            val openMarket = JButton(message("panel.jcefMissing.button"))
+            openMarket.addActionListener {
+                ShowSettingsUtil.getInstance().showSettingsDialog(
+                    project, PluginManagerConfigurable::class.java,
+                ) { configurable -> configurable.openMarketplaceTab("Web Browser (JCEF)") }
+            }
+            val center = JPanel(GridBagLayout()).apply {
+                isOpaque = false
+                val c = GridBagConstraints()
+                c.gridx = 0
+                c.insets = Insets(0, 24, 16, 24)
+                add(label, c)
+                c.gridy = 1
+                c.insets = Insets(0, 24, 0, 24)
+                add(openMarket, c)
+                addComponentListener(object : ComponentAdapter() {
+                    override fun componentResized(e: ComponentEvent) {
+                        applyHtml(width - 48)
+                    }
+                })
+            }
+            val wrapper = JPanel(BorderLayout())
+            wrapper.add(center, BorderLayout.CENTER)
+            return wrapper
         }
 
         /** 把当前标签布局全量写入 TabState（名字 + sessionId + workspacePath + activeIndex）*/
@@ -360,6 +422,17 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 cm.setSelectedContent(it)
                 toolWindow.show(null)
                 return it
+            }
+            // issue#55：ZCodeBrowserPanel 字段签名/初始化器引用 JCEF 类型，无 jcef 模块的
+            // IDE 上类加载即炸——同聊天标签给引导页（浏览器标签同样依赖 JCEF）
+            if (!JcefGuard.available()) {
+                val content = ContentFactory.getInstance()
+                    .createContent(buildJcefMissingPlaceholder(project), message("browser.tab.name"), false)
+                content.isCloseable = true
+                cm.addContent(content)
+                toolWindow.show(null)
+                cm.setSelectedContent(content)
+                return content
             }
             val panel = ZCodeBrowserPanel(project)
             val content = ContentFactory.getInstance().createContent(panel, message("browser.tab.name"), false)
@@ -557,6 +630,10 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
      */
     private fun restartStaleCefServerIfNeeded() {
         if (!com.intellij.openapi.util.SystemInfo.isMac) return
+        // issue#55：无 jcef 模块（AS 2026.2）时 JBCefApp/ZCodeBrowserExecutor 类均缺失，
+        // 下面的调用会 NoClassDefFoundError（外层 catch 只捕 Exception 包不住 Error）——
+        // CEF server 本就不存在，清理无从谈起，直接跳过
+        if (!JcefGuard.available()) return
         val log = com.intellij.openapi.diagnostic.Logger.getInstance("ZCodePlugin")
         try {
             if (com.intellij.ui.jcef.JBCefApp.isStarted()) return

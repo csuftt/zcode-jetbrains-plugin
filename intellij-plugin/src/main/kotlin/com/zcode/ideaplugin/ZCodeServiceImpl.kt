@@ -213,13 +213,21 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
                     false, "app-server 已启动但 browser-use 宿主 handler 未注册",
                     com.zcode.ideaplugin.env.BrowserHostStatus.CODE_HANDLER_MISSING,
                 )
-                com.intellij.ui.jcef.JBCefApp.isStarted() &&
-                    !com.zcode.ideaplugin.ui.ZCodeBrowserExecutor.hasReachableCdpEndpoint() ->
-                    com.zcode.ideaplugin.env.BrowserHostStatus(
-                        false, "JCEF 已启动但 CDP 调试端口不可达",
-                        com.zcode.ideaplugin.env.BrowserHostStatus.CODE_CEF_DOWN,
-                    )
-                else -> com.zcode.ideaplugin.env.BrowserHostStatus(true, null)
+                // issue#55：无 jcef 模块（AS 2026.2）时 JBCefApp/Executor 类缺失会
+                // NoClassDefFoundError——按宿主健康上报（browser-use 本就不可用，不该
+                // 误报 CEF_DOWN 也不该炸穿环境自检）
+                else -> runCatching {
+                    if (com.intellij.ui.jcef.JBCefApp.isStarted() &&
+                        !com.zcode.ideaplugin.ui.ZCodeBrowserExecutor.hasReachableCdpEndpoint()
+                    ) {
+                        com.zcode.ideaplugin.env.BrowserHostStatus(
+                            false, "JCEF 已启动但 CDP 调试端口不可达",
+                            com.zcode.ideaplugin.env.BrowserHostStatus.CODE_CEF_DOWN,
+                        )
+                    } else {
+                        com.zcode.ideaplugin.env.BrowserHostStatus(true, null)
+                    }
+                }.getOrDefault(com.zcode.ideaplugin.env.BrowserHostStatus(true, null))
             }
         }
         // CDP 实际端点探针（设置页 CDP 输入框未配置时回显生效文件，CLI 路径同款逻辑）
@@ -953,6 +961,9 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
     override fun getSharedBrowserPanel(): com.zcode.ideaplugin.ui.ZCodeBrowserPanel? = sharedBrowserPanel
 
     override fun getOrCreateSharedBrowserPanel(): com.zcode.ideaplugin.ui.ZCodeBrowserPanel? {
+        // issue#55：ZCodeBrowserPanel 类签名含 JCEF 类型，无 jcef 模块的 IDE 上实例化即炸；
+        // 该路径由前端触发（聊天 panel 不存在时理论到不了），防御性拦截
+        if (!com.zcode.ideaplugin.ui.JcefGuard.available()) return null
         sharedBrowserPanel?.let { return it }
         return synchronized(this) {
             sharedBrowserPanel?.let { return it }
