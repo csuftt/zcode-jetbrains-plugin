@@ -63,7 +63,7 @@ object ZCodeProviderBootstrap {
         }
     }
 
-    /** ① 客户端登录产物：~/.zcode/v2/runtime/provider/**/zcode-builtin.json 取 mtime 最新 */
+    /** ① 客户端登录产物：~/.zcode/v2/runtime/provider/**/zcode-builtin.json 取 mtime 最新（Kotlin 块注释嵌套：此处不写通配星号）*/
     private fun newestRuntimeProvider(home: Path): Path? = try {
         val root = home.resolve(".zcode").resolve("v2").resolve("runtime").resolve("provider")
         if (Files.isDirectory(root)) {

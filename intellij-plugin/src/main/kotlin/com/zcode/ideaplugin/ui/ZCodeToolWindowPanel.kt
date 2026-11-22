@@ -1389,6 +1389,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "setMemoryEnabled" -> handleSetMemoryEnabled(msg)
                         "getCuaEnabled" -> handleGetCuaEnabled()
                         "setCuaEnabled" -> handleSetCuaEnabled(msg)
+                        "getKbSettings" -> handleGetKbSettings()
+                        "setKbEnabled" -> handleSetKbEnabled(msg)
+                        "rebuildKbIndex" -> handleRebuildKbIndex()
                         "getCuaIcon" -> handleGetCuaIcon(msg)
                         "getProxyConfig" -> handleGetProxyConfig()
                         "setProxyConfig" -> handleSetProxyConfig(msg)
@@ -1512,6 +1515,10 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         log.warn("op=$op failed: resident pool likely full: ${e.message}")
                     } else {
                         log.error("op=$op handling failed", e)
+                    }
+                    // 兜底回 error 应答：op 异常若不回应答，前端等待方按钮永 busy（缺陷HW续三轮）
+                    runCatching {
+                        sendToJs(errorResponse("op $op 处理失败：${e.message ?: e.javaClass.simpleName}"))
                     }
                     // send 的兜底失败也带归属（缺陷FF）：客户端 send 抛 IOException/
                     // ZCodeProtocolException 之外的意外形态时，前端快路同样能退回队列
@@ -3257,6 +3264,19 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * 会话注入面汇总（CUA + 知识库）：各自开关/环境门控，任一非空才带 mcpServers。
+     * 知识库空库不注入（issue#54）；kb entryCount 走服务懒连接（sweep 启动后通常已开）。
+     */
+    private fun sessionMcpSpecs(): List<com.zcode.ideaplugin.protocol.model.McpServerSpec>? = buildList {
+        com.zcode.ideaplugin.cua.CuaFeature.specIfEnabled()?.let { add(it) }
+        runCatching {
+            com.zcode.ideaplugin.kb.KbFeature.specIfEnabled(
+                com.zcode.ideaplugin.kb.KbManagerService.instance.entryCount()
+            )
+        }.getOrNull()?.let { add(it) }
+    }.ifEmpty { null }
+
+    /**
      * worktree 会话创建（0.4.6）：创建编排（起点定版→建 detached 副本→副本目录建会话→
      * 注册表登记），进度经 worktreeProgress 推送；失败回错误并推 failed（前端降级三键）。
      */
@@ -3271,7 +3291,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
         val startRef = worktreeReq["startRef"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: "HEAD"
         val thoughtLevel = msg["thoughtLevel"]?.jsonPrimitive?.content
-        val cuaSpec = com.zcode.ideaplugin.cua.CuaFeature.specIfEnabled()?.let { listOf(it) }
+        val mcpSpecs = sessionMcpSpecs()
         val source = java.nio.file.Path.of(workspacePath)
         pushToWebview(buildJsonObject {
             put("op", "worktreeProgress")
@@ -3292,7 +3312,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
                     com.zcode.ideaplugin.protocol.model.Workspace(cwd.toString()),
                     com.zcode.ideaplugin.protocol.model.PermissionMode.YOLO,
                     thoughtLevel = thoughtLevel,
-                    mcpServers = cuaSpec,
+                    mcpServers = mcpSpecs,
                 )
             })
         } catch (e: GitWorktreeCli.GitWorktreeException) {
@@ -3404,11 +3424,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
         // 实证 create 带档合法即生效/非法静默落默认）：否则 create 后的例行 loadSettings
         // 读到服务端初始默认档 max，赶在首条消息写回之前，UI 闪「最高」再回预选档
         val thoughtLevel = msg["thoughtLevel"]?.jsonPrimitive?.content
-        // 电脑控制注入：开关开且环境满足时挂 zcgui-computer-use MCP server
+        // 电脑控制/知识库注入：各开关开且环境满足时挂 MCP server
         // （定时任务/远程会话不注入——后台无人监督的桌面控制不做）
-        val cuaSpec = com.zcode.ideaplugin.cua.CuaFeature.specIfEnabled()?.let { listOf(it) }
-        if (cuaSpec != null) {
-            log.info("Computer Use: injecting ${com.zcode.ideaplugin.cua.CuaFeature.SERVER_NAME} into new session")
+        val mcpSpecs = sessionMcpSpecs()
+        if (mcpSpecs != null) {
+            log.info("createSession injecting mcpServers: ${mcpSpecs.map { it.name }}")
         }
         val sid = client.createSession(
             com.zcode.ideaplugin.protocol.model.Workspace(createWs),
@@ -3416,7 +3436,7 @@ if (!window.__ZCODE_LOG_HOOK__) {
             // 决策撤出——官方 ZCode 客户端也无此机制）
             com.zcode.ideaplugin.protocol.model.PermissionMode.YOLO,
             thoughtLevel = thoughtLevel,
-            mcpServers = cuaSpec
+            mcpServers = mcpSpecs
         )
         lastSessionWorkspace = createWs
         refreshTabColorIcon() // 会话归属目录确定 → 色块跟随（createSession 落位目录）
@@ -3446,12 +3466,12 @@ if (!window.__ZCODE_LOG_HOOK__) {
         }
         val client = project.zCodeService().getClient()
         val thoughtLevel = msg["thoughtLevel"]?.jsonPrimitive?.content
-        val cuaSpec = com.zcode.ideaplugin.cua.CuaFeature.specIfEnabled()?.let { listOf(it) }
+        val mcpSpecs = sessionMcpSpecs()
         val sid = client.createSession(
             com.zcode.ideaplugin.protocol.model.Workspace(spec.worktreeRoot),
             com.zcode.ideaplugin.protocol.model.PermissionMode.YOLO,
             thoughtLevel = thoughtLevel,
-            mcpServers = cuaSpec,
+            mcpServers = mcpSpecs,
         )
         val info = spec.copy(sessionId = sid, createdAt = System.currentTimeMillis())
         worktreeRegistry.upsert(info)
@@ -3487,6 +3507,47 @@ if (!window.__ZCODE_LOG_HOOK__) {
         return buildJsonObject {
             put("op", "cuaEnabledChanged")
             put("enabled", enabled)
+        }
+    }
+
+    // ───────────────── 知识库设置（issue#54）─────────────────
+
+    /** op=getKbSettings — 设置页整包快照（开关/库位置/条目数/目录路径/标签/项目/占用） */
+    private fun handleGetKbSettings(): JsonObject {
+        val svc = com.zcode.ideaplugin.kb.KbManagerService.instance
+        return buildJsonObject {
+            put("op", "kbSettings")
+            put("enabled", com.zcode.ideaplugin.kb.KbFeature.isEnabled())
+            put("root", com.zcode.kb.core.KbPaths.rootDir().toString())
+            put("entryCount", runCatching { svc.entryCount() }.getOrDefault(0))
+            put("storageBytes", runCatching { svc.storageBytes() }.getOrDefault(0))
+            put(
+                "folders",
+                JsonArray(
+                    runCatching {
+                        svc.folders().map { f -> JsonPrimitive(runCatching { svc.folderPath(f.id) }.getOrDefault(f.name)) }
+                    }.getOrDefault(emptyList()),
+                ),
+            )
+            put("tags", JsonArray(runCatching { svc.tags() }.getOrDefault(emptyList()).map { JsonPrimitive(it) }))
+            put("projects", JsonArray(runCatching { svc.projects() }.getOrDefault(emptyList()).map { JsonPrimitive(it) }))
+        }
+    }
+
+    private fun handleSetKbEnabled(msg: JsonObject): JsonObject {
+        val enabled = msg["enabled"]?.jsonPrimitive?.boolean
+            ?: return errorResponse("缺少 enabled")
+        com.zcode.ideaplugin.kb.KbFeature.setEnabled(enabled)
+        // 应答直接给整包快照（op=kbSettings）：设置页收敛后 onMessage 只认 kbSettings
+        // （缺陷HW续三轮回归——应答 op=kbSettingsChanged 落不到分支，开关按钮永 busy 转圈）
+        return handleGetKbSettings()
+    }
+
+    private fun handleRebuildKbIndex(): JsonObject {
+        val n = runCatching { com.zcode.ideaplugin.kb.KbManagerService.instance.reindexAll() }.getOrDefault(-1)
+        return buildJsonObject {
+            put("op", "kbReindexDone")
+            put("reindexed", n)
         }
     }
 
@@ -9908,13 +9969,20 @@ if (!window.__ZCODE_LOG_HOOK__) {
             rpcError = "项目路径不可用"
         }
 
+        // 插件注入式 MCP（CUA/知识库，会话级顶层 mcpServers、无常驻连接）：开关开即列出，
+        // 让用户在 MCP 工具列表预先知道插件带了这些工具（用户反馈：看不到很不方便主导）。
+        // 检测连接/工具清单走 McpToolsClient 直连探测；重名（用户自配同名服务器）以磁盘为准。
+        // 必须在 connect 直连探测分支之前追加——探测按列表现状跑，晚加则注入条目永远探不到
+        val knownNames = servers.map { it.name }.toSet()
+        servers.addAll(injectedMcpInfos().filter { it.name !in knownNames })
+
         // connect 模式：宿主内置条目不参与 RPC 传参（会话自动连，11:04 类失败后
         // app-server 内无重试入口）——「检测连接」时插件侧直连探测刷新状态：
         // McpToolsClient 走 modern 信封握手（同款启动命令，探测完销毁进程），
         // 成功 → connected + 工具数；失败 → failed + 可读错误
         if (mode == "connect" && basePath != null) {
             servers.replaceAll { s ->
-                if (s.scope != "host") s
+                if (s.scope != "host" && s.scope != "injected") s
                 else runCatching {
                     val tools = McpToolsClient.listTools(s, basePath, 30_000L)
                     log.info("Host MCP direct probe [${s.name}] succeeded, ${tools.size} tool(s)")
@@ -9964,6 +10032,41 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
+     * 插件注入式 MCP 条目（CUA/知识库）：会话级顶层 mcpServers、无常驻连接。开关开 +
+     * 环境满足（spec 可构造）才列出；「检测连接」与工具清单展开走 McpToolsClient 直连。
+     */
+    private fun injectedMcpInfos(): List<McpConfigReader.McpServerInfo> {
+        fun specToInfo(spec: com.zcode.ideaplugin.protocol.model.McpServerSpec) =
+            McpConfigReader.McpServerInfo(
+                name = spec.name,
+                scope = "injected",
+                transport = "stdio",
+                command = spec.command,
+                args = spec.args,
+                url = null,
+                envKeys = spec.env.keys.toList(),
+                envValues = spec.env,
+                headerValues = emptyMap(),
+                enabled = true,
+                configPath = "",
+                pluginName = null,
+                status = "disconnected",
+                toolCount = null,
+                statusError = null,
+                updatedAt = null,
+            )
+        val out = mutableListOf<McpConfigReader.McpServerInfo>()
+        runCatching { com.zcode.ideaplugin.cua.CuaFeature.specIfEnabled() }
+            .getOrNull()?.let { out.add(specToInfo(it)) }
+        // KB 无参 specIfEnabled——开关门控必须显式判（serverSpec() 不看开关，禁用后
+        // 条目不移除即此坑；空库不注入的语义差异一期接受，条目仍显示供预收录）
+        runCatching {
+            if (com.zcode.ideaplugin.kb.KbFeature.isEnabled()) com.zcode.ideaplugin.kb.KbFeature.serverSpec() else null
+        }.getOrNull()?.let { out.add(specToInfo(it)) }
+        return out
+    }
+
+    /**
      * op=mcpServerTools — 单台 MCP 服务器的工具清单（设置页「MCP」卡片展开区）
      *
      * 协议 mcp/list 只有 toolCount 无明细 → McpToolsClient 自己连一次服务器
@@ -10001,7 +10104,11 @@ if (!window.__ZCODE_LOG_HOOK__) {
             runCatching { appendHostPluginMcpServers(hostServers, project.zCodeService().getClient(), basePath) }
             server = hostServers.find { it.name == name }
         }
-        if (server == null) return resp(error = "未在磁盘配置与宿主内置插件中找到该服务器（会话临时注入的无法获取工具列表）")
+        // 插件注入式（CUA/知识库）：开关开即可直连探测工具清单（spec 从 Feature 取）
+        if (server == null) {
+            server = injectedMcpInfos().find { it.name == name }
+        }
+        if (server == null) return resp(error = "未在磁盘配置、宿主内置插件与插件注入面中找到该服务器")
         if (!server.enabled) return resp(error = "服务器已禁用")
         return try {
             val tools = McpToolsClient.listTools(server, basePath ?: ".")
