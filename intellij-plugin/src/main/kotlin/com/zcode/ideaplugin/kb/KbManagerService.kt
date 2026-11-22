@@ -82,6 +82,9 @@ class KbManagerService : Disposable {
         val instance: KbManagerService
             get() = ApplicationManager.getApplication().getService(KbManagerService::class.java)
 
+        /** restored/ 产物文件名特征：`kb-<id>--<原文件名>`（恢复副本；兼容历史 bug 的 kb-kb- 双前缀存量，group=纯 hex） */
+        private val RESTORED_ID_PREFIX = Regex("^kb-(?:kb-)?([0-9a-f]+)--.+")
+
         /** 收录时的标签清洗：去逗号/引号/首尾空白，去重，丢空 */
         fun sanitizeTags(tags: List<String>): List<String> = tags
             .map { it.trim().replace(',', ' ').replace('"', ' ').replace('，', ' ').trim() }
@@ -184,6 +187,10 @@ class KbManagerService : Disposable {
     fun remove(id: String): Boolean {
         store().removeEntry(id)
         log.info("Knowledge Base: removed $id")
+        // 摘除条目的 git 恢复副本（restored/<id>--*）同步回收，防孤儿残留（真机实证：
+        // 摘除只清 entries/text，restored 文件永留——10 文件 6 孤儿）
+        val orphans = cleanupOrphanRestored()
+        if (orphans > 0) log.info("Knowledge Base: cleaned $orphans orphan restored file(s)")
         KbTopics.publish(null)
         return true
     }
@@ -464,9 +471,60 @@ class KbManagerService : Disposable {
             log.info("Knowledge Base: sweep refreshed $changed entries")
             KbTopics.publish(null)
         }
+        // restored 孤儿顺带回收（每轮毫秒级；存量孤儿+摘除残留统一清）
+        runCatching { cleanupOrphanRestored() }
+            .onFailure { log.warn("Knowledge Base: orphan cleanup failed: ${it.message}") }
         // sweep 自写（setStatus/update）也动 entries——重算基线，下轮不自误报
         lastStoreFingerprint = storeFingerprint()
         return changed
+    }
+
+    /**
+     * restored/ 副本生命周期：**跟文档走，不跟条目走**（用户拍板：切分支场景的分支保险，
+     * 摘除恢复条目不应连带删快照）。摘条目/sweep 两步：
+     * ① **同文档过继**——存活条目（带 git 锚点）名下没有副本、restored 里有「死主人」的
+     *    同 basename 副本 → 改挂为 `kb-<存活id>--<basename>`（主人死了副本换人）；
+     * ② **孤儿清理**——文件名 `kb-<id>--` 前缀 + id 不在现存条目集 + 路径不被任何现存
+     *    条目引用 → 删（真孤儿：连同文档条目都没了）。恢复副本可被再次收录为源，
+     *    引用在就不动（②的引用豁免）。
+     *
+     * @return 清理文件数（过继不计）
+     */
+    private fun cleanupOrphanRestored(): Int {
+        val dir = KbPaths.restoredDir()
+        if (!Files.isDirectory(dir)) return 0
+        val live = store().allEntries()
+        val liveIds = live.map { it.id }.toHashSet()
+        val liveSources = live.map { KbFileStore.normPath(it.sourcePath) }.toHashSet()
+        val files = Files.list(dir).use { stream -> stream.toList() }
+        // ① 同文档过继（从存活条目正查，副本文件自身无锚点信息）。
+        //    target 用条目原 id（已含 kb- 前缀）——曾手滑多拼一层 kb- 造出 kb-kb-xxx 畸形名
+        //    （真机实证 21:19），且畸形名不匹配清理正则成永久盲区
+        for (y in live) {
+            val rel = y.gitRel ?: continue
+            val base = rel.substringAfterLast('/')
+            if (base.isBlank()) continue
+            val target = dir.resolve("${y.id}--$base")
+            if (Files.exists(target)) continue // 名下已有权威副本，不需要过继
+            val donor = files.firstOrNull { f ->
+                val m = RESTORED_ID_PREFIX.matchEntire(f.fileName.toString())
+                m != null && "kb-${m.groupValues[1]}" !in liveIds && f.fileName.toString().endsWith("--$base")
+            } ?: continue
+            runCatching { Files.move(donor, target) }
+                .onFailure { log.warn("Knowledge Base: restored rehome failed (${donor.fileName}): ${it.message}") }
+        }
+        // ② 孤儿清理（失败可见——Explorer/杀毒占用会让删除静默失败，用户会困惑「为什么没删」）
+        var n = 0
+        for (f in files) {
+            val m = RESTORED_ID_PREFIX.matchEntire(f.fileName.toString()) ?: continue
+            if ("kb-${m.groupValues[1]}" in liveIds) continue
+            if (KbFileStore.normPath(f.toAbsolutePath().normalize().toString()) in liveSources) continue
+            if (!Files.exists(f)) continue // ①里刚被过继搬走
+            runCatching { Files.deleteIfExists(f) }
+                .onSuccess { if (it) n++ }
+                .onFailure { log.warn("Knowledge Base: orphan restored delete failed (${f.fileName}): ${it.message}") }
+        }
+        return n
     }
 
     /** 全库重建（设置页入口）：清缓存重提取 */
