@@ -31,4 +31,29 @@
     font-size: 13px;
     margin-top: 1px;
   }
+
+  /* 文字型小按钮（库位置/重建索引/重命名/删除）：.icon-button 是 24px 固定宽的
+     图标按钮类，塞文字会被压成一字一行竖排（设置页窄容器实证），须用本类 */
+  &__text-btn {
+    flex: none;
+    white-space: nowrap;
+    background: transparent;
+    border: 1px solid var(--border-default, #444);
+    border-radius: 4px;
+    color: var(--fg-muted, #999);
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 2px 10px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      color: var(--fg-default, #ccc);
+      background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
 }

@@ -14,7 +14,8 @@
     "browserDown": "Browser (channel unavailable)",
     "other": "Other",
     "processes": "Processes",
-    "computer": "Computer Control"
+    "computer": "Computer Control",
+    "kb": "Knowledge Base"
   },
   "processesView": {
     "desc": "One resident app-server per project window, shared across tabs. Killing a process interrupts any running turn; it respawns automatically on next use.",

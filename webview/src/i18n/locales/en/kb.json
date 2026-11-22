@@ -1,0 +1,13 @@
+{
+  "title": "Knowledge Base",
+  "switchTitle": "Enable Knowledge Base",
+  "switchDesc": "Collect project documents (md/word/pdf and any text type) into a local knowledge base organized by folders and tags. When enabled with entries, new sessions get kb_* retrieval and organizing tools — the AI can search your knowledge base and reorganize it on request — and the companion skill is installed into the ZCode skills directory. Zero injection when the library is empty.",
+  "onHint": "New sessions will include knowledge base retrieval/organizing tools and the companion skill",
+  "offHint": "Sessions no longer get knowledge base tools, and the companion skill is removed (running sessions unaffected)",
+  "statsTitle": "Library Status",
+  "entryCount": "Entries",
+  "storage": "Storage",
+  "noteRedline": "The knowledge base uses plugin-private storage (~/.zcgui/knowledge/) and never touches session data",
+  "loadFailed": "Failed to load settings",
+  "tab": "Knowledge Base"
+}

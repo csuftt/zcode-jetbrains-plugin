@@ -17,7 +17,8 @@
     "project": "プロジェクト",
     "plugin": "プラグイン",
     "runtime": "ランタイム",
-    "host": "ホスト内蔵"
+    "host": "ホスト内蔵",
+    "injected": "プラグイン注入"
   },
   "status": {
     "connected": "接続済み",

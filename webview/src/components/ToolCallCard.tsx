@@ -31,6 +31,7 @@ import { useTick } from '@/hooks/useTick'
 import { extractTodoItems, diffTodos, findPrevTodoWriteTodos } from '@/utils/todoDiff'
 import { isAgentMessageTool, shortAgentId, parseAgentMessageReceipt } from '@/utils/agentMessage'
 import { isCuaTool, cuaToolShortName, cuaIconKeyFromOutput, parseCuaAppList, parseCuaWindows } from '@/utils/cuaTools'
+import { isKbTool, kbToolLabel, kbActionSummary } from '@/utils/kbTools'
 import { FileIcon } from './FileIcon'
 import { CuaAppIcon } from './CuaAppIcon'
 import '../styles/tool-call-card.less'
@@ -71,13 +72,16 @@ function toolIcon(tool: string): string {
     SendMessage: 'codicon-mail',
     RespondToCoordinator: 'codicon-reply',
   }
-  // mcp__ 前缀的工具统一用 package 图标
+  // mcp__ 前缀的工具统一用 package 图标；知识库工具族用 database
+  if (isKbTool(tool)) return 'codicon-database'
   if (tool.startsWith('mcp__')) return 'codicon-package'
   return map[tool] || 'codicon-tools'
 }
 
 /** 工具 → 显示名（对齐 cc-gui zh.json tools.*；文案经 i18n，未收录工具回退原名）*/
 function toolDisplayName(tool: string, t: TFunction): string {
+  // 知识库工具族用中文友好名（MCP.zcgui-knowledge_kb_search 双前缀形态一并识别）
+  if (isKbTool(tool)) return kbToolLabel(tool)
   if (tool.startsWith('mcp__')) {
     // CUA 族用短名（list_apps 比 MCP·zcgui-computer-use__list_apps 可读，与组卡一致）
     if (isCuaTool(tool)) return cuaToolShortName(tool)
@@ -151,6 +155,8 @@ function inputSummary(tool: string, input?: Record<string, unknown>): string {
     case 'RespondToCoordinator':
       return String(input.summary || '').slice(0, 80)
     default:
+      // 知识库工具族：一行动作摘要（检索「x」/移动 3 条 → 目录）
+      if (isKbTool(tool)) return kbActionSummary(tool, input)
       // mcp__* 工具用 title，其他用第一个字符串值
       if (tool.startsWith('mcp__') && typeof input.title === 'string') return input.title
       const first = Object.values(input).find((v) => typeof v === 'string')

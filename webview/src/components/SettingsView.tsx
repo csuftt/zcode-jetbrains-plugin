@@ -24,13 +24,14 @@ import { McpListView } from './McpListView'
 import { ModelListView } from './ModelListView'
 import { BrowserSettingsView } from './BrowserSettingsView'
 import { ComputerSettingsView } from './ComputerSettingsView'
+import { KbSettingsView } from './KbSettingsView'
 import { AgentListView } from './AgentListView'
 import { HookListView } from './HookListView'
 import { ProcessSettingsView } from './ProcessSettingsView'
 import { isInJcef } from '@/ipc/bridge'
 import '../styles/settings.less'
 
-type SettingsTab = 'basic' | 'models' | 'usage' | 'memory' | 'skills' | 'agents' | 'mcp' | 'hooks' | 'browser' | 'computer' | 'processes' | 'other'
+type SettingsTab = 'basic' | 'models' | 'usage' | 'memory' | 'skills' | 'agents' | 'mcp' | 'hooks' | 'browser' | 'computer' | 'processes' | 'kb' | 'other'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -44,7 +45,7 @@ export function SettingsView({ onBack }: Props) {
   // JCEF 内 hash 恒空不影响生产
   const hashTab = window.location.hash.replace('#', '').split('/')[0] as SettingsTab
   const initialTab: SettingsTab =
-    !isInJcef() && ['basic', 'models', 'usage', 'memory', 'skills', 'agents', 'mcp', 'hooks', 'browser', 'computer', 'processes', 'other'].includes(hashTab)
+    !isInJcef() && ['basic', 'models', 'usage', 'memory', 'skills', 'agents', 'mcp', 'hooks', 'browser', 'computer', 'processes', 'kb', 'other'].includes(hashTab)
       ? hashTab
       : 'basic'
   const [tab, setTab] = useState<SettingsTab>(initialTab)
@@ -80,6 +81,7 @@ export function SettingsView({ onBack }: Props) {
     { key: 'hooks', glyph: '⚓\uFE0E' },
     { key: 'browser', icon: 'codicon-globe' },
     { key: 'computer', icon: 'codicon-device-desktop' },
+    { key: 'kb', icon: 'codicon-book' },
     { key: 'processes', icon: 'codicon-pulse' },
     { key: 'other', icon: 'codicon-ellipsis' },
   ]
@@ -129,6 +131,7 @@ export function SettingsView({ onBack }: Props) {
           {tab === 'hooks' && <HookListView />}
           {tab === 'browser' && <BrowserSettingsView />}
           {tab === 'computer' && <ComputerSettingsView />}
+          {tab === 'kb' && <KbSettingsView />}
           {tab === 'processes' && <ProcessSettingsView />}
           {tab === 'other' && <OtherSettingsView />}
         </main>

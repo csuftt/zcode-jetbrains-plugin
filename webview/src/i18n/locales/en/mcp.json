@@ -17,7 +17,8 @@
     "project": "Project",
     "plugin": "Plugin",
     "runtime": "Runtime",
-    "host": "Host Built-in"
+    "host": "Host Built-in",
+    "injected": "Plugin Injected"
   },
   "status": {
     "connected": "Connected",

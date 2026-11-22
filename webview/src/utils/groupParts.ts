@@ -18,12 +18,14 @@
 
 import type { MessagePart, ToolPart } from '@/types/messages'
 import { CUA_TOOL_PREFIX } from './cuaTools'
+import { isKbTool } from './kbTools'
 
-export type ToolGroupKind = 'bash' | 'read' | 'edit' | 'search' | 'cua'
+export type ToolGroupKind = 'bash' | 'read' | 'edit' | 'search' | 'cua' | 'kb'
 
 /** 工具名 → 分组类别；null = 不参与聚组（TodoWrite/Agent/其余 mcp__* 等走单卡）*/
 export function toolGroupKind(tool: string): ToolGroupKind | null {
   if (tool.startsWith(CUA_TOOL_PREFIX)) return 'cua'
+  if (isKbTool(tool)) return 'kb'
   switch (tool) {
     case 'Bash': return 'bash'
     case 'Read': return 'read'
@@ -76,7 +78,8 @@ export function groupParts(parts: MessagePart[]): PartRenderUnit[] {
       if (kind) {
         // 同类别追加；不同类别 → 收掉旧组再开新组。
         // cua 类别额外要求同名（连点成组，click→type 不并——不同动作不可读）
-        const merge = kind === group && (kind !== 'cua' || bucket[0].tool === part.tool)
+        // cua/kb 类别额外要求同名（连点/连环整理成组；不同动作语义差异大不并）
+        const merge = kind === group && (kind !== 'cua' && kind !== 'kb' || bucket[0].tool === part.tool)
         if (merge) {
           bucket.push(part)
           return

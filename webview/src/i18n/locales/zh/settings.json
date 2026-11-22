@@ -14,7 +14,8 @@
     "browserDown": "浏览器（通道不可用）",
     "other": "其他设置",
     "processes": "进程",
-    "computer": "电脑控制"
+    "computer": "电脑控制",
+    "kb": "知识库"
   },
   "processesView": {
     "desc": "常驻 app-server 每个项目窗口一个、多标签共享；结束进程会中断进行中的回合，下次使用时自动重新拉起。",

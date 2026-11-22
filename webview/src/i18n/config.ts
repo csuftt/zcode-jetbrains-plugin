@@ -32,6 +32,8 @@ import zhAgents from './locales/zh/agents.json'
 import zhRemote from './locales/zh/remote.json'
 import zhTrajectory from './locales/zh/trajectory.json'
 
+import zhKb from './locales/zh/kb.json'
+
 import zhHooks from './locales/zh/hooks.json'
 
 import zhTwCommon from './locales/zh-TW/common.json'
@@ -53,6 +55,8 @@ import zhTwEnhance from './locales/zh-TW/enhance.json'
 import zhTwAgents from './locales/zh-TW/agents.json'
 import zhTwRemote from './locales/zh-TW/remote.json'
 import zhTwTrajectory from './locales/zh-TW/trajectory.json'
+
+import zhTwKb from './locales/zh-TW/kb.json'
 
 import zhTwHooks from './locales/zh-TW/hooks.json'
 
@@ -76,6 +80,8 @@ import enAgents from './locales/en/agents.json'
 import enRemote from './locales/en/remote.json'
 import enTrajectory from './locales/en/trajectory.json'
 
+import enKb from './locales/en/kb.json'
+
 import enHooks from './locales/en/hooks.json'
 
 import jaCommon from './locales/ja/common.json'
@@ -98,6 +104,8 @@ import jaAgents from './locales/ja/agents.json'
 import jaRemote from './locales/ja/remote.json'
 import jaTrajectory from './locales/ja/trajectory.json'
 
+import jaKb from './locales/ja/kb.json'
+
 import jaHooks from './locales/ja/hooks.json'
 
 import koCommon from './locales/ko/common.json'
@@ -119,6 +127,8 @@ import koEnhance from './locales/ko/enhance.json'
 import koAgents from './locales/ko/agents.json'
 import koRemote from './locales/ko/remote.json'
 import koTrajectory from './locales/ko/trajectory.json'
+
+import koKb from './locales/ko/kb.json'
 
 import koHooks from './locales/ko/hooks.json'
 
@@ -151,8 +161,9 @@ function merge(
   remote: object,
   trajectory: object,
   hooks: object,
+  kb: object,
 ) {
-  return { common, app, settings, input, chat, tool, history, mcp, usage, memory, skills, utils, models, browser, computer, enhance, agents, remote, trajectory, hooks }
+  return { common, app, settings, input, chat, tool, history, mcp, usage, memory, skills, utils, models, browser, computer, enhance, agents, remote, trajectory, hooks, kb }
 }
 
 /** IDE 注入的权威语言（buildBridgeJs 生成；无注入为 undefined）*/
@@ -185,11 +196,11 @@ export function getInitialLanguage(): SupportedLanguage {
 
 void i18n.use(initReactI18next).init({
   resources: {
-    zh: { translation: merge(zhCommon, zhApp, zhSettings, zhInput, zhChat, zhTool, zhHistory, zhMcp, zhUsage, zhMemory, zhSkills, zhUtils, zhModels, zhBrowser, zhComputer, zhEnhance, zhAgents, zhRemote, zhTrajectory, zhHooks) },
-    'zh-TW': { translation: merge(zhTwCommon, zhTwApp, zhTwSettings, zhTwInput, zhTwChat, zhTwTool, zhTwHistory, zhTwMcp, zhTwUsage, zhTwMemory, zhTwSkills, zhTwUtils, zhTwModels, zhTwBrowser, zhTwComputer, zhTwEnhance, zhTwAgents, zhTwRemote, zhTwTrajectory, zhTwHooks) },
-    en: { translation: merge(enCommon, enApp, enSettings, enInput, enChat, enTool, enHistory, enMcp, enUsage, enMemory, enSkills, enUtils, enModels, enBrowser, enComputer, enEnhance, enAgents, enRemote, enTrajectory, enHooks) },
-    ja: { translation: merge(jaCommon, jaApp, jaSettings, jaInput, jaChat, jaTool, jaHistory, jaMcp, jaUsage, jaMemory, jaSkills, jaUtils, jaModels, jaBrowser, jaComputer, jaEnhance, jaAgents, jaRemote, jaTrajectory, jaHooks) },
-    ko: { translation: merge(koCommon, koApp, koSettings, koInput, koChat, koTool, koHistory, koMcp, koUsage, koMemory, koSkills, koUtils, koModels, koBrowser, koComputer, koEnhance, koAgents, koRemote, koTrajectory, koHooks) },
+    zh: { translation: merge(zhCommon, zhApp, zhSettings, zhInput, zhChat, zhTool, zhHistory, zhMcp, zhUsage, zhMemory, zhSkills, zhUtils, zhModels, zhBrowser, zhComputer, zhEnhance, zhAgents, zhRemote, zhTrajectory, zhHooks, zhKb) },
+    'zh-TW': { translation: merge(zhTwCommon, zhTwApp, zhTwSettings, zhTwInput, zhTwChat, zhTwTool, zhTwHistory, zhTwMcp, zhTwUsage, zhTwMemory, zhTwSkills, zhTwUtils, zhTwModels, zhTwBrowser, zhTwComputer, zhTwEnhance, zhTwAgents, zhTwRemote, zhTwTrajectory, zhTwHooks, zhTwKb) },
+    en: { translation: merge(enCommon, enApp, enSettings, enInput, enChat, enTool, enHistory, enMcp, enUsage, enMemory, enSkills, enUtils, enModels, enBrowser, enComputer, enEnhance, enAgents, enRemote, enTrajectory, enHooks, enKb) },
+    ja: { translation: merge(jaCommon, jaApp, jaSettings, jaInput, jaChat, jaTool, jaHistory, jaMcp, jaUsage, jaMemory, jaSkills, jaUtils, jaModels, jaBrowser, jaComputer, jaEnhance, jaAgents, jaRemote, jaTrajectory, jaHooks, jaKb) },
+    ko: { translation: merge(koCommon, koApp, koSettings, koInput, koChat, koTool, koHistory, koMcp, koUsage, koMemory, koSkills, koUtils, koModels, koBrowser, koComputer, koEnhance, koAgents, koRemote, koTrajectory, koHooks, koKb) },
   },
   lng: getInitialLanguage(),
   fallbackLng: DEFAULT_LANGUAGE,

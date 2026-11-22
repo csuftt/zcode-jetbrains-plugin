@@ -20,6 +20,7 @@ import { ToolCallCard } from './ToolCallCard'
 import { BashCommandGroupCard } from './BashCommandGroupCard'
 import { FileToolGroupCard } from './FileToolGroupCard'
 import { CuaActionGroupCard } from './CuaActionGroupCard'
+import { KbToolGroupCard } from './KbToolGroupCard'
 import { ImagePreview } from './ImagePreview'
 import { AgentNotificationCard } from './AgentNotificationCard'
 import { clockTime } from '@/utils/time'
@@ -192,6 +193,8 @@ export function renderPartUnits(
             softenError={softenError}
             cuaIconKey={cuaIconByIndex.get(unit.startIndex) ?? null}
           />
+        ) : unit.group === 'kb' ? (
+          <KbToolGroupCard key={`kb-${unit.startIndex}`} parts={unit.parts} />
         ) : (
           <FileToolGroupCard key={`${unit.group}-${unit.startIndex}`} kind={unit.group} parts={unit.parts} softenError={softenError} />
         )

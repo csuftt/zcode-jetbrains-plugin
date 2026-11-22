@@ -17,7 +17,8 @@
     "project": "專案",
     "plugin": "外掛",
     "runtime": "執行時",
-    "host": "宿主內建"
+    "host": "宿主內建",
+    "injected": "外掛注入"
   },
   "status": {
     "connected": "已連線",

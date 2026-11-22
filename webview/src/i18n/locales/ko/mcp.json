@@ -17,7 +17,8 @@
     "project": "프로젝트",
     "plugin": "플러그인",
     "runtime": "런타임",
-    "host": "호스트 내장"
+    "host": "호스트 내장",
+    "injected": "플러그인 주입"
   },
   "status": {
     "connected": "연결됨",
