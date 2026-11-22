@@ -40,7 +40,10 @@ import javax.swing.JPanel
  *   自由输入新路径 `a/b/c` 由调用方 ensureFolderPath 逐级建）；
  * - 标签：下拉框形态多选（复用目录 combo 视觉）——中央=已选色块 chips（点 ✕ 移除），
  *   右端 ▾ 弹选择菜单（勾选态✓+注册色块，底部「新建标签…」即建即选；用户拍板：
- *   菜单与选中展示都要带色块）。
+ *   菜单与选中展示都要带色块）。单行排布、超宽收「+N」胶囊，行高锁定=目录 combo
+ *   preferred 高（选/未选同高，不挤备注行）；框线对齐靠离屏试画标定原生 border 的
+ *   真实绘制偏移/色号再补偿（原生 border 带组件类型门控不可复用），框线与标题/
+ *   目录/备注左右同列（缺陷HX）。
  *
  * [titleValue]/[folderPathValue]/[tagsValue]/[notesValue] 在 doValidate 前（即 OK 后）读取。
  */
@@ -98,16 +101,41 @@ class KbIngestDialog(
         }
         val items = arrayOf(uncategorizedLabel) + folderOptions.map { it.path }
         folderCombo = JComboBox(items).apply { isEditable = true; selectedItem = preselect }
+        // 框线对齐靠离屏试画标定：原生 border 的 paint 带组件类型门控（rounded/search
+        // 分支强转 JTextComponent、editor 分支见 parent=JComboBox 直接 return），复用到
+        // JPanel/scrollpane 上会抛异常或空画→整框消失；改试画扫像素拿真实绘制偏移/色号，
+        // 自绘框按偏移补偿，任何 LAF/DPI 自适应（缺陷HX）
+        val comboProbe = probeBorder(folderCombo.border, folderCombo)
+        val comboInsets = folderCombo.border.getBorderInsets(folderCombo)
         selectedTags.addAll(editOf?.tags ?: suggestion.tags)
         refreshTagColors()
-        tagChips = JPanel(FlowWrap(4, 3, 360))
-        tagCombo = buildTagCombo()
+        tagChips = JPanel(FlowRow(4, 2, 360))
+        // 弹窗拉伸后按真实宽度重算「+N」收纳
+        tagChips.addComponentListener(object : java.awt.event.ComponentAdapter() {
+            override fun componentResized(e: java.awt.event.ComponentEvent) = tagChips.rebuildChips()
+        })
+        tagCombo = buildTagCombo(comboProbe, comboInsets, folderCombo.preferredSize.height)
         notesArea = JBTextArea(3, 30).apply {
             text = editOf?.notes ?: ""
             lineWrap = true
             // 17+scroll 框线 1=18px：与带框线控件文字起点对齐（真机反馈起点不齐）
             border = JBUI.Borders.empty(2, 17, 2, 11)
         }
+        val notesScroll = JBScrollPane(notesArea).apply { preferredSize = Dimension(420, 64) }
+        // 备注保留原生 scroll 边框，外圈空边框补「combo 框线偏移 - scroll 框线偏移」差值，
+        // 框线落到与目录下拉同一竖线；差值同步从文本内边距减回保持文字起点（缺陷HX）
+        val notesBorder = notesScroll.border
+        val notesProbe = probeBorder(notesBorder, notesScroll)
+        val notesInsets = notesBorder.getBorderInsets(notesScroll)
+        val dLeft = maxOf(0, (comboProbe?.left ?: comboInsets.left) - (notesProbe?.left ?: notesInsets.left))
+        val dTop = maxOf(0, (comboProbe?.top ?: comboInsets.top) - (notesProbe?.top ?: notesInsets.top))
+        val dRight = maxOf(0, (comboProbe?.right ?: comboInsets.right) - (notesProbe?.right ?: notesInsets.right))
+        val dBottom = maxOf(0, (comboProbe?.bottom ?: comboInsets.bottom) - (notesProbe?.bottom ?: notesInsets.bottom))
+        notesScroll.border = javax.swing.BorderFactory.createCompoundBorder(
+            JBUI.Borders.empty(dLeft, dTop, dRight, dBottom),
+            notesBorder,
+        )
+        notesArea.border = JBUI.Borders.empty(maxOf(0, 2 - dTop), maxOf(0, 17 - dLeft), maxOf(0, 2 - dBottom), maxOf(0, 11 - dRight))
 
         centerPanel = JPanel(GridBagLayout()).apply {
             val c = GridBagConstraints().apply {
@@ -168,7 +196,7 @@ class KbIngestDialog(
             add(JBLabel(ZCodeBundle.message("kb.dialog.notesLabel")), c)
             c.gridx = 1; c.fill = GridBagConstraints.BOTH; c.weightx = 1.0
             c.weighty = 1.0 // 唯一 weighty 行：chip 增删引发的剩余/不足空间全部由备注吸收，其它行高锁定不重排（真机反馈备注高度跳变）
-            add(JBScrollPane(notesArea).apply { preferredSize = Dimension(420, 64) }, c)
+            add(notesScroll, c)
             c.weighty = 0.0
         }
 
@@ -206,6 +234,10 @@ class KbIngestDialog(
     private fun colorOf(tag: String): String =
         tagColorHex[tag] ?: KbFileStore.TAG_PALETTE.last()
 
+    /** hex → Color；非法/缺失回退灰（与未注册同兜底） */
+    private fun decodeColor(hex: String): Color =
+        runCatching { Color.decode(hex) }.getOrDefault(Color(0x8A919C))
+
     private fun refreshTagColors() {
         tagColorHex = runCatching {
             KbManagerService.instance.tagMetas().associate { it.name to it.color }
@@ -216,25 +248,44 @@ class KbIngestDialog(
      * 下拉框形态的多选标签行（复用目录 combo 视觉）：中央=已选 chips 流，右端=▾；
      * 点 ▾（或行内空白）弹选择菜单（既有标签色块+勾选态✓+底部「新建标签…」）。
      */
-    private fun buildTagCombo(): JComponent {
+    private fun buildTagCombo(probe: BorderProbe?, comboInsets: Insets, fixedHeight: Int): JComponent {
         val arrow = JBLabel(AllIcons.General.ChevronDown).apply { border = JBUI.Borders.emptyLeft(6) }
         arrow.addMouseListener(object : java.awt.event.MouseAdapter() {
             override fun mouseClicked(e: java.awt.event.MouseEvent) = showTagChooser()
         })
         return JPanel(BorderLayout()).apply {
+            // 外圈空边框=试画扫出的原生框线绘制偏移，LineBorder 才与标题/目录框线同列
+            // 同色（自绘贴边界画会左右各凸出几像素）；内圈左 6 与 field 文字 margin
+            // 同值，胶囊/占位文案起点对齐标题文字；试画失败回退 insets 补偿（缺陷HX）
+            val outer = if (probe != null) {
+                JBUI.Borders.empty(probe.left, probe.top, probe.right, probe.bottom)
+            } else {
+                JBUI.Borders.empty(comboInsets)
+            }
+            val lineColor = probe?.color ?: JBColor.border()
             border = javax.swing.BorderFactory.createCompoundBorder(
-                javax.swing.BorderFactory.createLineBorder(JBColor.border()),
-                JBUI.Borders.empty(3, 1), // 像素实测 -16：chip 胶囊起点与 field 文字对齐；上下 3px 防 CJK 裁切
+                outer,
+                javax.swing.BorderFactory.createCompoundBorder(
+                    javax.swing.BorderFactory.createLineBorder(lineColor),
+                    JBUI.Borders.empty(1, 6, 1, 6),
+                ),
             )
             add(tagChips, BorderLayout.CENTER)
             add(arrow, BorderLayout.EAST)
             addMouseListener(object : java.awt.event.MouseAdapter() {
                 override fun mouseClicked(e: java.awt.event.MouseEvent) = showTagChooser()
             })
+            // 行高锁定=目录 combo preferred 高：选/未选同高，chips 不再撑行挤备注出滚动条（缺陷HX）
+            preferredSize = Dimension(preferredSize.width, fixedHeight)
+            minimumSize = Dimension(0, fixedHeight)
+            maximumSize = Dimension(Int.MAX_VALUE, fixedHeight)
         }
     }
 
-    /** 重渲染已选 chips（增删后调用；▾ 在外层不受影响）；空选集显示灰色占位避免下拉框塌陷 */
+    /**
+     * 重渲染已选 chips（增删后调用；▾ 在外层不受影响）；空选集显示灰色占位避免下拉框塌陷。
+     * 单行排布：超可用宽收「+N」胶囊（点击弹选择菜单），行高恒定（缺陷HX）。
+     */
     private fun JPanel.rebuildChips() {
         removeAll()
         if (selectedTags.isEmpty()) {
@@ -242,7 +293,23 @@ class KbIngestDialog(
                 foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
             })
         } else {
-            for (t in selectedTags) add(ChipLabel(t))
+            val chips = selectedTags.map { ChipLabel(it, decodeColor(colorOf(it))) }
+            val gap = 4 // 与 FlowRow hgap 一致
+            val widths = chips.map { it.preferredSize.width + gap }
+            val avail = width.takeIf { it > 0 } ?: 360
+            val overflowW = 40 // 「+N」胶囊预留宽
+            val budget = if (widths.sum() <= avail) avail else avail - overflowW
+            var used = 0
+            var shown = 0
+            for (i in chips.indices) {
+                if (shown > 0 && used + widths[i] > budget) break
+                add(chips[i])
+                used += widths[i]
+                shown++
+            }
+            if (shown < chips.size) {
+                add(ChipLabel("+${chips.size - shown}", decodeColor(KbFileStore.TAG_PALETTE.last()), removable = false))
+            }
         }
         revalidate()
         repaint()
@@ -266,7 +333,7 @@ class KbIngestDialog(
                     icon = AllIcons.General.Add
                 } else {
                     text = if (value in selectedTags) "$value  ✓" else value
-                    icon = ColorIcon(runCatching { Color.decode(colorOf(value)) }.getOrDefault(Color(0x8A919C)))
+                    icon = ColorIcon(decodeColor(colorOf(value)))
                 }
                 border = JBUI.Borders.empty(2, 6)
                 if (isSelected) {
@@ -298,10 +365,15 @@ class KbIngestDialog(
         tagChips.rebuildChips()
     }
 
-    /** 已选标签胶囊（正常尺寸）：标签色圆角底+黑/白字，尾部「✕」点击移除 */
-    private inner class ChipLabel(private val tag: String) : JBLabel("$tag ✕") {
-        private val bg: Color = runCatching { Color.decode(colorOf(tag)) }.getOrDefault(Color(0x8A919C))
-
+    /**
+     * 已选标签胶囊（正常尺寸）：标签色圆角底+黑/白字，尾部「✕」点击移除；
+     * removable=false 为「+N」溢出胶囊，整块点击弹选择菜单。
+     */
+    private inner class ChipLabel(
+        private val tag: String,
+        private val bg: Color,
+        private val removable: Boolean = true,
+    ) : JBLabel(if (removable) "$tag ✕" else tag) {
         init {
             font = JBUI.Fonts.label(11f)
             border = JBUI.Borders.empty(2, 6) // 上下 2px：CJK 字形超出 fontMetrics preferred 时不贴边被裁
@@ -309,7 +381,9 @@ class KbIngestDialog(
             isOpaque = false
             addMouseListener(object : java.awt.event.MouseAdapter() {
                 override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                    if (e.x > width - 16) { // 命中尾部 ✕ 区
+                    if (!removable) {
+                        showTagChooser()
+                    } else if (e.x > width - 16) { // 命中尾部 ✕ 区
                         selectedTags.remove(tag)
                         tagChips.rebuildChips()
                     }
@@ -338,33 +412,51 @@ class KbIngestDialog(
     }
 }
 
+/** 原生框线真实绘制偏移（距组件边界四边距离）+ 框线色号 */
+private data class BorderProbe(val left: Int, val top: Int, val right: Int, val bottom: Int, val color: Color)
+
 /**
- * 固定宽度感知的 FlowLayout：GridBag 行高按组件 preferred 计算，原生 FlowLayout 的
- * preferred 是**单行总宽**——标签多时会撑爆弹窗宽度/裁掉换行后的第二行；按给定宽度
- * 模拟换行重算 preferred（实际布局仍用容器真实宽度，行为不变）。
+ * 离屏试画标定：拿真实组件把原生 border 画到透明画布一次，四边扫首个不透明像素得
+ * 框线真实绘制偏移并取该点色号。原生 border 的 paint 带组件类型门控不能复用到自绘
+ * 控件上，但试画传组件本身、与活体绘制同行为；跨 LAF/DPI 不用猜像素。失败返 null
+ * （调用方回退 insets 补偿）。
  */
-private class FlowWrap(hgap: Int, vgap: Int, private val wrapWidth: Int) : FlowLayout(FlowLayout.LEFT, hgap, vgap) {
+private fun probeBorder(border: javax.swing.border.Border, comp: JComponent): BorderProbe? = runCatching {
+    val size = 64
+    val img = java.awt.image.BufferedImage(size, size, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+    val g = img.createGraphics()
+    try {
+        border.paintBorder(comp, g, 0, 0, size, size)
+    } finally {
+        g.dispose()
+    }
+    fun opaque(x: Int, y: Int): Boolean = (img.getRGB(x, y) ushr 24) > 128
+    val mid = size / 2
+    val left = (0 until mid).firstOrNull { opaque(it, mid) } ?: return null
+    val right = (size - 1 downTo mid).firstOrNull { opaque(it, mid) } ?: return null
+    val top = (0 until mid).firstOrNull { opaque(mid, it) } ?: return null
+    val bottom = (size - 1 downTo mid).firstOrNull { opaque(mid, it) } ?: return null
+    BorderProbe(left, top, size - 1 - right, size - 1 - bottom, Color(img.getRGB(left, mid) and 0xFFFFFF))
+}.getOrNull()
+
+/**
+ * 单行 FlowLayout：preferred 宽封顶 wrapWidth（原生 FlowLayout 的 preferred 是单行总宽，
+ * 标签多时会撑爆弹窗宽度）；高=单行行高。超宽 chips 由 rebuildChips 收「+N」，
+ * 保证实际布局不出现第二行（外层行高锁定，第二行会被裁）。
+ */
+private class FlowRow(hgap: Int, vgap: Int, private val wrapWidth: Int) : FlowLayout(FlowLayout.LEFT, hgap, vgap) {
     override fun preferredLayoutSize(target: java.awt.Container): Dimension {
         synchronized(target.treeLock) {
-            var x = 0
+            var w = 0
             var rowH = 0
-            var totalH = 0
-            var maxRowW = 0
             for (i in 0 until target.componentCount) {
                 val d = target.getComponent(i).preferredSize
-                if (x > 0 && x + hgap + d.width > wrapWidth) {
-                    totalH += rowH + vgap
-                    x = 0
-                    rowH = 0
-                }
-                if (x > 0) x += hgap
-                x += d.width
-                rowH = maxOf(rowH, d.height) + 2 // 每行 2px 余量：CJK 字形渲染超出 preferred 时不被裁
-                maxRowW = maxOf(maxRowW, x)
+                if (w > 0) w += hgap
+                w += d.width
+                rowH = maxOf(rowH, d.height)
             }
-            totalH += rowH
             val ins = target.insets
-            return Dimension(maxRowW + ins.left + ins.right, totalH + ins.top + ins.bottom)
+            return Dimension(minOf(w, wrapWidth) + ins.left + ins.right, rowH + ins.top + ins.bottom)
         }
     }
 }

@@ -352,8 +352,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
 
     /**
      * 工具条漏斗弹层：多选标签过滤（色块+计数灰字+勾选✓；点击切换勾选，弹层不关、
-     * 每次变化即时生效走 refreshAsync；底部 AND/OR 互斥切换组合语义，切换即刷新）。
-     * 有过滤态时清除项置顶（一键清空勾选，不清组合模式记忆）。
+     * 每次变化即时生效走 refreshAsync；组合模式一行横排置标签行之前，切换即刷新）。
+     * 清除项常驻置顶（无勾选置灰；一键清空勾选，不清组合模式记忆）。
      * popupChooserBuilder 是单选体系（选即关），多选需持久弹层 → 自建组件弹层。
      */
     private fun showTagFilterPopup(anchor: java.awt.Component?) {
@@ -373,42 +373,43 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             )
         }
 
-        for (name in names) {
-            val row = JLabel().apply { border = JBUI.Borders.empty(2, 8) }
-            rowByName[name] = row
-            refreshRow(name)
-            row.addMouseListener(object : java.awt.event.MouseAdapter() {
-                override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                    if (name in filterTags) filterTags.remove(name) else filterTags.add(name)
-                    refreshRow(name)
-                    refreshAsync()
-                }
-            })
-            listPanel.add(row)
+        // 清除项常驻置顶（真机反馈：仅初始化有勾选才渲染→弹层内勾选后无从取消）；
+        // 无勾选置灰、勾选后点亮，一键清空勾选、不清组合模式记忆
+        val clear = JLabel(ZCodeBundle.message("kb.tw.filterClear")).apply {
+            icon = AllIcons.Actions.Undo
+            border = JBUI.Borders.empty(2, 8)
+            // BoxLayout 纵排默认居中（JLabel alignmentX=CENTER），弹层有宽度下限后会整体居中漂移，显式左对齐
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
         }
-
-        if (filterTags.isNotEmpty()) {
-            val clear = JLabel(ZCodeBundle.message("kb.tw.filterClear")).apply {
-                icon = AllIcons.Actions.Undo
-                border = JBUI.Borders.empty(2, 8)
+        fun refreshClear() {
+            val active = filterTags.isNotEmpty()
+            clear.isEnabled = active
+            clear.foreground = if (active) com.intellij.util.ui.UIUtil.getLabelForeground()
+            else com.intellij.util.ui.UIUtil.getContextHelpForeground()
+        }
+        clear.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                if (filterTags.isEmpty()) return
+                filterTags.clear()
+                names.forEach(::refreshRow)
+                refreshClear()
+                refreshAsync()
             }
-            clear.addMouseListener(object : java.awt.event.MouseAdapter() {
-                override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                    filterTags.clear()
-                    names.forEach(::refreshRow)
-                    refreshAsync()
-                }
-            })
-            listPanel.add(clear, 0)
-        }
+        })
+        refreshClear()
+        listPanel.add(clear)
 
-        // 组合模式行（单勾选时 AND/OR 等效；恒显示便于先切模式再勾）
-        val modePanel = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 8, 2))
+        // 组合模式一行横排、置标签行之前（真机反馈：竖排两行不必要、别放最后）；hgap=0+按钮左内距 8，
+        // 单选图标起点与清除项/标签行色块同列（对齐后再加间距会错位，间距放进按钮右内距）
+        val modePanel = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0)).apply {
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+        }
         val anyBtn = javax.swing.JRadioButton(ZCodeBundle.message("kb.tw.filterMatchAny"))
         val allBtn = javax.swing.JRadioButton(ZCodeBundle.message("kb.tw.filterMatchAll"))
         javax.swing.ButtonGroup().apply { add(anyBtn); add(allBtn) }
         (if (filterMatchAll) allBtn else anyBtn).isSelected = true
         for (btn in listOf(anyBtn, allBtn)) {
+            btn.border = JBUI.Borders.empty(1, 8)
             btn.addActionListener {
                 val want = btn === allBtn
                 if (filterMatchAll != want) {
@@ -419,13 +420,34 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             modePanel.add(btn)
         }
         modePanel.border = javax.swing.BorderFactory.createCompoundBorder(
-            javax.swing.BorderFactory.createEmptyBorder(0, 0, 2, 0),
-            javax.swing.BorderFactory.createMatteBorder(1, 0, 0, 0, com.intellij.ui.JBColor.border()),
+            javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, com.intellij.ui.JBColor.border()),
+            javax.swing.BorderFactory.createEmptyBorder(2, 0, 2, 0),
         )
+        listPanel.add(modePanel)
+
+        for (name in names) {
+            val row = JLabel().apply {
+                border = JBUI.Borders.empty(2, 8)
+                alignmentX = java.awt.Component.LEFT_ALIGNMENT
+            }
+            rowByName[name] = row
+            refreshRow(name)
+            row.addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    if (name in filterTags) filterTags.remove(name) else filterTags.add(name)
+                    refreshRow(name)
+                    refreshClear()
+                    refreshAsync()
+                }
+            })
+            listPanel.add(row)
+        }
 
         val panel = JPanel(java.awt.BorderLayout())
         panel.add(listPanel, java.awt.BorderLayout.CENTER)
-        panel.add(modePanel, java.awt.BorderLayout.SOUTH)
+        // 宽度下限：组合行竖排后内容宽缩水、弹层显挤（真机反馈太窄）；长标签名仍自动撑宽
+        val pref = panel.preferredSize
+        panel.preferredSize = java.awt.Dimension(maxOf(pref.width, JBUI.scale(190)), pref.height)
         val host = anchor ?: this
         JBPopupFactory.getInstance()
             .createComponentPopupBuilder(panel, listPanel)
