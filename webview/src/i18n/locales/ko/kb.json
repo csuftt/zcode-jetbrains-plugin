@@ -9,5 +9,15 @@
   "storage": "저장 공간",
   "noteRedline": "지식 베이스는 플러그인 전용 저장소(~/.zcgui/knowledge/)로 세션 데이터에 접근하지 않습니다",
   "loadFailed": "설정을 불러오지 못했습니다",
-  "tab": "지식 베이스"
+  "tab": "지식 베이스",
+  "snapshotLocation": "스냅샷 저장 위치",
+  "snapshotBytes": "스냅샷 용량",
+  "snapshotChange": "변경…",
+  "snapshotRestore": "기본값 복원",
+  "reindexTitle": "인덱스 재구축",
+  "reindexBtn": "재구축",
+  "reindexDone": "{{n}}개 재구축됨",
+  "reindexFailed": "재구축 실패",
+  "snapshotDesc": "스냅샷 데이터(텍스트 캐시, git 복원 사본)는 수록과 함께 늘어나며 다른 드라이브로 옮겨 C: 공간을 확보할 수 있습니다. 메타데이터는 ~/.zcgui/knowledge/ 에 고정됩니다",
+  "reindexDesc": "텍스트 캐시를 비우고 전체를 다시 추출합니다. 캐시 손상이나 파싱 오류 복구용이며 일상 사용에는 불필요합니다"
 }

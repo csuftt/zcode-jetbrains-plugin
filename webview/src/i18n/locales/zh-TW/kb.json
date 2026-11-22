@@ -9,5 +9,15 @@
   "storage": "儲存佔用",
   "noteRedline": "知識庫為外掛私有儲存（~/.zcgui/knowledge/），不讀寫會話資料",
   "loadFailed": "設定載入失敗",
-  "tab": "知識庫"
+  "tab": "知識庫",
+  "snapshotLocation": "快照儲存位置",
+  "snapshotBytes": "快照佔用",
+  "snapshotChange": "修改位置…",
+  "snapshotRestore": "恢復預設",
+  "reindexTitle": "重建索引",
+  "reindexBtn": "重建索引",
+  "reindexDone": "已重建 {{n}} 條",
+  "reindexFailed": "重建失敗",
+  "snapshotDesc": "快照資料（提取文字快取、git 恢復副本）佔用隨收錄增長，可遷移到其他磁碟釋放 C 槽空間；條目元資料固定在 ~/.zcgui/knowledge/，不隨遷移移動",
+  "reindexDesc": "清空提取文字快取並全量重新提取，用於快取損壞或解析異常後修復；日常使用無需執行"
 }

@@ -9,5 +9,15 @@
   "storage": "存储占用",
   "noteRedline": "知识库为插件私有存储（~/.zcgui/knowledge/），不读写会话数据",
   "loadFailed": "设置加载失败",
-  "tab": "知识库"
+  "tab": "知识库",
+  "snapshotLocation": "快照存储位置",
+  "snapshotBytes": "快照占用",
+  "snapshotChange": "修改位置…",
+  "snapshotRestore": "恢复默认",
+  "reindexTitle": "重建索引",
+  "reindexBtn": "重建索引",
+  "reindexDone": "已重建 {{n}} 条",
+  "reindexFailed": "重建失败",
+  "snapshotDesc": "快照数据（提取文本缓存、git 恢复副本）占用随收录增长，可迁移到其他盘释放 C 盘空间；条目元数据固定在 ~/.zcgui/knowledge/，不随迁移移动",
+  "reindexDesc": "清空提取文本缓存并全量重提取，用于缓存损坏或解析异常后修复；日常使用无需执行"
 }

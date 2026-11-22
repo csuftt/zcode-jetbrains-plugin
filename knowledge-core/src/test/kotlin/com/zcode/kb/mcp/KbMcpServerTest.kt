@@ -101,6 +101,29 @@ class KbMcpServerTest {
     }
 
     @Test
+    fun `java store honors snapshotDir in config for text cache`(@TempDir dir: Path) {
+        seed(dir)
+        val snapRoot = dir.resolve("snap-loc")
+        // IDE 侧改快照根（搬 text/ + 写 config）——同款语义直接落盘
+        KbFileStore(dir).use { s ->
+            // 先建目标父目录再搬（setSnapshotDir 会预建新根 text 空目录，顺序反了 move 目标已存在）
+            java.nio.file.Files.createDirectories(snapRoot)
+            java.nio.file.Files.move(dir.resolve("text"), snapRoot.resolve("text"))
+            s.setSnapshotDir(snapRoot.toString())
+        }
+        // MCP server（root=元数据根）每请求解析 config.snapshotDir → text 命中新位置
+        KbServerStore(dir).use { server ->
+            assertTrue(server.available()) // entries 仍在元数据根
+            assertEquals("信创适配部署实践：DM8 数据库与 Nacos 集群部署步骤", server.readText("kb-aaaa1111"))
+            assertEquals("React 组件分层约定", server.readText("kb-bbbb2222"))
+            // 检索正文取自新根缓存（snippet 有内容即取到）
+            val hits = server.search("部署", null, null, null, 10)
+            assertEquals(1, hits.size)
+            assertTrue(hits[0].snippet.contains("部署"))
+        }
+    }
+
+    @Test
     fun `java store management writes are readable by kotlin store`(@TempDir dir: Path) {
         seed(dir)
         KbServerStore(dir).use { server ->

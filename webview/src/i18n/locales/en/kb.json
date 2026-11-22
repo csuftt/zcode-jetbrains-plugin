@@ -9,5 +9,15 @@
   "storage": "Storage",
   "noteRedline": "The knowledge base uses plugin-private storage (~/.zcgui/knowledge/) and never touches session data",
   "loadFailed": "Failed to load settings",
-  "tab": "Knowledge Base"
+  "tab": "Knowledge Base",
+  "snapshotLocation": "Snapshot location",
+  "snapshotBytes": "Snapshot size",
+  "snapshotChange": "Change…",
+  "snapshotRestore": "Restore default",
+  "reindexTitle": "Rebuild index",
+  "reindexBtn": "Rebuild",
+  "reindexDone": "Rebuilt {{n}} entries",
+  "reindexFailed": "Rebuild failed",
+  "snapshotDesc": "Snapshot data (text cache, git-restore copies) grows with your library and can move to another drive to free up C:; entry metadata stays fixed at ~/.zcgui/knowledge/",
+  "reindexDesc": "Clears the text cache and re-extracts everything; for repairing corrupted caches or parse errors, not needed in daily use"
 }

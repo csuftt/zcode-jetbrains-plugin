@@ -8,6 +8,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.zcode.ideaplugin.ZCodeBundle
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFolder
@@ -92,6 +93,9 @@ class KbManagerService : Disposable {
     @Synchronized
     fun store(): KbFileStore {
         store?.let { return it }
+        // 旧整库 pointer 一次性归位（幂等；元数据固定 ~/.zcgui/knowledge、快照根入 config）
+        val migrated = runCatching { KbPaths.migrateLegacyPointer() }.getOrDefault(false)
+        if (migrated) log.info("Knowledge Base: legacy library pointer migrated (metadata back to default root)")
         val s = KbFileStore(KbPaths.rootDir())
         store = s
         Disposer.register(this) { runCatching { s.close() } }
@@ -313,11 +317,12 @@ class KbManagerService : Disposable {
             java.nio.file.StandardWatchEventKinds.ENTRY_DELETE,
         )
         runCatching {
+            val snapshot = KbPaths.snapshotDir() // text 跟随快照根（元数据/快照拆根后不再同根）
             java.nio.file.Files.createDirectories(root.resolve("entries"))
-            java.nio.file.Files.createDirectories(root.resolve("text"))
+            java.nio.file.Files.createDirectories(snapshot.resolve("text"))
             root.register(ws, *kinds)
             root.resolve("entries").register(ws, *kinds)
-            root.resolve("text").register(ws, *kinds)
+            snapshot.resolve("text").register(ws, *kinds)
         }.onFailure {
             runCatching { ws.close() }
             log.warn("Knowledge Base: watcher register failed: ${it.message}")
@@ -490,31 +495,117 @@ class KbManagerService : Disposable {
         return ok
     }
 
-    /** 设置页改库位置：关连接 → 搬目录 → 写 pointer（失败回滚搬动） */
-    fun changeRoot(newRoot: Path): Boolean {
-        if (!newRoot.isAbsolute) return false
-        if (newRoot.toAbsolutePath().normalize() == KbPaths.rootDir().toAbsolutePath().normalize()) return true
-        val old = KbPaths.rootDir()
-        val s = store
-        s?.close()
-        store = null
+    /**
+     * 设置页改快照存储位置（元数据根固定不动）：关连接 → 搬 text/restored → 新 store 写
+     * config.snapshotDir → 重挂 watcher → 广播。恢复默认 = newDir 为元数据根。
+     * 失败全程回滚（目录搬回原位 + config 复位）。@Synchronized 与 store()/sweep 同锁，
+     * 迁移窗口内 sweep 拿锁等待，落锁即见迁移后的新 store。
+     *
+     * watcher 必须在搬移前释放（Windows 上 WatchService 句柄锁目录——真机实证：text 目录
+     * Files.move 报 FileSystemException，异常 message 仅路径本身），迁移收尾整套重挂
+     * （startWatcher 幂等门控已重置，text 注册跟随新快照根）。
+     *
+     * @return null=成功；非空=用户可读的失败原因（拒绝类未动盘直接给原因；搬移中断类已回滚）
+     */
+    @Synchronized
+    fun changeSnapshotRoot(newDir: Path): String? {
+        if (!newDir.isAbsolute) return ZCodeBundle.message("kb.settings.snapshot.fail.notAbsolute")
+        val target = newDir.toAbsolutePath().normalize()
+        val metaRoot = KbPaths.rootDir().toAbsolutePath().normalize()
+        val current = store().snapshotDir().toAbsolutePath().normalize()
+        if (target == current) return null // 幂等
+        if (target == metaRoot.resolve("entries") || target == metaRoot.resolve("text") ||
+            target == metaRoot.resolve("restored")
+        ) {
+            return ZCodeBundle.message("kb.settings.snapshot.fail.metaShape") // 误选元数据形位（混布/自指）
+        }
+        if (target.startsWith(current.toString() + java.io.File.separator)) {
+            return ZCodeBundle.message("kb.settings.snapshot.fail.inside") // 目录搬进自身子树必炸
+        }
+        val oldSnapshot = current
+        val textDir = oldSnapshot.resolve("text")
+        val restoredDir = oldSnapshot.resolve("restored")
+        val newTextDir = target.resolve("text")
+        val newRestoredDir = target.resolve("restored")
+        // 目标空 text/restored 残骸无碍（源侧 deleteRecursively 常被 Explorer/杀毒瞬时句柄
+        // 挡住留下空目录——用户拍板：空的直接复用，覆盖写入即可）；仅非空才拒绝（防覆盖用户同名目录）
+        if (!dirAbsentOrEmpty(newTextDir) || !dirAbsentOrEmpty(newRestoredDir)) {
+            return ZCodeBundle.message("kb.settings.snapshot.fail.occupied")
+        }
         return try {
-            if (Files.isDirectory(old)) {
-                Files.createDirectories(newRoot.parent)
-                if (Files.exists(newRoot)) return false // 目标已存在不覆盖
-                Files.move(old, newRoot, StandardCopyOption.ATOMIC_MOVE)
-            }
-            if (!KbPaths.setCustomRoot(newRoot.toString())) throw IllegalStateException("pointer write failed")
-            true
+            Files.createDirectories(target)
+            // 先关 store、再释放 watcher（句柄锁目录），然后才动盘
+            store?.let { runCatching { it.close() } }
+            store = null
+            runCatching { watcher?.close() }
+            watcher = null
+            watcherStarted = false
+            // WatchService.close() 的底层目录句柄释放是异步的（Windows IOCP 线程退出+
+            // CancelIo 有窗口），立即 rename 仍会撞锁（真机实证：释放后立刻搬 text 依旧
+            // FileSystemException）——小睡等句柄落地，moveDirectory 内部还有退避重试兜底
+            Thread.sleep(300)
+            if (Files.isDirectory(textDir)) KbPaths.moveDirectory(textDir, newTextDir)
+            if (Files.isDirectory(restoredDir)) KbPaths.moveDirectory(restoredDir, newRestoredDir)
+            val newStore = KbFileStore(metaRoot)
+            newStore.setSnapshotDir(if (target == metaRoot) "" else target.toString())
+            store = newStore
+            Disposer.register(this) { runCatching { newStore.close() } }
+            startWatcher()
+            KbTopics.publish(null)
+            log.info("Knowledge Base: snapshot dir changed $oldSnapshot -> $target")
+            null
         } catch (e: Exception) {
-            log.warn("Knowledge Base: changeRoot failed: ${e.message}")
-            false
+            // toString() 带 FileSystemException 的系统 reason（「另一个程序正在使用…」），
+            // e.message 只有路径——用户拿不到原因就没法自查资源管理器/杀毒占用
+            val cause = e.toString()
+            log.warn("Knowledge Base: changeSnapshotRoot failed: $cause")
+            // 回滚：config 复位旧值 + 已搬目录搬回原位（尽力，均幂等）
+            runCatching {
+                val rollback = KbFileStore(metaRoot)
+                rollback.setSnapshotDir(if (oldSnapshot == metaRoot) "" else oldSnapshot.toString())
+                rollback.close()
+            }
+            runCatching {
+                // 跨盘搬移是 copy+delete：中断时源完整（未删）→ 目标残骸直接清；
+                // rename 成功后异常（config 写失败等）→ 目录搬回原位
+                if (Files.isDirectory(newTextDir)) {
+                    if (Files.isDirectory(textDir)) newTextDir.toFile().deleteRecursively()
+                    else KbPaths.moveDirectory(newTextDir, textDir)
+                }
+                if (Files.isDirectory(newRestoredDir)) {
+                    if (Files.isDirectory(restoredDir)) newRestoredDir.toFile().deleteRecursively()
+                    else KbPaths.moveDirectory(newRestoredDir, restoredDir)
+                }
+            }
+            store = null // 下次 store() 按未变的旧 config 重建
+            startWatcher() // 监听已释放，按旧快照根重挂
+            ZCodeBundle.message("kb.settings.snapshot.fail.move", cause)
         }
     }
 
-    /** 设置页存储占用（bytes） */
-    fun storageBytes(): Long = try {
-        Files.walk(KbPaths.rootDir()).use { stream -> stream.mapToLong { Files.size(it) }.sum() }
+    /** 目标形位判定：不存在或空目录 = 可复用（空残骸覆盖写入）；非空 = 拒绝防覆盖 */
+    private fun dirAbsentOrEmpty(p: Path): Boolean =
+        !Files.exists(p) || (Files.isDirectory(p) && Files.list(p).use { !it.findAny().isPresent })
+
+    /** 存储占用（bytes）：元数据 + 快照之和（快照根自定义后总账仍完整） */
+    fun storageBytes(): Long = metaBytes() + snapshotBytes()
+
+    /** 元数据占用：entries/ + config.json（固定元数据根下） */
+    fun metaBytes(): Long = dirBytes(KbPaths.entriesDir()) + fileBytes(KbPaths.configFile())
+
+    /** 快照占用：text/ + restored/（跟随快照根；设置页快照位置行展示） */
+    fun snapshotBytes(): Long = dirBytes(KbPaths.textDir()) + dirBytes(KbPaths.restoredDir())
+
+    private fun dirBytes(dir: Path): Long = try {
+        if (Files.isDirectory(dir)) {
+            Files.walk(dir).use { stream -> stream.filter { Files.isRegularFile(it) }.mapToLong { Files.size(it) }.sum() }
+        } else 0
+    } catch (e: Exception) {
+        0
+    }
+
+    private fun fileBytes(f: Path): Long = try {
+        if (Files.isRegularFile(f)) Files.size(f) else 0
     } catch (e: Exception) {
         0
     }

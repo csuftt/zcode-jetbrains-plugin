@@ -9,5 +9,15 @@
   "storage": "ストレージ",
   "noteRedline": "ナレッジベースはプラグイン専用ストレージ（~/.zcgui/knowledge/）でセッションデータには触れません",
   "loadFailed": "設定の読み込みに失敗しました",
-  "tab": "ナレッジベース"
+  "tab": "ナレッジベース",
+  "snapshotLocation": "スナップショット保存先",
+  "snapshotBytes": "スナップショット容量",
+  "snapshotChange": "変更…",
+  "snapshotRestore": "既定に戻す",
+  "reindexTitle": "インデックス再構築",
+  "reindexBtn": "再構築",
+  "reindexDone": "{{n}} 件を再構築しました",
+  "reindexFailed": "再構築に失敗しました",
+  "snapshotDesc": "スナップショットデータ（テキストキャッシュ・git 復元コピー）は増え続けるため、Cドライブ以外へ移動できます。メタデータは ~/.zcgui/knowledge/ に固定され移動しません",
+  "reindexDesc": "テキストキャッシュを消去して全件再抽出します。キャッシュ破損や解析エラーの修復用で、日常使用では不要です"
 }

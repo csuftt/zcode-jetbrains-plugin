@@ -14,7 +14,8 @@ import java.util.Map;
  * MCP server 侧查询 + 管理写（纯 Java，不得引用 Kotlin 类——fork JVM 无 kotlin-stdlib）。
  *
  * 与 IDE 侧 KbFileStore（Kotlin）共享同一文件布局（root/entries/&lt;id&gt;.json 元数据 +
- * root/text/&lt;id&gt;.txt 提取文本缓存 + root/config.json 目录树/标签注册表）：
+ * text/&lt;id&gt;.txt 提取文本缓存（跟随 config.json 顶层 snapshotDir 快照根，空=root 同根）+
+ * root/config.json 目录树/标签注册表）：
  * 写侧（IDE 与本 server）一律临时文件 + ATOMIC_MOVE（读侧无撕裂，跨进程最坏丢一次
  * 更新、结构不撕裂）；读侧每请求全量扫描，千条以内毫秒级，不做缓存。
  * ⚠️ 检索判据与 KbFileStore.search 保持同形（KbTokenizer 分词 + 小写包含 AND + 计次
@@ -165,7 +166,7 @@ final class KbServerStore implements AutoCloseable {
         if (!isSafeId(id)) {
             return null;
         }
-        Path f = root.resolve("text").resolve(id + ".txt");
+        Path f = textDir().resolve(id + ".txt");
         if (!Files.isRegularFile(f)) {
             return null;
         }
@@ -481,7 +482,7 @@ final class KbServerStore implements AutoCloseable {
             }
             try {
                 Files.deleteIfExists(root.resolve("entries").resolve(id + ".json"));
-                Files.deleteIfExists(root.resolve("text").resolve(id + ".txt"));
+                Files.deleteIfExists(textDir().resolve(id + ".txt"));
                 n++;
             } catch (Exception e) {
                 throw new KbOpException("remove failed: " + id + " (" + errMsg(e) + ")");
@@ -706,7 +707,7 @@ final class KbServerStore implements AutoCloseable {
         e.put("indexedMtime", (double) mtime(f));
         e.put("indexedSize", (double) size);
         writeEntryMap(e);
-        atomicWrite(root.resolve("text").resolve(id + ".txt"), text);
+        atomicWrite(textDir().resolve(id + ".txt"), text);
         return resultOf(id, (String) e.get("title"), e, false);
     }
 
@@ -910,6 +911,26 @@ final class KbServerStore implements AutoCloseable {
 
     /** config.json 读投影（缺文件/损坏按缺省结构返回，写回即重建——与 IDE 侧 readConfig 同语义）。顶层复制，folders/tags 数组元素与原文件共享引用（改前由调用方复制） */
     @SuppressWarnings("unchecked")
+    /**
+     * 快照根下的 text 目录（config.json 顶层 snapshotDir，空/损坏/相对路径 → 元数据根）。
+     * 每请求解析（configMap 本就每请求读，开销同级）——IDE 侧改快照根后已 fork 的 server
+     * 下一请求即生效，无需重启。
+     */
+    private Path textDir() {
+        try {
+            Object v = configMap().get("snapshotDir");
+            String dir = v instanceof String ? ((String) v).trim() : "";
+            if (!dir.isEmpty()) {
+                Path p = Path.of(dir);
+                if (p.isAbsolute()) {
+                    return p.resolve("text");
+                }
+            }
+        } catch (Exception ignore) {
+        }
+        return root.resolve("text");
+    }
+
     private Map<String, Object> configMap() {
         Path f = root.resolve("config.json");
         if (Files.isRegularFile(f)) {

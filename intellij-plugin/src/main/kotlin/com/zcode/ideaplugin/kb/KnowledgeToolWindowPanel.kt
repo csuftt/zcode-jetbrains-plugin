@@ -233,7 +233,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 }
             })
             add(action(ZCodeBundle.message("kb.tw.tags.manage"), AllIcons.Nodes.Tag) { KbDialogs.show(KbTagsDialog()) })
-            add(action(ZCodeBundle.message("kb.tw.btn.reindex"), AllIcons.Actions.Compile) { reindexAllAsync() })
+            // 重建索引已挪设置页（2026-11-22：库级数据动作与快照位置设置同区，工具窗只留日常操作）
         }
         toolbar = com.intellij.openapi.actionSystem.ActionManager.getInstance()
             .createActionToolbar("ZCode.KnowledgeToolbar", group, true).apply {
@@ -762,23 +762,6 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         }
         walk(id)
         return out
-    }
-
-    /** 库级重建索引：清缓存全量重提取 → 气泡回执 */
-    private fun reindexAllAsync() {
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val n = runCatching { KbManagerService.instance.reindexAll() }.getOrDefault(-1)
-            ApplicationManager.getApplication().invokeLater {
-                NotificationGroupManager.getInstance().getNotificationGroup("ZCode")
-                    .createNotification(
-                        ZCodeBundle.message("kb.notify.groupTitle"),
-                        if (n >= 0) ZCodeBundle.message("kb.notify.reindexed", n)
-                        else ZCodeBundle.message("kb.tw.reindexFailed"),
-                        if (n >= 0) NotificationType.INFORMATION else NotificationType.WARNING,
-                    )
-                    .notify(project)
-            }
-        }
     }
 
     // ───────────────────────── 动作 ─────────────────────────

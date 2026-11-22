@@ -11,10 +11,14 @@ import java.nio.file.StandardCopyOption
  * 知识库纯文件存储（`~/.zcgui/knowledge/` 下，根目录即库根）：
  *
  * ```
- * config.json          # 目录树（folders 有序）+ 收录默认目录
+ * config.json          # 目录树（folders 有序）+ 收录默认目录 + snapshotDir 快照根
  * entries/<id>.json    # 每条目一份元数据（KbEntry 序列化，文本可读）
- * text/<id>.txt        # 提取文本缓存（检索与预览的语料）
+ * text/<id>.txt        # 提取文本缓存（检索与预览的语料；跟随快照根，见下）
  * ```
+ *
+ * 双根模型（KbPaths 同语义）：元数据根=构造 root（固定 ~/.zcgui/knowledge/）；快照根
+ * （text/ + restored/）默认同根，config.json 顶层 snapshotDir 可自定义（设置页改位置时
+ * 由 KbManagerService 搬移目录后调 setSnapshotDir）。
  *
  * 目录树（2026-11-21 改版）：模块/项目分组层退役，用户自建嵌套目录（层级不限），
  * 条目挂 folderId（"" = 根级垫底）。目录用 id 引用而非路径：重命名/移动不改子条目，
@@ -36,8 +40,12 @@ class KbFileStore(private val root: Path) : AutoCloseable {
 
     private val lock = Any()
     private val entriesDir = root.resolve("entries")
-    private val textDir = root.resolve("text")
     private val configFile = root.resolve("config.json")
+
+    /** 快照根：config.json 顶层 snapshotDir（空/损坏 → 元数据根）；构造时解析，setSnapshotDir 再解析 */
+    private var snapshotRoot: Path = parseSnapshotRoot()
+    private val textDir: Path
+        get() = snapshotRoot.resolve("text")
 
     init {
         Files.createDirectories(entriesDir)
@@ -102,6 +110,27 @@ class KbFileStore(private val root: Path) : AutoCloseable {
     fun clearIndex() = synchronized(lock) {
         for (f in listRegularFiles(textDir)) Files.deleteIfExists(f)
         for (e in allEntriesLocked()) writeEntry(e.copy(indexedMtime = 0, indexedSize = 0))
+    }
+
+    // ───────────────────────── 快照根 ─────────────────────────
+
+    /** 当前快照根（text/restored 所在；展示与改位置确认用） */
+    fun snapshotDir(): Path = synchronized(lock) { snapshotRoot }
+
+    /**
+     * 改快照根并写 config（目录搬移/watcher 重挂由调用方负责）：写 snapshotDir 字段
+     * 后内存再解析。空/空白 = 恢复默认（元数据根）。
+     */
+    fun setSnapshotDir(dir: String) = synchronized(lock) {
+        writeConfig(readConfig().copy(snapshotDir = dir.trim()))
+        snapshotRoot = parseSnapshotRoot()
+        Files.createDirectories(textDir)
+    }
+
+    private fun parseSnapshotRoot(): Path = try {
+        readConfig().snapshotDir.takeIf { it.isNotBlank() }?.let { Path.of(it) } ?: root
+    } catch (e: Exception) {
+        root
     }
 
     // ───────────────────────── 目录树 ─────────────────────────
@@ -594,7 +623,7 @@ class KbFileStore(private val root: Path) : AutoCloseable {
 }
 
 /**
- * config.json（version 2）：目录树 + 标签注册表 + 收录默认目录记忆。
+ * config.json（version 2）：目录树 + 标签注册表 + 收录默认目录记忆 + 快照根。
  * 旧版 version 1（modules 字符串清单）读取时 folders/tags 缺省空表——不迁移，自然重置。
  */
 @Serializable
@@ -603,6 +632,7 @@ data class KbConfigFile(
     val folders: List<KbFolder> = emptyList(),
     val tags: List<KbTagMeta> = emptyList(),
     val lastFolderId: String = "",
+    val snapshotDir: String = "",
 )
 
 /** 标签注册表条目：名字 + 颜色（hex，如 #4A9EFF）。条目 tags 只存名字，颜色在此一层。 */

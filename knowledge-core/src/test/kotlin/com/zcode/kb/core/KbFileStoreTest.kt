@@ -49,6 +49,30 @@ class KbFileStoreTest {
     }
 
     @Test
+    fun `snapshot dir relocation persists and reroutes text cache`() {
+        val s = newStore()
+        s.insert(entry("kb-1", "d:/1.md"), "旧根缓存")
+        assertEquals("旧根缓存", s.readText("kb-1"))
+        val snapRoot = dir.resolve("snap")
+        s.setSnapshotDir(snapRoot.toString())
+        // store 层只切指针不搬目录（搬移由 service 层负责）：旧缓存留在旧根、新根读不到
+        assertNull(s.readText("kb-1"))
+        // 新写入落新根
+        s.insert(entry("kb-2", "d:/2.md"), "新根缓存")
+        assertEquals("新根缓存", s.readText("kb-2"))
+        assertTrue(java.nio.file.Files.exists(snapRoot.resolve("text/kb-2.txt")))
+        assertFalse(java.nio.file.Files.exists(snapRoot.resolve("text/kb-1.txt")))
+        // 重开 store：config.snapshotDir 权威解析，读侧落新根
+        val again = KbFileStore(dir)
+        assertEquals(snapRoot, again.snapshotDir())
+        assertEquals("新根缓存", again.readText("kb-2"))
+        // 恢复默认（空串）后回落元数据根
+        again.setSnapshotDir("")
+        assertEquals(dir, again.snapshotDir())
+        assertEquals("旧根缓存", again.readText("kb-1"))
+    }
+
+    @Test
     fun `folders persist and derive display path`() {
         val s = newStore()
         val root = s.createFolder(null, "信创适配")
