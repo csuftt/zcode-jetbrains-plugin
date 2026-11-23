@@ -100,13 +100,19 @@
         <!-- 多工作区收口组（与 SendFileToInput 互斥显示，单一入口）：可投递目标>1 时
              以同名子菜单取代平铺项，子项按目录名区分、当前标签置顶标「（当前）」；
              文案在类构造器经 ZCodeBundle 取值（同上，不走 XML %key%） -->
+        <!-- 三处挂点须锚 after SendFileToInput（勿用 anchor=first）：first 按注册序倒插
+             （后注册的在上面），若组压在平铺项上方，relative-to-action 在注册时一次性解析，
+             KnowledgeAddGroup（锚 after 本组）会被静态地夹在「组与平铺项之间」——多目标
+             显示组时顺序正常，单目标组隐藏、平铺项可见时「加入知识库」就顶到发送项上面
+             （缺陷 HX，IDEA/PyCharm 表现不一致的真根因）。锚平铺项后静态链恒为
+             平铺项→组→知识库，两种互斥形态下知识库都在发送入口之后 -->
         <group id="ZCode.SendToWorkspaceGroup"
                popup="true"
                class="com.zcode.ideaplugin.action.SendFileToWorkspaceGroupAction"
                icon="com.zcode.ideaplugin.ZCodeIcons.ZcGui">
-            <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
-            <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
-            <add-to-group group-id="ChangesViewPopupMenu" anchor="first"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="ZCode.SendFileToInput"/>
+            <add-to-group group-id="EditorTabPopupMenu" anchor="after" relative-to-action="ZCode.SendFileToInput"/>
+            <add-to-group group-id="ChangesViewPopupMenu" anchor="after" relative-to-action="ZCode.SendFileToInput"/>
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ZCode.SendFileToInput"/>
         </group>
         <!-- 控制台右键：选中日志文本发送到输入框（发纯文本正文，行号引用是编辑器场景专属） -->
