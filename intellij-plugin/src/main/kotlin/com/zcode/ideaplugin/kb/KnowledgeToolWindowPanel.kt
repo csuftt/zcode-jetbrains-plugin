@@ -846,6 +846,13 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
      * 在系统文件管理器定位源文件：Windows `explorer /select` 选中文件，macOS `open -R`，
      * Linux 开父目录。只 start 不等退出——explorer 成功也返回非 0 退出码，等待退出会误判失败
      * （同主面板 turnfile 的 reveal 兜底）。启动失败降级系统默认应用打开。
+     *
+     * Windows 坑（真机实证，全部打通过）：① sourcePath 是正斜杠 displayPath，explorer 不认
+     * 正斜杠——转反斜杠；② explorer /select 的合法形式是 `explorer.exe /select,"路径"`
+     * （引号只包路径），而 Java ProcessBuilder 对含空格参数整体加引号（`"/select,路径"`），
+     * explorer 拒识静默打开默认位置（文档库），`cmd /c` 中转又过不了 & 元字符——
+     * 最终用 `powershell -EncodedCommand`（Base64 零转义）+ `--%` 原样传参通道产出合法形式，
+     * 盘根/空格/`&` 路径真机全部选中成功。
      */
     private fun revealEntry(e: KbEntry) {
         val f = File(e.sourcePath)
@@ -856,7 +863,12 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         val os = System.getProperty("os.name")?.lowercase() ?: ""
         val ok = runCatching {
             when {
-                os.contains("win") -> ProcessBuilder("explorer.exe", "/select,${f.absolutePath}").start()
+                os.contains("win") -> {
+                    val winPath = f.absolutePath.replace('/', '\\').replace("'", "''")
+                    val script = "explorer.exe --% /select,\"$winPath\""
+                    val enc = java.util.Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_16LE))
+                    ProcessBuilder("powershell.exe", "-NoProfile", "-EncodedCommand", enc).start()
+                }
                 os.contains("mac") || os.contains("darwin") -> ProcessBuilder("open", "-R", f.absolutePath).start()
                 else -> ProcessBuilder("xdg-open", f.parentFile?.absolutePath ?: f.absolutePath).start()
             }
@@ -976,7 +988,10 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
 
     private var dropTarget: DropTarget? = null
 
-    /** 拖外部文件进面板收录（树区域拖入走 [KbTransferHandler] 的文件 flavor 分流） */
+    /**
+     * 拖外部文件进面板收录（文件拖入的**唯一**入口：树 TransferHandler 对文件 flavor 拒收，
+     * 树区域也落到这里——drop 光标像素坐标可精确换算落点行做弹窗目录预选）。
+     */
     private fun registerFileDropTarget() {
         dropTarget = DropTarget(this, object : DropTargetAdapter() {
             // 悬停必须 acceptDrag，否则 Windows 拖拽光标恒为「禁止」、部分场景 drop 不投递（真机实测）
@@ -1006,7 +1021,26 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 )
                 KbIngestHelper.notifySkipped(project, skipped)
                 if (supported.isNotEmpty()) {
-                    SwingUtilities.invokeLater { ingestWithDialog(supported) }
+                    // 弹窗目录预选=拖入落点行（2026-11-23 反馈：拖到目录行却还预填上次收录目录）：
+                    // 光标坐标转树坐标取精确行（行外取最近行兜底），目录行取该目录、条目行取其
+                    // 所属目录、树外/根行传空回落「上次收录目录」
+                    val preselectFolder = dropTargetFolderId(dtde.location)
+                    SwingUtilities.invokeLater { ingestWithDialog(supported, preselectFolder) }
+                }
+            }
+
+            /** drop 光标 → 落点行节点 → 预选目录 id（null=树外/根行/无法解析） */
+            private fun dropTargetFolderId(panelPoint: java.awt.Point): String? {
+                val pt = javax.swing.SwingUtilities.convertPoint(
+                    this@KnowledgeToolWindowPanel, panelPoint, tree,
+                )
+                val path = tree.getPathForLocation(pt.x, pt.y)
+                    ?: tree.getClosestPathForLocation(pt.x, pt.y) // 精确行外（树边空白）取最近行
+                    ?: return null
+                return when (val d = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject) {
+                    is NodeData.Folder -> d.folder.id
+                    is NodeData.Entry -> d.entry.folderId
+                    else -> null // 根行 = 根级（回落上次收录目录）
                 }
             }
         })
@@ -1032,7 +1066,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         }
 
         override fun canImport(support: TransferSupport): Boolean {
-            // 外部文件拖入树区=收录（不走树内移动语义，搜索/过滤平铺态也放行——收录不涉误移）
+            // 外部文件拖入树区=收录（不走树内移动语义，搜索/过滤平铺态也放行——收录不涉误移；
+            // 树必须接：内层 DropTarget 拒收不会 fallback 到面板 target，拒了就整体禁止拖入）
             if (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) return true
             if (!support.isDataFlavorSupported(KbTransferable.FLAVOR)) return false
             if (searchHits.isNotEmpty() || filterTags.isNotEmpty()) return false // 搜索/标签过滤平铺态禁拖（落点语义不明，防误移入根级）
@@ -1071,7 +1106,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         }
 
         override fun importData(support: TransferSupport): Boolean {
-            // 外部文件拖入树区=收录（与面板空白区 DropTarget 同流；importData 在 EDT，弹窗可直接调）
+            // 外部文件拖入树区=收录（importData 在 EDT，弹窗可直接调）
             if (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
                 val files = runCatching {
                     @Suppress("UNCHECKED_CAST")
@@ -1080,14 +1115,29 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 val (supported, skipped) = KbIngestHelper.partitionIngestable(files.map { it.toPath() })
                 KbIngestHelper.notifySkipped(project, skipped)
                 if (supported.isNotEmpty()) {
-                    // 弹窗目录预选=拖入落点（2026-11-23 反馈：拖到目录行却还预填上次收录目录）：
-                    // 目录行取该目录、条目行取其所属目录，根行/未知传空回落「上次收录目录」
-                    val node = (support.dropLocation as? javax.swing.JTree.DropLocation)
-                        ?.path?.lastPathComponent as? DefaultMutableTreeNode
+                    // 弹窗目录预选=拖入落点行（2026-11-23 反馈：拖到目录行却还预填上次收录目录）。
+                    // ON_OR_INSERT 的坑（真机实证）：行边缘=INSERT 落点，DropLocation.path 指向
+                    // 父容器节点而非落点行——候选行取 childIndex 处子节点，且**前一行是目录时
+                    // 优先取前一行**（拖到目录行下边缘意图=放进它，childIndex 会偏到下一行）
+                    val loc = support.dropLocation as? javax.swing.JTree.DropLocation
+                    val container = loc?.path?.lastPathComponent as? DefaultMutableTreeNode
+                    val node = if (loc != null && loc.childIndex >= 0 && container != null) {
+                        val k = loc.childIndex
+                        val candAt = (k.coerceIn(0, container.childCount - 1)).let { container.getChildAt(it) as? DefaultMutableTreeNode }
+                        val candPrev = (k - 1).takeIf { it in 0 until container.childCount }
+                            ?.let { container.getChildAt(it) as? DefaultMutableTreeNode }
+                        when {
+                            candPrev?.userObject is NodeData.Folder -> candPrev
+                            candAt != null -> candAt
+                            else -> container
+                        }
+                    } else {
+                        container
+                    }
                     val preselectFolder = when (val d = node?.userObject) {
                         is NodeData.Folder -> d.folder.id
                         is NodeData.Entry -> d.entry.folderId
-                        else -> null
+                        else -> null // 根行 = 根级（回落上次收录目录）
                     }
                     ingestWithDialog(supported, preselectFolder)
                 }
