@@ -635,7 +635,8 @@ class AccountProviderBridgeTest {
         assertNull(AccountProviderBridge.accessModeOf("3556624f-xxx"))
     }
 
-    // ===== overlayModelIds（账号渠道 personal 覆盖合并，2026-09-24 渠道重复修复）=====
+    // ===== overlayModelIds（账号渠道 personal 覆盖合并，2026-09-24 渠道重复修复；
+    // 2026-11-23 缺陷IB 对齐官方 resolveOwnedOrder 三段语义）=====
 
     /** provider_config.json account:* 规则 config 节同构样本 */
     private fun ruleConfig(json: String): kotlinx.serialization.json.JsonObject =
@@ -646,6 +647,8 @@ class AccountProviderBridgeTest {
         val builtin = listOf("GLM-5.3", "GLM-5.3-Flash")
         assertEquals(builtin, AccountProviderBridge.overlayModelIds(null, builtin))
         assertEquals(builtin, AccountProviderBridge.overlayModelIds(ruleConfig("{}"), builtin))
+        // 空数组等价缺省
+        assertEquals(builtin, AccountProviderBridge.overlayModelIds(ruleConfig("""{"modelOrder":[]}"""), builtin))
     }
 
     @Test
@@ -672,9 +675,38 @@ class AccountProviderBridgeTest {
     }
 
     @Test
-    fun `modelOrder 漏项时未收录模型按序补尾且去重`() {
+    fun `目录新增的未排序内置成员排在用户顺序之前（缺陷IB 真机形态）`() {
+        // 真机 2026-11-23：目录 rev47 把 GLM-5.4 放到 builtinModelIds 首位，客户端 9 月
+        // 写入的 modelOrder 尚未收录——旧实现补尾把 GLM-5.4 甩到末尾，与客户端及
+        // registry 的顺序（GLM-5.4 在最前）不一致
         assertEquals(
-            listOf("glm-5.3-flashx", "GLM-5.3", "GLM-5.3-Flash"),
+            listOf("GLM-5.4", "GLM-5.3", "GLM-5.3-Flash", "GLM-5.3-flashx"),
+            AccountProviderBridge.overlayModelIds(
+                ruleConfig("""{"personalModelIds":["GLM-5.3-flashx"],"modelOrder":["GLM-5.3","GLM-5.3-Flash","GLM-5.3-flashx"]}"""),
+                listOf("GLM-5.4", "GLM-5.3", "GLM-5.3-Flash"),
+            ),
+        )
+    }
+
+    @Test
+    fun `官方三段语义向量（未排序内置在前 未排序个人在后 stale 与重复丢弃）`() {
+        // 官方 provider-refactor todo-28 示例：Built-in=[A,B] Personal=[P,Q]
+        // Requested=[P,B,stale,P] → Canonical=[A,P,B,Q]
+        assertEquals(
+            listOf("A", "P", "B", "Q"),
+            AccountProviderBridge.overlayModelIds(
+                ruleConfig("""{"personalModelIds":["P","Q"],"modelOrder":["P","B","stale","P"]}"""),
+                listOf("A", "B"),
+            ),
+        )
+    }
+
+    @Test
+    fun `未进 modelOrder 的内置成员前置而非补尾`() {
+        // 旧用例「modelOrder 漏项时未收录模型按序补尾」固化的是错误语义：用户把 flashx
+        // 排在最前，目录的两个内置成员未进 modelOrder → 仍按目录序排在用户顺序之前
+        assertEquals(
+            listOf("GLM-5.3", "GLM-5.3-Flash", "glm-5.3-flashx"),
             AccountProviderBridge.overlayModelIds(
                 ruleConfig("""{"modelOrder":["glm-5.3-flashx"],"personalModelIds":["glm-5.3-flashx"]}"""),
                 listOf("GLM-5.3", "GLM-5.3-Flash"),
@@ -683,11 +715,31 @@ class AccountProviderBridgeTest {
     }
 
     @Test
-    fun `空白条目过滤`() {
+    fun `builtin 与 personal 同 id 只保留内置位置`() {
+        assertEquals(
+            listOf("GLM-5.3", "GLM-5.3-Flash", "glm-5.3-flashx"),
+            AccountProviderBridge.overlayModelIds(
+                ruleConfig("""{"personalModelIds":["GLM-5.3-Flash","glm-5.3-flashx"],"modelOrder":["GLM-5.3-Flash","glm-5.3-flashx"]}"""),
+                listOf("GLM-5.3", "GLM-5.3-Flash"),
+            ),
+        )
+    }
+
+    @Test
+    fun `非成员条目与空白条目丢弃`() {
+        // modelOrder 只排序不创建成员：无 builtin/personal 背书的条目（目录下架/模型
+        // 已删的手写残留）不进结果——registry 不发布，展示出来即选中即失败
         assertEquals(
             listOf("GLM-5.3"),
             AccountProviderBridge.overlayModelIds(
-                ruleConfig("""{"personalModelIds":["","  "],"modelOrder":["GLM-5.3"]}"""),
+                ruleConfig("""{"personalModelIds":["","  "],"modelOrder":["removed-model","GLM-5.3","GLM-5.3",""]}"""),
+                listOf("GLM-5.3"),
+            ),
+        )
+        assertEquals(
+            emptyList<String>(),
+            AccountProviderBridge.overlayModelIds(
+                ruleConfig("""{"modelOrder":["GLM-5.3"]}"""),
                 emptyList(),
             ),
         )

@@ -124,19 +124,33 @@ object AccountProviderBridge {
     /**
      * 账号渠道的最终模型序（官方客户端 overlay 语义，2026-09-24 渠道重复修复）：
      * 用户在客户端给账号渠道「添加模型/排序」时，客户端在 provider_config.json 写
-     * **同 id** 的 account:* 规则——modelOrder 是含内置在内的完整展示序，
-     * personalModelIds 是用户新增模型。该规则是账号渠道的 personal 覆盖而非独立
-     * 渠道：合并规则 = modelOrder 当权威序在前，目录 builtinModelIds 与
-     * personalModelIds 中未收录的按序补尾（去重保序）；modelOrder 缺省退化为
-     * builtin + personal 追加。[personalRuleConfig] null（渠道无覆盖规则）返回
-     * builtinModelIds 原序。
+     * **同 id** 的 account:* 规则——modelOrder 是成员的排序请求，personalModelIds
+     * 是用户新增模型。该规则是账号渠道的 personal 覆盖而非独立渠道，合并规则 = 官方
+     * resolveOwnedOrder 三段语义（packages/provider/src/owned-order.ts，装机 3.19.1
+     * zcode.cjs 压缩名 E_e 逐句同构）：
+     * - builtin = 目录 builtinModelIds 去重保序；personal = personalModelIds 去重保序，
+     *   剔除与 builtin 同 id 者（Built-in wins）；
+     * - ordered = modelOrder 去重保序，只保留仍是成员的条目（目录已下架/已删除的
+     *   stale id 丢弃——registry 同样不发布，展示出来即选中即失败）；
+     * - 结果 = 未进 modelOrder 的内置成员（保持目录序）+ ordered + 未进 modelOrder
+     *   的个人成员。
+     *
+     * 未排序内置成员必须排在用户顺序**之前**而非补尾（2026-11-23 缺陷IB）：目录新增
+     * 模型（GLM-5.4 置于 builtinModelIds 首位）时客户端早先写入的 modelOrder 尚未
+     * 收录它，补尾会把官方排在最前的新模型甩到列表末尾。[personalRuleConfig] null
+     * （渠道无覆盖规则）或无 modelOrder 退化为 builtin + personal 追加。
      */
     fun overlayModelIds(personalRuleConfig: JsonObject?, builtinModelIds: List<String>): List<String> {
         fun idsOf(key: String): List<String> =
             personalRuleConfig?.get(key)?.jsonArray
                 ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { s -> s.isNotBlank() } }
+                ?.distinct()
                 ?: emptyList()
-        return (idsOf("modelOrder") + builtinModelIds + idsOf("personalModelIds")).distinct()
+        val builtin = builtinModelIds.distinct()
+        val personal = idsOf("personalModelIds").filter { it !in builtin }
+        val members = (builtin + personal).toSet()
+        val ordered = idsOf("modelOrder").filter { it in members }
+        return builtin.filter { it !in ordered } + ordered + personal.filter { it !in ordered }
     }
 
     /** account:* 规则前缀（客户端托管的账号渠道 personal 覆盖；插件只读不写） */
