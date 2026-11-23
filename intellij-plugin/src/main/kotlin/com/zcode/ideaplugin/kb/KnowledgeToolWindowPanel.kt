@@ -748,8 +748,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
 
     /**
      * 发送到 ZC GUI 输入框（品牌图标置顶）：文件引用（AI 拿到路径即可读原文）+ 知识库
-     * 上下文尾注（紧跟引用后插入纯文本——AI 据此知道出处是知识库、可用 zcgui-knowledge
-     * 技能 / kb_search 检索更多）。单篇带标题/目录/标签，批量只报数量（2026-11-23 用户拍板）。
+     * 上下文尾注（紧跟引用后插入纯文本——AI 据此知道出处是知识库）。单篇带标题/目录，
+     * 批量只报数量（2026-11-23 用户拍板；「可用 zcgui-knowledge 技能」提示尾句已按用户要求移除）。
      */
     private fun sendToInputAction(text: String, entries: List<KbEntry>): AnAction =
         object : AnAction(text, text, ZCodeIcons.ZcGui) {
