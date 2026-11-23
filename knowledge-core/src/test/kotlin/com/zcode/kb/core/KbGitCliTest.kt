@@ -5,7 +5,6 @@ import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -57,45 +56,19 @@ class KbGitCliTest {
     }
 
     @Test
-    fun `anchor captures root commit and rel path`() {
+    fun `repoRoot is the git top level of a tracked file`() {
         val root = newRepo()
-        val a = cli.anchor(root.resolve("docs/指南.md"))
-        assertNotNull(a)
-        assertEquals(root.toAbsolutePath().normalize().toString().replace('\\', '/'), a.repoRoot.toString().replace('\\', '/'))
-        assertEquals(40, a.commit.length)
-        assertEquals("docs/指南.md", a.relPath)
-        assertTrue(cli.hasBlob(a.repoRoot.toString(), a.commit, a.relPath))
+        assertEquals(root.toAbsolutePath().normalize(), cli.repoRoot(root.resolve("docs/指南.md")))
     }
 
     @Test
-    fun `file outside git repo returns null anchor`() {
+    fun `file outside git repo has no repo root`() {
         org.junit.jupiter.api.Assumptions.assumeTrue(gitAvailable, "git 不可用，跳过")
         val dir = Files.createTempDirectory("kb-nogit")
         val f = dir.resolve("a.md")
         Files.writeString(f, "x")
-        assertNull(cli.anchor(f))
+        assertNull(cli.repoRoot(f))
         dir.toFile().deleteRecursively()
-    }
-
-    @Test
-    fun `restore blob after source deleted`() {
-        val root = newRepo()
-        val a = cli.anchor(root.resolve("docs/指南.md"))!!
-        // 模拟分支切换：源文件消失
-        Files.delete(root.resolve("docs/指南.md"))
-        kotlin.test.assertFalse(Files.exists(root.resolve("docs/指南.md")))
-
-        val target = root.resolve("restored/kb-x/指南.md")
-        assertTrue(cli.restoreBlob(a.repoRoot.toString(), a.commit, a.relPath, target))
-        assertEquals("# 指南\n内容 v1", Files.readString(target))
-    }
-
-    @Test
-    fun `hasBlob false for untracked file commit`() {
-        val root = newRepo()
-        val a = cli.anchor(root.resolve("docs/指南.md"))!!
-        // 未跟踪文件的假 rel：blob 不存在
-        kotlin.test.assertFalse(cli.hasBlob(a.repoRoot.toString(), a.commit, "docs/不存在.md"))
     }
 
     // ── 提交状态（收录/编辑弹窗「Git 提交」行） ──
@@ -153,27 +126,6 @@ class KbGitCliTest {
         Files.writeString(f, "x")
         assertNull(cli.historyOf(f))
         dir.toFile().deleteRecursively()
-    }
-
-    @Test
-    fun `historyAt after source deleted returns last commit touching the path`() {
-        val root = newRepo()
-        val a = cli.anchor(root.resolve("docs/指南.md"))!!
-        // 工作区删除（未提交）：最近提交不变，标记有未提交改动
-        Files.delete(root.resolve("docs/指南.md"))
-        cli.historyAt(a.repoRoot, a.relPath)!!.let {
-            assertEquals("init", it.commit!!.subject)
-            assertTrue(it.dirty)
-        }
-        g("add", "-A")
-        g("commit", "-m", "删除指南")
-        cli.historyAt(a.repoRoot, a.relPath)!!.let {
-            assertEquals("删除指南", it.commit!!.subject)
-            kotlin.test.assertFalse(it.dirty)
-        }
-        // 仓目录已不在：null（行不显示）
-        root.toFile().deleteRecursively()
-        assertNull(cli.historyAt(a.repoRoot, a.relPath))
     }
 
     @Test

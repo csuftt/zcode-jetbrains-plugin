@@ -1,5 +1,6 @@
 package com.zcode.kb.mcp;
 
+import com.zcode.kb.core.KbContent;
 import com.zcode.kb.text.KbTokenizer;
 
 import java.nio.file.Files;
@@ -13,7 +14,7 @@ import java.util.Map;
  * MCP server 侧查询 + 管理写（纯 Java，不得引用 Kotlin 类——fork JVM 无 kotlin-stdlib）。
  *
  * 与 IDE 侧 KbFileStore（Kotlin）共享同一文件布局（root/entries/&lt;id&gt;.json 元数据 +
- * text/&lt;id&gt;.txt 提取文本缓存（跟随 config.json 顶层 snapshotDir 快照根，空=root 同根）+
+ * text/&lt;id&gt;.txt 检索缓存 + snapshots/&lt;id&gt;/ 文档快照 +
  * root/config.json 目录树/标签注册表）：
  * 写侧（IDE 与本 server）一律临时文件 + ATOMIC_MOVE（读侧无撕裂，跨进程最坏丢一次
  * 更新、结构不撕裂）；读侧每请求全量扫描，千条以内毫秒级，不做缓存。
@@ -21,6 +22,10 @@ import java.util.Map;
  * 打分 title 4 : tag 2 : body 1 + 首命中点摘要），改任一侧必须同步另一侧。
  * ⚠️ 管理写语义（目录防环/删目录条目退根级/标签清洗/自动配色）与 KbFileStore 同形，
  * 两套实现，改任一侧必须对照另一侧。
+ *
+ * 文档快照、解析规则（条目现在读源文件还是读快照）、检索缓存的重建只有一份实现
+ * （KbContent，IDE 侧同用）：收录与重指向时落文档快照并写 contentHash，摘除时清掉，
+ * 状态读取时现算，不落盘。
  */
 final class KbServerStore implements AutoCloseable {
 
@@ -46,7 +51,11 @@ final class KbServerStore implements AutoCloseable {
         int count;
     }
 
-    /** 检索命中行（tagsJson 是 JSON 数组文本，可直接内嵌结果；folder 是派生展示路径） */
+    /**
+     * 检索命中行（tagsJson 是 JSON 数组文本，可直接内嵌结果；folder 是派生展示路径）。
+     * status 与 contentPath 读取时现算（不读盘上的值）：status 为 ok | snapshot | missing，
+     * contentPath 是现在实际该读的文件——源文件或文档快照（正斜杠），失效条目为空串。
+     */
     static final class Row {
         String id;
         String title;
@@ -55,6 +64,7 @@ final class KbServerStore implements AutoCloseable {
         String project;
         String sourcePath;
         String status;
+        String contentPath = "";
         String snippet = "";
         double score;
         long ingestedAt;
@@ -68,7 +78,6 @@ final class KbServerStore implements AutoCloseable {
         String tagsJson = "[]";
         String project = "";
         String sourcePath = "";
-        String status = "";
         long ingestedAt;
         int order;
     }
@@ -108,7 +117,7 @@ final class KbServerStore implements AutoCloseable {
             if (!filterMatches(r, folders, folder, tag, project)) {
                 continue;
             }
-            String content = readText(r.id);
+            String content = textOf(r);
             if (content == null) {
                 content = "";
             }
@@ -162,16 +171,18 @@ final class KbServerStore implements AutoCloseable {
         return r == null ? null : rowOf(r, loadFolders(), 0, "");
     }
 
+    /** 检索缓存在则读回，缺失按解析规则即时重建（KbContent.ensureText：源文件在从源文件建，否则从文档快照建）；失效条目返回 null */
     String readText(String id) {
         if (!isSafeId(id)) {
             return null;
         }
-        Path f = textDir().resolve(id + ".txt");
-        if (!Files.isRegularFile(f)) {
-            return null;
-        }
+        Rec r = parseEntry(root.resolve("entries").resolve(id + ".json"));
+        return r == null ? null : textOf(r);
+    }
+
+    private String textOf(Rec r) {
         try {
-            return Files.readString(f);
+            return KbContent.ensureText(root, r.id, r.sourcePath, this::extractText);
         } catch (Exception e) {
             return null;
         }
@@ -599,15 +610,15 @@ final class KbServerStore implements AutoCloseable {
                 e.put("notes", notes);
             }
             if (relinkFile != null) {
-                // relink 同形（IDE KbManagerService.relink）：源路径/status/尺寸指纹刷新 + 重抽取
-                String display = relinkFile.toString().replace('\\', '/').trim();
+                // relink 同形（IDE KbManagerService.relink）：换源后重新落文档快照（随之改名）
+                // 与内容哈希，文本重抽取；id/标题/目录/标签/备注不动
+                String display = displayPath(relinkFile);
+                KbContent.Captured captured = captureQuietly(id, relinkFile);
                 e.put("sourcePath", display);
-                e.put("status", "ok");
-                long size = fileSize(relinkFile);
-                e.put("sizeBytes", (double) size);
-                e.put("indexedMtime", (double) mtime(relinkFile));
-                e.put("indexedSize", (double) size);
-                atomicWrite(textDir().resolve(id + ".txt"), extractText(relinkFile));
+                e.put("sizeBytes", (double) (captured == null ? fileSize(relinkFile) : captured.size));
+                e.put("contentHash", captured == null ? "" : captured.hash);
+                e.put("fileExt", fileExt(relinkFile));
+                atomicWrite(textDir().resolve(id + ".txt"), orEmpty(extractText(relinkFile)));
             }
             e.put("updatedAt", (double) System.currentTimeMillis());
             writeEntryMap(e);
@@ -616,7 +627,7 @@ final class KbServerStore implements AutoCloseable {
         return n;
     }
 
-    /** 摘除条目：删元数据 + 提取缓存；磁盘源文件永不触碰（指针模型红线）。@return 摘除数 */
+    /** 摘除条目：删元数据 + 检索缓存 + 文档快照；磁盘源文件永不触碰（安全语义）。@return 摘除数 */
     int removeEntries(List<String> ids) {
         if (ids == null || ids.isEmpty()) {
             throw new KbOpException("ids is empty");
@@ -629,6 +640,7 @@ final class KbServerStore implements AutoCloseable {
             try {
                 Files.deleteIfExists(root.resolve("entries").resolve(id + ".json"));
                 Files.deleteIfExists(textDir().resolve(id + ".txt"));
+                KbContent.deleteSnapshot(root, id);
                 n++;
             } catch (Exception e) {
                 throw new KbOpException("remove failed: " + id + " (" + errMsg(e) + ")");
@@ -769,11 +781,12 @@ final class KbServerStore implements AutoCloseable {
 
     /**
      * 收录（kb_add）：IDE 侧 ingest 同语义——sourcePath 归一判重，命中=更新元数据（传了才
-     * 覆盖）；新收录走 ensureFolderPath 语义建目录 + 提取正文 + 全字段落库（fileExt 带点、
-     * project=父目录名、status=ok、indexed stat 对账位）。提取优先 IDE 同款 KbExtractor
-     * （反射调用——fork classpath 含 kotlin-stdlib/jsoup/pdfbox，反射免编译期耦合；
-     * 加载失败降级纯文本直读），返回 null（doc 等）→ 空文本缓存=仅标题检索。git 锚点
-     * 不抓（AI 收录条目无「从 git 恢复」入口，菜单门控 gitCommit!=null 自然隐藏）。
+     * 覆盖）并重新确认内容；新收录走 ensureFolderPath 语义建目录 + 提取正文 + 全字段落库
+     * （fileExt 带点、project=源文件所在 git 仓根名或父目录名）。收录即落文档快照
+     * （KbContent.capture：源文件原始字节 + 内容哈希 + 本机缓存），快照写不成不拦收录，
+     * IDE 侧对账会补齐。提取优先 IDE 同款 KbExtractor（反射调用——fork classpath 含
+     * kotlin-stdlib/jsoup/pdfbox，反射免编译期耦合；加载失败降级纯文本直读），返回 null
+     * （doc 等）→ 空文本缓存=仅标题检索。状态不落盘（读取时现算）。
      */
     java.util.Map<String, Object> addEntry(String path, String title, String folderPath, java.util.List<String> tags, String notes) {
         Path f;
@@ -806,6 +819,12 @@ final class KbServerStore implements AutoCloseable {
             if (notes != null) {
                 e.put("notes", notes);
             }
+            // 再次收录 = 重新确认内容：文档快照与内容哈希一并刷新
+            KbContent.Captured recaptured = captureQuietly(id, f);
+            if (recaptured != null) {
+                e.put("sizeBytes", (double) recaptured.size);
+                e.put("contentHash", recaptured.hash);
+            }
             e.put("updatedAt", (double) System.currentTimeMillis());
             writeEntryMap(e);
             return resultOf(id, orEmpty(str(e.get("title"))), e, true);
@@ -829,31 +848,16 @@ final class KbServerStore implements AutoCloseable {
         e.put("folderId", folderId);
         e.put("tags", cleanTags(tags));
         e.put("notes", notes == null ? "" : notes);
-        Path parent = f.getParent();
-        e.put("project", parent != null ? parent.getFileName().toString() : "");
-        String ext = "";
-        int dot = base.lastIndexOf('.');
-        if (dot > 0) {
-            ext = base.substring(dot).toLowerCase(java.util.Locale.ROOT);
-        }
-        e.put("fileExt", ext);
-        long size = fileSize(f);
-        e.put("sizeBytes", (double) size);
-        // git 锚点对齐 IDE 收录路径（KbGitCli.anchor 同形）：repoRoot/HEAD commit/相对路径；
-        // 非 git 仓或失败不写字段（收录照常，「从 git 恢复」对 MCP 收录的条目也可用）
-        String[] anchor = gitAnchor(f);
-        if (anchor != null) {
-            e.put("gitRepo", anchor[0]);
-            e.put("gitCommit", anchor[1]);
-            e.put("gitRel", anchor[2]);
-        }
-        e.put("status", "ok");
+        e.put("project", projectNameOf(f));
+        e.put("fileExt", fileExt(f));
+        // 文档快照：源文件原始字节逐字节入库 + 内容哈希（与 IDE 收录同一实现）
+        KbContent.Captured captured = captureQuietly(id, f);
+        e.put("sizeBytes", (double) (captured == null ? fileSize(f) : captured.size));
+        e.put("contentHash", captured == null ? "" : captured.hash);
         e.put("ingestedAt", (double) now);
         e.put("updatedAt", (double) now);
-        e.put("indexedMtime", (double) mtime(f));
-        e.put("indexedSize", (double) size);
         writeEntryMap(e);
-        atomicWrite(textDir().resolve(id + ".txt"), text);
+        atomicWrite(textDir().resolve(id + ".txt"), orEmpty(text));
         return resultOf(id, (String) e.get("title"), e, false);
     }
 
@@ -873,73 +877,6 @@ final class KbServerStore implements AutoCloseable {
         String s = p == null ? "" : p.trim().replace('\\', '/');
         return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("windows")
                 ? s.toLowerCase(java.util.Locale.ROOT) : s;
-    }
-
-    /**
-     * git 锚点捕获（纯 Java 同 KbGitCli.anchor）：{repoRoot, HEAD commit, 相对路径}；
-     * 非 git 仓 / 无 HEAD / 相对化失败返回 null（收录照常，同 IDE 侧容错语义）。
-     */
-    private static String[] gitAnchor(Path f) {
-        Path dir = f.getParent();
-        if (dir == null || !Files.isRegularFile(f)) {
-            return null;
-        }
-        String rootRaw = gitText(dir, "rev-parse", "--show-toplevel");
-        if (rootRaw == null || rootRaw.isEmpty()) {
-            return null;
-        }
-        Path repoRoot = java.nio.file.Paths.get(rootRaw.replace('\\', '/')).toAbsolutePath().normalize();
-        String commit = gitText(dir, "rev-parse", "--verify", "--quiet", "HEAD");
-        if (commit == null || commit.isEmpty()) {
-            return null;
-        }
-        String rel;
-        try {
-            rel = repoRoot.relativize(f.toAbsolutePath().normalize()).toString().replace('\\', '/');
-        } catch (Exception e) {
-            return null;
-        }
-        if (rel.isEmpty()) {
-            return null;
-        }
-        return new String[]{repoRoot.toString(), commit, rel};
-    }
-
-    /** 单条 git 命令输出（stdout trim）；失败/超时返回 null。env 同 KbGitCli（pager 关、LC_ALL=C） */
-    private static String gitText(Path dir, String... args) {
-        try {
-            java.util.List<String> cmd = new java.util.ArrayList<>();
-            cmd.add("git");
-            cmd.add("-c");
-            cmd.add("core.quotepath=off");
-            for (String a : args) {
-                cmd.add(a);
-            }
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            if (Files.isDirectory(dir)) {
-                pb.directory(dir.toFile());
-            }
-            pb.environment().put("GIT_OPTIONAL_LOCKS", "0");
-            pb.environment().put("GIT_PAGER", "cat");
-            pb.environment().put("PAGER", "cat");
-            pb.environment().put("TERM", "dumb");
-            pb.environment().put("LC_ALL", "C");
-            pb.environment().put("LANG", "C");
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            boolean done = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
-            if (!done) {
-                p.destroyForcibly();
-                return null;
-            }
-            if (p.exitValue() != 0) {
-                return null;
-            }
-            return out.trim();
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     /**
@@ -992,11 +929,84 @@ final class KbServerStore implements AutoCloseable {
         }
     }
 
-    private static long mtime(Path f) {
+    /** 展示态路径：反斜杠归一正斜杠（同 KbFileStore.displayPath） */
+    private static String displayPath(Path f) {
+        return f.toString().replace('\\', '/').trim();
+    }
+
+    private static String fileExt(Path f) {
+        String base = f.getFileName().toString();
+        int dot = base.lastIndexOf('.');
+        return dot > 0 ? base.substring(dot).toLowerCase(java.util.Locale.ROOT) : "";
+    }
+
+    /**
+     * 落文档快照（收录/重指向/再次收录共用，KbContent.capture）：失败返回 null，不拦业务——
+     * 条目 contentHash 留空，IDE 侧对账首轮即补齐快照与哈希。
+     */
+    private KbContent.Captured captureQuietly(String id, Path f) {
         try {
-            return Files.getLastModifiedTime(f).toMillis();
+            return KbContent.capture(root, id, displayPath(f));
         } catch (Exception e) {
-            return 0;
+            return null;
+        }
+    }
+
+    /**
+     * project = 源文件所在 git 仓的根目录名（与 IDE 收录同口径）；不在 git 仓内 / 查询失败
+     * 取父目录名。
+     */
+    private static String projectNameOf(Path f) {
+        Path dir = f.getParent();
+        if (dir == null) {
+            return "";
+        }
+        String rootRaw = gitText(dir, "rev-parse", "--show-toplevel");
+        if (rootRaw != null && !rootRaw.isEmpty()) {
+            Path repoRoot = java.nio.file.Paths.get(rootRaw.replace('\\', '/')).toAbsolutePath().normalize();
+            Path name = repoRoot.getFileName();
+            if (name != null) {
+                return name.toString();
+            }
+        }
+        Path parentName = dir.getFileName();
+        return parentName == null ? "" : parentName.toString();
+    }
+
+    /** 单条 git 命令输出（stdout trim）；失败/超时返回 null。env 同 KbGitCli（pager 关、LC_ALL=C） */
+    private static String gitText(Path dir, String... args) {
+        try {
+            java.util.List<String> cmd = new java.util.ArrayList<>();
+            cmd.add("git");
+            cmd.add("-c");
+            cmd.add("core.quotepath=off");
+            for (String a : args) {
+                cmd.add(a);
+            }
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            if (Files.isDirectory(dir)) {
+                pb.directory(dir.toFile());
+            }
+            pb.environment().put("GIT_OPTIONAL_LOCKS", "0");
+            pb.environment().put("GIT_PAGER", "cat");
+            pb.environment().put("PAGER", "cat");
+            pb.environment().put("TERM", "dumb");
+            pb.environment().put("LC_ALL", "C");
+            pb.environment().put("LANG", "C");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            boolean done = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+            if (!done) {
+                p.destroyForcibly();
+                return null;
+            }
+            if (p.exitValue() != 0) {
+                return null;
+            }
+            return out.trim();
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -1055,28 +1065,13 @@ final class KbServerStore implements AutoCloseable {
 
     // ───────────────────────── 内部 ─────────────────────────
 
-    /** config.json 读投影（缺文件/损坏按缺省结构返回，写回即重建——与 IDE 侧 readConfig 同语义）。顶层复制，folders/tags 数组元素与原文件共享引用（改前由调用方复制） */
-    @SuppressWarnings("unchecked")
-    /**
-     * 快照根下的 text 目录（config.json 顶层 snapshotDir，空/损坏/相对路径 → 元数据根）。
-     * 每请求解析（configMap 本就每请求读，开销同级）——IDE 侧改快照根后已 fork 的 server
-     * 下一请求即生效，无需重启。
-     */
+    /** 检索缓存目录（库根下 text，单根模型——与 IDE 侧同源） */
     private Path textDir() {
-        try {
-            Object v = configMap().get("snapshotDir");
-            String dir = v instanceof String ? ((String) v).trim() : "";
-            if (!dir.isEmpty()) {
-                Path p = Path.of(dir);
-                if (p.isAbsolute()) {
-                    return p.resolve("text");
-                }
-            }
-        } catch (Exception ignore) {
-        }
-        return root.resolve("text");
+        return root.resolve(KbContent.TEXT_DIR);
     }
 
+    /** config.json 读投影（缺文件/损坏按缺省结构返回，写回即重建——与 IDE 侧 readConfig 同语义）。顶层复制，folders/tags 数组元素与原文件共享引用（改前由调用方复制） */
+    @SuppressWarnings("unchecked")
     private Map<String, Object> configMap() {
         Path f = root.resolve("config.json");
         if (Files.isRegularFile(f)) {
@@ -1258,7 +1253,12 @@ final class KbServerStore implements AutoCloseable {
         }
     }
 
+    /** 已退役的条目字段（读取时现算的状态、git 锚点、源文件 stat）：存量文件里还有就在写盘时丢弃 */
+    private static final java.util.Set<String> RETIRED_KEYS = new java.util.HashSet<>(
+        java.util.Arrays.asList("status", "indexedMtime", "indexedSize", "gitRepo", "gitCommit", "gitRel"));
+
     private void writeEntryMap(Map<String, Object> e) {
+        e.keySet().removeAll(RETIRED_KEYS);
         atomicWrite(root.resolve("entries").resolve(orEmpty(str(e.get("id"))) + ".json"), KbMiniJson.stringify(e));
     }
 
@@ -1366,7 +1366,6 @@ final class KbServerStore implements AutoCloseable {
             r.folderId = orEmpty(str(m.get("folderId")));
             r.project = orEmpty(str(m.get("project")));
             r.sourcePath = orEmpty(str(m.get("sourcePath")));
-            r.status = orEmpty(str(m.get("status")));
             Object ingestedAt = m.get("ingestedAt");
             r.ingestedAt = ingestedAt instanceof Number ? ((Number) ingestedAt).longValue() : 0;
             Object order = m.get("order");
@@ -1504,7 +1503,7 @@ final class KbServerStore implements AutoCloseable {
         return true;
     }
 
-    private static Row rowOf(Rec r, Map<String, Folder> folders, double score, String snippet) {
+    private Row rowOf(Rec r, Map<String, Folder> folders, double score, String snippet) {
         Row row = new Row();
         row.id = r.id;
         row.title = r.title;
@@ -1512,7 +1511,10 @@ final class KbServerStore implements AutoCloseable {
         row.tagsJson = r.tagsJson;
         row.project = r.project;
         row.sourcePath = r.sourcePath;
-        row.status = r.status;
+        // 状态与「现在该读哪个文件」读取时现算（KbContent.resolve，与 IDE 侧同一规则），不读盘上的值
+        KbContent.Resolved resolved = KbContent.resolve(root, r.id, r.sourcePath);
+        row.status = KbContent.statusCode(resolved.state);
+        row.contentPath = resolved.path == null ? "" : displayPath(resolved.path);
         row.score = score;
         row.snippet = snippet == null ? "" : snippet;
         row.ingestedAt = r.ingestedAt;

@@ -40,12 +40,16 @@ import com.zcode.ideaplugin.ZCodeBundle
 import com.zcode.ideaplugin.ZCodeIcons
 import com.zcode.ideaplugin.action.pushRefs
 import com.zcode.ideaplugin.action.pushTextToInput
+import com.zcode.ideaplugin.ui.ZCodeToolWindowFactory
+import com.zcode.ideaplugin.zCodeService
+import com.zcode.kb.core.KbContent
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFileStore
 import com.zcode.kb.core.KbFilter
 import com.zcode.kb.core.KbFolder
 import com.zcode.kb.core.KbHit
+import com.zcode.kb.core.KbSync
 import com.zcode.kb.text.KbTokenizer
 import java.awt.BorderLayout
 import java.awt.FlowLayout
@@ -66,6 +70,8 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import javax.swing.BoxLayout
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -96,6 +102,13 @@ import javax.swing.tree.TreeNode
  *   │       · 📄 Redis 部署 ⟨部署⟩… │  条目行 = 标题 + 标签 chip（最多 2 个 + 省略号）
  *   │   · 📄 未归组条目             │  根级直放条目 = 「全部」直属（垫底）
  *   └───────────────────────────────┘
+ *
+ * 条目的内容读取只有一条规则（KbContent.resolve）：源文件在就读源文件；否则读知识库里的
+ * 文档快照，树内标题后跟灰色「文档快照」标识（内容完好可用，不置灰）；两者都没有才失效
+ * （灰色删除线）。打开、定位、发送到输入框都按这条规则走。
+ * 同步：整个库是一个 git 仓库，工具条「同步知识库」一键提交并推送；库里有未同步的变化时
+ * 按钮带圆点角标，结果走通知。没配远端地址时除了通知，还会把当前标签页带到设置页的知识库
+ * 分区（远端地址在那里填）。
  *
  * 树行为：搜索有词时退化为平铺命中列表（命中标签 chip 提前第一位并金黄高亮）；标签
  * 过滤保留层级但无命中条目的目录整枝隐藏；展开态/选中态跨刷新记忆（key 字符串对齐）；
@@ -138,6 +151,17 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     // ── 搜索态上下文（仿记忆搜索：命中条目两行渲染=标题+处数 / 片段关键词高亮） ──
     private var searchHits: Map<String, KbHit> = emptyMap()
     private var searchTokens: List<String> = emptyList()
+
+    // ── 解析结果：每条目现在读哪个文件（源文件 / 文档快照 / 失效），随刷新在后台重算、EDT 回填 ──
+    private var states: Map<String, KbContent.Resolved> = emptyMap()
+
+    /** 库里有未提交或未推送的变化（工具条同步按钮的圆点角标） */
+    @Volatile
+    private var syncPending: Boolean = false
+
+    /** 一次同步在途（按钮置灰防重复） */
+    @Volatile
+    private var syncRunning: Boolean = false
 
     private lateinit var toolbar: ActionToolbar
 
@@ -259,6 +283,22 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             })
             // 图标用 codicon tag 造型（斜挂牌，与展开/收起箭头区分——AllIcons.Nodes.Tag 形似被否）
             add(action(ZCodeBundle.message("kb.tw.tags.manage"), kbIcon("kb-tag.svg")) { KbDialogs.show(KbTagsDialog()) })
+            // 同步：整个库作为一个 git 仓库提交并推送，同时取回云端的变化——图标是一上一下的两个箭头
+            // （平台自带的都是单向）。图标文件按平台工具条图标的规矩画：1px 描边、平台的图标灰、
+            // 另带一份 *_dark 深色变体（见 kb-sync.svg），粗细和明暗与相邻的平台图标一致。
+            // 库里有未同步的变化时图标右下角带圆点角标
+            val syncIcon = kbIcon("kb-sync.svg")
+            add(object : AnAction(ZCodeBundle.message("kb.tw.sync"), ZCodeBundle.message("kb.tw.sync"), syncIcon) {
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT // 读的是面板字段
+
+                override fun update(e: AnActionEvent) {
+                    e.presentation.description = ZCodeBundle.message(if (syncPending) "kb.tw.syncPending" else "kb.tw.sync")
+                    e.presentation.icon = if (syncPending) DotBadgeIcon(syncIcon) else syncIcon
+                    e.presentation.isEnabled = !syncRunning
+                }
+
+                override fun actionPerformed(e: AnActionEvent) = syncNow()
+            })
             // 重建索引已挪设置页（2026-11-22：库级数据动作与快照位置设置同区，工具窗只留日常操作）
             // 末位一个智能按钮（2026-11-23 拍板，原型 kb-tree-expand-collapse-ui-prototype.html）：
             // 还有目录没收起=「全部展开」（箭头向外），已全开=「全部收起」（箭头向内）；搜索平铺态置灰
@@ -329,15 +369,14 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         }
 
     /** 右键菜单专用：动作锁定捕获的条目，不依赖树选中态 */
-    /** gate 非空 = 按条目状态门控可见性（update 在 ActionPopupMenu 弹出时调用） */
-    private fun entryAction(text: String, icon: javax.swing.Icon, entry: KbEntry, gate: ((KbEntry) -> Boolean)? = null, run: (KbEntry) -> Unit): AnAction =
+    private fun entryAction(text: String, icon: javax.swing.Icon, entry: KbEntry, run: (KbEntry) -> Unit): AnAction =
         object : AnAction(text, text, icon) {
-            override fun update(e: AnActionEvent) {
-                if (gate != null) e.presentation.isVisible = gate(entry)
-            }
-
             override fun actionPerformed(e: AnActionEvent) = run(entry)
         }
+
+    /** 条目现在读哪个文件：源文件 / 文档快照 / 失效（最近一次刷新的后台计算结果，纯内存） */
+    private fun stateOf(e: KbEntry): KbContent.State =
+        states[e.id]?.state ?: KbContent.State.SOURCE
 
     private fun selected(): KbEntry? =
         ((tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? NodeData.Entry)?.entry
@@ -383,9 +422,14 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                     hits = emptyList()
                 }
             }
+            // 每条目现在读哪个文件（源文件 / 文档快照 / 失效）与「待同步」都在后台算好再回 EDT
+            val resolved = runCatching { service.resolveAll(entries) }.getOrDefault(emptyMap())
+            val pending = runCatching { service.hasUnsyncedChanges() }.getOrDefault(false)
             ApplicationManager.getApplication().invokeLater {
                 foldersCache = folders
                 entriesCache = entries
+                states = resolved
+                syncPending = pending
                 tagColorMap = tagMetas.associate { it.name to it.color }
                 if (q.isNotEmpty()) {
                     searchTokens = KbTokenizer.tokens(q)
@@ -397,6 +441,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 // 标签过滤态走正常目录树（entries 已是过滤子集）——层级保留只筛条目（真机反馈：平铺丢层级），
                 // 且无命中条目的目录整枝隐藏（2026-11-23 反馈：过滤后空目录还挂着干扰视线）
                 rebuildTree(entries, folders, searching = q.isNotEmpty(), filtering = q.isNotEmpty() || tags.isNotEmpty())
+                // 同步按钮的角标跟「待同步」结果走（动作的 update 在 EDT 读面板字段；本回调就在 EDT）
+                toolbar.updateActionsImmediately()
                 refreshing.set(false)
                 if (pendingRefresh.getAndSet(false)) {
                     refreshAsync()
@@ -716,8 +762,12 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         when (val d = node?.userObject as? NodeData) {
             is NodeData.Entry -> {
                 val entries = selectedEntries()
+                // 失效条目（源文件与文档快照都没有）没有内容可发
+                val sendable = entries.filter { stateOf(it) != KbContent.State.MISSING }
                 if (entries.size > 1) {
-                    group.add(sendToInputAction(ZCodeBundle.message("kb.tw.sendBatch", entries.size), entries))
+                    if (sendable.isNotEmpty()) {
+                        group.add(sendToInputAction(ZCodeBundle.message("kb.tw.sendBatch", sendable.size), sendable))
+                    }
                     group.add(tagsSubmenu(entries)) // 批量加/移标签（真机反馈：多选批量为文档加标签）
                     group.addSeparator()
                     group.add(entryAction(
@@ -727,21 +777,16 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                     ) { removeEntriesBatch(entries) })
                 } else {
                     val entry = d.entry
-                    group.add(sendToInputAction(ZCodeBundle.message("action.sendFileToInput.text"), listOf(entry)))
-                    group.addSeparator()
+                    if (sendable.isNotEmpty()) {
+                        group.add(sendToInputAction(ZCodeBundle.message("action.sendFileToInput.text"), listOf(entry)))
+                        group.addSeparator()
+                    }
                     group.add(tagsSubmenu(listOf(entry))) // 勾选式标签子菜单
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.edit"), AllIcons.Actions.Edit, entry) { editEntry(it) })
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.move"), AllIcons.Actions.MoveToTopRight, entry) { moveEntryTo(it) })
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.relink"), AllIcons.Actions.Replace, entry) { relinkEntry(it) })
                     // 「打开」与双击行重复（2026-11-23 反馈），菜单位让给资源管理器定位，排在重新指定路径后
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.reveal"), AllIcons.Nodes.Folder, entry) { revealEntry(it) })
-                    // 仅失联且有 git 锚点的条目可见：正常条目误点会把源路径改指收录时点
-                    // 历史副本（内容回退 + 脱离 sweep 对账）；hasBlob 是 git 子进程调用，
-                    // update 里太重，blob 已不存在由 restoreFailed 提示兜底
-                    group.add(entryAction(
-                        ZCodeBundle.message("kb.tw.btn.restoreGit"), AllIcons.Actions.Undo, entry,
-                        gate = { it.status == KbEntry.STATUS_MISSING && it.gitCommit != null },
-                    ) { restoreEntry(it) })
                     group.addSeparator()
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.remove"), AllIcons.Actions.GC, entry) { removeEntry(it) })
                 }
@@ -768,21 +813,29 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     private fun sendToInputAction(text: String, entries: List<KbEntry>): AnAction =
         object : AnAction(text, text, ZCodeIcons.ZcGui) {
             override fun actionPerformed(e: AnActionEvent) {
-                val refs = entries.map { "@" + it.sourcePath }
+                // 引用的是「现在实际该读的文件」：源文件在就是源文件，否则是知识库里的文档快照
+                val refs = entries.mapNotNull { states[it.id]?.path?.let { "@" + KbFileStore.displayPath(it.toString()) } }
                 if (refs.isEmpty()) return
                 pushRefs(project, refs)
                 pushTextToInput(project, kbSendContext(entries))
             }
         }
 
-    /** 知识库发送尾注：单篇=标题+目录路径；多选批量=仅数量（标签不进文案，2026-11-23 用户拍板） */
-    private fun kbSendContext(entries: List<KbEntry>): String =
-        if (entries.size == 1) {
-            val entry = entries.first()
-            ZCodeBundle.message("kb.tw.sendKb.entry", entry.title, folderDisplayPath(entry.folderId))
-        } else {
-            ZCodeBundle.message("kb.tw.sendKb.batch", entries.size)
+    /**
+     * 知识库发送尾注：单篇=标题+目录路径；多选批量=仅数量（标签不进文案，2026-11-23 用户拍板）。
+     * 内容取自文档快照的条目（源文件在本机不存在）在尾注里注明，AI 据此知道读到的不是现行文件。
+     */
+    private fun kbSendContext(entries: List<KbEntry>): String {
+        val fromSnapshot = entries.filter { stateOf(it) == KbContent.State.SNAPSHOT }
+        return when {
+            entries.size == 1 && fromSnapshot.isEmpty() ->
+                ZCodeBundle.message("kb.tw.sendKb.entry", entries.first().title, folderDisplayPath(entries.first().folderId))
+            entries.size == 1 ->
+                ZCodeBundle.message("kb.tw.sendKb.entrySnapshot", entries.first().title, folderDisplayPath(entries.first().folderId))
+            fromSnapshot.isEmpty() -> ZCodeBundle.message("kb.tw.sendKb.batch", entries.size)
+            else -> ZCodeBundle.message("kb.tw.sendKb.batchSnapshot", entries.size, fromSnapshot.size)
         }
+    }
 
     /** 目录显示路径（foldersCache 祖先上溯，纯内存不打盘；断链/根级返回空串） */
     private fun folderDisplayPath(folderId: String): String {
@@ -796,7 +849,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         return parts.joinToString("/")
     }
 
-    /** 目录子树内可发送条目（status!=missing；断链条目不属于任何目录，天然排除） */
+    /** 目录子树内可发送条目（失效条目除外——没有内容可发；断链条目不属于任何目录，天然排除） */
     private fun subtreeOkEntries(folder: KbFolder): List<KbEntry> {
         val byParent = foldersCache.groupBy { it.parentId ?: "" }
         val ids = HashSet<String>()
@@ -805,7 +858,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             byParent[id].orEmpty().forEach { walk(it.id) }
         }
         walk(folder.id)
-        return entriesCache.filter { it.folderId in ids && it.status != KbEntry.STATUS_MISSING }
+        return entriesCache.filter { it.folderId in ids && stateOf(it) != KbContent.State.MISSING }
     }
 
     /**
@@ -1060,9 +1113,57 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         return out
     }
 
+    // ───────────────────────── 同步 ─────────────────────────
+
+    /** 工具条「同步知识库」：后台提交并推送，结果走通知（成功 / 无变化 / 失败原因） */
+    private fun syncNow() {
+        if (syncRunning) return
+        syncRunning = true
+        toolbar.updateActionsImmediately()
+        ApplicationManager.getApplication().executeOnPooledThread {
+            var openSettings = false
+            val (type, text) = try {
+                val r = KbManagerService.instance.syncNow(project)
+                NotificationType.INFORMATION to KbManagerService.instance.syncResultMessage(r)
+            } catch (e: KbSync.SyncException) {
+                // 没配远端：通知照发，再把人直接带到知识库设置（远端地址在那里填）
+                openSettings = e.failure == KbSync.Failure.NO_REMOTE
+                NotificationType.WARNING to KbManagerService.instance.syncFailureMessage(e)
+            } catch (e: Exception) {
+                log.warn("Knowledge Base: sync failed: ${e.message}")
+                NotificationType.ERROR to ZCodeBundle.message("kb.sync.failed", e.toString())
+            }
+            syncRunning = false
+            ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed) return@invokeLater
+                toolbar.updateActionsImmediately()
+                NotificationGroupManager.getInstance().getNotificationGroup("ZCode")
+                    .createNotification(ZCodeBundle.message("kb.notify.groupTitle"), text, type)
+                    .notify(project)
+                if (openSettings) openKbSettingsInChatTab()
+                refreshAsync() // 同步后重新算「待同步」；取回远端变化时对账已广播过
+            }
+        }
+    }
+
+    /**
+     * 把当前标签页切到设置页的知识库分区（远端地址在那里填）：推一条 openSettings 给当前活动的
+     * 聊天面板，前端自己切视图并把焦点落到输入框。聊天工具窗被遮住时先亮出来。没有打开着的
+     * 标签页就什么都不做——通知里已经说了去哪配。
+     */
+    private fun openKbSettingsInChatTab() {
+        val service = project.zCodeService()
+        if (service.getActivePanel() == null) return
+        ZCodeToolWindowFactory.getToolWindow(project)?.show(null)
+        service.pushToWebview(buildJsonObject {
+            put("op", "openSettings")
+            put("section", "kb")
+        })
+    }
+
     // ───────────────────────── 动作 ─────────────────────────
 
-    /** 工具条 ⊕：文件选择器（黑名单扩展隐藏，其余全显示——py/java/Makefile 可见可选）→ 选后嗅探分流 → 收录弹窗（默认上次目录） */
+    /** 工具条 ⊕：文件选择器（黑名单扩展隐藏，其余全显示——py/java/Makefile 可见可选）→ 选后嗅探分流 → 收录弹窗（目录默认根级） */
     private fun ingestFromChooser(preselectFolderId: String? = null) {
         val descriptor = FileChooserDescriptor(true, false, false, false, false, true)
             .withFileFilter { vf -> !KbExtractor.isDeniedBinary(vf.name) }
@@ -1081,8 +1182,9 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
      * 兜底落系统默认应用**；VFS 找不到文件同样落系统应用。
      */
     private fun openEntry(e: KbEntry) {
-        val f = File(e.sourcePath)
-        if (!f.isFile) {
+        // 解析规则：源文件在就开源文件；不在就开知识库里的文档快照（条目行有「文档快照」标识）；都没有提示失效
+        val f = states[e.id]?.path?.let { it.toFile() }
+        if (f == null || !f.isFile) {
             Messages.showInfoMessage(ZCodeBundle.message("kb.tw.sourceMissing"), e.title)
             return
         }
@@ -1146,8 +1248,9 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
      * 盘根/空格/`&` 路径真机全部选中成功。
      */
     private fun revealEntry(e: KbEntry) {
-        val f = File(e.sourcePath)
-        if (!f.isFile) {
+        // 定位的是「现在实际打开的那个文件」：源文件不在时就是知识库里的文档快照
+        val f = states[e.id]?.path?.let { it.toFile() }
+        if (f == null || !f.isFile) {
             Messages.showInfoMessage(ZCodeBundle.message("kb.tw.sourceMissing"), e.title)
             return
         }
@@ -1212,19 +1315,6 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         val vf = FileChooser.chooseFile(descriptor, project, null) ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
             runCatching { KbManagerService.instance.relink(e.id, Path.of(vf.path)) }
-        }
-    }
-
-    private fun restoreEntry(e: KbEntry) {
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val result = runCatching { KbManagerService.instance.restoreFromGit(e.id) }.getOrNull()
-            ApplicationManager.getApplication().invokeLater {
-                if (result != null) {
-                    Messages.showInfoMessage(ZCodeBundle.message("kb.tw.restored", result.toString()), e.title)
-                } else {
-                    Messages.showErrorDialog(project, ZCodeBundle.message("kb.tw.restoreFailed"), "ZCode")
-                }
-            }
         }
     }
 
@@ -1328,13 +1418,13 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 if (supported.isNotEmpty()) {
                     // 弹窗目录预选=拖入落点行（2026-11-23 反馈：拖到目录行却还预填上次收录目录）：
                     // 光标坐标转树坐标取精确行（行外取最近行兜底），目录行取该目录、条目行取其
-                    // 所属目录、「全部」行取根目录、树外传空回落「上次收录目录」
+                    // 所属目录、「全部」行取根目录、树外传空回落根目录
                     val preselectFolder = dropTargetFolderId(dtde.location)
                     SwingUtilities.invokeLater { ingestWithDialog(supported, preselectFolder) }
                 }
             }
 
-            /** drop 光标 → 落点行节点 → 预选目录 id（null=树外/无法解析回落上次收录目录） */
+            /** drop 光标 → 落点行节点 → 预选目录 id（null=树外/无法解析，回落根目录） */
             private fun dropTargetFolderId(panelPoint: java.awt.Point): String? {
                 val pt = javax.swing.SwingUtilities.convertPoint(
                     this@KnowledgeToolWindowPanel, panelPoint, tree,
@@ -1444,7 +1534,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                         is NodeData.Folder -> d.folder.id
                         is NodeData.Entry -> d.entry.folderId
                         is NodeData.Root -> "" // 「全部」行 = 预选根目录
-                        else -> null // 树外/无法解析（回落上次收录目录）
+                        else -> null // 树外/无法解析（回落根目录）
                     }
                     ingestWithDialog(supported, preselectFolder)
                 }
@@ -1628,11 +1718,13 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                         if (d.count > 0) append("  ${d.count}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                     }
                     is NodeData.Entry -> {
-                        // 兜底（组件行不可用时）：无 chip 的纯标题行
+                        // 兜底（组件行不可用时）：无 chip 的纯标题行 + 状态标注
                         icon = iconFor(d.entry)
                         append(d.entry.title, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-                        if (d.entry.status == KbEntry.STATUS_MISSING) {
-                            append(" " + ZCodeBundle.message("kb.tw.missingMark"), SimpleTextAttributes.ERROR_ATTRIBUTES)
+                        when (stateOf(d.entry)) {
+                            KbContent.State.MISSING -> append(" " + ZCodeBundle.message("kb.tw.missingMark"), SimpleTextAttributes.ERROR_ATTRIBUTES)
+                            KbContent.State.SNAPSHOT -> append(" " + ZCodeBundle.message("kb.tw.snapshotMark"), SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                            KbContent.State.SOURCE -> Unit
                         }
                     }
                 }
@@ -1666,8 +1758,9 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         val gold = hitTagIds(entry)
 
         row.title.icon = iconFor(entry)
-        val missing = entry.status == KbEntry.STATUS_MISSING
-        // 源文件已移除：标题灰色+删除线（真机反馈：目录里零标识，点开才弹气泡才知道失效）
+        val state = stateOf(entry)
+        val missing = state == KbContent.State.MISSING
+        // 失效（源文件与文档快照都没有）：标题灰色+删除线
         row.title.text = if (missing) "<html><strike>${escapeHtml(entry.title)}</strike></html>" else entry.title
         val fg = if (selected) UIUtil.getTreeSelectionForeground(true) else tree.foreground
         // git diff 样式：文件名用链接色（双击打开语义一致），选中态反白；失效条目降灰
@@ -1676,6 +1769,13 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             missing -> UIUtil.getContextHelpForeground()
             else -> JBUI.CurrentTheme.Link.Foreground.ENABLED
         }
+
+        // 仅文档快照：源文件在本机不存在，内容取自知识库里的快照——内容完好可打开可检索，
+        // 所以不置灰不加删除线，只在标题后跟一个灰色标注，提醒这不是文件的现状
+        val fromSnapshot = state == KbContent.State.SNAPSHOT
+        row.mark.text = ZCodeBundle.message("kb.tw.snapshotMark")
+        row.mark.isVisible = fromSnapshot
+        row.mark.foreground = if (selected) fg else UIUtil.getContextHelpForeground()
 
         row.chips.removeAll()
         for ((tag, isGold) in visibleTags(entry, gold)) {
@@ -1707,10 +1807,14 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         row.doLayout()
     }
 
-    /** 条目行组件（git diff 样式）：标题链接色+chips+行尾灰色路径；垂直留白行距（用户反馈拥挤）；搜索态追加片段行 */
+    /**
+     * 条目行组件（git diff 样式）：标题链接色+「文档快照」标注（仅文档快照的条目才有，否则隐藏
+     * 不占位）+chips+行尾灰色路径；垂直留白行距（用户反馈拥挤）；搜索态追加片段行
+     */
     private class EntryRowPanel : JPanel(BorderLayout()) {
         val line = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0))
         val title = JBLabel()
+        val mark = JBLabel()
         val chips = JPanel(FlowLayout(FlowLayout.LEFT, 3, 0))
         val count = JBLabel()
         val path = JBLabel()
@@ -1720,18 +1824,51 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             isOpaque = false
             line.isOpaque = false
             chips.isOpaque = false
+            mark.border = JBUI.Borders.emptyLeft(6)
             count.border = JBUI.Borders.emptyLeft(6)
             path.border = JBUI.Borders.emptyLeft(8)
             border = JBUI.Borders.empty(3, 0) // 行距留白（git diff 同款宽松密度）
             snippets.verticalAlignment = javax.swing.SwingConstants.TOP
             snippets.border = JBUI.Borders.empty(1, 0, 2, 0)
             line.add(title)
+            line.add(mark)
             line.add(chips)
             line.add(count)
             line.add(path)
             add(line, BorderLayout.NORTH)
             add(snippets, BorderLayout.CENTER)
         }
+    }
+
+    /**
+     * 图标加右下角圆点角标（「有未同步的变化」）。先铺一圈面板底色再点圆点，深浅主题下
+     * 圆点都能从图标笔画里跳出来。
+     */
+    private class DotBadgeIcon(private val base: javax.swing.Icon) : javax.swing.Icon {
+        override fun paintIcon(c: java.awt.Component?, g: Graphics, x: Int, y: Int) {
+            base.paintIcon(c, g, x, y)
+            val g2 = g.create() as Graphics2D
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val dot = JBUI.scale(6f)
+                val ring = JBUI.scale(1f)
+                val cx = x + base.iconWidth - dot / 2f - JBUI.scale(1f)
+                val cy = y + base.iconHeight - dot / 2f - JBUI.scale(1f)
+                g2.color = UIUtil.getPanelBackground()
+                g2.fillOval(
+                    (cx - dot / 2f - ring).toInt(), (cy - dot / 2f - ring).toInt(),
+                    (dot + 2 * ring).toInt(), (dot + 2 * ring).toInt(),
+                )
+                g2.color = JBUI.CurrentTheme.Link.Foreground.ENABLED
+                g2.fillOval((cx - dot / 2f).toInt(), (cy - dot / 2f).toInt(), dot.toInt(), dot.toInt())
+            } finally {
+                g2.dispose()
+            }
+        }
+
+        override fun getIconWidth(): Int = base.iconWidth
+
+        override fun getIconHeight(): Int = base.iconHeight
     }
 
     /**

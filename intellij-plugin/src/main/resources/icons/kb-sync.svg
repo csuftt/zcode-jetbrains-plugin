@@ -1,0 +1,12 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 同步图标：一上一下两个箭头——同步是双向的，既提交并推送到云端，也取回云端的变化。
+       平台自带的 Push / Update / Fetch 都是单向，「设置同步」与「刷新」又是同一个环形造型。
+       画法与平台工具条图标同一套：1px 描边、圆头、落在半像素格上，颜色用平台的图标灰——
+       深浅主题下粗细、明暗与相邻图标一致（暗色主题见 kb-sync_dark.svg）。
+       上行箭头的杆通到右下角：待同步时圆点角标压在杆尾上，两个箭头的头部都不受影响。
+       颜色不要写「跟随前景色」的关键字：它不在主题换色之列，深色主题下是纯白，比相邻图标亮一大截。 -->
+  <path d="M9 5L11.5 2.5L14 5" stroke="#6C707E" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M11.5 2.5V13.5" stroke="#6C707E" stroke-linecap="round"/>
+  <path d="M2 11L4.5 13.5L7 11" stroke="#6C707E" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4.5 2.5V13.5" stroke="#6C707E" stroke-linecap="round"/>
+</svg>

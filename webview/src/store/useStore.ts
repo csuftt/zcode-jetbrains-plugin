@@ -1150,8 +1150,9 @@ interface StoreState {
   envSaving: boolean
   /** 路径类环境变量白名单（getPathEnvResult 落位；null=尚未到达，占位符路径暂不展开）。缺陷 GY */
   pathEnv: Record<string, string> | null
-  /** EnvBanner「去设置」的跳转意图：App 切 settings 视图同时置位，BasicSettingsView 消费后清除 */
-  pendingSettingsSection: 'env' | 'agents' | 'models' | 'hooks' | null
+  /** 设置页跳转意图：App 切 settings 视图同时置位（EnvBanner「去设置」= env；AgentSelect/模型「管理」=
+   *  agents/models；钩子横幅 = hooks；工具条「同步知识库」没配远端 = kb），各分区页消费后清除 */
+  pendingSettingsSection: 'env' | 'agents' | 'models' | 'hooks' | 'kb' | null
 
   // 网络代理（与 ZCode 客户端共享 ~/.zcode/v2/setting.json，issue #12）
   /** null = 尚未拉取（进设置页环境 tab 时拉取）；restartPending=app-server 在跑、保存后需重启吃到新代理 */
@@ -1981,8 +1982,8 @@ interface StoreState {
   clearNotice: () => void
   /** 清除驻留水位提醒（toast 自动消失/手动关闭）*/
   clearResidentPoolNotice: () => void
-  /** 设置 EnvBanner「去设置」的跳转意图（BasicSettingsView 消费后清除）*/
-  setPendingSettingsSection: (section: 'env' | 'agents' | 'models' | 'hooks' | null) => void
+  /** 设置页跳转意图（EnvBanner / AgentSelect / 模型管理 / 钩子横幅 / 同步没配远端共用），分区页消费后清除 */
+  setPendingSettingsSection: (section: 'env' | 'agents' | 'models' | 'hooks' | 'kb' | null) => void
   /** 检测运行环境三件套（init 时 / 提醒条「重新检测」触发）*/
   checkEnv: () => void
   /** 拉取路径类环境变量白名单（占位符路径展开，缺陷 GY；幂等单飞+超窗重发） */

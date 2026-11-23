@@ -8,17 +8,18 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
 /**
- * 知识库纯文件存储（`~/.zcgui/knowledge/` 下，根目录即库根）：
+ * 知识库纯文件存储（IDE 进程内的读写入口；库根目录即库目录所在位置）：
  *
  * ```
- * config.json          # 目录树（folders 有序）+ 收录默认目录 + snapshotDir 快照根
+ * config.json          # 目录树（folders 有序）+ 标签注册表
  * entries/<id>.json    # 每条目一份元数据（KbEntry 序列化，文本可读）
- * text/<id>.txt        # 提取文本缓存（检索与预览的语料；跟随快照根，见下）
+ * text/<id>.txt        # 检索缓存（提取文本；可重建，不进版本历史）
+ * snapshots/<id>/...   # 文档快照（源文件原始字节）
  * ```
  *
- * 双根模型（KbPaths 同语义）：元数据根=构造 root（固定 ~/.zcgui/knowledge/）；快照根
- * （text/ + restored/）默认同根，config.json 顶层 snapshotDir 可自定义（设置页改位置时
- * 由 KbManagerService 搬移目录后调 setSnapshotDir）。
+ * 条目、检索缓存与文档快照的内容读写规则只有一份实现（[KbContent]，IDE 与 MCP server
+ * 共用）；本类只管元数据与目录树、标签的增删改，内容对账的结果经 [confirmContent] 落盘。
+ * 文档快照与检索缓存由 [KbContent] 按 id 落在库根下，摘除条目时一并清掉。
  *
  * 目录树（2026-11-21 改版）：模块/项目分组层退役，用户自建嵌套目录（层级不限），
  * 条目挂 folderId（"" = 根级垫底）。目录用 id 引用而非路径：重命名/移动不改子条目，
@@ -28,10 +29,12 @@ import java.nio.file.StandardCopyOption
  * 为什么去 SQLite：sqlite-jdbc 单 jar ~13.5MB（全平台 native，无瘦身手段）占了插件
  * zip 的一半；千条以内规模纯文件 + 内存扫描毫秒级。
  *
- * 并发模型：IDE 进程读写（本类）、MCP server 进程只读（KbServerStore）。写一律
- * 临时文件 + ATOMIC_MOVE（读侧永远看到完整旧文件或完整新文件，无撕裂）；进程内
- * 单锁串行；跨 IDE 窗口对同条目的并发写=后写覆盖（同源数据，内容一致，无害）。
+ * 并发模型：IDE 进程读写（本类）、MCP server 进程读写同一布局（KbServerStore）。写一律
+ * 临时文件 + ATOMIC_MOVE（读侧永远看到完整旧文件或完整新文件，无撕裂）；进程内单锁
+ * 串行；跨进程对同条目的并发写=后写覆盖（同源数据，内容一致，无害）。
  * 条目文件名必须匹配 [ID_SAFE]，损坏 JSON / 非法文件名直接跳过（隔离，不炸全库）。
+ * 读取端忽略未知键；已退役的字段（status、git 锚点、indexed 时间与大小）存量文件里
+ * 还有的话，下次写盘即被丢弃。
  *
  * 红线：本文件及整个 knowledge-core 不出现 zcode 会话库（db.sqlite/tasks-index.sqlite）
  * 的任何路径引用。
@@ -39,18 +42,22 @@ import java.nio.file.StandardCopyOption
 class KbFileStore(private val root: Path) : AutoCloseable {
 
     private val lock = Any()
-    private val entriesDir = root.resolve("entries")
+    private val entriesDir = root.resolve(KbContent.ENTRIES_DIR)
     private val configFile = root.resolve("config.json")
+    private val textDir = root.resolve(KbContent.TEXT_DIR)
 
-    /** 快照根：config.json 顶层 snapshotDir（空/损坏 → 元数据根）；构造时解析，setSnapshotDir 再解析 */
-    private var snapshotRoot: Path = parseSnapshotRoot()
-    private val textDir: Path
-        get() = snapshotRoot.resolve("text")
+    /** 库位置迁移后旧连接作废：之后的写入一律拒绝，不再在旧路径上建目录 */
+    @Volatile
+    private var closed = false
 
     init {
         Files.createDirectories(entriesDir)
         Files.createDirectories(textDir)
+        Files.createDirectories(root.resolve(KbContent.SNAPSHOTS_DIR))
     }
+
+    /** 库根目录（[KbContent] 的 root 参数） */
+    fun root(): Path = root
 
     // ───────────────────────── 条目 CRUD ─────────────────────────
 
@@ -101,15 +108,15 @@ class KbFileStore(private val root: Path) : AutoCloseable {
         true
     }
 
-    /** 摘除条目（只删登记与缓存，绝不动源文件——安全语义） */
+    /**
+     * 摘除条目：删登记、检索缓存与文档快照，绝不动源文件（安全语义）。已同步过的内容
+     * 仍留在 git 历史里。
+     */
     fun removeEntry(id: String) = synchronized(lock) {
+        if (!id.matches(ID_SAFE)) return@synchronized
         Files.deleteIfExists(entriesDir.resolve("$id.json"))
         Files.deleteIfExists(textDir.resolve("$id.txt"))
-    }
-
-    fun setStatus(id: String, status: String) = synchronized(lock) {
-        val e = readEntry(id) ?: return@synchronized
-        writeEntry(e.copy(status = status, updatedAt = System.currentTimeMillis()))
+        KbContent.deleteSnapshot(root, id)
     }
 
     fun readText(id: String): String? = synchronized(lock) {
@@ -119,31 +126,46 @@ class KbFileStore(private val root: Path) : AutoCloseable {
         runCatching { Files.readString(f) }.getOrNull()
     }
 
-    /** 清空提取文本缓存并复位对账 stat（设置页「重建索引」第一步） */
-    fun clearIndex() = synchronized(lock) {
-        for (f in listRegularFiles(textDir)) Files.deleteIfExists(f)
-        for (e in allEntriesLocked()) writeEntry(e.copy(indexedMtime = 0, indexedSize = 0))
+    /**
+     * 锁内读最新条目 → transform → 写回。调用方手里的条目可能是过期快照，不能拿它整条覆盖
+     * （会冲掉期间别的入口改的字段）；transform 作用在库里的最新条目上。
+     *
+     * @param text 非空时同步刷新检索缓存
+     * @return 写回后的条目；条目不存在返回 null（不写盘）
+     */
+    fun transformEntry(id: String, text: String? = null, transform: (KbEntry) -> KbEntry): KbEntry? = synchronized(lock) {
+        val e = readEntry(id) ?: return@synchronized null
+        val next = transform(e)
+        writeEntry(next)
+        if (text != null) writeText(id, text)
+        next
     }
-
-    // ───────────────────────── 快照根 ─────────────────────────
-
-    /** 当前快照根（text/restored 所在；展示与改位置确认用） */
-    fun snapshotDir(): Path = synchronized(lock) { snapshotRoot }
 
     /**
-     * 改快照根并写 config（目录搬移/watcher 重挂由调用方负责）：写 snapshotDir 字段
-     * 后内存再解析。空/空白 = 恢复默认（元数据根）。
+     * 内容对账落盘（[KbContent.ContentSink] 的 IDE 侧实现）：锁内读最新条目，只改内容
+     * 字段（contentHash / sizeBytes），别的字段原样保留——对账线程手里的条目视图是开轮
+     * 时的快照，拿它整条覆盖会冲掉期间改的标题、目录、标签。
+     *
+     * 不动 updatedAt：同一处源文件的变化常被两台电脑各自对账到，两边写下的条目文件必须
+     * 逐字节相同，后同步的那台才不会撞上冲突。updatedAt 只跟随收录与整理这类元数据编辑。
+     *
+     * @return 是否写盘（条目不存在或字段已是目标值 = false）
      */
-    fun setSnapshotDir(dir: String) = synchronized(lock) {
-        writeConfig(readConfig().copy(snapshotDir = dir.trim()))
-        snapshotRoot = parseSnapshotRoot()
-        Files.createDirectories(textDir)
+    fun confirmContent(id: String, hash: String, size: Long): Boolean = synchronized(lock) {
+        val e = readEntry(id) ?: return@synchronized false
+        if (e.contentHash == hash && e.sizeBytes == size) return@synchronized false
+        writeEntry(e.copy(contentHash = hash, sizeBytes = size))
+        true
     }
 
-    private fun parseSnapshotRoot(): Path = try {
-        readConfig().snapshotDir.takeIf { it.isNotBlank() }?.let { Path.of(it) } ?: root
-    } catch (e: Exception) {
-        root
+    /** 对账入参：全部条目的内容视图（锁内一次性快照） */
+    fun contentSources(): List<KbContent.Source> = synchronized(lock) {
+        allEntriesLocked().map { KbContent.Source(it.id, it.sourcePath, it.contentHash) }
+    }
+
+    /** 清空检索缓存（设置页「重建索引」第一步；之后的重提取走 KbContent.rebuildText） */
+    fun clearIndex() = synchronized(lock) {
+        for (f in listRegularFiles(textDir)) Files.deleteIfExists(f)
     }
 
     // ───────────────────────── 目录树 ─────────────────────────
@@ -451,6 +473,7 @@ class KbFileStore(private val root: Path) : AutoCloseable {
 
     /** 临时文件 + ATOMIC_MOVE（ZcGuiConfig 同款；不支持原子移动的文件系统降级普通 move） */
     private fun atomicWrite(target: Path, content: () -> String) {
+        check(!closed) { "knowledge base store is closed: $root" }
         Files.createDirectories(target.parent)
         val tmp = target.resolveSibling(target.fileName.toString() + ".tmp")
         Files.writeString(tmp, content())
@@ -570,8 +593,9 @@ class KbFileStore(private val root: Path) : AutoCloseable {
         return out
     }
 
-    /** 无持久连接，仅为 `use {}`/Disposer 形面保留 */
+    /** 关库：库位置迁移前调用，此后本连接的写入一律拒绝，不再在旧路径上建目录写文件 */
     override fun close() {
+        closed = true
     }
 
     companion object {
@@ -653,17 +677,15 @@ class KbFileStore(private val root: Path) : AutoCloseable {
 }
 
 /**
- * config.json（version 2）：目录树 + 标签注册表 + 快照根。
+ * config.json（version 2）：目录树 + 标签注册表。
  * 旧版 version 1（modules 字符串清单）读取时 folders/tags 缺省空表——不迁移，自然重置。
- * lastFolderId 字段已废除（2026-11-23 拍板：收录目录不缓存默认根级）；存量文件里的旧键由
- * ignoreUnknownKeys 无害忽略。
+ * lastFolderId、snapshotDir 字段已废除；存量文件里的旧键由 ignoreUnknownKeys 无害忽略。
  */
 @Serializable
 data class KbConfigFile(
     val version: Int = 2,
     val folders: List<KbFolder> = emptyList(),
     val tags: List<KbTagMeta> = emptyList(),
-    val snapshotDir: String = "",
 )
 
 /** 标签注册表条目：名字 + 颜色（hex，如 #4A9EFF）。条目 tags 只存名字，颜色在此一层。 */

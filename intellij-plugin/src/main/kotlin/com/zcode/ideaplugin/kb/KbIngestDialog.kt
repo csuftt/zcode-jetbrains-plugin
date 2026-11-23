@@ -12,6 +12,7 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.zcode.ideaplugin.ZCodeBundle
+import com.zcode.kb.core.KbContent
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFileStore
@@ -29,6 +30,7 @@ import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
 import java.awt.RenderingHints
+import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -48,10 +50,11 @@ import javax.swing.JPanel
  *   preferred 高（选/未选同高，不挤备注行）；框线对齐靠离屏试画标定原生 border 的
  *   真实绘制偏移/色号再补偿（原生 border 带组件类型门控不可复用），框线与标题/
  *   目录/备注左右同列（缺陷HX）；
- * - Git 提交行（2026-11-23 用户要求）：源文件下方显示该文件自己的最近提交（哈希/日期/
- *   标题），仅 git 管理的文件出现；未提交的新文件、被 .gitignore 忽略、有未提交修改各有
- *   文案。git 子进程查询不进 EDT——行先隐藏，后台查到再显示并重排弹窗。多文件收录不查
- *   （清单里每行一个提交既挤又慢）。
+ * - 源文件下方一行（2026-11-23 用户要求）：源文件在时显示该文件自己的最近提交（哈希/日期/
+ *   标题，仅 git 管理的文件出现；未提交的新文件、被 .gitignore 忽略、有未提交修改各有
+ *   文案）。源文件不在时这一行改为显示文档快照的信息（知识库里的存档副本；没有快照则
+ *   明示没有内容），源文件行同步标注「源文件在本机不存在」。git 子进程与解析都在后台
+ *   线程做——行先隐藏，查到再显示并重排弹窗。多文件收录不查（清单里每行一个提交既挤又慢）。
  *
  * [titleValue]/[folderPathValue]/[tagsValue]/[notesValue] 在 doValidate 前（即 OK 后）读取。
  */
@@ -60,7 +63,7 @@ class KbIngestDialog(
     folderOptions: List<FolderOption>,
     editOf: KbEntry? = null,
     defaultFolderId: String = "",
-    /** 只用于解析 git 可执行路径（项目里配了自定义 git 时与收录锚点取同一个）；null = PATH 上的 git */
+    /** 只用于解析 git 可执行路径（项目里配了自定义 git 时取项目里那个）；null = PATH 上的 git */
     private val project: com.intellij.openapi.project.Project? = null,
 ) : DialogWrapper(true) {
 
@@ -74,7 +77,10 @@ class KbIngestDialog(
     private val notesArea: JBTextArea
     private val centerPanel: JComponent
 
-    /** 「Git 提交」行（源文件下方）：初值隐藏，查到提交状态才显示；左内边距与源文件行同值（文字起点对齐） */
+    /** 源文件只读行（源文件不在时追加灰色标注） */
+    private val sourceLabel = JBLabel()
+
+    /** 源文件下方那一行（Git 提交，或源文件不在时的文档快照信息）：初值隐藏，后台查到才显示；左内边距与源文件行同值（文字起点对齐） */
     private val commitCaption = JBLabel(ZCodeBundle.message("kb.dialog.commitLabel")).apply { isVisible = false }
     private val commitLabel = JBLabel().apply {
         isVisible = false
@@ -183,7 +189,8 @@ class KbIngestDialog(
                 c.gridx = 0; c.gridy = row
                 add(JBLabel(ZCodeBundle.message("kb.dialog.sourceLabel")), c)
                 c.gridx = 1; c.fill = GridBagConstraints.HORIZONTAL; c.weightx = 1.0
-                add(JBLabel(htmlWrapped(KbFileStore.displayPath(src.toString()))).apply {
+                add(sourceLabel.apply {
+                    text = htmlWrapped(KbFileStore.displayPath(src.toString()))
                     // 像素实测 -10：与 field 文字起点对齐
                     border = JBUI.Borders.empty(0, 8)
                 }, c)
@@ -227,7 +234,7 @@ class KbIngestDialog(
         }
 
         init()
-        gitSource?.let { loadCommit(it, editOf) }
+        gitSource?.let { loadContentRow(it, editOf) }
     }
 
     val titleValue: String get() = titleField.text.trim()
@@ -349,22 +356,59 @@ class KbIngestDialog(
     }
 
     /**
-     * 后台查文件的提交状态，回填「Git 提交」行：不在 git 仓内（或查询失败）= 行保持隐藏。
+     * 后台填源文件下方那一行：源文件在 = 它自己的提交状态（不在 git 仓内或查询失败 = 行保持
+     * 隐藏）；源文件不在 = 文档快照的信息（没有快照则明示没有内容），源文件行同步标注。
      * 回填须 ModalityState.any()——默认 modality 的 invokeLater 在模态弹窗开着时不执行，
      * 不加的话行要等弹窗关了才冒出来。
      */
-    private fun loadCommit(file: Path, entry: KbEntry?) {
+    private fun loadContentRow(file: Path, entry: KbEntry?) {
         ApplicationManager.getApplication().executeOnPooledThread {
-            val history = KbManagerService.instance.fileHistory(entry, file, project)
+            val service = KbManagerService.instance
+            val resolved = entry?.let { runCatching { service.resolve(it) }.getOrNull() }
+            val history = if (resolved == null || resolved.state == KbContent.State.SOURCE) {
+                service.fileHistory(file, project)
+            } else {
+                null
+            }
             ApplicationManager.getApplication().invokeLater({
-                if (isDisposed || history == null) return@invokeLater
-                commitLabel.text = commitHtml(history)
+                if (isDisposed) return@invokeLater
+                val state = resolved?.state
+                if (state == KbContent.State.SNAPSHOT || state == KbContent.State.MISSING) {
+                    sourceLabel.text = htmlWrapped(KbFileStore.displayPath(file.toString())) +
+                        " <span style='color:${noteColor()}'>" +
+                        escapeHtml(ZCodeBundle.message("kb.dialog.sourceMissingNote")) + "</span>"
+                }
+                val text = when {
+                    history != null -> commitHtml(history)
+                    state == KbContent.State.SNAPSHOT -> snapshotHtml(resolved!!.path)
+                    state == KbContent.State.MISSING -> "<html><body style='width:400px'>" +
+                        gray(escapeHtml(ZCodeBundle.message("kb.dialog.noContent"))) + "</body></html>"
+                    else -> return@invokeLater // 非 git 文件：这一行不显示
+                }
+                commitCaption.text = if (history != null) ZCodeBundle.message("kb.dialog.commitLabel")
+                else ZCodeBundle.message("kb.dialog.snapshotLabel")
+                commitLabel.text = text
                 commitCaption.isVisible = true
                 commitLabel.isVisible = true
                 centerPanel.revalidate()
                 pack() // 弹窗已按「无此行」定好尺寸：按新内容重排（左上角不动，向下长高）
             }, ModalityState.any())
         }
+    }
+
+    /** 文档快照行 HTML：存档副本的大小 + 「源文件在本机不存在」的说明 */
+    private fun snapshotHtml(snapshot: java.nio.file.Path?): String {
+        val size = snapshot?.let { runCatching { Files.size(it) }.getOrDefault(0L) } ?: 0L
+        val body = escapeHtml(humanBytes(size)) + "  " +
+            gray(escapeHtml(ZCodeBundle.message("kb.dialog.snapshotInfo")))
+        return "<html><body style='width:400px'>$body</body></html>"
+    }
+
+    private fun humanBytes(n: Long): String = when {
+        n >= 1024L * 1024 * 1024 -> "%.1f GB".format(n / 1024.0 / 1024 / 1024)
+        n >= 1024L * 1024 -> "%.1f MB".format(n / 1024.0 / 1024)
+        n >= 1024L -> "%.1f KB".format(n / 1024.0)
+        else -> "$n B"
     }
 
     /** 提交行 HTML：`a1b2c3d  2026-11-20  标题`，日期与各种标注用灰字 */
@@ -383,10 +427,9 @@ class KbIngestDialog(
     }
 
     /** 次要信息灰（跟随主题深浅，与树行的路径灰同色系） */
-    private fun gray(html: String): String {
-        val color = if (UIUtil.isUnderDarcula()) "#8a8f98" else "#6c707e"
-        return "<span style='color:$color'>$html</span>"
-    }
+    private fun noteColor(): String = if (UIUtil.isUnderDarcula()) "#8a8f98" else "#6c707e"
+
+    private fun gray(html: String): String = "<span style='color:${noteColor()}'>$html</span>"
 
     /** 已注册标签选择菜单：色块+勾选态✓；点已选项=取消；底部「新建标签…」即建即选 */
     private fun showTagChooser() {

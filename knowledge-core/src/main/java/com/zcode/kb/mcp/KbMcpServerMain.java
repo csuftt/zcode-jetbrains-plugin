@@ -17,25 +17,29 @@ import java.util.Map;
  * Kotlin 类；分词器 KbTokenizer 同为纯 Java 双侧共用）。
  *
  * 生命周期同 CUA：由 app-server 按 session/create 顶层 mcpServers 注入配置拉起，
- * stdin EOF 即退出（管道断 → readLine null → halt）。读库文件（root/entries/*.json +
- * root/text/*.txt + root/config.json）；管理写与 IDE 侧同手法（临时文件 + ATOMIC_MOVE，
- * 读侧无撕裂，跨进程最坏丢一次更新）。库根环境变量 ZCODE_KB_ROOT（IDE 注入时带上，
- * 自定义库位置生效），缺省 ~/.zcgui/knowledge。
+ * stdin EOF 即退出（管道断 → readLine null → halt）。读库文件（root/entries 下的条目 +
+ * root/text 检索缓存 + root/snapshots 文档快照 + root/config.json）；管理写与 IDE 侧同手法
+ * （临时文件 + ATOMIC_MOVE，读侧无撕裂，跨进程最坏丢一次更新）。库根环境变量 ZCODE_KB_ROOT
+ * （IDE 注入时带上，固定入口路径；库位置自定义后入口是指向库目录的联接），缺省
+ * ~/.zcgui/knowledge。
  *
- * 工具面（检索 3 + 管理 4）：
+ * 条目的内容读取只有一条规则（KbContent，IDE 侧同用）：源文件在就读源文件，否则读知识库
+ * 里的文档快照，都没有即失效。状态读取时现算：ok | snapshot | missing。
+ *
+ * 工具面（检索 3 + 管理 4 + 收录 1）：
  * - kb_search(query, folder?, tag?, project?, limit?) → 命中列表（id/标题/目录路径/标签/摘要）
- * - kb_read(id)  → 提取全文（超 40k 字符截断并注明）
+ * - kb_read(id)  → 提取全文（超 40k 字符截断并注明）；仅文档快照的条目同样有正文
  * - kb_list(folder?, tag?, project?, limit?) → 浏览清单
  * - kb_tree() → 目录树统计（path/count/subtreeCount）+ 根级/全库计数 + 标签清单（整理起点）
  * - kb_folder(action: create|rename|move|delete, path, ...) → 目录管理（AI 面全用路径定位；
  *   move 可带 index=目标层兄弟位次，同层排序/层首插位）
  * - kb_entry(action: move|update|delete, ids, ...) → 条目批量移动/改标题·标签·备注·源路径
- *   重指向（update 单条目，换路径即重抽取）/摘除
- *   （摘除只删元数据+提取缓存，磁盘源文件永不触碰；move 可带 index=目标层条目位次，
+ *   重指向（update 单条目，换路径即重抽取并重新落文档快照）/摘除
+ *   （摘除只删元数据、检索缓存与文档快照，磁盘源文件永不触碰；move 可带 index=目标层条目位次，
  *   层内顺序 = index 升序、并列按收录新旧——与 IDE 树视觉序一致）
  * - kb_tag(action: create|rename|delete|color, name, ...) → 标签注册表管理
- * - kb_add(path, title?, folderPath?, tags?, notes?) → 收录文档（指针模型，IDE ingest 同
- *   语义：判重命中=更新元数据；提取走 IDE 同款 KbExtractor，git 锚点不抓）
+ * - kb_add(path, title?, folderPath?, tags?, notes?) → 收录文档（IDE ingest 同语义：判重命中=
+ *   更新元数据；提取走 IDE 同款 KbExtractor；收录即落文档快照）
  *
  * 无 CUA 式 fail-closed 闸门：server 只碰本地知识库文件（删条目不碰源文件），无安全敏感
  * 面；工具调用过 zcode 的 MCP 权限审批；设置关闭后的新会话不再注入（KbFeature 门控），
@@ -188,17 +192,26 @@ public final class KbMcpServerMain {
                 }
                 String text = store.readText(id);
                 if (text == null) {
-                    return KbMiniJson.textResult("{\"error\":\"entry text missing (index out of date?): " + KbMiniJson.escape(id) + "\"}", true);
+                    String why = "missing".equals(row.status)
+                        ? "entry has no content on this machine: the source file is missing and no document snapshot was kept"
+                        : "entry text could not be rebuilt right now; try again shortly";
+                    return KbMiniJson.textResult("{\"error\":\"" + why + ": " + KbMiniJson.escape(id) + "\"}", true);
                 }
                 String note = "";
                 if (text.length() > MAX_READ_CHARS) {
                     text = text.substring(0, MAX_READ_CHARS);
-                    note = "\n\n[truncated at " + MAX_READ_CHARS + " chars; open the source file for the rest]";
+                    note = "\n\n[truncated at " + MAX_READ_CHARS + " chars; open the content file for the rest]";
                 }
+                // 仅文档快照的条目：明说正文来自知识库的快照、源文件在本机不存在（内容可能不是文件的现状）
+                String snapshotNote = "snapshot".equals(row.status)
+                    ? "- content: from the knowledge base snapshot " + safe(row.contentPath)
+                        + " (the source file is not present on this machine; this may not reflect the file's current state)\n"
+                    : "";
                 String header = "### " + row.title + "\n"
                     + "- folder: " + safe(row.folder) + " | tags: " + row.tagsJson
                     + " | project: " + safe(row.project) + " | status: " + safe(row.status) + "\n"
-                    + "- source: " + safe(row.sourcePath) + "\n\n";
+                    + "- source: " + safe(row.sourcePath) + "\n"
+                    + snapshotNote + "\n";
                 return KbMiniJson.textResult(KbMiniJson.escape(header + text + note), false);
             }
             case "kb_list": {
@@ -384,6 +397,7 @@ public final class KbMcpServerMain {
         return out;
     }
 
+    /** 行 JSON：contentPath 是现在实际该读的文件（源文件或文档快照；失效为空串） */
     private static String rowJson(KbServerStore.Row r, boolean withSnippet) {
         StringBuilder sb = new StringBuilder("{\"id\":").append(KbMiniJson.str(safe(r.id)))
             .append(",\"title\":").append(KbMiniJson.str(safe(r.title)))
@@ -391,7 +405,8 @@ public final class KbMcpServerMain {
             .append(",\"tags\":").append(r.tagsJson == null || r.tagsJson.isEmpty() ? "[]" : r.tagsJson)
             .append(",\"project\":").append(KbMiniJson.str(safe(r.project)))
             .append(",\"status\":").append(KbMiniJson.str(safe(r.status)))
-            .append(",\"sourcePath\":").append(KbMiniJson.str(safe(r.sourcePath)));
+            .append(",\"sourcePath\":").append(KbMiniJson.str(safe(r.sourcePath)))
+            .append(",\"contentPath\":").append(KbMiniJson.str(safe(r.contentPath)));
         if (withSnippet) {
             sb.append(",\"snippet\":").append(KbMiniJson.str(r.snippet));
         }
@@ -448,7 +463,7 @@ public final class KbMcpServerMain {
 
     private static final String[] TOOLS = {
         "{\"name\":\"kb_search\","
-            + "\"description\":\"Search the user's local knowledge base (documents collected from their projects: markdown/word/pdf/html notes, design docs, deployment guides). Use it when the question may relate to the user's own documents - prior decisions, past solutions, project know-how. Search covers titles, tags and content. Returns id/title/folder/tags/snippet for each hit.\","
+            + "\"description\":\"Search the user's local knowledge base (documents collected from their projects: markdown/word/pdf/html notes, design docs, deployment guides). Use it when the question may relate to the user's own documents - prior decisions, past solutions, project know-how. Search covers titles, tags and content. Returns id/title/folder/tags/snippet for each hit, plus status: ok (source file present), snapshot (source file missing on this machine - content comes from the stored copy and may be outdated), or missing (no content). Read files via contentPath, the file to actually open now.\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"query\":{\"type\":\"string\",\"description\":\"Free-text query; CJK and latin mixed supported\"},"
             + "\"folder\":{\"type\":\"string\",\"description\":\"Filter by folder path as shown in results (e.g. 'Ops/Middleware'); matches that folder and all its sub-folders; empty string = root-level entries (no folder)\"},"
@@ -458,13 +473,13 @@ public final class KbMcpServerMain {
             + "},\"required\":[\"query\"]}},"
 
             + "{\"name\":\"kb_read\","
-            + "\"description\":\"Read the full extracted text of a knowledge base entry by id (id comes from kb_search or kb_list). Always follow a search with reads of the relevant hits before answering from the knowledge base.\","
+            + "\"description\":\"Read the full extracted text of a knowledge base entry by id (id comes from kb_search or kb_list). Always follow a search with reads of the relevant hits before answering from the knowledge base. Entries whose source file is missing on this machine still return text: it comes from the knowledge base's stored snapshot, and the header says so (it may not reflect the file's current state).\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"id\":{\"type\":\"string\",\"description\":\"Entry id from kb_search/kb_list\"}"
             + "},\"required\":[\"id\"]}},"
 
             + "{\"name\":\"kb_list\","
-            + "\"description\":\"Browse knowledge base entries (optionally filtered by folder/tag/project) without a text query - useful to see what the knowledge base contains.\","
+            + "\"description\":\"Browse knowledge base entries (optionally filtered by folder/tag/project) without a text query - useful to see what the knowledge base contains. Each row carries status (ok / snapshot / missing) and contentPath (the file to read now: source file, or the stored snapshot when the source is absent).\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"folder\":{\"type\":\"string\",\"description\":\"Filter by folder path (matches the folder and its sub-folders); empty string = root-level entries (no folder)\"},"
             + "\"tag\":{\"type\":\"string\"},"
@@ -487,7 +502,7 @@ public final class KbMcpServerMain {
             + "},\"required\":[\"action\",\"path\"]}},"
 
             + "{\"name\":\"kb_entry\","
-            + "\"description\":\"Manage knowledge base entries (ids from kb_search/kb_list). move: batch-move entries into a folder (folderPath empty = root level), optionally at a given position (index) within that folder's entry list - omit index to append. The IDE tree order inside each folder follows index then recency. update: batch-set tags (REPLACES the full tag set - read current tags via kb_list and merge yourself to append), set notes, rename a single entry's title (title only allowed for one id), or re-point a single entry's sourcePath (single id; re-extracts the text from the new file, id/title/folder/tags stay - pass the current path to refresh the cached text). delete: remove entries from the knowledge base (metadata + extracted text); the source files on disk are NEVER touched. Verify ids before deleting - removal is not undoable.\","
+            + "\"description\":\"Manage knowledge base entries (ids from kb_search/kb_list). move: batch-move entries into a folder (folderPath empty = root level), optionally at a given position (index) within that folder's entry list - omit index to append. The IDE tree order inside each folder follows index then recency. update: batch-set tags (REPLACES the full tag set - read current tags via kb_list and merge yourself to append), set notes, rename a single entry's title (title only allowed for one id), or re-point a single entry's sourcePath (single id; re-extracts the text from the new file and refreshes its stored snapshot, id/title/folder/tags stay - pass the current path to refresh). delete: remove entries from the knowledge base (metadata, extracted text and the stored snapshot); the source files on disk are NEVER touched. Verify ids before deleting - removal is not undoable (earlier synced copies remain in the repository history).\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"action\":{\"type\":\"string\",\"enum\":[\"move\",\"update\",\"delete\"]},"
             + "\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Entry ids from kb_search/kb_list; order matters for move+index (ids are inserted in order)\"},"
@@ -496,7 +511,7 @@ public final class KbMcpServerMain {
             + "\"title\":{\"type\":\"string\",\"description\":\"update: new title (single id only)\"},"
             + "\"tags\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"update: full replacement tag set (appending requires reading current tags first)\"},"
             + "\"notes\":{\"type\":\"string\",\"description\":\"update: notes; empty string clears\"},"
-            + "\"sourcePath\":{\"type\":\"string\",\"description\":\"update: new absolute source file path (single id only); re-extracts the entry text from that file; pass the entry's current path to refresh its cached text\"}"
+            + "\"sourcePath\":{\"type\":\"string\",\"description\":\"update: new absolute source file path (single id only); re-extracts the entry text from that file and refreshes its stored snapshot; pass the entry's current path to refresh\"}"
             + "},\"required\":[\"action\",\"ids\"]}},"
 
             + "{\"name\":\"kb_tag\","
@@ -509,7 +524,7 @@ public final class KbMcpServerMain {
             + "},\"required\":[\"action\",\"name\"]}},"
 
             + "{\"name\":\"kb_add\","
-            + "\"description\":\"Collect a document into the knowledge base (pointer model: the source file stays on disk, the entry stores its path plus extracted full text). Use it when the user asks to add/collect a file into the knowledge base. Re-adding an existing source path updates its metadata instead of duplicating. Extraction supports md/text/code/html/word/excel/pdf like the IDE plugin; files without an extractable text layer are stored title-only. The source must be an absolute path to a regular file.\","
+            + "\"description\":\"Collect a document into the knowledge base (the source file stays on disk; the entry stores its path plus the extracted full text, and a byte-exact snapshot copy of the file is kept inside the knowledge base so the content survives even if the source is later deleted or not yet committed). Use it when the user asks to add/collect a file into the knowledge base. Re-adding an existing source path updates its metadata instead of duplicating. Extraction supports md/text/code/html/word/excel/pdf like the IDE plugin; files without an extractable text layer are stored title-only. The source must be an absolute path to a regular file.\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"path\":{\"type\":\"string\",\"description\":\"Absolute path of the source file to collect\"},"
             + "\"title\":{\"type\":\"string\",\"description\":\"Entry title; defaults to the file name without extension\"},"

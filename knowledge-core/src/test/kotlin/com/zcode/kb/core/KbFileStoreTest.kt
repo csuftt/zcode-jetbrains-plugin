@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -49,27 +50,11 @@ class KbFileStoreTest {
     }
 
     @Test
-    fun `snapshot dir relocation persists and reroutes text cache`() {
+    fun `library root is exposed for the shared content implementation`() {
         val s = newStore()
-        s.insert(entry("kb-1", "d:/1.md"), "旧根缓存")
-        assertEquals("旧根缓存", s.readText("kb-1"))
-        val snapRoot = dir.resolve("snap")
-        s.setSnapshotDir(snapRoot.toString())
-        // store 层只切指针不搬目录（搬移由 service 层负责）：旧缓存留在旧根、新根读不到
-        assertNull(s.readText("kb-1"))
-        // 新写入落新根
-        s.insert(entry("kb-2", "d:/2.md"), "新根缓存")
-        assertEquals("新根缓存", s.readText("kb-2"))
-        assertTrue(java.nio.file.Files.exists(snapRoot.resolve("text/kb-2.txt")))
-        assertFalse(java.nio.file.Files.exists(snapRoot.resolve("text/kb-1.txt")))
-        // 重开 store：config.snapshotDir 权威解析，读侧落新根
-        val again = KbFileStore(dir)
-        assertEquals(snapRoot, again.snapshotDir())
-        assertEquals("新根缓存", again.readText("kb-2"))
-        // 恢复默认（空串）后回落元数据根
-        again.setSnapshotDir("")
-        assertEquals(dir, again.snapshotDir())
-        assertEquals("旧根缓存", again.readText("kb-1"))
+        assertEquals(dir, s.root())
+        // 库根下的文档快照目录随库建立
+        assertTrue(Files.isDirectory(dir.resolve("snapshots")))
     }
 
     @Test
@@ -225,19 +210,29 @@ class KbFileStoreTest {
     }
 
     @Test
-    fun `legacy entry json without order field reads as zero`() {
-        newStore().insert(entry("kb-1", "d:/1.md"), "x")
-        // 手写旧版格式（无 order 字段，encodeDefaults 之前的落盘形态）
+    fun `entry file has no retired fields and legacy keys are ignored then dropped`() {
+        newStore().insert(entry("kb-1", "d:/1.md", title = "旧格式"), "x")
+        // 手写旧版格式：没有 order / contentHash，还带着已退役的状态、锚点与 stat 字段
         Files.writeString(
             dir.resolve("entries").resolve("kb-1.json"),
             "{\"id\":\"kb-1\",\"sourcePath\":\"d:/1.md\",\"title\":\"旧格式\",\"folderId\":\"\",\"tags\":[]," +
-                "\"notes\":\"\",\"project\":\"\",\"fileExt\":\".md\",\"sizeBytes\":0,\"status\":\"ok\"," +
+                "\"notes\":\"\",\"project\":\"\",\"fileExt\":\".md\",\"sizeBytes\":0,\"status\":\"missing\"," +
+                "\"gitRepo\":\"r\",\"gitCommit\":\"c\",\"gitRel\":\"p\"," +
                 "\"ingestedAt\":100,\"updatedAt\":100,\"indexedMtime\":0,\"indexedSize\":0}",
         )
         val s = newStore()
         val e = s.getEntry("kb-1")!!
         assertEquals(0, e.order)
+        assertEquals("", e.contentHash)
         assertEquals("旧格式", e.title)
+        assertEquals(100, e.updatedAt)
+        // 任何一次写盘都把退役键丢掉：条目文件随 git 同步，只留对每台机器都成立的事实
+        s.transformEntry("kb-1") { it }
+        val json = Files.readString(dir.resolve("entries/kb-1.json"))
+        for (retired in listOf("\"status\"", "gitRepo", "gitCommit", "gitRel", "indexedMtime", "indexedSize")) {
+            assertFalse(json.contains(retired), retired)
+        }
+        assertTrue(json.contains("\"contentHash\": \"\""))
     }
 
     @Test
@@ -346,15 +341,24 @@ class KbFileStoreTest {
     }
 
     @Test
-    fun `remove entry cleans metadata and text`() {
+    fun `remove entry cleans metadata, text cache and snapshot`() {
         val s = newStore()
         s.insert(entry("kb-1", "d:/1.md"), "唯一内容关键词")
+        val snap = dir.resolve("snapshots/kb-1/1.md").also {
+            Files.createDirectories(it.parent)
+            Files.writeString(it, "文档快照")
+        }
         assertEquals(1, s.search("唯一").size)
         s.removeEntry("kb-1")
         assertEquals(0, s.entryCount())
         assertNull(s.readText("kb-1"))
         assertNull(s.getEntry("kb-1"))
         assertTrue(s.search("唯一").isEmpty())
+        assertFalse(Files.exists(snap))
+        assertFalse(Files.exists(snap.parent))
+        // 不合法的 id 不拼路径
+        s.removeEntry("../../outside")
+        assertTrue(Files.exists(dir.resolve("entries")))
     }
 
     @Test
@@ -424,14 +428,60 @@ class KbFileStoreTest {
     }
 
     @Test
-    fun `setStatus flips status and bumps updatedAt`() {
+    fun `confirmContent changes only hash and size and never touches updatedAt`() {
+        val s = newStore()
+        s.insert(entry("kb-1", "d:/1.md", title = "标题甲", tags = listOf("Redis")), "正文")
+
+        assertTrue(s.confirmContent("kb-1", "hash-1", 10))
+        s.getEntry("kb-1")!!.let {
+            assertEquals("hash-1", it.contentHash)
+            assertEquals(10, it.sizeBytes)
+            assertEquals("标题甲", it.title)
+            assertEquals(listOf("Redis"), it.tags)
+        }
+        val updatedAt = s.getEntry("kb-1")!!.updatedAt
+        assertFalse(s.confirmContent("kb-1", "hash-1", 10)) // 已是目标值：不写盘
+        // 内容版本变了也不动：两台电脑各自对账到同一处变化时，写下的条目要逐字节相同
+        assertTrue(s.confirmContent("kb-1", "hash-2", 20))
+        assertEquals(updatedAt, s.getEntry("kb-1")!!.updatedAt)
+        assertEquals("hash-2", s.getEntry("kb-1")!!.contentHash)
+        // 没有这条条目：不写
+        assertFalse(s.confirmContent("kb-9", "hash", 1))
+    }
+
+    @Test
+    fun `transformEntry applies to the latest entry and keeps unrelated fields`() {
+        val s = newStore()
+        s.insert(entry("kb-1", "d:/a.md", title = "原标题", tags = listOf("A")), "原正文")
+        val stale = s.getEntry("kb-1")!! // 调用方手里的旧快照
+        s.updateTags("kb-1") { it + "B" } // 期间别的入口改了标签
+        val next = s.transformEntry("kb-1", "新正文") { it.copy(title = "新标题") }!!
+        assertEquals("新标题", next.title)
+        assertEquals(listOf("A", "B"), s.getEntry("kb-1")!!.tags) // 旧快照整条覆盖会把它冲掉
+        assertEquals("新正文", s.readText("kb-1"))
+        assertNull(s.transformEntry("kb-9") { it.copy(title = "x") })
+        assertNull(s.getEntry("kb-9"))
+    }
+
+    @Test
+    fun `contentSources projects id sourcePath and hash for reconcile`() {
         val s = newStore()
         s.insert(entry("kb-1", "d:/1.md"), "x")
-        Thread.sleep(5)
-        s.setStatus("kb-1", KbEntry.STATUS_MISSING)
-        val e = s.getEntry("kb-1")!!
-        assertEquals(KbEntry.STATUS_MISSING, e.status)
-        assertTrue(e.updatedAt >= e.ingestedAt)
+        s.confirmContent("kb-1", "hash-1", 3)
+        s.insert(entry("kb-2", "d:/2.md"), "y")
+        val sources = s.contentSources().associateBy { it.id }
+        assertEquals("hash-1", sources["kb-1"]!!.contentHash)
+        assertEquals("", sources["kb-2"]!!.contentHash) // 尚未确认过
+        assertEquals("d:/2.md", sources["kb-2"]!!.sourcePath)
+    }
+
+    @Test
+    fun `a closed store refuses writes instead of recreating directories at the old location`() {
+        val old = KbFileStore(dir)
+        old.insert(entry("kb-1", "d:/1.md"), "x")
+        old.close() // 库位置迁移前关连接
+        assertFailsWith<IllegalStateException> { old.insert(entry("kb-2", "d:/2.md"), "y") }
+        assertNull(old.getEntry("kb-2"))
     }
 
     @Test
@@ -447,6 +497,15 @@ class KbFileStoreTest {
         val taken = setOf(a)
         assertEquals(KbFileStore.newId("G:/AI/x.md", taken), KbFileStore.newId("G:/AI/x.md", taken))
         assertEquals(a, KbFileStore.newId("G:/AI/x.md", taken = emptySet()))
+    }
+
+    @Test
+    fun `legacy config keeps retired keys harmless`() {
+        // snapshotDir 字段已废除（单根模型：检索缓存与文档快照都在库根下）；存量旧键无害忽略
+        Files.writeString(dir.resolve("config.json"), "{\"version\":2,\"snapshotDir\":\"d:/old-snap\",\"folders\":[],\"tags\":[]}")
+        val s = newStore()
+        assertTrue(s.folders().isEmpty())
+        assertEquals(dir.resolve("text"), s.root().resolve("text"))
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.zcode.kb.mcp
 
+import com.zcode.kb.core.KbContent
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbFileStore
 import com.zcode.kb.core.KbFilter
@@ -16,7 +17,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -46,23 +49,38 @@ class KbMcpServerTest {
         assertEquals(expected, names)
     }
 
-    /** 种子数据：目录树 信创/中间件 两级 + 两条目挂载（folderId 是创建返回的 id） */
+    /**
+     * 种子数据：目录树 信创/中间件 两级 + 两条目挂载（folderId 是创建返回的 id）。
+     * 收录形态与 IDE 一致：源文件真实存在、文档快照已落、条目带内容哈希。
+     */
     private fun seed(dir: Path): Pair<String, String> {
         var f1 = ""
         var f2 = ""
+        val x = dir.resolve("docs/x.md")
+        val y = dir.resolve("docs/y.md")
+        Files.createDirectories(x.parent)
+        val xText = "信创适配部署实践：DM8 数据库与 Nacos 集群部署步骤"
+        val yText = "React 组件分层约定"
+        Files.writeString(x, xText)
+        Files.writeString(y, yText)
+        val dx = x.toString().replace('\\', '/')
+        val dy = y.toString().replace('\\', '/')
         KbFileStore(dir).use { s ->
             f1 = s.createFolder(null, "信创")
             f2 = s.createFolder(f1, "中间件")
+            val cx = KbContent.capture(dir, "kb-aaaa1111", dx)
+            val cy = KbContent.capture(dir, "kb-bbbb2222", dy)
             s.insert(
                 KbEntry(
-                    id = "kb-aaaa1111", sourcePath = "d:/docs/x.md", title = "部署手册",
+                    id = "kb-aaaa1111", sourcePath = dx, title = "部署手册",
                     folderId = f2, tags = listOf("nacos", "dm8"), project = "proj-a",
+                    sizeBytes = cx.size, contentHash = cx.hash,
                 ),
-                "信创适配部署实践：DM8 数据库与 Nacos 集群部署步骤",
+                xText,
             )
             s.insert(
-                KbEntry(id = "kb-bbbb2222", sourcePath = "d:/docs/y.md", title = "前端规范", folderId = ""),
-                "React 组件分层约定",
+                KbEntry(id = "kb-bbbb2222", sourcePath = dy, title = "前端规范", folderId = "", sizeBytes = cy.size, contentHash = cy.hash),
+                yText,
             )
         }
         return f1 to f2
@@ -102,25 +120,47 @@ class KbMcpServerTest {
     }
 
     @Test
-    fun `java store honors snapshotDir in config for text cache`(@TempDir dir: Path) {
-        seed(dir)
-        val snapRoot = dir.resolve("snap-loc")
-        // IDE 侧改快照根（搬 text/ + 写 config）——同款语义直接落盘
+    fun `java store computes status on read and serves snapshot-only entries`(@TempDir dir: Path) {
+        // Kotlin 侧收录：文档快照 + 条目带内容哈希
+        val src = dir.resolve("doc.md")
+        Files.writeString(src, "源文件正文")
+        val display = src.toString().replace('\\', '/')
+        val snap = dir.resolve("snapshots/kb-cccc3333/doc.md")
         KbFileStore(dir).use { s ->
-            // 先建目标父目录再搬（setSnapshotDir 会预建新根 text 空目录，顺序反了 move 目标已存在）
-            java.nio.file.Files.createDirectories(snapRoot)
-            java.nio.file.Files.move(dir.resolve("text"), snapRoot.resolve("text"))
-            s.setSnapshotDir(snapRoot.toString())
+            val captured = KbContent.capture(dir, "kb-cccc3333", display)
+            s.insert(
+                KbEntry(
+                    id = "kb-cccc3333", sourcePath = display, title = "文档",
+                    sizeBytes = captured.size, contentHash = captured.hash,
+                ),
+                "源文件正文",
+            )
         }
-        // MCP server（root=元数据根）每请求解析 config.snapshotDir → text 命中新位置
         KbServerStore(dir).use { server ->
-            assertTrue(server.available()) // entries 仍在元数据根
-            assertEquals("信创适配部署实践：DM8 数据库与 Nacos 集群部署步骤", server.readText("kb-aaaa1111"))
-            assertEquals("React 组件分层约定", server.readText("kb-bbbb2222"))
-            // 检索正文取自新根缓存（snippet 有内容即取到）
-            val hits = server.search("部署", null, null, null, 10)
-            assertEquals(1, hits.size)
-            assertTrue(hits[0].snippet.contains("部署"))
+            val live = server.entry("kb-cccc3333")!!
+            assertEquals("ok", live.status) // 读取时现算，盘上的条目文件里没有 status
+            assertEquals(display, live.contentPath)
+
+            Files.delete(src) // 源文件没了（删除 / 改名 / 在另一台机器上）
+            Files.delete(dir.resolve("text/kb-cccc3333.txt")) // 检索缓存也没了（新克隆下来的状态）
+            val snapshotOnly = server.entry("kb-cccc3333")!!
+            assertEquals("snapshot", snapshotOnly.status)
+            assertEquals(snap.toString().replace('\\', '/'), snapshotOnly.contentPath)
+            assertEquals(display, snapshotOnly.sourcePath) // 源路径照旧记录着
+            // kb_read / kb_search 的正文：从文档快照即时重建
+            assertEquals("源文件正文", server.readText("kb-cccc3333"))
+            assertTrue(Files.exists(dir.resolve("text/kb-cccc3333.txt")))
+            assertEquals(1, server.search("源文件", null, null, null, 10).size)
+            assertEquals("snapshot", server.list(null, null, null, 10).single().status)
+        }
+        // 连文档快照也没有：失效，没有正文可给
+        Files.writeString(dir.resolve("text/kb-cccc3333.txt"), "残留的旧缓存")
+        KbContent.deleteSnapshot(dir, "kb-cccc3333")
+        KbServerStore(dir).use { server ->
+            val missing = server.entry("kb-cccc3333")!!
+            assertEquals("missing", missing.status)
+            assertEquals("", missing.contentPath)
+            assertNull(server.readText("kb-cccc3333"))
         }
     }
 
@@ -308,18 +348,33 @@ class KbMcpServerTest {
             val again = server.addEntry(src.toString(), "新标题", null, null, null)
             assertEquals(true, again["existed"])
             assertEquals("新标题", again["title"])
-            // Kotlin 读回：字段落库口径与 IDE ingest 一致 + 提取缓存就位
+            // Kotlin 读回：字段落库口径与 IDE ingest 一致 + 检索缓存就位 + 文档快照落盘
+            val bytes = Files.readAllBytes(src)
+            val id2 = id
             KbFileStore(dir).use { s ->
-                val e = s.getEntry(id)!!
+                val e = s.getEntry(id2)!!
                 assertEquals("新标题", e.title)
                 assertEquals(listOf("ai"), e.tags)
                 assertEquals(".md", e.fileExt)
-                assertEquals(src.parent.fileName.toString(), e.project)
-                assertEquals("ok", e.status)
-                assertEquals("# AI 收录\n正文段落，含中文。", s.readText(id)!!.trim())
+                assertEquals(src.parent.fileName.toString(), e.project) // 不在 git 仓内：父目录名
+                assertEquals(sha256(bytes), e.contentHash) // 上次确认的内容版本
+                assertEquals(bytes.size.toLong(), e.sizeBytes)
+                assertEquals("# AI 收录\n正文段落，含中文。", s.readText(id2)!!.trim())
+                // 文档快照：逐字节副本，路径按条目 id、文件名取源文件名
+                val snap = dir.resolve("snapshots").resolve(id2).resolve("ai-sample.md")
+                assertTrue(Files.isRegularFile(snap), snap.toString())
+                assertTrue(Files.readAllBytes(snap).contentEquals(bytes))
+                // 条目文件随 git 同步：没有只对本机有意义的字段
+                val json = Files.readString(dir.resolve("entries").resolve("$id2.json"))
+                for (retired in listOf("\"status\"", "gitRepo", "gitCommit", "gitRel", "indexedMtime", "indexedSize")) {
+                    assertTrue(!json.contains(retired), "$retired 仍在条目文件里：$json")
+                }
             }
         }
     }
+
+    private fun sha256(bytes: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     @Test
     fun `java store relink re-points entry and re-extracts text`(@TempDir dir: Path) {
@@ -341,6 +396,11 @@ class KbMcpServerTest {
             assertEquals("重指向后的新正文", server.readText("kb-aaaa1111")!!.trim())
             assertEquals("甲", row.title)
             assertEquals("ok", row.status)
+            assertEquals(b.toString().replace('\\', '/'), row.contentPath)
+            // 文档快照随之改名、内容哈希刷新（以新源文件为准）
+            assertTrue(Files.isRegularFile(dir.resolve("snapshots/kb-aaaa1111/relink-b.md")))
+            assertFalse(Files.exists(dir.resolve("snapshots/kb-aaaa1111/relink-a.md")))
+            assertTrue(Files.readAllBytes(dir.resolve("snapshots/kb-aaaa1111/relink-b.md")).contentEquals(Files.readAllBytes(b)))
             // 传当前路径 = 幂等刷新缓存文本（自占路径不触发判重）
             assertEquals(1, server.updateEntries(listOf("kb-aaaa1111"), null, null, null, b.toString()))
             // 缺文件拒绝
@@ -356,12 +416,14 @@ class KbMcpServerTest {
                 server.updateEntries(listOf("kb-aaaa1111", "kb-bbbb2222"), null, null, null, b.toString())
             }
         }
-        // Kotlin 侧读回：Java relink 写 → Kotlin 读，跨进程闭环 + id 稳定
+        // Kotlin 侧读回：Java relink 写 → Kotlin 读，跨进程闭环 + id 稳定 + 内容哈希以新源文件为准
         KbFileStore(dir).use { s ->
             val e = s.getEntry("kb-aaaa1111")!!
             assertEquals(b.toString().replace('\\', '/'), e.sourcePath)
             assertEquals("重指向后的新正文", s.readText("kb-aaaa1111")!!.trim())
             assertEquals("甲", e.title)
+            assertEquals(sha256(Files.readAllBytes(b)), e.contentHash)
+            assertEquals(Files.size(b), e.sizeBytes)
         }
     }
 
@@ -473,6 +535,19 @@ class KbMcpServerTest {
         val readBack = reader.readLine()
         assertTrue(readBack.contains("stdio-relink-target.md"), readBack)
         assertTrue(readBack.contains("重指向后的 stdio 正文"), readBack)
+        assertTrue(readBack.contains("status: ok"), readBack)
+
+        // 仅文档快照：源文件在本机不存在 → 状态现算为 snapshot，kb_read 仍返回正文并注明来自文档快照
+        Files.delete(relinkTarget)
+        send("""{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"kb_list","arguments":{}}}""")
+        val listed = reader.readLine()
+        assertTrue(listed.contains("\\\"status\\\":\\\"snapshot\\\""), listed)
+        assertTrue(listed.contains("\\\"contentPath\\\":\\\""), listed)
+        send("""{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"kb_read","arguments":{"id":"$addedId"}}}""")
+        val fromSnapshot = reader.readLine()
+        assertTrue(fromSnapshot.contains("重指向后的 stdio 正文"), fromSnapshot)
+        assertTrue(fromSnapshot.contains("knowledge base snapshot"), fromSnapshot)
+        assertTrue(fromSnapshot.contains("not present on this machine"), fromSnapshot)
 
         p.outputStream.close()
         assertTrue(p.waitFor(30, TimeUnit.SECONDS), "stdin EOF 后应退出")

@@ -1391,8 +1391,9 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "setCuaEnabled" -> handleSetCuaEnabled(msg)
                         "getKbSettings" -> handleGetKbSettings()
                         "setKbEnabled" -> handleSetKbEnabled(msg)
-                        "changeKbSnapshotDir" -> handleChangeKbSnapshotDir(msg)
-                        "restoreKbSnapshotDir" -> handleRestoreKbSnapshotDir()
+                        "changeKbLocation" -> handleChangeKbLocation(msg)
+                        "restoreKbLocation" -> handleRestoreKbLocation()
+                        "setKbRemote" -> handleSetKbRemote(msg)
                         "rebuildKbIndex" -> handleRebuildKbIndex()
                         "getCuaIcon" -> handleGetCuaIcon(msg)
                         "getProxyConfig" -> handleGetProxyConfig()
@@ -3514,20 +3515,23 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     // ───────────────── 知识库设置（issue#54）─────────────────
 
-    /** op=getKbSettings — 设置页整包快照（开关/库位置/快照位置/条目数/目录路径/标签/项目/占用）；error 可选附传（改位置失败提示） */
+    /** op=getKbSettings — 设置页整包快照（开关/库位置/远端/条目数/目录路径/标签/项目/占用）；error 可选附传（改位置、远端、克隆失败提示） */
     private fun handleGetKbSettings(error: String? = null): JsonObject {
         val svc = com.zcode.ideaplugin.kb.KbManagerService.instance
-        val metaRoot = com.zcode.kb.core.KbPaths.rootDir().toString()
-        val snapshotDir = runCatching { svc.store().snapshotDir().toString() }.getOrDefault(metaRoot)
+        val entry = com.zcode.kb.core.KbPaths.entryDir().toString()
+        val root = runCatching { svc.store().root().toString() }.getOrDefault(entry)
+        val remoteUrl = runCatching { svc.remoteUrl() }.getOrNull()
         return buildJsonObject {
             put("op", "kbSettings")
             put("enabled", com.zcode.ideaplugin.kb.KbFeature.isEnabled())
-            put("root", metaRoot)
-            put("snapshotDir", snapshotDir)
-            put("snapshotCustom", snapshotDir != metaRoot)
+            put("entryPath", entry)
+            put("locationDir", root)
+            // 是否自定义由 Java 侧判（路径写法、大小写各机不同，前端不做字符串比较）
+            put("locationCustom", runCatching { com.zcode.kb.core.KbPaths.isCustomized() }.getOrDefault(false))
+            put("remoteUrl", remoteUrl ?: "")
             put("entryCount", runCatching { svc.entryCount() }.getOrDefault(0))
             put("storageBytes", runCatching { svc.storageBytes() }.getOrDefault(0))
-            put("snapshotBytes", runCatching { svc.snapshotBytes() }.getOrDefault(0))
+            put("snapshotBytes", runCatching { svc.snapshotsBytes() }.getOrDefault(0))
             put(
                 "folders",
                 JsonArray(
@@ -3552,70 +3556,93 @@ if (!window.__ZCODE_LOG_HOOK__) {
     }
 
     /**
-     * op=changeKbSnapshotDir — 快照存储位置修改（元数据根固定 ~/.zcgui/knowledge 不动）：
-     * dir 缺省 → EDT 弹目录选择框 + 确认框（Java 侧模态，用户选完目标位置）后迁移；
-     * dir 显式给出 → 跳过 chooser 直达迁移。迁移后台执行，完成/失败经 sendToJs 回整包
-     * kbSettings（失败 error=changeSnapshotRoot 的细化原因），应答模式同 handleSetKbEnabled
-     * （webview 只认 kbSettings 分支）。本 op 先回 kbSnapshotChanging 置 busy，防重复触发。
+     * op=changeKbLocation — 改库位置（整个库目录搬走，系统盘入口路径不变）：
+     * dir 缺省 → EDT 弹目录选择框 + 确认框（Java 侧模态，用户选完目标位置）后搬迁；
+     * dir 显式给出 → 跳过 chooser 直达搬迁。搬迁后台执行，完成/失败经 sendToJs 回整包
+     * kbSettings（失败 error=细化原因），应答模式同 handleSetKbEnabled
+     * （webview 只认 kbSettings 分支）。本 op 先回 kbLocationChanging 置 busy，防重复触发。
      */
-    private fun handleChangeKbSnapshotDir(msg: JsonObject): JsonObject {
+    private fun handleChangeKbLocation(msg: JsonObject): JsonObject {
         val dir = msg["dir"]?.jsonPrimitive?.contentOrNull?.trim()
         if (!dir.isNullOrEmpty()) {
-            return finishChangeKbSnapshotDir {
-                com.zcode.ideaplugin.kb.KbManagerService.instance.changeSnapshotRoot(java.nio.file.Path.of(dir))
+            return finishKbChange("kbLocationChanging") {
+                com.zcode.ideaplugin.kb.KbManagerService.instance.changeLocation(java.nio.file.Path.of(dir))
             }
         }
         ApplicationManager.getApplication().invokeLater {
             val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory.createSingleFolderDescriptor()
-                .withTitle(ZCodeBundle.message("kb.settings.snapshot.pick.title"))
-                .withDescription(ZCodeBundle.message("kb.settings.snapshot.pick.desc"))
+                .withTitle(ZCodeBundle.message("kb.settings.location.pick.title"))
+                .withDescription(ZCodeBundle.message("kb.settings.location.pick.desc"))
             val vf = FileChooser.chooseFile(descriptor, project, null) ?: return@invokeLater
             val confirm = com.intellij.openapi.ui.Messages.showYesNoDialog(
                 project,
-                ZCodeBundle.message("kb.settings.snapshot.confirm", vf.path),
-                ZCodeBundle.message("kb.settings.snapshot.confirm.title"),
-                com.intellij.openapi.ui.Messages.getQuestionIcon(),
-            )
-            if (confirm != com.intellij.openapi.ui.Messages.YES) return@invokeLater
-            finishChangeKbSnapshotDir {
-                com.zcode.ideaplugin.kb.KbManagerService.instance.changeSnapshotRoot(java.nio.file.Path.of(vf.path))
-            }
-        }
-        return buildJsonObject { put("op", "kbSnapshotChanging") }
-    }
-
-    /** op=restoreKbSnapshotDir — 恢复默认快照位置：先二次确认（当前快照根展示），再后台迁回 */
-    private fun handleRestoreKbSnapshotDir(): JsonObject {
-        ApplicationManager.getApplication().invokeLater {
-            val current = runCatching { com.zcode.ideaplugin.kb.KbManagerService.instance.store().snapshotDir().toString() }
-                .getOrDefault("")
-            val confirm = com.intellij.openapi.ui.Messages.showYesNoDialog(
-                project,
-                ZCodeBundle.message("kb.settings.snapshot.restore.confirm", current),
-                ZCodeBundle.message("kb.settings.snapshot.restore.confirm.title"),
+                ZCodeBundle.message("kb.settings.location.confirm", vf.path),
+                ZCodeBundle.message("kb.settings.location.confirm.title"),
                 com.intellij.openapi.ui.Messages.getQuestionIcon(),
             )
             if (confirm != com.intellij.openapi.ui.Messages.YES) {
                 sendToJs(runCatching { handleGetKbSettings() }.getOrDefault(buildJsonObject { put("op", "kbSettings") }))
                 return@invokeLater
             }
-            finishChangeKbSnapshotDir {
-                com.zcode.ideaplugin.kb.KbManagerService.instance
-                    .changeSnapshotRoot(com.zcode.kb.core.KbPaths.rootDir())
+            finishKbChange("kbLocationChanging") {
+                com.zcode.ideaplugin.kb.KbManagerService.instance.changeLocation(java.nio.file.Path.of(vf.path))
             }
         }
-        return buildJsonObject { put("op", "kbSnapshotChanging") }
+        return buildJsonObject { put("op", "kbLocationChanging") }
     }
 
-    /** changeSnapshotRoot 后台执行 + 回整包 kbSettings（run 返回 null=成功 / 非空=失败原因带进 error） */
-    private fun finishChangeKbSnapshotDir(run: () -> String?): JsonObject {
+    /** op=restoreKbLocation — 恢复默认库位置（系统盘入口路径）：先二次确认（当前位置展示），再后台迁回 */
+    private fun handleRestoreKbLocation(): JsonObject {
+        ApplicationManager.getApplication().invokeLater {
+            val current = runCatching {
+                com.zcode.ideaplugin.kb.KbManagerService.instance.store().root().toString()
+            }.getOrDefault("")
+            val confirm = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                project,
+                ZCodeBundle.message("kb.settings.location.restore.confirm", current),
+                ZCodeBundle.message("kb.settings.location.restore.confirm.title"),
+                com.intellij.openapi.ui.Messages.getQuestionIcon(),
+            )
+            if (confirm != com.intellij.openapi.ui.Messages.YES) {
+                sendToJs(runCatching { handleGetKbSettings() }.getOrDefault(buildJsonObject { put("op", "kbSettings") }))
+                return@invokeLater
+            }
+            finishKbChange("kbLocationChanging") {
+                com.zcode.ideaplugin.kb.KbManagerService.instance
+                    .changeLocation(com.zcode.kb.core.KbPaths.entryDir())
+            }
+        }
+        return buildJsonObject { put("op", "kbLocationChanging") }
+    }
+
+    /** op=setKbRemote — 设置远端地址（空 = 清除）。后台执行，回整包 kbSettings（失败带 error）。
+     *  换电脑接入也走这里：填上同一个远端地址保存后，工具条上的「同步」发现本地库为空而远端有历史，
+     *  会直接把整个库取回来（KbSync.sync）。 */
+    private fun handleSetKbRemote(msg: JsonObject): JsonObject {
+        val url = msg["url"]?.jsonPrimitive?.contentOrNull?.trim()
+            ?: return errorResponse("缺少 url")
+        return finishKbChange("kbRemoteChanging") {
+            com.zcode.ideaplugin.kb.KbManagerService.instance.setRemoteUrl(url)
+        }
+    }
+
+    /**
+     * 库级改动后台执行 + 回整包 kbSettings。run 返回 null=成功 / 非空=失败原因带进 error。
+     * ackOp 是立即回给前端的占位应答（置 busy）；之后一律再推一包 kbSettings 复位 busy。
+     */
+    private fun finishKbChange(ackOp: String, run: () -> String?): JsonObject {
         ApplicationManager.getApplication().executeOnPooledThread {
-            val err = runCatching { run() }.getOrNull()
+            // run 抛异常也算失败（不能当成功复位 busy）：原因原样带进 error
+            val err = try {
+                run()
+            } catch (e: Exception) {
+                e.toString()
+            }
             val snap = runCatching { handleGetKbSettings(err) }
                 .getOrDefault(buildJsonObject { put("op", "kbSettings") })
             sendToJs(snap)
         }
-        return buildJsonObject { put("op", "kbSnapshotChanging") }
+        return buildJsonObject { put("op", ackOp) }
     }
 
     private fun handleRebuildKbIndex(): JsonObject {

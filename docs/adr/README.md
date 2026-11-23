@@ -17,6 +17,9 @@
 | [0009](0009-public-internal-repo-boundary.md) | 公开主仓库与内部过程仓库的硬边界 | accepted（回溯） |
 | [0010](0010-idea-platform-2023-3-floor.md) | IDE 编译下限钉在 2023.3 | accepted（回溯） |
 | [0011](0011-data-root-scope-for-child-processes.md) | 数据根重定向只下发给轻任务子进程，主会话进程暂留 home | accepted |
+| [0012](0012-worktree-managed-root-desktop-convention.md) | worktree 托管根复用桌面约定 | accepted |
+| [0013](0013-worktree-session-via-legacy-create.md) | worktree 会话经 legacy session/create 落位 | accepted |
+| [0014](0014-knowledge-base-as-git-repo-with-document-snapshots.md) | 知识库以 git 仓库承载，文档快照替代源仓锚点恢复 | accepted |
 
 ## 功能 → 决策 → 记录
 
@@ -35,6 +38,7 @@
 | 手机远程会话 | 0.3.9 | 0004 | `design-research/手机远程会话复用调研-2026-08.md` |
 | 轻任务模型 | 0.4.4-beta.1 | — | issue #48 |
 | 润色/标题轻任务数据根跟随 | 0.4.5 | 0011 | `bugs-regressions/缺陷HL-数据根重定向子进程读不到provider_config-2026-11-13.md` |
+| 知识库（文档快照、git 同步、库位置） | 未发版 | 0014 | issue #54、#56 |
 
 内部记录的根目录是 `docs/internal/`（独立私有仓库，主仓库不跟踪）。
 

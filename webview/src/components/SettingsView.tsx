@@ -57,14 +57,17 @@ export function SettingsView({ onBack }: Props) {
     return !!bh && !bh.ok
   })
 
-  // 跳转意图消费：AgentSelect 下拉「管理」入口（env 由 BasicSettingsView 消费；
-  // 挂载时消费一次即清，避免切走再回重复跳转）
+  // 跳转意图消费：AgentSelect 下拉「管理」入口（env 由 BasicSettingsView 消费；挂载时消费一次即清，
+  // 避免切走再回重复跳转）；kb（工具条「同步」没配远端时被带过来）只在这里切页签，
+  // 意图留给 KbSettingsView 挂载后消费——它要把焦点落到远端地址输入框
   const pendingSection = useStore((s) => s.pendingSettingsSection)
   const setPendingSection = useStore((s) => s.setPendingSettingsSection)
   useEffect(() => {
     if (pendingSection === 'agents' || pendingSection === 'models' || pendingSection === 'hooks') {
       setTab(pendingSection)
       setPendingSection(null)
+    } else if (pendingSection === 'kb') {
+      setTab('kb')
     }
   }, [pendingSection, setPendingSection])
 

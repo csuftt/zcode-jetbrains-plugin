@@ -14,9 +14,21 @@ Scope guard: this collection only. If the user means another knowledge store
 (Obsidian vault, RAG server, a different knowledge MCP or skill), use that
 tool instead — do not funnel those requests here.
 
-- Pointer model: entries reference source files; **deleting an entry never
-  touches the file on disk**.
+- Entries reference source files and the knowledge base keeps a byte-exact
+  **document snapshot** of each file (kept up to date as the source changes).
+  **Deleting an entry never touches the file on disk** — it only removes the
+  entry, its search cache and the stored snapshot.
+- Every entry carries a `status`, computed when it is read:
+  - `ok` — the source file is present; `contentPath` is the source file.
+  - `snapshot` — the source file is missing on this machine (deleted, renamed,
+    on another branch, or on another computer). Content comes from the stored
+    snapshot, which **may be out of date** — say so when you quote it, and do
+    not claim it reflects the current file.
+  - `missing` — neither the source file nor a snapshot exists; nothing to read.
+  Open files via `contentPath` (the file to actually read now), not `sourcePath`.
 - Retrieval covers titles, tags and body text (CJK and latin mixed supported).
+- `kb_add` collects a document the same way the IDE does: the source stays where
+  it is, and a snapshot copy is stored inside the knowledge base.
 
 ## Search flow
 
@@ -25,8 +37,9 @@ tool instead — do not funnel those requests here.
    `kb_search` first. Free-text query; add `folder` / `tag` / `project`
    filters when the user names one.
 2. `kb_read` the relevant hits (id from search/list) before answering; the
-   result includes title/folder/tags/source path. If text is truncated, open
-   the source file with your regular file tools via its sourcePath.
+   result includes title/folder/tags/source path, and says in the header when
+   the text comes from a stored snapshot. If text is truncated, open the content
+   file with your regular file tools via its `contentPath`.
 
 ## Organizing flow (整理 / 归类 / 移动 / 打标签 / tidying)
 
@@ -41,9 +54,10 @@ tool instead — do not funnel those requests here.
    to append, read current tags via kb_list and merge yourself before
    sending. `title` renames one entry only (single id). `notes` is free
    annotation (empty string clears). `sourcePath` re-points one entry to a
-   new absolute file path (single id; re-extracts its text from the new
-   file, id/title/folder/tags stay) — use it when the real source file
-   moved, e.g. a snapshot copy should follow the original file.
+   new absolute file path (single id; re-extracts its text from the new file
+   and refreshes the stored snapshot, id/title/folder/tags stay) — use it when
+   the real source file moved, e.g. an entry showing `snapshot` status should
+   follow its original file again.
 5. New tag needed? `kb_tag` `create` first (auto-assigns a display color);
    `kb_tag` `rename` / `delete` rewrite every entry carrying the tag.
 6. Folders: `kb_folder` `create` builds paths level by level (`a/b/c`);
@@ -54,5 +68,7 @@ tool instead — do not funnel those requests here.
    immediately with no confirmation prompt: state the scope and get the
    user's go-ahead first when more than a couple of entries are involved.
    Entry ids come only from kb_search/kb_list output — never invent ids.
+   Removed entries stay recoverable from the repository history only if the
+   user syncs the knowledge base; do not promise an undo.
 8. Finish with a short summary of what was moved/renamed/tagged/deleted; the
    IDE panel picks up changes within seconds.

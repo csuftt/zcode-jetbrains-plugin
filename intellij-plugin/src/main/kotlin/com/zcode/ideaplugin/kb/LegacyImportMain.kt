@@ -1,8 +1,8 @@
 package com.zcode.ideaplugin.kb
 
+import com.zcode.kb.core.KbContent
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbExtractor
-import com.zcode.kb.core.KbGitCli
 import com.zcode.kb.core.KbPaths
 import com.zcode.kb.core.KbFileStore
 import kotlinx.serialization.json.Json
@@ -20,9 +20,8 @@ import kotlin.system.exitProcess
  *
  * ⚠️ 维护者个人迁移用（issue#54 定案：不随插件发布、无 UI 入口）：命令行跑
  * `java -cp <插件lib目录> com.zcode.ideaplugin.kb.LegacyImportMainKt <登记表.json>`
- * ——指针模型收录 sourcePath，git 源条目沿用登记表里的 branch/commit/relFromRoot
- * 锚点（比重新锚定更忠实收录时点）；源文件在盘上的顺手提取文本，失联条目落 missing
- * （后续可从 git 锚点恢复）。可重复跑（按 sourcePath 判重，命中即跳过）。
+ * ——收录 sourcePath，源文件在盘上的提取文本并落一份文档快照；源文件不在的条目没有
+ * 内容，只能靠「重新指定路径」恢复。可重复跑（按 sourcePath 判重，命中即跳过）。
  */
 fun main(args: Array<String>) {
     if (args.isEmpty()) {
@@ -37,7 +36,6 @@ fun main(args: Array<String>) {
         System.err.println("no entries array in registry")
         exitProcess(2)
     }
-    val cli = KbGitCli()
     var imported = 0
     var skipped = 0
     var missing = 0
@@ -51,7 +49,6 @@ fun main(args: Array<String>) {
                 skipped++
                 continue
             }
-            val git = e["git"]?.let { if (it.toString() == "null") null else it.jsonObject }
             val file = Path.of(display)
             val exists = Files.isRegularFile(file)
             val text = if (exists) KbExtractor.extract(file) else null
@@ -60,8 +57,14 @@ fun main(args: Array<String>) {
             } ?: System.currentTimeMillis()
             // 登记表 category 语义=目录路径：逐级建目录树（一次性导入工具，无 UI）
             val folderId = str("category")?.takeIf { it.isNotBlank() }?.let { store.ensureFolderPath(it) } ?: ""
+            val id = "kb-" + md8(display)
+            val captured = if (exists) {
+                runCatching { KbContent.capture(store.root(), id, display) }.getOrNull()
+            } else {
+                null
+            }
             val entry = KbEntry(
-                id = "kb-" + md8(display),
+                id = id,
                 sourcePath = display,
                 title = str("title")?.take(120) ?: file.fileName.toString(),
                 folderId = folderId,
@@ -69,15 +72,10 @@ fun main(args: Array<String>) {
                 notes = "imported from knowledge-index registry (id=${str("id") ?: "-"})",
                 project = str("project") ?: "",
                 fileExt = "." + display.substringAfterLast('.', "").lowercase(),
-                sizeBytes = if (exists) Files.size(file) else 0,
-                gitRepo = git?.let { str2(it, "branch")?.let { b -> guessRepoRoot(display, b) } },
-                gitCommit = git?.let { str2(it, "commit") },
-                gitRel = git?.let { str2(it, "relFromRoot") },
-                status = if (exists) KbEntry.STATUS_OK else KbEntry.STATUS_MISSING,
+                sizeBytes = captured?.size ?: if (exists) Files.size(file) else 0,
+                contentHash = captured?.hash ?: "",
                 ingestedAt = ingestedAt,
                 updatedAt = System.currentTimeMillis(),
-                indexedMtime = if (exists) Files.getLastModifiedTime(file).toMillis() else 0,
-                indexedSize = if (exists) Files.size(file) else 0,
             )
             store.insert(entry, text ?: "")
             imported++
@@ -86,15 +84,6 @@ fun main(args: Array<String>) {
     }
     println("imported=$imported skipped=$skipped missingSource=$missing")
 }
-
-private fun str2(o: kotlinx.serialization.json.JsonObject, k: String): String? =
-    o[k]?.let { if (it.toString() == "null") null else it.jsonPrimitive.content }
-
-/**
- * 登记表没记仓根只记 branch：按经验规则从源路径猜仓根不可靠——改为只锚 commit+rel，
- * gitRepo 留 null（恢复入口对无 repo 的条目置灰）。此处返回 null。
- */
-private fun guessRepoRoot(display: String, branch: String): String? = null
 
 private fun md8(s: String): String =
     MessageDigest.getInstance("MD5").digest(s.toByteArray())

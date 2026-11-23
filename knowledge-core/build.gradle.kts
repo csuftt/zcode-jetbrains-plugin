@@ -9,10 +9,11 @@ version = "0.1.0"
 
 /*
  * 知识库核心（平台无关）：
- * - Kotlin 侧（com.zcode.kb.core / kb.tools）：存储、提取、git 锚点、启发式——只在 IDE 进程内加载；
- * - Java 侧（com.zcode.kb.text / kb.mcp）：MCP server 主体——被 app-server 以
- *   `java -cp <插件>\lib\*` fork 出去运行，fork JVM 无 kotlin-stdlib（CUA 先例实证），
- *   因此 server 主体与双侧共用的分词器必须纯 Java，且 Java 类不得引用任何 Kotlin 类。
+ * - Kotlin 侧（com.zcode.kb.core）：元数据存储、提取、git 信息查询、启发式——只在 IDE 进程内加载；
+ * - Java 侧（com.zcode.kb.core 的 KbContent/KbSync、kb.text、kb.mcp）：文档快照/对账/同步的
+ *   共用实现与 MCP server 主体——MCP server 被 app-server 以 `java -cp <插件>\lib\*` fork
+ *   出去运行。约定 server 主体与两侧共用的代码保持纯 Java、不引用 Kotlin 类：不去赌 fork
+ *   classpath 里带不带 Kotlin 运行时、带的版本与编译期是否合拍。
  * 依赖随 implementation 落进插件 zip 的 lib/，fork classpath `lib\*` 天然覆盖。
  */
 dependencies {

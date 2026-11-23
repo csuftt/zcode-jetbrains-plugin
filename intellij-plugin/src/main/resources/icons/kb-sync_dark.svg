@@ -1,0 +1,8 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- kb-sync.svg 的暗色主题变体，仅换描边色（同 knowledge_dark.svg 的约定）：
+       IntelliJ 在暗色主题下按 *_dark 后缀自动加载本文件。 -->
+  <path d="M9 5L11.5 2.5L14 5" stroke="#CED0D6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M11.5 2.5V13.5" stroke="#CED0D6" stroke-linecap="round"/>
+  <path d="M2 11L4.5 13.5L7 11" stroke="#CED0D6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4.5 2.5V13.5" stroke="#CED0D6" stroke-linecap="round"/>
+</svg>

@@ -1540,6 +1540,8 @@ export type JavaResponse =
   | { op: 'zoomLevel'; percent: number }
   /** 环境状态（checkEnv 查询 / envSave 保存成功后的重检结果 / IDE 广播同构体）*/
   | { op: 'envStatus'; status: EnvStatus }
+  /** Java 直推：切到设置页的指定分区（工具条「同步知识库」没配远端时直达知识库设置）*/
+  | { op: 'openSettings'; section: 'kb' }
   /** 路径类环境变量白名单（getPathEnv 响应；值为 canonical 化后的真实长路径，缺陷 GY）*/
   | { op: 'getPathEnvResult'; vars: Record<string, string> }
   /** 网络代理回显（getProxyConfig 响应；restartPending=app-server 在跑需重启生效）*/

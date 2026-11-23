@@ -35,7 +35,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ChangelogDialog, CHANGELOG_LAST_SEEN_KEY } from '@/components/ChangelogDialog'
 import { EnvBanner } from '@/components/EnvBanner'
 import { ZoomIndicator } from '@/components/ZoomIndicator'
-import { sendToJava, isInJcef } from '@/ipc/bridge'
+import { sendToJava, isInJcef, onMessage } from '@/ipc/bridge'
 import { getPersisted, setPersisted, isKvHydrated, KV_HYDRATED_EVENT, KV_DISABLED_EVENT } from '@/utils/persist'
 import { firstCharUpper } from '@/utils/format'
 import { resolveWsColorIndex } from '@/utils/wsColors'
@@ -125,7 +125,7 @@ export default function App() {
   // 视图切换（dev 辅助：浏览器 mock 验收可带 #settings/#basic/#other/#skills/#mcp/#usage 直达，
   // 前缀需与 SettingsView 的页签 hash 白名单一致；#mcp/<服务器名> 直达并自动展开该卡片；
   // JCEF 内 hash 恒空不影响生产）
-  const settingsHashes = ['#settings', '#basic', '#models', '#other', '#skills', '#agents', '#mcp', '#usage', '#memory', '#hooks', '#browser', '#computer', '#processes']
+  const settingsHashes = ['#settings', '#basic', '#models', '#other', '#skills', '#agents', '#mcp', '#usage', '#memory', '#hooks', '#browser', '#computer', '#processes', '#kb']
   const isSettingsHash = settingsHashes.some(
     (h) => window.location.hash === h || window.location.hash.startsWith(h + '/'),
   )
@@ -143,6 +143,18 @@ export default function App() {
   useEffect(() => {
     if (currentView !== 'chat') setSearchOpen(false)
   }, [currentView])
+
+  // 插件侧推来的「打开设置页」跳转意图（工具条「同步知识库」没配远端时直达知识库设置）：
+  // 切到设置视图并置位分区意图，分区页挂载后自己消费
+  useEffect(
+    () =>
+      onMessage((msg) => {
+        if (msg.op !== 'openSettings' || !msg.section) return
+        setPendingSettingsSection(msg.section)
+        setCurrentView('settings')
+      }),
+    [setPendingSettingsSection],
+  )
 
   // 手机远程状态初始拉取：入口图标颜色随 relay 状态联动，面板打开时要先取到
   // 当前态（重启自动恢复连接发生在面板打开之前，Kotlin 广播无人接收，须主动拉）；

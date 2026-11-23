@@ -17,9 +17,10 @@ import java.nio.file.StandardCopyOption
  * - 开关全局（PropertiesComponent，机器级），**默认开**——空库零存在感：条目数为 0
  *   时 specIfEnabled 返回 null，不注入任何东西（issue#54 定案）；
  * - spec：java=IDE 自带 JBR，classpath=插件 lib\* 通配（依赖随 implementation 落
- *   lib/，server 与分词器在其上）；env 带 ZCODE_KB_ROOT（自定义
- *   库位置对 server 进程生效）；scope=user + alwaysLoad=true（3.17.x 双保险，老 CLI
- *   由 ZCodeProtocolClient.mcpServersJson 的门控与 -32602 自愈兜底，本类不重复处理）；
+ *   lib/，server 与分词器在其上）；env 带 ZCODE_KB_ROOT = 库的固定入口路径（库位置
+ *   自定义后入口是指向库目录的联接，server 走入口即可，对库位置无感知）；scope=user +
+ *   alwaysLoad=true（3.17.x 双保险，老 CLI 由 ZCodeProtocolClient.mcpServersJson 的门控与
+ *   -32602 自愈兜底，本类不重复处理）；
  * - server 纯 Java（KbMcpServerMain），检索 + 管理写（目录/条目/标签）；
  * - skill 分发（CUA 同款）：自带 SKILL.md 复制到 ~/.zcode/skills/zcgui-knowledge/
  *   （ZCode CLI 用户级技能目录，SkillScanner 同一扫描面），教 AI 检索与整理工作流；
@@ -77,7 +78,7 @@ object KbFeature {
             name = SERVER_NAME,
             command = java.absolutePath,
             args = listOf("-cp", cp, "com.zcode.kb.mcp.KbMcpServerMain"),
-            env = mapOf("ZCODE_KB_ROOT" to KbPaths.rootDir().toAbsolutePath().toString()),
+            env = mapOf("ZCODE_KB_ROOT" to KbPaths.entryDir().toAbsolutePath().toString()),
             isolation = "session",
             timeoutMs = 60_000L,
             // 与 CUA 同款双保险：scope 绕开 workspace-mcp-trust 撞名门控，alwaysLoad 防
