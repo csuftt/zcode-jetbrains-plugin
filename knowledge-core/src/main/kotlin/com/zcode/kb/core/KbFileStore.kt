@@ -68,11 +68,11 @@ class KbFileStore(private val root: Path) : AutoCloseable {
     /** 全量条目（sweep/重建用；ingested_at 倒序，与旧库行为一致） */
     fun allEntries(): List<KbEntry> = synchronized(lock) { allEntriesLocked() }
 
-    /** 过滤列表（无查询词；搜索走 [search]） */
+    /** 过滤列表（无查询词；搜索走 [search]）。层内手动序：order 升序，并列（0=未拖过）按 ingestedAt 倒序 */
     fun listEntries(f: KbFilter = KbFilter(), limit: Int = 1000): List<KbEntry> = synchronized(lock) {
         allEntriesLocked()
             .filter { matchesFilter(it, f) }
-            .sortedByDescending { it.ingestedAt } // sortedByDescending 稳定排序，同刻按落盘序
+            .sortedWith(compareBy({ it.order }, { -it.ingestedAt })) // 稳定排序，同键按落盘序
             .take(limit)
     }
 
@@ -203,16 +203,20 @@ class KbFileStore(private val root: Path) : AutoCloseable {
 
     /**
      * 移动目录到新父（null/"" = 根级）。防环：newParent 不得是自身或其子孙。
-     * afterId 非空 = 插到目标层该兄弟之后（null = 追加尾部），目标层 order 全量重写。
+     * insertIndex = 目标层摘出前视觉位次（UI 插入线换算值，同 [reorderEntries] 语义；
+     * 默认尾部），同层自拖的摘出偏移内部校正，目标层 order 全量重写。
      * @return false = 防环拒绝
      */
-    fun moveFolder(id: String, newParentId: String?, afterId: String? = null): Boolean = synchronized(lock) {
+    fun moveFolder(id: String, newParentId: String?, insertIndex: Int = Int.MAX_VALUE): Boolean = synchronized(lock) {
         val cfg = readConfig()
         if (cfg.folders.none { it.id == id }) return@synchronized false
         val parent = newParentId?.takeIf { it.isNotEmpty() }
         if (parent != null && isDescendantLocked(cfg.folders, ancestor = id, node = parent)) return@synchronized false
-        val siblings = cfg.folders.filter { it.parentId == parent && it.id != id } // 原位摘出（同层重排/跨层同形）
-        reorderLocked(cfg, id, parent, siblings, afterId)
+        val layer = cfg.folders.filter { it.parentId == parent }.sortedBy { it.order }
+        val at = insertIndex.coerceAtMost(layer.size)
+        val corrected = at - layer.take(at).count { it.id == id } // 同层自拖：摘出偏移校正（跨层时 0）
+        val siblings = layer.filter { it.id != id } // 原位摘出（同层重排/跨层同形）
+        reorderLocked(cfg, id, parent, siblings, corrected)
         true
     }
 
@@ -243,19 +247,40 @@ class KbFileStore(private val root: Path) : AutoCloseable {
     }
 
     /**
-     * 移动条目到目标目录（"" = 根级/根级直放）。目标目录不存在（断链/损坏）容错回根级。
-     * 条目同层精细排序一期不做（无 order 字段，层内视觉序=ingestedAt），目录层排序见 [moveFolder]。
+     * 移动/重排条目（拖拽落位统一入口）：ids 依次移入目标目录（"" = 根级/根级直放；目标
+     * 目录不存在断链容错回根级），并插到目标层条目序列 insertIndex 位次（默认尾部）。
+     * 层内序见 [listEntries]；落位后目标层全量重写 order（0..n-1），跨层拖入时原层也
+     * 重写（收拢空洞）。同层自拖的 insertIndex 按「摘出前位次」传入即可，摘出偏移内部校正。
+     * order 变更不刷 updatedAt（纯排序无内容变化），仅 folderId 变化才刷。
      */
-    fun moveEntries(ids: List<String>, targetFolderId: String) = synchronized(lock) {
+    fun reorderEntries(ids: List<String>, targetFolderId: String, insertIndex: Int = Int.MAX_VALUE) = synchronized(lock) {
         if (ids.isEmpty()) return@synchronized
         val cfg = readConfig()
         val known = cfg.folders.map { it.id }.toHashSet()
         val target = if (targetFolderId.isEmpty() || known.contains(targetFolderId)) targetFolderId else ""
-        for (id in ids) {
-            val e = readEntry(id) ?: continue
+        val idSet = ids.toSet()
+        val moving = ids.mapNotNull { readEntry(it) }.distinctBy { it.id }
+        // 目标层现状（摘出前）：同层自拖的条目先摘出，插入位次按摘出偏移校正
+        val layer = allEntriesLocked()
+            .filter { it.folderId == target }
+            .sortedWith(compareBy({ it.order }, { -it.ingestedAt }))
+        val at = insertIndex.coerceAtMost(layer.size)
+        val rebuilt = ArrayList(layer.filterNot { it.id in idSet })
+        val insertAt = (at - layer.take(at).count { it.id in idSet }).coerceIn(0, rebuilt.size)
+        moving.forEachIndexed { k, e -> rebuilt.add(insertAt + k, e) }
+        for ((i, e) in rebuilt.withIndex()) {
             if (e.folderId != target) {
-                writeEntry(e.copy(folderId = target, updatedAt = System.currentTimeMillis()))
+                writeEntry(e.copy(folderId = target, order = i, updatedAt = System.currentTimeMillis()))
+            } else if (e.order != i) {
+                writeEntry(e.copy(order = i))
             }
+        }
+        // 跨层拖入：原层剩余条目重写 order 收拢空洞
+        for (origin in moving.map { it.folderId }.filter { it != target }.distinct()) {
+            allEntriesLocked()
+                .filter { it.folderId == origin && it.id !in idSet }
+                .sortedWith(compareBy({ it.order }, { -it.ingestedAt }))
+                .forEachIndexed { i, e -> if (e.order != i) writeEntry(e.copy(order = i)) }
         }
     }
 
@@ -467,13 +492,12 @@ class KbFileStore(private val root: Path) : AutoCloseable {
     }
 
     /**
-     * 目录同层/跨层移动落位：从旧位置摘出（跨层时父指针已由调用方语义决定），目标层
-     * 兄弟按 afterId 插位后全量重写 order（0..n-1），移动目录本身 parentId 同步改。
+     * 目录同层/跨层移动落位：目标层兄弟已按序摘出被移动目录，按 insertIndex 插位后
+     * 全量重写 order（0..n-1），移动目录本身 parentId 同步改。
      */
-    private fun reorderLocked(cfg: KbConfigFile, id: String, parent: String?, siblings: List<KbFolder>, afterId: String?) {
+    private fun reorderLocked(cfg: KbConfigFile, id: String, parent: String?, siblings: List<KbFolder>, insertIndex: Int) {
         val moving = cfg.folders.first { it.id == id }
-        val insertAt = if (afterId == null) siblings.size
-        else siblings.indexOfFirst { it.id == afterId }.let { if (it < 0) siblings.size else it + 1 }
+        val insertAt = insertIndex.coerceIn(0, siblings.size)
         val rebuilt = ArrayList<KbFolder>(siblings.size + 1)
         siblings.forEachIndexed { i, f -> rebuilt.add(f.copy(order = if (i < insertAt) i else i + 1)) }
         rebuilt.add(insertAt, moving.copy(parentId = parent, order = insertAt))

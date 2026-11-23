@@ -92,9 +92,11 @@ import javax.swing.tree.TreeNode
  *
  * 树行为：搜索有词时退化为平铺命中列表（命中标签 chip 提前第一位并金黄高亮）；
  * 展开态/选中态跨刷新记忆（key 字符串对齐）；目录管理/条目动作全在右键。
- * 拖拽：条目（支持多选）拖入目录=移入、拖到根=根级；目录拖到目录=成为子目录
- * （防环：拒绝拖入自身子孙，canImport 拒绝 + 数据层二次校验）；精细同层排序一期不做
- * （目录 order 字段已留）。「发送到 ZC GUI 输入框」= 条目右键第一组（品牌图标置顶）。
+ * 拖拽（DropMode.ON_OR_INSERT）：行边缘=插入线——条目=层内插位重排（多选依次插入）、
+ * 目录=同层排序；行中心=ON——落目录行=移入尾部、条目行=排其后、根=根级；目录防环
+ * （拒绝拖入自身子孙，canImport 拒绝 + 数据层二次校验）。条目顺序存 order 字段
+ * （拖拽全层重写 0..n-1），目录 order 同理，重启保持。「发送到 ZC GUI 输入框」=
+ * 条目右键第一组（品牌图标置顶）。
  *
  * 刷新：订阅 KB_CHANGED 广播（KbManagerService 变更点收口发布）。
  * 线程纪律：store 查询/提取一律 pooled 线程，EDT 只回填 UI。
@@ -155,8 +157,10 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         tree.emptyText.text = ZCodeBundle.message("kb.tw.emptyHint")
         tree.cellRenderer = renderer()
-        // 拖拽移动（条目多选移入目录 / 目录拖为子目录）：JTree 原生 DnD + 自定义 TransferHandler
+        // 拖拽移动（条目多选移入/层内插位重排 + 目录同层排序）：JTree 原生 DnD +
+        // 自定义 TransferHandler；ON_OR_INSERT 行边缘出插入线（精细排序）、行中心=ON（移入）
         tree.dragEnabled = true
+        tree.dropMode = javax.swing.DropMode.ON_OR_INSERT
         tree.transferHandler = KbTransferHandler()
 
         tree.addTreeExpansionListener(object : TreeExpansionListener {
@@ -1009,8 +1013,9 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     }
 
     /**
-     * 树内拖拽：条目（支持多选，拖到目录=移入、拖到条目=移入其父目录、拖到根=根级）
-     * 与目录（拖到目录=成为子目录；防环拒绝自身子孙）。精细同层排序一期不做。
+     * 树内拖拽（DropMode.ON_OR_INSERT）：条目（支持多选）与目录均支持精细落位——
+     * INSERT（行边缘插入线）=层内插位重排；ON（行中心）=目录行/根行移入尾部、条目行=
+     * 排其后。目录防环拒绝自身子孙（canImport 拒绝 + 数据层二次校验）。
      */
     private inner class KbTransferHandler : javax.swing.TransferHandler() {
 
@@ -1039,16 +1044,28 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return false
             return when {
                 payload.startsWith("F:") -> {
-                    // 目录落点：目录节点（非自身/子孙）或根行；条目行不算目录落点
-                    val target = node.userObject as? NodeData.Folder
-                    when {
-                        target != null -> target.folder.id != payload.substring(2) &&
-                            !isAncestor(payload.substring(2), target.folder.id)
-                        node.userObject is String -> true // 根行 = 根级
-                        else -> false
+                    val draggedId = payload.substring(2)
+                    if (loc.childIndex >= 0) {
+                        // INSERT 线（path=容器节点）：线须落在该层目录区内（目录区下边缘=尾部），
+                        // 条目区边缘的线对目录无意义（插进去视觉错乱且立即被 rebuild 纠正）
+                        val dirCount = childPrefixCount(node, NodeData.Folder::class.java)
+                        when (val d = node.userObject) {
+                            is NodeData.Folder -> loc.childIndex <= dirCount &&
+                                d.folder.id != draggedId && !isAncestor(draggedId, d.folder.id)
+                            is String -> loc.childIndex <= dirCount // 根行边缘 = 根级插位
+                            else -> false
+                        }
+                    } else {
+                        // ON：目录节点（非自身/子孙）或根行；条目行不算目录落点
+                        val target = node.userObject as? NodeData.Folder
+                        when {
+                            target != null -> target.folder.id != draggedId && !isAncestor(draggedId, target.folder.id)
+                            node.userObject is String -> true // 根行 = 根级
+                            else -> false
+                        }
                     }
                 }
-                payload.startsWith("E:") -> true // 条目落目录行/条目行/根行均可（importData 解析）
+                payload.startsWith("E:") -> true // 条目落目录行/条目行/根行/插入线均可（importData 换算）
                 else -> false
             }
         }
@@ -1086,30 +1103,80 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             return when {
                 payload.startsWith("E:") -> {
                     val ids = payload.substring(2).split(',').filter { it.isNotEmpty() }
-                    val target = when (val d = node.userObject) {
-                        is NodeData.Folder -> d.folder.id
-                        is NodeData.Entry -> parentFolderIdOf(node) // 拖到条目行=移入其父目录
-                        else -> "" // 根行 = 根级
-                    }
-                    val ids2 = ids.filter { id -> entriesCache.any { it.id == id } }
-                    if (ids2.isEmpty()) return false
+                        .filter { id -> entriesCache.any { it.id == id } }
+                    if (ids.isEmpty()) return false
+                    val (target, index) = entryDropTarget(loc, node)
                     if (target.isNotEmpty()) expandedKeys.add("F\u0001$target") // 落点目录自动展开（刷新后生效）
                     ApplicationManager.getApplication().executeOnPooledThread {
-                        runCatching { service.moveEntries(ids2, target) }
+                        runCatching { service.reorderEntries(ids, target, index) }
                     }
                     true
                 }
                 payload.startsWith("F:") -> {
                     val draggedId = payload.substring(2)
-                    val target = (node.userObject as? NodeData.Folder)?.folder?.id
-                    if ((node.userObject as? NodeData.Folder)?.folder?.id == draggedId) return false
+                    val (parent, index) = folderDropTarget(loc, node) ?: return false
+                    if (loc.childIndex < 0 && (node.userObject as? NodeData.Folder)?.folder?.id == draggedId) return false
                     ApplicationManager.getApplication().executeOnPooledThread {
-                        runCatching { service.moveFolder(draggedId, target) }
+                        runCatching { service.moveFolder(draggedId, parent, index) }
                     }
                     true
                 }
                 else -> false
             }
+        }
+
+        /**
+         * 条目落点换算 → (目标目录 id, 层内插入位次)：INSERT（path=容器节点）=容器层内
+         * children 前缀条目数（0=层首）；ON 目录行=尾部、ON 条目行=其父目录排该条目之后、
+         * ON 根行=根级尾部。
+         */
+        private fun entryDropTarget(loc: javax.swing.JTree.DropLocation, node: DefaultMutableTreeNode): Pair<String, Int> {
+            val k = loc.childIndex
+            if (k >= 0) {
+                val target = (node.userObject as? NodeData.Folder)?.folder?.id ?: ""
+                return target to childPrefixCount(node, NodeData.Entry::class.java, upTo = k)
+            }
+            return when (val d = node.userObject) {
+                is NodeData.Folder -> d.folder.id to Int.MAX_VALUE
+                is NodeData.Entry -> parentFolderIdOf(node) to siblingIndexOf(node) + 1
+                else -> "" to Int.MAX_VALUE // 根行 = 根级尾部
+            }
+        }
+
+        /**
+         * 目录落点换算 → (目标父目录 id 或 null=根级, 目录序列插入位次)；非法返回 null。
+         * INSERT（path=容器节点）=容器层 children 前缀目录数；ON 目录行=成为其子目录（尾部）、
+         * ON 根行=根级尾部。
+         */
+        private fun folderDropTarget(loc: javax.swing.JTree.DropLocation, node: DefaultMutableTreeNode): Pair<String?, Int>? {
+            val k = loc.childIndex
+            if (k >= 0) {
+                val parent = (node.userObject as? NodeData.Folder)?.folder?.id
+                return parent to childPrefixCount(node, NodeData.Folder::class.java, upTo = k)
+            }
+            return when (val d = node.userObject) {
+                is NodeData.Folder -> d.folder.id to Int.MAX_VALUE
+                is String -> null to Int.MAX_VALUE // 根行 = 根级尾部
+                else -> null
+            }
+        }
+
+        /** node 前 [upTo] 个 children（缺省全部）中 userObject 属于 [cls] 的节点数（INSERT 线 → 层内序列位次） */
+        private fun childPrefixCount(node: DefaultMutableTreeNode, cls: Class<out NodeData>, upTo: Int = node.childCount): Int =
+            (0 until upTo.coerceIn(0, node.childCount)).count {
+                (node.getChildAt(it) as? DefaultMutableTreeNode)?.userObject?.javaClass == cls
+            }
+
+        /** 条目节点在兄弟条目序列中的位次（ON 条目行=排其后，+1 由调用方做） */
+        private fun siblingIndexOf(node: DefaultMutableTreeNode): Int {
+            val parent = node.parent as? DefaultMutableTreeNode ?: return 0
+            var n = 0
+            for (i in 0 until parent.childCount) {
+                val c = parent.getChildAt(i) as? DefaultMutableTreeNode ?: continue
+                if (c === node) return n
+                if (c.userObject is NodeData.Entry) n++
+            }
+            return n
         }
 
         /** 条目节点的父目录 id（父是目录节点取其 id；父是根/根级=""） */

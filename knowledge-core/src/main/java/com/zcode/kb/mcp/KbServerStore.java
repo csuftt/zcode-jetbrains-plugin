@@ -5,7 +5,6 @@ import com.zcode.kb.text.KbTokenizer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -71,6 +70,7 @@ final class KbServerStore implements AutoCloseable {
         String sourcePath = "";
         String status = "";
         long ingestedAt;
+        int order;
     }
 
     /** config.json 目录投影：id → name/parentId */
@@ -184,7 +184,11 @@ final class KbServerStore implements AutoCloseable {
         }
         List<Rec> recs = loadEntries();
         Map<String, Folder> folders = loadFolders();
-        recs.sort(Comparator.comparingLong((Rec r) -> r.ingestedAt).reversed());
+        // 层内视觉序与 IDE KbFileStore.listEntries 同形：order 升序，并列（0=未拖过）按 ingestedAt 倒序
+        recs.sort((a, b) -> {
+            int c = Integer.compare(a.order, b.order);
+            return c != 0 ? c : Long.compare(b.ingestedAt, a.ingestedAt);
+        });
         for (Rec r : recs) {
             if (!filterMatches(r, folders, folder, tag, project)) {
                 continue;
@@ -338,8 +342,12 @@ final class KbServerStore implements AutoCloseable {
         writeConfigMap(cfg);
     }
 
-    /** 目录移动到新父路径（null/""=根级，追加尾部）。防环：新父不得是自身或其子孙 */
-    void moveFolder(String path, String newParentPath) {
+    /**
+     * 目录移动到新父路径（null/""=根级）。防环：新父不得是自身或其子孙。index=目标层
+     * 摘出前视觉位次（同层自拖偏移内部校正，null=追加尾部），目标层 order 全量重写，
+     * 与 IDE 侧 KbFileStore.moveFolder 同形。
+     */
+    void moveFolder(String path, String newParentPath, Integer index) {
         Map<String, Object> cfg = configMap();
         List<Map<String, Object>> folders = foldersOf(cfg);
         String id = folderIdByPath(cfg, path);
@@ -351,24 +359,38 @@ final class KbServerStore implements AutoCloseable {
             throw new KbOpException("cannot move folder '" + path + "' into its own subtree");
         }
         Map<String, Object> moving = null;
-        int maxOrder = -1;
-        for (Map<String, Object> f : folders) {
+        List<int[]> no = new ArrayList<>(); // 目标层 [mapIndex, order]（摘出前）
+        for (int i = 0; i < folders.size(); i++) {
+            Map<String, Object> f = folders.get(i);
             String fid = str(f.get("id"));
             if (fid != null && fid.equals(id)) {
                 moving = f;
-            } else if (eqParent(f.get("parentId"), newParent)) {
+            } else if (eqParent(f.get("parentId"), newParent.isEmpty() ? null : newParent)) {
                 Object o = f.get("order");
                 int ord = o instanceof Number ? ((Number) o).intValue() : 0;
-                if (ord > maxOrder) {
-                    maxOrder = ord;
-                }
+                no.add(new int[]{i, ord});
             }
         }
         if (moving == null) {
             throw new KbOpException("folder not found: " + path);
         }
+        no.sort((a, b) -> a[1] != b[1] ? Integer.compare(a[1], b[1]) : Integer.compare(a[0], b[0]));
+        int at = index == null ? no.size() : Math.min(index, no.size());
+        // 同层自拖：插入点之前每有一个被拖目录本体，摘出后位次 -1（跨层拖入 dropK=0）
+        int dropK = 0;
+        for (int[] slot : no.subList(0, at)) {
+            if (id.equals(str(folders.get(slot[0]).get("id")))) {
+                dropK++;
+            }
+        }
+        int corrected = at - dropK;
         moving.put("parentId", newParent.isEmpty() ? null : newParent);
-        moving.put("order", maxOrder + 1);
+        // 目标层 order 全量重写 0..n-1（插位之后的兄弟 +1 平移）
+        for (int i = 0; i < no.size(); i++) {
+            int[] slot = no.get(i);
+            folders.get(slot[0]).put("order", i < corrected ? i : i + 1);
+        }
+        moving.put("order", corrected);
         writeConfigMap(cfg);
     }
 
@@ -404,8 +426,13 @@ final class KbServerStore implements AutoCloseable {
         return moved;
     }
 
-    /** 批量移动条目（folderPath 空=根级；非空路径不存在即报错——不静默容错）。@return 移动条目数 */
-    int moveEntries(List<String> ids, String folderPath) {
+    /**
+     * 批量移动/重排条目（folderPath 空=根级；非空路径不存在即报错——不静默容错）。
+     * index=目标层摘出前视觉位次（null=追加尾部），与 IDE 侧 reorderEntries 同形：
+     * 被移动条目 folderId 落目标层且目标层 order 全量重写 0..n-1（folderId 变才刷
+     * updatedAt），跨层拖入时各原层剩余条目 order 重写收拢空洞。@return 移动条目数
+     */
+    int moveEntries(List<String> ids, String folderPath, Integer index) {
         if (ids == null || ids.isEmpty()) {
             throw new KbOpException("ids is empty");
         }
@@ -414,20 +441,101 @@ final class KbServerStore implements AutoCloseable {
         if (folderPath != null && !folderPath.trim().isEmpty()) {
             target = folderIdByPath(cfg, folderPath.trim());
         }
-        int n = 0;
-        for (String id : new java.util.LinkedHashSet<>(ids)) {
+        java.util.LinkedHashSet<String> uniq = new java.util.LinkedHashSet<>(ids);
+        // 读全部被移动条目（缺失即报错，语义同旧实现）
+        java.util.LinkedHashMap<String, Map<String, Object>> moving = new java.util.LinkedHashMap<>();
+        for (String id : uniq) {
             Map<String, Object> e = readEntryMap(id);
             if (e == null) {
                 throw new KbOpException("entry not found: " + id);
             }
-            if (!orEmpty(str(e.get("folderId"))).equals(target)) {
+            moving.put(id, e);
+        }
+        // 目标层现状（摘出前，按层内视觉序 = order 升序、并列 ingestedAt 倒序）：摘出被移动项 → 插位
+        List<Rec> targetRecs = new ArrayList<>();
+        for (Rec r : loadEntries()) {
+            if (orEmpty(str(r.folderId)).equals(target)) {
+                targetRecs.add(r);
+            }
+        }
+        targetRecs.sort((a, b) -> {
+            int c = Integer.compare(a.order, b.order);
+            return c != 0 ? c : Long.compare(b.ingestedAt, a.ingestedAt);
+        });
+        List<String> layer = new ArrayList<>();
+        for (Rec r : targetRecs) {
+            layer.add(r.id);
+        }
+        int at = index == null ? layer.size() : Math.min(index, layer.size());
+        List<String> rebuilt = new ArrayList<>(layer);
+        List<String> headDrop = new ArrayList<>();
+        for (String id : uniq) {
+            int i = rebuilt.indexOf(id);
+            if (i >= 0) {
+                rebuilt.remove(i);
+                if (i < at) {
+                    headDrop.add(id);
+                }
+            }
+        }
+        int insertAt = at - headDrop.size();
+        insertAt = Math.max(0, Math.min(insertAt, rebuilt.size()));
+        int k = 0;
+        for (String id : uniq) {
+            rebuilt.add(insertAt + k, id);
+            k++;
+        }
+        // 全量重写目标层 order（folderId 变才刷 updatedAt）
+        for (int i = 0; i < rebuilt.size(); i++) {
+            String id = rebuilt.get(i);
+            Map<String, Object> e = moving.containsKey(id) ? moving.get(id) : readEntryMap(id);
+            if (e == null) {
+                continue;
+            }
+            Object orderObj = e.get("order");
+            int oldOrder = orderObj instanceof Number ? ((Number) orderObj).intValue() : 0;
+            boolean movedCross = !orEmpty(str(e.get("folderId"))).equals(target);
+            if (movedCross) {
                 e.put("folderId", target);
                 e.put("updatedAt", (double) System.currentTimeMillis());
+            }
+            if (oldOrder != i || movedCross) {
+                e.put("order", (double) i);
                 writeEntryMap(e);
             }
-            n++;
         }
-        return n;
+        // 跨层拖入：各原层剩余条目 order 重写收拢空洞
+        java.util.Set<String> origins = new java.util.LinkedHashSet<>();
+        for (Map<String, Object> e : moving.values()) {
+            String of = orEmpty(str(e.get("folderId")));
+            if (!of.equals(target)) {
+                origins.add(of);
+            }
+        }
+        for (String origin : origins) {
+            // 剩余条目按现视觉序排好后赋 order 0..n-1（乱序赋值会打乱相对顺序）
+            List<Rec> restRecs = new ArrayList<>();
+            for (Rec r : loadEntries()) {
+                if (orEmpty(str(r.folderId)).equals(origin) && !uniq.contains(r.id)) {
+                    restRecs.add(r);
+                }
+            }
+            restRecs.sort((a, b) -> {
+                int c = Integer.compare(a.order, b.order);
+                return c != 0 ? c : Long.compare(b.ingestedAt, a.ingestedAt);
+            });
+            for (int i = 0; i < restRecs.size(); i++) {
+                Map<String, Object> e = readEntryMap(restRecs.get(i).id);
+                if (e == null) {
+                    continue;
+                }
+                if (restRecs.get(i).order != i) {
+                    e.put("order", (double) i);
+                    writeEntryMap(e);
+                }
+            }
+        }
+        return uniq.size();
     }
 
     /**
@@ -1224,6 +1332,8 @@ final class KbServerStore implements AutoCloseable {
             r.status = orEmpty(str(m.get("status")));
             Object ingestedAt = m.get("ingestedAt");
             r.ingestedAt = ingestedAt instanceof Number ? ((Number) ingestedAt).longValue() : 0;
+            Object order = m.get("order");
+            r.order = order instanceof Number ? ((Number) order).intValue() : 0;
             Object tags = m.get("tags");
             if (tags instanceof List) {
                 StringBuilder sb = new StringBuilder("[");

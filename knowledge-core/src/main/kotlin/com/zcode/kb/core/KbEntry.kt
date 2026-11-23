@@ -34,6 +34,12 @@ data class KbEntry(
     val updatedAt: Long = 0,
     val indexedMtime: Long = 0,
     val indexedSize: Long = 0,
+    /**
+     * 同目录层内手动排序键（拖拽重排时全层重写 0..n-1）。排序键 = order 升序，
+     * 并列（含未拖过的 0）按 ingestedAt 倒序——旧库无此字段读为 0，自然退化现状序；
+     * 新收录 order=0 恒落层顶，与收录弹窗后的视觉习惯一致。
+     */
+    val order: Int = 0,
 ) {
     companion object {
         const val STATUS_OK = "ok"

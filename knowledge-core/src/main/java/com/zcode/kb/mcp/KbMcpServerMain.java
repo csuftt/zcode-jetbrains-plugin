@@ -27,9 +27,11 @@ import java.util.Map;
  * - kb_read(id)  → 提取全文（超 40k 字符截断并注明）
  * - kb_list(folder?, tag?, project?, limit?) → 浏览清单
  * - kb_tree() → 目录树统计（path/count/subtreeCount）+ 根级/全库计数 + 标签清单（整理起点）
- * - kb_folder(action: create|rename|move|delete, path, ...) → 目录管理（AI 面全用路径定位）
+ * - kb_folder(action: create|rename|move|delete, path, ...) → 目录管理（AI 面全用路径定位；
+ *   move 可带 index=目标层兄弟位次，同层排序/层首插位）
  * - kb_entry(action: move|update|delete, ids, ...) → 条目批量移动/改标题·标签·备注/摘除
- *   （摘除只删元数据+提取缓存，磁盘源文件永不触碰）
+ *   （摘除只删元数据+提取缓存，磁盘源文件永不触碰；move 可带 index=目标层条目位次，
+ *   层内顺序 = index 升序、并列按收录新旧——与 IDE 树视觉序一致）
  * - kb_tag(action: create|rename|delete|color, name, ...) → 标签注册表管理
  * - kb_add(path, title?, folderPath?, tags?, notes?) → 收录文档（指针模型，IDE ingest 同
  *   语义：判重命中=更新元数据；提取走 IDE 同款 KbExtractor，git 锚点不抓）
@@ -254,7 +256,7 @@ public final class KbMcpServerMain {
                         store.renameFolder(strArg(args, "path", ""), strArg(args, "newName", ""));
                         return okResult("renamed");
                     case "move":
-                        store.moveFolder(strArg(args, "path", ""), optStr(args, "newPath"));
+                        store.moveFolder(strArg(args, "path", ""), optStr(args, "newPath"), optInt(args, "index"));
                         return okResult("moved");
                     case "delete": {
                         int moved = store.deleteFolder(strArg(args, "path", ""));
@@ -269,7 +271,7 @@ public final class KbMcpServerMain {
                 switch (action) {
                     case "move": {
                         String fp = optStr(args, "folderPath");
-                        int n = store.moveEntries(strList(args, "ids"), fp == null ? "" : fp);
+                        int n = store.moveEntries(strList(args, "ids"), fp == null ? "" : fp, optInt(args, "index"));
                         return countResult("moved", n);
                     }
                     case "update": {
@@ -408,6 +410,12 @@ public final class KbMcpServerMain {
         return v instanceof String ? (String) v : null;
     }
 
+    /** 可选整数参数（null=未传；move 的 index 插位用） */
+    private static Integer optInt(Map<?, ?> args, String key) {
+        Object v = args.get(key);
+        return v instanceof Number ? ((Number) v).intValue() : null;
+    }
+
     private static int intArg(Map<?, ?> args, String key, int def) {
         Object v = args.get(key);
         return v instanceof Double ? (int) Math.round((Double) v) : def;
@@ -467,20 +475,22 @@ public final class KbMcpServerMain {
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
 
             + "{\"name\":\"kb_folder\","
-            + "\"description\":\"Manage knowledge base folders. Folders are addressed by their full path (e.g. 'Ops/Middleware'), which must match an existing folder (check kb_tree first) unless you are creating. delete removes the folder and its sub-folders; entries inside are moved to the root level (never deleted). move rejects moving a folder into its own subtree.\","
+            + "\"description\":\"Manage knowledge base folders. Folders are addressed by their full path (e.g. 'Ops/Middleware'), which must match an existing folder (check kb_tree first) unless you are creating. delete removes the folder and its sub-folders; entries inside are moved to the root level (never deleted). move rejects moving a folder into its own subtree; index reorders within the sibling layer (visible in the IDE panel).\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"action\":{\"type\":\"string\",\"enum\":[\"create\",\"rename\",\"move\",\"delete\"],\"description\":\"create: build folder path level by level (a/b/c); rename: rename keeping position; move: re-parent (newPath empty/omitted = root level); delete: remove folder + sub-folders, entries go to root\"},"
             + "\"path\":{\"type\":\"string\",\"description\":\"Target folder full path, e.g. 'Ops/Middleware'\"},"
             + "\"newName\":{\"type\":\"string\",\"description\":\"rename: new folder name\"},"
-            + "\"newPath\":{\"type\":\"string\",\"description\":\"move: new parent folder path; empty or omitted = root level\"}"
+            + "\"newPath\":{\"type\":\"string\",\"description\":\"move: new parent folder path; empty or omitted = root level\"},"
+            + "\"index\":{\"type\":\"number\",\"description\":\"move: optional position among the target siblings (0 = first, as shown in the IDE tree); omitted = appended last. Use with same-path move to reorder without re-parenting\"}"
             + "},\"required\":[\"action\",\"path\"]}},"
 
             + "{\"name\":\"kb_entry\","
-            + "\"description\":\"Manage knowledge base entries (ids from kb_search/kb_list). move: batch-move entries into a folder. update: batch-set tags (REPLACES the full tag set - read current tags via kb_list and merge yourself to append), set notes, or rename a single entry's title (title only allowed for one id). delete: remove entries from the knowledge base (metadata + extracted text); the source files on disk are NEVER touched. Verify ids before deleting - removal is not undoable.\","
+            + "\"description\":\"Manage knowledge base entries (ids from kb_search/kb_list). move: batch-move entries into a folder (folderPath empty = root level), optionally at a given position (index) within that folder's entry list - omit index to append. The IDE tree order inside each folder follows index then recency. update: batch-set tags (REPLACES the full tag set - read current tags via kb_list and merge yourself to append), set notes, or rename a single entry's title (title only allowed for one id). delete: remove entries from the knowledge base (metadata + extracted text); the source files on disk are NEVER touched. Verify ids before deleting - removal is not undoable.\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"action\":{\"type\":\"string\",\"enum\":[\"move\",\"update\",\"delete\"]},"
-            + "\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Entry ids from kb_search/kb_list\"},"
+            + "\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Entry ids from kb_search/kb_list; order matters for move+index (ids are inserted in order)\"},"
             + "\"folderPath\":{\"type\":\"string\",\"description\":\"move: destination folder path; empty = root level\"},"
+            + "\"index\":{\"type\":\"number\",\"description\":\"move: optional position in the destination folder's entry list (0 = first, as shown in the IDE tree); omitted = appended last; use with the current folder to reorder in place\"},"
             + "\"title\":{\"type\":\"string\",\"description\":\"update: new title (single id only)\"},"
             + "\"tags\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"update: full replacement tag set (appending requires reading current tags first)\"},"
             + "\"notes\":{\"type\":\"string\",\"description\":\"update: notes; empty string clears\"}"

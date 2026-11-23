@@ -286,15 +286,19 @@ class KbManagerService : Disposable {
     }
 
     /** @return false = 防环拒绝（目标在自身子树内） */
-    fun moveFolder(id: String, newParentId: String?, afterId: String? = null): Boolean =
-        store().moveFolder(id, newParentId, afterId).also { if (it) KbTopics.publish(null) }
+    fun moveFolder(id: String, newParentId: String?, insertIndex: Int = Int.MAX_VALUE): Boolean =
+        store().moveFolder(id, newParentId, insertIndex).also { if (it) KbTopics.publish(null) }
 
     /** @return 移入根级的条目数（确认框文案用） */
     fun deleteFolder(id: String): Int =
         store().deleteFolder(id).also { if (it >= 0) KbTopics.publish(null) }
 
-    fun moveEntries(ids: List<String>, targetFolderId: String) {
-        store().moveEntries(ids, targetFolderId)
+    /** 条目移动到目录尾部（右键「移动到…」用；拖拽精细落位走 [reorderEntries]） */
+    fun moveEntries(ids: List<String>, targetFolderId: String) = reorderEntries(ids, targetFolderId)
+
+    /** 条目拖拽移动 + 层内插位重排（insertIndex 默认尾部） */
+    fun reorderEntries(ids: List<String>, targetFolderId: String, insertIndex: Int = Int.MAX_VALUE) {
+        store().reorderEntries(ids, targetFolderId, insertIndex)
         KbTopics.publish(null)
     }
 

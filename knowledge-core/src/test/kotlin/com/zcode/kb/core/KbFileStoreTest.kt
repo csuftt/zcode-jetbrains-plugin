@@ -149,14 +149,120 @@ class KbFileStoreTest {
         val f = s.createFolder(null, "信创")
         s.insert(entry("kb-1", "d:/1.md"), "x")
         s.insert(entry("kb-2", "d:/2.md"), "y")
-        s.moveEntries(listOf("kb-1", "kb-2"), f)
+        s.reorderEntries(listOf("kb-1", "kb-2"), f) // 默认尾部 = 原移动语义
         assertEquals(f, s.getEntry("kb-1")!!.folderId)
         assertEquals(f, s.getEntry("kb-2")!!.folderId)
         // 断链目标容错回根级
-        s.moveEntries(listOf("kb-1"), "f-nonexist")
+        s.reorderEntries(listOf("kb-1"), "f-nonexist")
         assertEquals("", s.getEntry("kb-1")!!.folderId)
-        s.moveEntries(listOf("kb-2"), "")
+        s.reorderEntries(listOf("kb-2"), "")
         assertEquals("", s.getEntry("kb-2")!!.folderId)
+    }
+
+    @Test
+    fun `reorder entries reorders within layer and persists order`() {
+        val s = newStore()
+        s.insert(entry("kb-1", "d:/1.md"), "a")
+        Thread.sleep(5)
+        s.insert(entry("kb-2", "d:/2.md"), "b")
+        Thread.sleep(5)
+        s.insert(entry("kb-3", "d:/3.md"), "c")
+        // 未排序层 = ingestedAt 倒序（新收录在上）
+        assertEquals(listOf("kb-3", "kb-2", "kb-1"), s.listEntries().map { it.id })
+        val updatedAtBefore = s.getEntry("kb-1")!!.updatedAt
+        // 拖 kb-2 到层首（摘出前位次 0）
+        s.reorderEntries(listOf("kb-2"), "", 0)
+        assertEquals(listOf("kb-2", "kb-3", "kb-1"), s.listEntries().map { it.id })
+        // 同层自拖校正：kb-2 排到 kb-3 之后 = 插入线在 kb-3 下边缘（摘出前位次 2）
+        s.reorderEntries(listOf("kb-2"), "", 2)
+        assertEquals(listOf("kb-3", "kb-2", "kb-1"), s.listEntries().map { it.id })
+        // order 全层重写 0..n-1 且落盘
+        val again = KbFileStore(dir)
+        assertEquals(listOf("kb-3", "kb-2", "kb-1"), again.listEntries().map { it.id })
+        assertEquals(listOf(0, 1, 2), again.listEntries().map { it.order })
+        // 排序不刷 updatedAt（纯排序无内容变化）
+        assertEquals(updatedAtBefore, again.getEntry("kb-1")!!.updatedAt)
+    }
+
+    @Test
+    fun `reorder entries moves across folders with insert index`() {
+        val s = newStore()
+        val f = s.createFolder(null, "信创")
+        s.insert(entry("kb-1", "d:/1.md", folderId = f), "a")
+        Thread.sleep(5)
+        s.insert(entry("kb-2", "d:/2.md", folderId = f), "b")
+        Thread.sleep(5)
+        s.insert(entry("kb-3", "d:/3.md"), "c")
+        // 根级 kb-3 拖入 f 层首：跨层移动 + 插位
+        s.reorderEntries(listOf("kb-3"), f, 0)
+        assertEquals(f, s.getEntry("kb-3")!!.folderId)
+        assertEquals(listOf("kb-3", "kb-2", "kb-1"), s.listEntries(KbFilter(folderId = f)).map { it.id })
+        assertEquals(listOf(0, 1, 2), s.listEntries(KbFilter(folderId = f)).map { it.order })
+        // 原层（根级）已空
+        assertEquals(emptyList(), s.listEntries(KbFilter(folderId = "")).map { it.id })
+    }
+
+    @Test
+    fun `reorder entries multi-select across origin layers and clamps index`() {
+        val s = newStore()
+        val f = s.createFolder(null, "信创")
+        s.insert(entry("kb-1", "d:/1.md", folderId = f), "a")
+        Thread.sleep(5)
+        s.insert(entry("kb-2", "d:/2.md", folderId = f), "b")
+        Thread.sleep(5)
+        s.insert(entry("kb-3", "d:/3.md"), "c") // 根级
+        Thread.sleep(5)
+        s.insert(entry("kb-4", "d:/4.md"), "d") // 根级
+        // 多选跨源层拖入 f 层首：f 的 kb-1 + 根级的 kb-3 一起拖
+        s.reorderEntries(listOf("kb-1", "kb-3"), f, 0)
+        assertEquals(listOf("kb-1", "kb-3", "kb-2"), s.listEntries(KbFilter(folderId = f)).map { it.id })
+        // 各原层剩余条目 order 重写收拢空洞（根级剩 kb-4）
+        assertEquals(listOf("kb-4"), s.listEntries(KbFilter(folderId = "")).map { it.id })
+        assertEquals(listOf(0), s.listEntries(KbFilter(folderId = "")).map { it.order })
+        // 越界截尾兜底：kb-2 拖到尾部（已在尾部，位置不变）
+        s.reorderEntries(listOf("kb-2"), f, 99)
+        assertEquals(listOf("kb-1", "kb-3", "kb-2"), s.listEntries(KbFilter(folderId = f)).map { it.id })
+    }
+
+    @Test
+    fun `legacy entry json without order field reads as zero`() {
+        newStore().insert(entry("kb-1", "d:/1.md"), "x")
+        // 手写旧版格式（无 order 字段，encodeDefaults 之前的落盘形态）
+        Files.writeString(
+            dir.resolve("entries").resolve("kb-1.json"),
+            "{\"id\":\"kb-1\",\"sourcePath\":\"d:/1.md\",\"title\":\"旧格式\",\"folderId\":\"\",\"tags\":[]," +
+                "\"notes\":\"\",\"project\":\"\",\"fileExt\":\".md\",\"sizeBytes\":0,\"status\":\"ok\"," +
+                "\"ingestedAt\":100,\"updatedAt\":100,\"indexedMtime\":0,\"indexedSize\":0}",
+        )
+        val s = newStore()
+        val e = s.getEntry("kb-1")!!
+        assertEquals(0, e.order)
+        assertEquals("旧格式", e.title)
+    }
+
+    @Test
+    fun `move folder insert index reorders siblings`() {
+        val s = newStore()
+        val a = s.createFolder(null, "A")
+        val b = s.createFolder(null, "B")
+        val c = s.createFolder(null, "C")
+        // folders() 返回 config 存储序（创建序），视觉序按 order 排——断言用 sortedBy order
+        fun layerNames(svc: KbFileStore) = svc.folders().sortedBy { it.order }.map { it.name }
+        assertEquals(listOf("A", "B", "C"), layerNames(s))
+        // A 拖到 B 下边缘（摘出前视觉位次 2）→ 排 B 之后（摘出偏移内部校正）
+        assertTrue(s.moveFolder(a, null, 2))
+        assertEquals(listOf("B", "A", "C"), layerNames(s))
+        // A 拖到层首（插入线 index 0）
+        assertTrue(s.moveFolder(a, null, 0))
+        assertEquals(listOf("A", "B", "C"), layerNames(s))
+        // 默认尾部（右键移动/不传位次）
+        assertTrue(s.moveFolder(a, null))
+        assertEquals(listOf("B", "C", "A"), layerNames(s))
+        // 越界截尾 + 落盘持久化
+        assertTrue(s.moveFolder(c, null, 99))
+        val again = KbFileStore(dir)
+        assertEquals(listOf("B", "A", "C"), layerNames(again))
+        assertEquals(listOf(0, 1, 2), again.folders().sortedBy { it.order }.map { it.order })
     }
 
     @Test

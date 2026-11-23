@@ -2,6 +2,7 @@ package com.zcode.kb.mcp
 
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbFileStore
+import com.zcode.kb.core.KbFilter
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
@@ -135,7 +136,7 @@ class KbMcpServerTest {
             // 目录：逐级建（Ops/Nginx 两级一起）+ 条目批量移动
             val opsId = server.createFolderPath("Ops/Nginx")
             assertTrue(opsId.startsWith("f-"))
-            assertEquals(1, server.moveEntries(listOf("kb-bbbb2222"), "Ops/Nginx"))
+            assertEquals(1, server.moveEntries(listOf("kb-bbbb2222"), "Ops/Nginx", null))
 
             // 标签：注册自动配色 + 全局改名
             val color = server.ensureTag("ops", null)
@@ -146,8 +147,8 @@ class KbMcpServerTest {
             assertEquals(1, server.updateEntries(listOf("kb-aaaa1111"), null, listOf("nacos", "达梦", "信创"), "AI 补充"))
 
             // 防环：挪进自身子孙拒绝；跨层移动成功
-            org.junit.jupiter.api.assertThrows<KbServerStore.KbOpException> { server.moveFolder("信创", "信创/中间件") }
-            server.moveFolder("信创/中间件", "Ops")
+            org.junit.jupiter.api.assertThrows<KbServerStore.KbOpException> { server.moveFolder("信创", "信创/中间件", null) }
+            server.moveFolder("信创/中间件", "Ops", null)
             // 删 Ops 子树（含挪入的中间件）：两条目全部退根级，不丢数据
             assertEquals(2, server.deleteFolder("Ops"))
         }
@@ -162,6 +163,54 @@ class KbMcpServerTest {
             assertEquals("", b.folderId)
             assertTrue(s.folders().none { it.name == "Nginx" || it.name == "中间件" })
             assertTrue(s.folders().any { it.name == "信创" })
+        }
+    }
+
+    @Test
+    fun `java store move with index reorders layers like IDE`(@TempDir dir: Path) {
+        // 自建确定性数据：ingestedAt 递增 → order 全 0 时视觉序 = 收录倒序（新在前）
+        KbFileStore(dir).use { s ->
+            s.insert(KbEntry(id = "kb-aaaa1111", sourcePath = "d:/1.md", title = "甲", ingestedAt = 1000, updatedAt = 1000), "x")
+            s.insert(KbEntry(id = "kb-bbbb2222", sourcePath = "d:/2.md", title = "乙", ingestedAt = 2000, updatedAt = 2000), "y")
+            s.insert(KbEntry(id = "kb-cccc3333", sourcePath = "d:/3.md", title = "丙", ingestedAt = 3000, updatedAt = 3000), "z")
+            s.insert(KbEntry(id = "kb-dddd4444", sourcePath = "d:/4.md", title = "丁", ingestedAt = 4000, updatedAt = 4000), "w")
+            s.createFolder(null, "Ops")
+        }
+        KbServerStore(dir).use { server ->
+            // 初始视觉序与 IDE listEntries 同形
+            assertEquals(
+                listOf("kb-dddd4444", "kb-cccc3333", "kb-bbbb2222", "kb-aaaa1111"),
+                server.list(null, null, null, 10).map { it.id },
+            )
+            // 多选插到层首：ids 顺序决定相对序
+            assertEquals(2, server.moveEntries(listOf("kb-bbbb2222", "kb-cccc3333"), "", 0))
+            assertEquals(
+                listOf("kb-bbbb2222", "kb-cccc3333", "kb-dddd4444", "kb-aaaa1111"),
+                server.list(null, null, null, 10).map { it.id },
+            )
+            // 同层自拖校正：bbbb（摘出前位次 0）拖到 index=2 = 排 cccc 之后
+            assertEquals(1, server.moveEntries(listOf("kb-bbbb2222"), "", 2))
+            assertEquals(
+                listOf("kb-cccc3333", "kb-bbbb2222", "kb-dddd4444", "kb-aaaa1111"),
+                server.list(null, null, null, 10).map { it.id },
+            )
+            // 跨层插位：aaaa 移入 Ops
+            assertEquals(1, server.moveEntries(listOf("kb-aaaa1111"), "Ops", null))
+            assertEquals(listOf("kb-aaaa1111"), server.list("Ops", null, null, 10).map { it.id })
+            // 目录插位：Plugins 拖到层首（Ops 之前）
+            server.createFolderPath("Plugins")
+            server.moveFolder("Plugins", "", 0)
+            // 越界截尾 + 尾部缺省
+            server.moveFolder("Plugins", "", 99)
+        }
+        // Kotlin 读回：Java 写的 order 落盘语义与 IDE 拖拽闭环
+        KbFileStore(dir).use { s ->
+            // 根级：cccc(0) bbbb(1) dddd(2)，aaaa 在 Ops
+            assertEquals(listOf("kb-cccc3333", "kb-bbbb2222", "kb-dddd4444"), s.listEntries(KbFilter(folderId = "")).map { it.id })
+            assertEquals(0, s.getEntry("kb-cccc3333")!!.order)
+            assertEquals(2, s.getEntry("kb-dddd4444")!!.order)
+            // 目录视觉序：Plugins 拖尾后 = Ops, Plugins
+            assertEquals(listOf("Ops", "Plugins"), s.folders().sortedBy { it.order }.map { it.name })
         }
     }
 
