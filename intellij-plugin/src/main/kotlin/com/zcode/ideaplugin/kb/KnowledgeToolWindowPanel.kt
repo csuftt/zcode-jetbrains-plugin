@@ -586,10 +586,11 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                     group.add(sendToInputAction(ZCodeBundle.message("action.sendFileToInput.text"), listOf(entry)))
                     group.addSeparator()
                     group.add(tagsSubmenu(listOf(entry))) // 勾选式标签子菜单
-                    group.add(entryAction(ZCodeBundle.message("kb.tw.btn.open"), AllIcons.Actions.Preview, entry) { openEntry(it) })
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.edit"), AllIcons.Actions.Edit, entry) { editEntry(it) })
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.move"), AllIcons.Actions.MoveToTopRight, entry) { moveEntryTo(it) })
                     group.add(entryAction(ZCodeBundle.message("kb.tw.btn.relink"), AllIcons.Actions.Replace, entry) { relinkEntry(it) })
+                    // 「打开」与双击行重复（2026-11-23 反馈），菜单位让给资源管理器定位，排在重新指定路径后
+                    group.add(entryAction(ZCodeBundle.message("kb.tw.btn.reveal"), AllIcons.Nodes.Folder, entry) { revealEntry(it) })
                     // 仅失联且有 git 锚点的条目可见：正常条目误点会把源路径改指收录时点
                     // 历史副本（内容回退 + 脱离 sweep 对账）；hasBlob 是 git 子进程调用，
                     // update 里太重，blob 已不存在由 restoreFailed 提示兜底
@@ -837,6 +838,29 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         }
     }
 
+    /**
+     * 在系统文件管理器定位源文件：Windows `explorer /select` 选中文件，macOS `open -R`，
+     * Linux 开父目录。只 start 不等退出——explorer 成功也返回非 0 退出码，等待退出会误判失败
+     * （同主面板 turnfile 的 reveal 兜底）。启动失败降级系统默认应用打开。
+     */
+    private fun revealEntry(e: KbEntry) {
+        val f = File(e.sourcePath)
+        if (!f.isFile) {
+            Messages.showInfoMessage(ZCodeBundle.message("kb.tw.sourceMissing"), e.title)
+            return
+        }
+        val os = System.getProperty("os.name")?.lowercase() ?: ""
+        val ok = runCatching {
+            when {
+                os.contains("win") -> ProcessBuilder("explorer.exe", "/select,${f.absolutePath}").start()
+                os.contains("mac") || os.contains("darwin") -> ProcessBuilder("open", "-R", f.absolutePath).start()
+                else -> ProcessBuilder("xdg-open", f.parentFile?.absolutePath ?: f.absolutePath).start()
+            }
+            true
+        }.getOrDefault(false)
+        if (!ok) openWithSystemApp(f, e.title)
+    }
+
     private fun editEntry(e: KbEntry) {
         val service = KbManagerService.instance
         val dialog = KbIngestDialog(
@@ -1038,7 +1062,18 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 }.getOrNull() ?: return false
                 val (supported, skipped) = KbIngestHelper.partitionIngestable(files.map { it.toPath() })
                 KbIngestHelper.notifySkipped(project, skipped)
-                if (supported.isNotEmpty()) ingestWithDialog(supported)
+                if (supported.isNotEmpty()) {
+                    // 弹窗目录预选=拖入落点（2026-11-23 反馈：拖到目录行却还预填上次收录目录）：
+                    // 目录行取该目录、条目行取其所属目录，根行/未知传空回落「上次收录目录」
+                    val node = (support.dropLocation as? javax.swing.JTree.DropLocation)
+                        ?.path?.lastPathComponent as? DefaultMutableTreeNode
+                    val preselectFolder = when (val d = node?.userObject) {
+                        is NodeData.Folder -> d.folder.id
+                        is NodeData.Entry -> d.entry.folderId
+                        else -> null
+                    }
+                    ingestWithDialog(supported, preselectFolder)
+                }
                 return true
             }
             val loc = support.dropLocation as? javax.swing.JTree.DropLocation ?: return false
