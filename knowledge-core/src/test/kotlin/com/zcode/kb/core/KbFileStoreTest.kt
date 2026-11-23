@@ -448,4 +448,31 @@ class KbFileStoreTest {
         assertEquals(KbFileStore.newId("G:/AI/x.md", taken), KbFileStore.newId("G:/AI/x.md", taken))
         assertEquals(a, KbFileStore.newId("G:/AI/x.md", taken = emptySet()))
     }
+
+    @Test
+    fun `updateTags changes only tags and keeps every other field`() {
+        val s = newStore()
+        s.insert(entry("kb-1", "d:/a.md", title = "标题甲", folderId = "f-1").copy(notes = "备注"), "正文")
+        assertTrue(s.updateTags("kb-1") { it + "Redis" })
+        val e = s.getEntry("kb-1")!!
+        assertEquals(listOf("Redis"), e.tags)
+        // 只动 tags：标题/目录/备注/正文缓存都原样（拿过期快照整条覆盖才会丢字段）
+        assertEquals("标题甲", e.title)
+        assertEquals("f-1", e.folderId)
+        assertEquals("备注", e.notes)
+        assertEquals("正文", s.readText("kb-1"))
+        // 变换作用在库里的最新标签上：连续增删不互相覆盖（标签菜单点完不关的场景）
+        assertTrue(s.updateTags("kb-1") { it + "Docker" })
+        assertTrue(s.updateTags("kb-1") { it - "Redis" })
+        assertEquals(listOf("Docker"), s.getEntry("kb-1")!!.tags)
+    }
+
+    @Test
+    fun `updateTags returns false for missing entry or unchanged tags`() {
+        val s = newStore()
+        s.insert(entry("kb-1", "d:/a.md", tags = listOf("Redis")), "正文")
+        assertFalse(s.updateTags("kb-9") { it + "Redis" })
+        assertFalse(s.updateTags("kb-1") { it }) // 标签无变化不写盘（去重/清洗由 service 层套在外面，这里原样写）
+        assertEquals(listOf("Redis"), s.getEntry("kb-1")!!.tags)
+    }
 }

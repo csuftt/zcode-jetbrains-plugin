@@ -10,11 +10,15 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import com.zcode.ideaplugin.ZCodeBundle
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFileStore
+import com.zcode.kb.core.KbGitCli
 import com.zcode.kb.core.KbHeuristics
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Dimension
@@ -43,7 +47,11 @@ import javax.swing.JPanel
  *   菜单与选中展示都要带色块）。单行排布、超宽收「+N」胶囊，行高锁定=目录 combo
  *   preferred 高（选/未选同高，不挤备注行）；框线对齐靠离屏试画标定原生 border 的
  *   真实绘制偏移/色号再补偿（原生 border 带组件类型门控不可复用），框线与标题/
- *   目录/备注左右同列（缺陷HX）。
+ *   目录/备注左右同列（缺陷HX）；
+ * - Git 提交行（2026-11-23 用户要求）：源文件下方显示该文件自己的最近提交（哈希/日期/
+ *   标题），仅 git 管理的文件出现；未提交的新文件、被 .gitignore 忽略、有未提交修改各有
+ *   文案。git 子进程查询不进 EDT——行先隐藏，后台查到再显示并重排弹窗。多文件收录不查
+ *   （清单里每行一个提交既挤又慢）。
  *
  * [titleValue]/[folderPathValue]/[tagsValue]/[notesValue] 在 doValidate 前（即 OK 后）读取。
  */
@@ -52,6 +60,8 @@ class KbIngestDialog(
     folderOptions: List<FolderOption>,
     editOf: KbEntry? = null,
     defaultFolderId: String = "",
+    /** 只用于解析 git 可执行路径（项目里配了自定义 git 时与收录锚点取同一个）；null = PATH 上的 git */
+    private val project: com.intellij.openapi.project.Project? = null,
 ) : DialogWrapper(true) {
 
     /** 目录下拉项：id + 派生展示路径（"" = 根级，恒为首项） */
@@ -63,6 +73,16 @@ class KbIngestDialog(
     private val tagCombo: JComponent
     private val notesArea: JBTextArea
     private val centerPanel: JComponent
+
+    /** 「Git 提交」行（源文件下方）：初值隐藏，查到提交状态才显示；左内边距与源文件行同值（文字起点对齐） */
+    private val commitCaption = JBLabel(ZCodeBundle.message("kb.dialog.commitLabel")).apply { isVisible = false }
+    private val commitLabel = JBLabel().apply {
+        isVisible = false
+        border = JBUI.Borders.empty(0, 8)
+    }
+
+    /** 「Git 提交」行要查的文件（仅单文件收录/编辑有源文件行；多文件收录不查） */
+    private var gitSource: Path? = null
 
     /** 已选标签（保序；初值=编辑条目现有标签；收录默认空，用户自选） */
     private val selectedTags = linkedSetOf<String>()
@@ -169,6 +189,14 @@ class KbIngestDialog(
                 }, c)
                 c.weightx = 0.0
                 row++
+                // Git 提交行紧随源文件下方；隐藏行在 GridBag 里不占位（JDK 17 实测），非 git 文件不留空隙
+                c.gridx = 0; c.gridy = row
+                add(commitCaption, c)
+                c.gridx = 1; c.fill = GridBagConstraints.HORIZONTAL; c.weightx = 1.0
+                add(commitLabel, c)
+                c.weightx = 0.0
+                row++
+                gitSource = runCatching { Path.of(src.toString()) }.getOrNull()
             }
             if (files.size == 1 || editOf != null) {
                 c.gridx = 0; c.gridy = row
@@ -199,6 +227,7 @@ class KbIngestDialog(
         }
 
         init()
+        gitSource?.let { loadCommit(it, editOf) }
     }
 
     val titleValue: String get() = titleField.text.trim()
@@ -319,6 +348,46 @@ class KbIngestDialog(
         return "<html><body style='width:400px'>$esc</body></html>"
     }
 
+    /**
+     * 后台查文件的提交状态，回填「Git 提交」行：不在 git 仓内（或查询失败）= 行保持隐藏。
+     * 回填须 ModalityState.any()——默认 modality 的 invokeLater 在模态弹窗开着时不执行，
+     * 不加的话行要等弹窗关了才冒出来。
+     */
+    private fun loadCommit(file: Path, entry: KbEntry?) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val history = KbManagerService.instance.fileHistory(entry, file, project)
+            ApplicationManager.getApplication().invokeLater({
+                if (isDisposed || history == null) return@invokeLater
+                commitLabel.text = commitHtml(history)
+                commitCaption.isVisible = true
+                commitLabel.isVisible = true
+                centerPanel.revalidate()
+                pack() // 弹窗已按「无此行」定好尺寸：按新内容重排（左上角不动，向下长高）
+            }, ModalityState.any())
+        }
+    }
+
+    /** 提交行 HTML：`a1b2c3d  2026-11-20  标题`，日期与各种标注用灰字 */
+    private fun commitHtml(h: KbGitCli.FileHistory): String {
+        val body = when {
+            h.commit == null && h.ignored -> gray(ZCodeBundle.message("kb.dialog.commit.ignored"))
+            h.commit == null -> gray(ZCodeBundle.message("kb.dialog.commit.uncommitted"))
+            else -> {
+                val c = h.commit!!
+                val subject = c.subject.let { if (it.length > COMMIT_SUBJECT_MAX) it.take(COMMIT_SUBJECT_MAX - 1) + "…" else it }
+                escapeHtml(c.hash) + "  " + gray(escapeHtml(c.date)) + "  " + escapeHtml(subject) +
+                    (if (h.dirty) "  " + gray(ZCodeBundle.message("kb.dialog.commit.dirty")) else "")
+            }
+        }
+        return "<html><body style='width:400px'>$body</body></html>"
+    }
+
+    /** 次要信息灰（跟随主题深浅，与树行的路径灰同色系） */
+    private fun gray(html: String): String {
+        val color = if (UIUtil.isUnderDarcula()) "#8a8f98" else "#6c707e"
+        return "<span style='color:$color'>$html</span>"
+    }
+
     /** 已注册标签选择菜单：色块+勾选态✓；点已选项=取消；底部「新建标签…」即建即选 */
     private fun showTagChooser() {
         val registered = runCatching { KbManagerService.instance.tags() }.getOrDefault(emptyList()).sorted()
@@ -408,7 +477,15 @@ class KbIngestDialog(
     override fun createCenterPanel(): JComponent = JPanel(BorderLayout()).apply {
         add(centerPanel, BorderLayout.CENTER)
     }
+
+    companion object {
+        /** 提交标题行展示上限（字符）：超长截断防把弹窗撑高 */
+        private const val COMMIT_SUBJECT_MAX = 200
+    }
 }
+
+private fun escapeHtml(s: String): String =
+    s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 /** 原生框线真实绘制偏移（距组件边界四边距离）+ 框线色号 */
 private data class BorderProbe(val left: Int, val top: Int, val right: Int, val bottom: Int, val color: Color)

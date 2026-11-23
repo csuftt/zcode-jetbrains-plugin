@@ -29,23 +29,31 @@ class KbGitCliTest {
 
     private fun newRepo(): Path {
         org.junit.jupiter.api.Assumptions.assumeTrue(gitAvailable, "git 不可用，跳过")
-        val dir = Files.createTempDirectory("kb-git-test")
-        fun g(vararg args: String) {
-            val p = ProcessBuilder("git", *args).directory(dir.toFile()).start()
-            p.inputStream.readBytes()
-            p.errorStream.readBytes()
-            assertEquals(0, p.waitFor(), "git ${args.joinToString(" ")} 失败")
-        }
+        repo = Files.createTempDirectory("kb-git-test")
         g("init")
         g("config", "user.email", "t@t")
         g("config", "user.name", "t")
         g("config", "core.autocrlf", "false")
-        Files.createDirectories(dir.resolve("docs"))
-        Files.writeString(dir.resolve("docs/指南.md"), "# 指南\n内容 v1")
+        Files.createDirectories(repo!!.resolve("docs"))
+        Files.writeString(repo!!.resolve("docs/指南.md"), "# 指南\n内容 v1")
         g("add", "-A")
         g("commit", "-m", "init")
-        repo = dir
-        return dir
+        return repo!!
+    }
+
+    private fun g(vararg args: String) {
+        val p = ProcessBuilder("git", *args).directory(repo!!.toFile()).start()
+        p.inputStream.readBytes()
+        p.errorStream.readBytes()
+        assertEquals(0, p.waitFor(), "git ${args.joinToString(" ")} 失败")
+    }
+
+    /** 文件最近一次提交的短哈希（对照值，与被测方法同源于 git 自身） */
+    private fun shortHead(): String {
+        val p = ProcessBuilder("git", "rev-parse", "--short", "HEAD").directory(repo!!.toFile()).start()
+        val out = String(p.inputStream.readBytes(), Charsets.UTF_8).trim()
+        assertEquals(0, p.waitFor())
+        return out
     }
 
     @Test
@@ -88,5 +96,95 @@ class KbGitCliTest {
         val a = cli.anchor(root.resolve("docs/指南.md"))!!
         // 未跟踪文件的假 rel：blob 不存在
         kotlin.test.assertFalse(cli.hasBlob(a.repoRoot.toString(), a.commit, "docs/不存在.md"))
+    }
+
+    // ── 提交状态（收录/编辑弹窗「Git 提交」行） ──
+
+    @Test
+    fun `historyOf reports last commit of clean tracked file`() {
+        val root = newRepo()
+        g("commit", "--allow-empty", "-m", "另一个无关提交") // HEAD 已前移：文件显示的是它自己的提交
+        val h = cli.historyOf(root.resolve("docs/指南.md"))!!
+        assertEquals("init", h.commit!!.subject)
+        kotlin.test.assertNotEquals(shortHead(), h.commit!!.hash)
+        assertTrue(Regex("\\d{4}-\\d{2}-\\d{2}").matches(h.commit!!.date), h.commit!!.date)
+        assertEquals("docs/指南.md", h.relPath)
+        assertEquals(root.toAbsolutePath().normalize(), h.repoRoot)
+        kotlin.test.assertFalse(h.dirty)
+        kotlin.test.assertFalse(h.ignored)
+    }
+
+    @Test
+    fun `historyOf flags uncommitted modification but keeps last commit`() {
+        val root = newRepo()
+        Files.writeString(root.resolve("docs/指南.md"), "# 指南\n内容 v2")
+        val h = cli.historyOf(root.resolve("docs/指南.md"))!!
+        assertEquals("init", h.commit!!.subject)
+        assertTrue(h.dirty)
+    }
+
+    @Test
+    fun `historyOf untracked file has no commit`() {
+        val root = newRepo()
+        Files.writeString(root.resolve("docs/新文档.md"), "x")
+        val h = cli.historyOf(root.resolve("docs/新文档.md"))!!
+        assertNull(h.commit)
+        assertTrue(h.dirty)
+        kotlin.test.assertFalse(h.ignored)
+    }
+
+    @Test
+    fun `historyOf ignored file is marked ignored`() {
+        val root = newRepo()
+        Files.writeString(root.resolve(".gitignore"), "build/\n")
+        Files.createDirectories(root.resolve("build"))
+        Files.writeString(root.resolve("build/out.md"), "x")
+        val h = cli.historyOf(root.resolve("build/out.md"))!!
+        assertNull(h.commit)
+        assertTrue(h.ignored)
+        kotlin.test.assertFalse(h.dirty)
+    }
+
+    @Test
+    fun `historyOf file outside git repo is null`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(gitAvailable, "git 不可用，跳过")
+        val dir = Files.createTempDirectory("kb-nogit")
+        val f = dir.resolve("a.md")
+        Files.writeString(f, "x")
+        assertNull(cli.historyOf(f))
+        dir.toFile().deleteRecursively()
+    }
+
+    @Test
+    fun `historyAt after source deleted returns last commit touching the path`() {
+        val root = newRepo()
+        val a = cli.anchor(root.resolve("docs/指南.md"))!!
+        // 工作区删除（未提交）：最近提交不变，标记有未提交改动
+        Files.delete(root.resolve("docs/指南.md"))
+        cli.historyAt(a.repoRoot, a.relPath)!!.let {
+            assertEquals("init", it.commit!!.subject)
+            assertTrue(it.dirty)
+        }
+        g("add", "-A")
+        g("commit", "-m", "删除指南")
+        cli.historyAt(a.repoRoot, a.relPath)!!.let {
+            assertEquals("删除指南", it.commit!!.subject)
+            kotlin.test.assertFalse(it.dirty)
+        }
+        // 仓目录已不在：null（行不显示）
+        root.toFile().deleteRecursively()
+        assertNull(cli.historyAt(a.repoRoot, a.relPath))
+    }
+
+    @Test
+    fun `pathspec metacharacters in file name are matched literally`() {
+        val root = newRepo()
+        // 当通配时 `部署[测试].md` 匹配的是 部署测.md / 部署试.md，匹配不到它自己
+        Files.writeString(root.resolve("docs/部署[测试].md"), "x")
+        g("add", "-A")
+        g("commit", "-m", "方括号文件名")
+        val h = cli.historyOf(root.resolve("docs/部署[测试].md"))!!
+        assertEquals("方括号文件名", h.commit!!.subject)
+        kotlin.test.assertFalse(h.dirty)
     }
 }

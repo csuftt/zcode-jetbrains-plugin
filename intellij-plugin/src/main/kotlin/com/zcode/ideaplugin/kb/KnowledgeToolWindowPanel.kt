@@ -6,9 +6,11 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.Toggleable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.notification.NotificationGroupManager
@@ -67,7 +69,10 @@ import java.util.Collections
 import javax.swing.BoxLayout
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JMenuItem
+import javax.swing.JPopupMenu
 import javax.swing.JPanel
+import javax.swing.MenuSelectionManager
 import javax.swing.SwingUtilities
 import javax.swing.event.TreeExpansionEvent
 import javax.swing.event.TreeExpansionListener
@@ -139,6 +144,15 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     /** 刷新在飞标志；期间到来的刷新请求记 [pendingRefresh]，回填后立即重跑（不吞查询） */
     private val refreshing = java.util.concurrent.atomic.AtomicBoolean(false)
     private val pendingRefresh = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * 标签写队列（面板级单线程 FIFO）：标签子菜单点击后菜单不关，连续点击必须按点击顺序落库
+     * （后一次的状态包含前一次的结果，乱序会互相覆盖）；「编辑」要先等这些写完再读最新条目，
+     * 也排进同一条队列。dispose 时 shutdown——已排队的写照常跑完。
+     */
+    private val tagWriter = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ZCode-KB-TagWrite").apply { isDaemon = true }
+    }
 
     /**
      * 搜索防抖（300ms）：SearchTextField 每个 keystroke 都触发 DocumentListener，
@@ -795,12 +809,18 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     }
 
     /**
-     * 条目标签子菜单（单选=勾选式切换；多选=toggle 批量：全部已打→点击批量移除，否则
-     * 批量添加）+ 新建标签（批量挂到选中条目）。标签项带注册表色块（用户拍板）。
-     * 右键菜单走 Swing 菜单体系：嵌套 DefaultActionGroup=JMenu 子菜单，hover 即展开
-     * （真机反馈 ListPopup 体系子菜单要点点击，不便）。
+     * 条目标签子菜单：多选菜单项——**点击后菜单不关，可连续增删**（2026-11-23 用户要求）。
+     * 勾选态 ✓ 即时翻转，树内 chip 随落库广播刷新。单选=切换该标签；多选=toggle 批量
+     * （全部已打→点击批量移除，否则批量添加）。「新建标签」要弹输入框，保持点完即关。
+     *
+     * 菜单不关是平台原生的「保持弹出菜单」机制（见 [markKeepPopupOpen]）：菜单项点击时
+     * BegMenuItemUI 不清菜单选择路径，并通知所属 ActionMenu 重跑子菜单全部动作的 update()
+     * ——✓ 就是在那次重跑里画的，所以 update 必须读会话态而不是菜单弹出时的条目快照。
+     * 标签项带注册表色块（用户拍板）。右键菜单走 Swing 菜单体系：嵌套 DefaultActionGroup=
+     * JMenu 子菜单，hover 即展开（真机反馈 ListPopup 体系子菜单要点点击，不便）。
      */
     private fun tagsSubmenu(entries: List<KbEntry>): DefaultActionGroup {
+        val session = TagToggleSession(entries)
         // DefaultActionGroup 作子菜单时默认无图标（真机反馈补位）：update 里补品牌同位图标
         val sub = object : DefaultActionGroup(ZCodeBundle.message("kb.tw.tags.label"), true) {
             override fun update(e: AnActionEvent) {
@@ -809,28 +829,29 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             }
         }
         for (tag in KbManagerService.instance.tags()) {
-            val allHave = entries.all { it.tags.contains(tag) }
             sub.add(object : AnAction(tag) {
+                init {
+                    markKeepPopupOpen(templatePresentation)
+                }
+
+                // ✓ 要在平台「点完重跑 update」里同步落到菜单项上，BGT 的 update 会晚一拍才应用
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
                 override fun update(e: AnActionEvent) {
-                    Toggleable.setSelected(e.presentation, allHave)
+                    val has = session.has(tag)
+                    Toggleable.setSelected(e.presentation, has)
                     // 已选标签文字前加 ✓（用户拍板：色块保留，勾选态用文字前缀，平台 toggled 视觉不可靠）
-                    e.presentation.text = if (allHave) "✓ $tag" else tag
+                    e.presentation.text = if (has) "✓ $tag" else tag
                     // 标签色块（无注册色的回退灰）
                     e.presentation.icon = ColorIcon(
                         runCatching { java.awt.Color.decode(tagColorMap[tag] ?: "#8A919C") }.getOrDefault(java.awt.Color(0x8A919C)),
                     )
                 }
+
                 override fun actionPerformed(e: AnActionEvent) {
-                    ApplicationManager.getApplication().executeOnPooledThread {
-                        runCatching {
-                            for (e in entries) {
-                                val newTags =
-                                    if (allHave) e.tags.filter { it != tag }
-                                    else (e.tags + tag).distinct()
-                                KbManagerService.instance.updateMeta(e.id, e.title, e.folderId, newTags, e.notes)
-                            }
-                        }
-                    }
+                    session.toggle(tag)
+                    // 「✓ 」前缀可能把最长项撑宽，已显示的弹出菜单不会自适应，要重排（时机见 watchTagPopupWidth）
+                    watchTagPopupWidth(e)
                 }
             })
         }
@@ -839,19 +860,70 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         return sub
     }
 
-    /** 新建标签：输入 → 注册表登记（自动分配颜色）→ 批量追加到选中条目 */
+    /**
+     * 标签子菜单的一次会话态。菜单点击后不关、可连续增删，而菜单项手里的 KbEntry 是菜单
+     * 弹出时的快照：勾选态显示与落库内容都以这里为准，否则第二次点击会拿旧快照把第一次
+     * 刚加的标签冲掉。状态整份替换（volatile 引用），读到的永远是完整快照。
+     */
+    private inner class TagToggleSession(entries: List<KbEntry>) {
+        @Volatile
+        private var tagsById: Map<String, List<String>> = entries.associate { it.id to it.tags }
+
+        /** 全部条目都带该标签（多选=批量语义：全有再点=全部移除） */
+        fun has(tag: String): Boolean = tagsById.values.all { tag in it }
+
+        fun toggle(tag: String) = transformAll { if (tag in it) it - tag else it + tag }
+
+        private fun transformAll(transform: (List<String>) -> List<String>) {
+            tagsById = tagsById.mapValues { transform(it.value) }
+            // 落库时对库里的最新标签套同一个变换（见 KbFileStore.updateTags），与会话态同形
+            for (id in tagsById.keys) enqueueTagWrite(id, transform)
+        }
+    }
+
+    private fun enqueueTagWrite(id: String, transform: (List<String>) -> List<String>) {
+        if (tagWriter.isShutdown) return
+        tagWriter.execute {
+            runCatching { KbManagerService.instance.updateEntryTags(id, transform) }
+                .onFailure { log.warn("Knowledge Base: tag write failed ($id): ${it.message}") }
+        }
+    }
+
+    /**
+     * 「✓ 」前缀可能让标签项比弹出时的子菜单还宽——弹出菜单的尺寸弹出即定死，不随菜单项
+     * 文字变宽自适应，会裁字。✓ 是平台在本动作返回之后才重画到菜单项上的（异步重跑 update，
+     * 调度方式各版本不同，没有确定的回调时机），所以改成跟着菜单项的 text 变化走：谁变了
+     * 就把所在弹出菜单按新内容重排一次（没变宽则不动）。每个子菜单只挂一次监听。
+     */
+    private fun watchTagPopupWidth(e: AnActionEvent) {
+        val path = MenuSelectionManager.defaultManager().selectedPath
+        val item = (e.inputEvent?.source as? JMenuItem) ?: path.lastOrNull() as? JMenuItem
+        val popup = item?.parent as? JPopupMenu ?: return
+        if (popup.getClientProperty(WIDTH_WATCH_KEY) == java.lang.Boolean.TRUE) return
+        popup.putClientProperty(WIDTH_WATCH_KEY, java.lang.Boolean.TRUE)
+        for (child in popup.components.filterIsInstance<JMenuItem>()) {
+            child.addPropertyChangeListener("text") { relayoutPopupMenu(popup) }
+        }
+    }
+
+    private fun relayoutPopupMenu(popup: JPopupMenu) {
+        if (!popup.isShowing) return
+        if (popup.preferredSize.width <= popup.width) return // 没变宽就不用动
+        // 位置微挪一格再挪回：setLocation 发现位置变化会自己撤掉旧弹层、按当前内容重建，
+        // 轻量/重量级两种弹层都走它自己的路径；两次调用在同一次事件里，屏幕上只看到最终态。
+        // setLocation 吃的是屏幕坐标（JMenu 弹子菜单也是经 show 换算成屏幕坐标再走它）
+        val at = popup.locationOnScreen
+        popup.setLocation(at.x, at.y - 1)
+        popup.setLocation(at.x, at.y)
+    }
+
+    /** 新建标签：输入 → 注册表登记（自动分配颜色）→ 批量追加到选中条目（读库里最新标签再追加） */
     private fun tagCreate(entries: List<KbEntry>) {
         val name = KbDialogs.input(ZCodeBundle.message("kb.tw.tags.newPrompt")) ?: return
         val clean = KbManagerService.sanitizeTags(listOf(name))
         if (clean.isEmpty()) return
         runCatching { KbManagerService.instance.createTag(clean.first()) }
-        ApplicationManager.getApplication().executeOnPooledThread {
-            runCatching {
-                for (e in entries) {
-                    KbManagerService.instance.updateMeta(e.id, e.title, e.folderId, (e.tags + clean).distinct(), e.notes)
-                }
-            }
-        }
+        for (e in entries) enqueueTagWrite(e.id) { (it + clean).distinct() }
     }
 
     /** 目录右键：新建子目录 / 收录到此目录 / 移动到… / 重命名 / 删除 */
@@ -1097,12 +1169,26 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     }
 
     private fun editEntry(e: KbEntry) {
+        // 标签子菜单点击后菜单不关（见 tagsSubmenu）：e 可能是改标签之前的快照，直接拿它弹窗会
+        // 带出旧标签，点确定就把刚加的标签冲掉。排进标签写队列——队列单线程 FIFO，轮到本任务时
+        // 前面排队的标签写已落库，读到的就是最新条目
+        if (tagWriter.isShutdown) return
+        tagWriter.execute {
+            val fresh = runCatching { KbManagerService.instance.get(e.id) }.getOrNull()
+            ApplicationManager.getApplication().invokeLater {
+                if (!project.isDisposed) showEditDialog(fresh ?: e)
+            }
+        }
+    }
+
+    private fun showEditDialog(e: KbEntry) {
         val service = KbManagerService.instance
         val dialog = KbIngestDialog(
             emptyList(),
             folderOptions(),
             editOf = e,
             defaultFolderId = e.folderId,
+            project = project,
         )
         if (!KbDialogs.show(dialog)) return
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -1192,7 +1278,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
      *  不再缓存「上次收录目录」） */
     fun ingestWithDialog(files: List<Path>, preselectFolderId: String? = null) {
         val service = KbManagerService.instance
-        val dialog = KbIngestDialog(files, folderOptions(), defaultFolderId = preselectFolderId ?: "")
+        val dialog = KbIngestDialog(files, folderOptions(), defaultFolderId = preselectFolderId ?: "", project = project)
         if (!KbDialogs.show(dialog)) return
         ApplicationManager.getApplication().executeOnPooledThread {
             val folderId = resolveFolderChoice(service, dialog)
@@ -1730,6 +1816,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
 
     override fun dispose() {
         searchDebounce.stop()
+        tagWriter.shutdown()
         dropTarget = null
     }
 
@@ -1748,5 +1835,35 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
 
         /** html 分流到 IDE 内置预览（WebPreview/JCEF 渲染），不进默认编辑器 */
         private val HTML_EXTS = setOf(".html", ".htm")
+
+        /** 标签子菜单弹层上「已挂文字变宽重排监听」的标记（client property 键） */
+        private val WIDTH_WATCH_KEY = Any()
+    }
+}
+
+/**
+ * 把动作标记成「点击后菜单不关」的多选菜单项——平台原生机制：菜单项点击时不清菜单选择
+ * 路径，所属子菜单收到通知后重跑全部子项的 update()（所以勾选态在 update 里画即可）。
+ *
+ * 平台 API 跨版本两代且互不兼容，只能反射探测：
+ * - 2023.3～2024.1：`Presentation.setMultiChoice(true)`；
+ * - 2024.2 起：`Presentation.setKeepPopupOnPerform(KeepPopupOnPerform.Always)`，旧方法同期删除；
+ *   同期的标记接口 `KeepingPopupOpenAction` 也已删除，代码里直接引用它会在新平台
+ *   NoClassDefFoundError，不能用。
+ * 编译基线 2023.3 没有新 API、新平台没有旧方法，两代都按方法名找，哪个在用哪个；
+ * 都探不到就静默回退成「点完即关」。
+ */
+internal fun markKeepPopupOpen(presentation: Presentation) {
+    runCatching {
+        val cls = Presentation::class.java
+        val modern = cls.methods.firstOrNull { it.name == "setKeepPopupOnPerform" && it.parameterCount == 1 }
+        if (modern != null) {
+            // Always = 无条件保持。官方注释：给「点击后会改动自身弹出菜单」的开关项用
+            val mode = modern.parameterTypes[0].enumConstants
+            val always = mode?.filterIsInstance<Enum<*>>()?.firstOrNull { it.name == "Always" } ?: mode?.lastOrNull()
+            always?.let { modern.invoke(presentation, it) }
+        } else {
+            cls.getMethod("setMultiChoice", java.lang.Boolean.TYPE).invoke(presentation, true)
+        }
     }
 }

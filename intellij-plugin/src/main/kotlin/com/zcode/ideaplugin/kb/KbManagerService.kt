@@ -182,6 +182,34 @@ class KbManagerService : Disposable {
         return true
     }
 
+    /**
+     * 只改条目标签（标签子菜单增删标签用）：库锁内读最新条目再套 transform，调用方手里的
+     * KbEntry 是菜单弹出时的快照——拿快照整条 updateMeta 会覆盖别的字段，或把连续点击刚
+     * 加上的标签冲掉。@return 是否写盘（条目不存在 / 标签无变化 = false）
+     */
+    fun updateEntryTags(id: String, transform: (List<String>) -> List<String>): Boolean {
+        val changed = store().updateTags(id) { sanitizeTags(transform(it)) }
+        if (changed) KbTopics.publish(null)
+        return changed
+    }
+
+    /**
+     * 文件的 git 提交状态（收录/编辑弹窗「Git 提交」行；后台线程调用——git 子进程不进 EDT）。
+     * 源文件在盘=现查它自己的最近提交；已失联=退回条目锚点里的仓根+相对路径；不在 git
+     * 仓内 / 无锚点 / 仓目录已不在返回 null（行不显示）。
+     */
+    fun fileHistory(entry: KbEntry?, file: Path?, project: Project? = null): KbGitCli.FileHistory? {
+        val cli = KbGitCli(gitExe = resolveGitExe(project))
+        return runCatching {
+            if (file != null && Files.isRegularFile(file)) {
+                cli.historyOf(file)
+            } else {
+                val e = entry ?: return@runCatching null
+                cli.historyAt(Path.of(e.gitRepo ?: return@runCatching null), e.gitRel ?: return@runCatching null)
+            }
+        }.getOrNull()
+    }
+
     /** 摘除：只删登记与缓存，绝不动源文件 */
     fun remove(id: String): Boolean {
         store().removeEntry(id)

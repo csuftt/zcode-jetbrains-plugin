@@ -88,6 +88,19 @@ class KbFileStore(private val root: Path) : AutoCloseable {
         if (text != null) writeText(e.id, text)
     }
 
+    /**
+     * 只改标签：锁内读最新条目 → transform → 写回，其余字段原样保留（调用方手里的条目
+     * 可能是过期快照，不能拿它整条覆盖）。transform 的返回值原样写入——去重/清洗由调用方
+     * （KbManagerService.updateEntryTags）套在外面。@return 是否写盘（条目不存在或标签无变化 = false）
+     */
+    fun updateTags(id: String, transform: (List<String>) -> List<String>): Boolean = synchronized(lock) {
+        val e = readEntry(id) ?: return@synchronized false
+        val tags = transform(e.tags)
+        if (tags == e.tags) return@synchronized false
+        writeEntry(e.copy(tags = tags, updatedAt = System.currentTimeMillis()))
+        true
+    }
+
     /** 摘除条目（只删登记与缓存，绝不动源文件——安全语义） */
     fun removeEntry(id: String) = synchronized(lock) {
         Files.deleteIfExists(entriesDir.resolve("$id.json"))
