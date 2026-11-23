@@ -239,13 +239,6 @@ class KbFileStore(private val root: Path) : AutoCloseable {
         moved
     }
 
-    /** 收录默认目录记忆（弹窗预选），"" = 根级 */
-    fun lastFolderId(): String = synchronized(lock) { readConfig().lastFolderId }
-
-    fun setLastFolderId(id: String) = synchronized(lock) {
-        writeConfig(readConfig().copy(lastFolderId = id))
-    }
-
     /**
      * 移动/重排条目（拖拽落位统一入口）：ids 依次移入目标目录（"" = 根级/根级直放；目标
      * 目录不存在断链容错回根级），并插到目标层条目序列 insertIndex 位次（默认尾部）。
@@ -647,15 +640,16 @@ class KbFileStore(private val root: Path) : AutoCloseable {
 }
 
 /**
- * config.json（version 2）：目录树 + 标签注册表 + 收录默认目录记忆 + 快照根。
+ * config.json（version 2）：目录树 + 标签注册表 + 快照根。
  * 旧版 version 1（modules 字符串清单）读取时 folders/tags 缺省空表——不迁移，自然重置。
+ * lastFolderId 字段已废除（2026-11-23 拍板：收录目录不缓存默认根级）；存量文件里的旧键由
+ * ignoreUnknownKeys 无害忽略。
  */
 @Serializable
 data class KbConfigFile(
     val version: Int = 2,
     val folders: List<KbFolder> = emptyList(),
     val tags: List<KbTagMeta> = emptyList(),
-    val lastFolderId: String = "",
     val snapshotDir: String = "",
 )
 

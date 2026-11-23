@@ -50,7 +50,6 @@ import javax.swing.JPanel
 class KbIngestDialog(
     private val files: List<Path>,
     folderOptions: List<FolderOption>,
-    tagNames: List<String>,
     editOf: KbEntry? = null,
     defaultFolderId: String = "",
 ) : DialogWrapper(true) {
@@ -65,7 +64,7 @@ class KbIngestDialog(
     private val notesArea: JBTextArea
     private val centerPanel: JComponent
 
-    /** 已选标签（保序；初值=编辑条目现有标签 / heuristics 建议） */
+    /** 已选标签（保序；初值=编辑条目现有标签；收录默认空，用户自选） */
     private val selectedTags = linkedSetOf<String>()
     /** 标签 → 注册色 hex（未注册回退灰；新建标签后 refreshTagColors 重读） */
     private var tagColorHex: Map<String, String> = emptyMap()
@@ -82,23 +81,20 @@ class KbIngestDialog(
         }
 
         val firstText = files.firstOrNull()?.let { runCatching { KbExtractor.extract(it) }.getOrNull() }
+        // 2026-11-23 用户拍板：只预填标题（heuristics 推断），标签/目录一律不预填——
+        // 标签让用户自己选，目录默认根级（Suggestion 的 folderName/tags 不再消费）
         val suggestion = editOf?.let {
-            KbHeuristics.Suggestion(it.title, "", it.tags)
+            KbHeuristics.Suggestion(it.title, "", emptyList())
         } ?: runCatching {
-            KbHeuristics.suggest(files.first(), firstText, folderOptions.map { it.name }, tagNames)
+            KbHeuristics.suggest(files.first(), firstText, folderOptions.map { it.name }, emptyList())
         }.getOrDefault(KbHeuristics.Suggestion(files.firstOrNull()?.fileName?.toString() ?: "", "", emptyList()))
 
         // 内容左起点统一 6px（真机反馈：各输入框/下拉/文本起点不齐；label 6、combo UI 内置≈6）
         titleField = JBTextField(suggestion.title).apply { margin = JBUI.insets(2, 6, 2, 6) }
-        // 预选优先级：编辑条目=原目录；拖放/右键落点（defaultFolderId=用户显式意图，压过
-        // heuristics——真机实证：拖文件到「测试啊 1」目录却预选「信创适配」，heuristics 按
-        // 源文件父目录名推断抢了显式落点）；heuristics 推断目录名命中；根级
+        // 预选优先级：编辑条目=原目录；拖放/右键落点（defaultFolderId=用户显式意图）；根级
         val preselect = when {
             editOf != null -> folderOptions.firstOrNull { it.id == editOf.folderId }?.path ?: uncategorizedLabel
             defaultFolderId.isNotEmpty() -> folderOptions.firstOrNull { it.id == defaultFolderId }?.path ?: uncategorizedLabel
-            suggestion.folderName.isNotEmpty() ->
-                folderOptions.firstOrNull { opt -> opt.path == suggestion.folderName || opt.name == suggestion.folderName }?.path
-                    ?: uncategorizedLabel
             else -> uncategorizedLabel
         }
         val items = arrayOf(uncategorizedLabel) + folderOptions.map { it.path }
@@ -109,7 +105,7 @@ class KbIngestDialog(
         // 自绘框按偏移补偿，任何 LAF/DPI 自适应（缺陷HX）
         val comboProbe = probeBorder(folderCombo.border, folderCombo)
         val comboInsets = folderCombo.border.getBorderInsets(folderCombo)
-        selectedTags.addAll(editOf?.tags ?: suggestion.tags)
+        selectedTags.addAll(editOf?.tags ?: emptyList()) // 编辑态带出原标签；收录默认空（2026-11-23 拍板）
         refreshTagColors()
         tagChips = JPanel(FlowRow(4, 2, 360))
         // 弹窗拉伸后按真实宽度重算「+N」收纳

@@ -383,15 +383,6 @@ class KbFileStoreTest {
     }
 
     @Test
-    fun `last folder id round trips`() {
-        val s = newStore()
-        assertEquals("", s.lastFolderId())
-        val f = s.createFolder(null, "信创")
-        s.setLastFolderId(f)
-        assertEquals(f, KbFileStore(dir).lastFolderId())
-    }
-
-    @Test
     fun `clearIndex drops text cache but keeps metadata`() {
         val s = newStore()
         s.insert(entry("kb-1", "d:/1.md", title = "留存标题"), "正文关键词")
@@ -419,10 +410,17 @@ class KbFileStoreTest {
         Files.writeString(dir.resolve("config.json"), "{\"version\":1,\"modules\":[\"旧模块\"]}")
         val s = newStore()
         assertTrue(s.folders().isEmpty())
-        assertEquals("", s.lastFolderId())
         // 新写 config 升 version 2（folders 结构覆盖旧文件）
         val f = s.createFolder(null, "新目录")
         assertEquals(f, KbFileStore(dir).folders().single().id)
+    }
+
+    @Test
+    fun `config with legacy lastFolderId key still loads`() {
+        // lastFolderId 已废除（2026-11-23 拍板：收录目录不缓存），存量文件里的旧键无害忽略
+        Files.writeString(dir.resolve("config.json"), "{\"version\":2,\"lastFolderId\":\"f-old\",\"folders\":[],\"tags\":[]}")
+        val s = newStore()
+        assertTrue(s.folders().isEmpty())
     }
 
     @Test

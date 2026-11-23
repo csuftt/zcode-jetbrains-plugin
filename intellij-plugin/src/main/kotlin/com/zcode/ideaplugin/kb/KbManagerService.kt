@@ -159,7 +159,6 @@ class KbManagerService : Disposable {
             indexedSize = runCatching { Files.size(file) }.getOrDefault(0),
         )
         s.insert(entry, text ?: "")
-        s.setLastFolderId(folderId) // 收录默认目录记忆（下次弹窗预选）
         log.info("Knowledge Base: ingested ${entry.id} <- $display (extract=${text != null}, git=${anchor != null})")
         KbTopics.publish(project)
         return entry
@@ -243,8 +242,6 @@ class KbManagerService : Disposable {
     fun folders(): List<KbFolder> = store().folders()
 
     fun folderPath(folderId: String): String = store().folderPath(folderId)
-
-    fun lastFolderId(): String = store().lastFolderId()
 
     fun tags(): List<String> = store().allTags()
 

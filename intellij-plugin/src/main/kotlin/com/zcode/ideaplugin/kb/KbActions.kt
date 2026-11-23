@@ -57,8 +57,6 @@ class KbAddFilesAction : AnAction(
         val dialog = KbIngestDialog(
             files,
             folderOptions,
-            service.tags(),
-            defaultFolderId = runCatching { service.lastFolderId() }.getOrDefault(""),
         )
         if (!dialog.showAndGet()) return
         val title = dialog.titleValue
