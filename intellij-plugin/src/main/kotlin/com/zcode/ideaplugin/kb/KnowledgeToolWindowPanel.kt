@@ -37,6 +37,7 @@ import com.intellij.util.ui.UIUtil
 import com.zcode.ideaplugin.ZCodeBundle
 import com.zcode.ideaplugin.ZCodeIcons
 import com.zcode.ideaplugin.action.pushRefs
+import com.zcode.ideaplugin.action.pushTextToInput
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFileStore
@@ -84,16 +85,20 @@ import javax.swing.tree.TreeNode
  *
  *   ┌───────────────────────────────┐
  *   │ [🔍 搜索……]      [⊕收录 ⟳ ⟲] │  顶行（模块/项目过滤行已废）
- *   │ ▾ 📁 信创适配            3    │
- *   │   ▾ 📁 中间件            2    │  树：用户目录（递归） → 条目
- *   │     · 📄 Redis 部署 ⟨部署⟩…   │  条目行 = 标题 + 标签 chip（最多 2 个 + 省略号）
- *   │ · 📄 未归组条目               │  根级直放条目 = 根级（垫底）
+ *   │ ▾ 🗂 全部               51    │  可见根「全部」= 拖回根级的落点
+ *   │   ▾ 📁 信创适配          3    │
+ *   │     ▾ 📁 中间件          2    │  树：用户目录（递归） → 条目
+ *   │       · 📄 Redis 部署 ⟨部署⟩… │  条目行 = 标题 + 标签 chip（最多 2 个 + 省略号）
+ *   │   · 📄 未归组条目             │  根级直放条目 = 「全部」直属（垫底）
  *   └───────────────────────────────┘
  *
- * 树行为：搜索有词时退化为平铺命中列表（命中标签 chip 提前第一位并金黄高亮）；
- * 展开态/选中态跨刷新记忆（key 字符串对齐）；目录管理/条目动作全在右键。
+ * 树行为：搜索有词时退化为平铺命中列表（命中标签 chip 提前第一位并金黄高亮）；标签
+ * 过滤保留层级但无命中条目的目录整枝隐藏；展开态/选中态跨刷新记忆（key 字符串对齐）；
+ * 目录管理/条目动作全在右键。快速展开/收起（2026-11-23 拍板）：工具条末位一个智能按钮
+ * 管整棵树（图标按状态换向，搜索平铺态置灰）、目录右键「展开子目录/收起子目录」管一整支；
+ * 不做快捷键，单击目录名不改开合（单击选中、双击/箭头开合一层）。
  * 拖拽（DropMode.ON_OR_INSERT）：行边缘=插入线——条目=层内插位重排（多选依次插入）、
- * 目录=同层排序；行中心=ON——落目录行=移入尾部、条目行=排其后、根=根级；目录防环
+ * 目录=同层排序；行中心=ON——落目录行=移入尾部、条目行=排其后、「全部」行=根级；目录防环
  * （拒绝拖入自身子孙，canImport 拒绝 + 数据层二次校验）。条目顺序存 order 字段
  * （拖拽全层重写 0..n-1），目录 order 同理，重启保持。「发送到 ZC GUI 输入框」=
  * 条目右键第一组（品牌图标置顶）。
@@ -117,6 +122,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     private val treeModel = DefaultTreeModel(DefaultMutableTreeNode("root"))
     private val tree = Tree(treeModel)
     private val expandedKeys = HashSet<String>()
+    /** 展开态是否已初始化：首次加载全展开，此后 expandedKeys 空集=用户全部收起（不回弹） */
+    private var expansionInitialized = false
 
     // ── 数据缓存（rebuild 后常驻，canImport 防环 / 删除确认计数 / chip 颜色用） ──
     private var foldersCache: List<KbFolder> = emptyList()
@@ -217,7 +224,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             }
         })
 
-        // 顶行工具条：⊕ 收录 + ⟳ 刷新 + 标签管理（用户拍板从空白右键挪顶上）+ 库级重建索引
+        // 顶行工具条：⊕ 收录 + ⟳ 刷新 + 标签管理（用户拍板从空白右键挪顶上）+ 全部展开/收起（2026-11-23）
         val group = DefaultActionGroup().apply {
             add(action(ZCodeBundle.message("kb.action.add.text"), AllIcons.General.Add) { ingestFromChooser() })
             add(action(ZCodeBundle.message("kb.tw.btn.refresh"), AllIcons.Actions.Refresh) { refreshAsync() })
@@ -236,8 +243,37 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                     showTagFilterPopup(e.inputEvent?.source as? java.awt.Component)
                 }
             })
-            add(action(ZCodeBundle.message("kb.tw.tags.manage"), AllIcons.Nodes.Tag) { KbDialogs.show(KbTagsDialog()) })
+            // 图标用 codicon tag 造型（斜挂牌，与展开/收起箭头区分——AllIcons.Nodes.Tag 形似被否）
+            add(action(ZCodeBundle.message("kb.tw.tags.manage"), kbIcon("kb-tag.svg")) { KbDialogs.show(KbTagsDialog()) })
             // 重建索引已挪设置页（2026-11-22：库级数据动作与快照位置设置同区，工具窗只留日常操作）
+            // 末位一个智能按钮（2026-11-23 拍板，原型 kb-tree-expand-collapse-ui-prototype.html）：
+            // 还有目录没收起=「全部展开」（箭头向外），已全开=「全部收起」（箭头向内）；搜索平铺态置灰
+            add(object : AnAction(
+                ZCodeBundle.message("kb.tw.expandAll"),
+                ZCodeBundle.message("kb.tw.expandAll"),
+                AllIcons.Actions.Expandall,
+            ) {
+                private fun allOpen(): List<NodeData.Folder> = foldersOnTree()
+
+                private fun fullyExpanded(folders: List<NodeData.Folder>): Boolean =
+                    folders.isNotEmpty() && folders.all { it.key in expandedKeys }
+
+                override fun update(e: AnActionEvent) {
+                    val folders = allOpen()
+                    val open = fullyExpanded(folders)
+                    // 搜索结果是平铺命中列表，无目录可开合；标签过滤保留层级照常可用
+                    e.presentation.isEnabled = searchHits.isEmpty() && folders.isNotEmpty()
+                    val text = ZCodeBundle.message(if (open) "kb.tw.collapseAll" else "kb.tw.expandAll")
+                    e.presentation.setText(text)
+                    e.presentation.setDescription(text)
+                    e.presentation.setIcon(if (open) AllIcons.Actions.Collapseall else AllIcons.Actions.Expandall)
+                }
+
+                override fun actionPerformed(e: AnActionEvent) {
+                    val folders = allOpen()
+                    if (fullyExpanded(folders)) collapseAllFolders() else expandAllFolders()
+                }
+            })
         }
         toolbar = com.intellij.openapi.actionSystem.ActionManager.getInstance()
             .createActionToolbar("ZCode.KnowledgeToolbar", group, true).apply {
@@ -344,8 +380,9 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                     searchTokens = emptyList()
                     searchHits = emptyMap()
                 }
-                // 标签过滤态走正常目录树（entries 已是过滤子集）——层级保留只筛条目（真机反馈：平铺丢层级）
-                rebuildTree(entries, folders, searching = q.isNotEmpty())
+                // 标签过滤态走正常目录树（entries 已是过滤子集）——层级保留只筛条目（真机反馈：平铺丢层级），
+                // 且无命中条目的目录整枝隐藏（2026-11-23 反馈：过滤后空目录还挂着干扰视线）
+                rebuildTree(entries, folders, searching = q.isNotEmpty(), filtering = q.isNotEmpty() || tags.isNotEmpty())
                 refreshing.set(false)
                 if (pendingRefresh.getAndSet(false)) {
                     refreshAsync()
@@ -467,6 +504,11 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     private sealed class NodeData {
         abstract val key: String
 
+        /** 可见根「全部」：全库条目聚合行，也是条目/目录拖拽回根级的落点（拖条目到该行=移入根级） */
+        class Root(val count: Int) : NodeData() {
+            override val key = "R\u0001all"
+        }
+
         class Folder(val folder: KbFolder, val count: Int) : NodeData() {
             override val key = "F\u0001${folder.id}"
         }
@@ -477,12 +519,19 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
     }
 
     /**
-     * 全量重建：用户目录树（层级不限，空目录也上树）→ 条目挂 folderId；根级/断链
-     * 条目垫底（根级）；搜索词非空退化为根下平铺命中条目。
+     * 全量重建：可见根「全部」（拖拽回根级的落点）→ 用户目录树（层级不限，空目录也上树）
+     * → 条目挂 folderId；根级/断链条目垫底（「全部」直属）；搜索词非空退化为「全部」下
+     * 平铺命中条目。库全空时根隐身，让 emptyText 空态提示可见。
+     *
+     * filtering=true（搜索或标签过滤）时剪枝：子树内没有任何命中条目的目录整枝隐藏
+     * （递归到顶层——父目录子树全空同样隐藏），只留下还有命中的骨架。
      */
-    private fun rebuildTree(entries: List<KbEntry>, folders: List<KbFolder>, searching: Boolean) {
+    private fun rebuildTree(entries: List<KbEntry>, folders: List<KbFolder>, searching: Boolean, filtering: Boolean) {
         val selectedId = selected()?.id
-        val root = DefaultMutableTreeNode("root")
+        // 根隐身（让 emptyText 可见）：空库，或搜索/过滤后零命中——有内容时可见根「全部」做落点
+        val isEmpty = entries.isEmpty() && (filtering || folders.isEmpty())
+        tree.isRootVisible = !isEmpty
+        val root = DefaultMutableTreeNode(if (isEmpty) "root" else NodeData.Root(entries.size))
         if (searching) {
             entries.forEach { root.add(DefaultMutableTreeNode(NodeData.Entry(it))) }
         } else {
@@ -491,6 +540,17 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             val subtreeCount = HashMap<String, Int>()
             val childrenOf = folders.groupBy { it.parentId ?: "" }
             val entriesByFolder = entries.groupBy { it.folderId } // 条目挂目录节点（拖拽/移动的展示主体）
+            // 过滤态剪枝：命中条目所在目录 + 其全部祖先保留，其余整枝隐藏（空目录在非过滤态照常上树）
+            val keepIds: Set<String>? = if (filtering) {
+                val hitFolders = entries.map { it.folderId }.toHashSet()
+                val memo = HashMap<String, Boolean>()
+                fun subtreeHasHit(folderId: String): Boolean = memo.getOrPut(folderId) {
+                    folderId in hitFolders || childrenOf[folderId].orEmpty().any { subtreeHasHit(it.id) }
+                }
+                folders.filter { subtreeHasHit(it.id) }.map { it.id }.toSet()
+            } else {
+                null
+            }
             fun countWith(folderId: String): Int {
                 if (subtreeCount.containsKey(folderId)) return subtreeCount[folderId]!!
                 var n = directCount[folderId] ?: 0
@@ -499,7 +559,9 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 return n
             }
             fun build(parentNode: DefaultMutableTreeNode, parentKey: String) {
-                for (f in (childrenOf[parentKey].orEmpty()).sortedWith(compareBy({ it.order }, { it.name }))) {
+                for (f in (childrenOf[parentKey].orEmpty())
+                    .filter { keepIds == null || it.id in keepIds }
+                    .sortedWith(compareBy({ it.order }, { it.name }))) {
                     val n = DefaultMutableTreeNode(NodeData.Folder(f, countWith(f.id)))
                     parentNode.add(n)
                     build(n, f.id)
@@ -521,23 +583,87 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         treeModel.reload()
         restoreExpansion(root)
         restoreSelection(root, selectedId)
-        // 空态分流：搜索无命中≠空库（缺陷HV真机误导：搜不到时显示「暂无条目」让用户以为条目丢了）
-        tree.emptyText.text = if (searching && root.childCount == 0) {
-            ZCodeBundle.message("kb.tw.searchNoHit")
-        } else {
-            ZCodeBundle.message("kb.tw.emptyHint")
+        // 空态分流：搜索/过滤无命中≠空库（缺陷HV真机误导：搜不到时显示「暂无条目」让用户以为条目丢了）
+        tree.emptyText.text = when {
+            searching && root.childCount == 0 -> ZCodeBundle.message("kb.tw.searchNoHit")
+            filtering && root.childCount == 0 -> ZCodeBundle.message("kb.tw.filterNoHit")
+            else -> ZCodeBundle.message("kb.tw.emptyHint")
         }
     }
 
-    /** 展开态恢复：按 key 对齐；首次加载（无记忆）展开全部目录层 */
+    /** 展开态恢复：按 key 对齐；首次加载（显式标志）展开全部目录层 */
     private fun restoreExpansion(root: DefaultMutableTreeNode) {
-        val firstLoad = expandedKeys.isEmpty()
+        // 空集合≠首次加载（2026-11-23：全部收起后切面板/搜索清空会把空集误判为首次而全展开回弹）
+        val firstLoad = !expansionInitialized
+        expansionInitialized = true
         val e = root.depthFirstEnumeration()
         while (e.hasMoreElements()) {
             val n = e.nextElement() as DefaultMutableTreeNode
             val d = n.userObject as? NodeData ?: continue
             if (d is NodeData.Folder && (firstLoad || expandedKeys.contains(d.key))) {
                 tree.expandPath(TreePath(n.path))
+            }
+        }
+    }
+
+    // ───────────────────────── 全部/子树 展开·收起（2026-11-23） ─────────────────────────
+
+    /** 当前树上可见的目录节点（搜索平铺态=空；标签过滤态=剪枝后骨架） */
+    private fun foldersOnTree(): List<NodeData.Folder> {
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return emptyList()
+        val out = ArrayList<NodeData.Folder>()
+        val e = root.depthFirstEnumeration()
+        while (e.hasMoreElements()) {
+            ((e.nextElement() as DefaultMutableTreeNode).userObject as? NodeData.Folder)?.let { out.add(it) }
+        }
+        return out
+    }
+
+    /** 树上按 key 找节点（找不到=null：过滤剪枝态下不在骨架里） */
+    private fun treeNodeByKey(key: String): DefaultMutableTreeNode? {
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return null
+        val e = root.depthFirstEnumeration()
+        while (e.hasMoreElements()) {
+            val n = e.nextElement() as DefaultMutableTreeNode
+            if ((n.userObject as? NodeData)?.key == key) return n
+        }
+        return null
+    }
+
+    /** 工具条「全部展开」：树上全部目录展开（先父后子，事件链自然记录 expandedKeys）；「全部」行保持展开 */
+    private fun expandAllFolders() {
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return
+        val e = root.preorderEnumeration()
+        while (e.hasMoreElements()) {
+            val n = e.nextElement() as DefaultMutableTreeNode
+            val d = n.userObject as? NodeData.Folder ?: continue
+            expandedKeys.add(d.key)
+            tree.expandPath(TreePath(n.path))
+        }
+    }
+
+    /** 工具条「全部收起」：树上全部目录自底向上收起（后序=先叶子后父，每步都从可见态收起，
+     *  子孙不残留隐藏展开态——否则下次展开父目录时子孙自动弹开，违背「收起就是收起」）；
+     *  「全部」行保持展开，露出顶层目录 */
+    private fun collapseAllFolders() {
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return
+        val e = root.depthFirstEnumeration() // 后序
+        while (e.hasMoreElements()) {
+            val n = e.nextElement() as DefaultMutableTreeNode
+            val d = n.userObject as? NodeData.Folder ?: continue
+            expandedKeys.remove(d.key)
+            tree.collapsePath(TreePath(n.path))
+        }
+    }
+
+    /** expandedKeys 应用到当前树（右键子树开合即时生效；不在树上的 key 下次 rebuild 恢复时生效） */
+    private fun applyExpansionToTree() {
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return
+        val e = root.depthFirstEnumeration()
+        while (e.hasMoreElements()) {
+            val n = e.nextElement() as DefaultMutableTreeNode
+            (n.userObject as? NodeData.Folder)?.let { d ->
+                if (d.key in expandedKeys) tree.expandPath(TreePath(n.path)) else tree.collapsePath(TreePath(n.path))
             }
         }
     }
@@ -607,6 +733,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 }
             }
             is NodeData.Folder -> folderMenu(d.folder, group)
+            is NodeData.Root -> blankMenu(group) // 「全部」行右键 = 空白区同款（新建根级目录/收录）
             else -> blankMenu(group)
         }
         // Swing 菜单体系（ActionPopupMenu）：子菜单=JMenu，hover 即展开——
@@ -619,14 +746,53 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             .show(tree, e.x, e.y)
     }
 
-    /** 发送到 ZC GUI 输入框（品牌图标；条目文件引用，AI 拿到路径即可读原文） */
+    /**
+     * 发送到 ZC GUI 输入框（品牌图标置顶）：文件引用（AI 拿到路径即可读原文）+ 知识库
+     * 上下文尾注（紧跟引用后插入纯文本——AI 据此知道出处是知识库、可用 zcgui-knowledge
+     * 技能 / kb_search 检索更多）。单篇带标题/目录/标签，批量只报数量（2026-11-23 用户拍板）。
+     */
     private fun sendToInputAction(text: String, entries: List<KbEntry>): AnAction =
         object : AnAction(text, text, ZCodeIcons.ZcGui) {
             override fun actionPerformed(e: AnActionEvent) {
                 val refs = entries.map { "@" + it.sourcePath }
-                if (refs.isNotEmpty()) pushRefs(project, refs)
+                if (refs.isEmpty()) return
+                pushRefs(project, refs)
+                pushTextToInput(project, kbSendContext(entries))
             }
         }
+
+    /** 知识库发送尾注：单篇=标题+目录路径；多选批量=仅数量（标签不进文案，2026-11-23 用户拍板） */
+    private fun kbSendContext(entries: List<KbEntry>): String =
+        if (entries.size == 1) {
+            val entry = entries.first()
+            ZCodeBundle.message("kb.tw.sendKb.entry", entry.title, folderDisplayPath(entry.folderId))
+        } else {
+            ZCodeBundle.message("kb.tw.sendKb.batch", entries.size)
+        }
+
+    /** 目录显示路径（foldersCache 祖先上溯，纯内存不打盘；断链/根级返回空串） */
+    private fun folderDisplayPath(folderId: String): String {
+        val byId = foldersCache.associateBy { it.id }
+        var cur: KbFolder? = byId[folderId] ?: return ""
+        val parts = ArrayDeque<String>()
+        while (cur != null) {
+            parts.addFirst(cur.name)
+            cur = cur.parentId?.let { byId[it] }
+        }
+        return parts.joinToString("/")
+    }
+
+    /** 目录子树内可发送条目（status!=missing；断链条目不属于任何目录，天然排除） */
+    private fun subtreeOkEntries(folder: KbFolder): List<KbEntry> {
+        val byParent = foldersCache.groupBy { it.parentId ?: "" }
+        val ids = HashSet<String>()
+        fun walk(id: String) {
+            if (!ids.add(id)) return
+            byParent[id].orEmpty().forEach { walk(it.id) }
+        }
+        walk(folder.id)
+        return entriesCache.filter { it.folderId in ids && it.status != KbEntry.STATUS_MISSING }
+    }
 
     /**
      * 条目标签子菜单（单选=勾选式切换；多选=toggle 批量：全部已打→点击批量移除，否则
@@ -638,7 +804,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         // DefaultActionGroup 作子菜单时默认无图标（真机反馈补位）：update 里补品牌同位图标
         val sub = object : DefaultActionGroup(ZCodeBundle.message("kb.tw.tags.label"), true) {
             override fun update(e: AnActionEvent) {
-                e.presentation.icon = AllIcons.Nodes.Tag
+                // 与工具条「管理标签」同款 codicon tag 造型（AllIcons.Nodes.Tag 形似展开箭头已弃用）
+                e.presentation.icon = kbIcon("kb-tag.svg")
             }
         }
         for (tag in KbManagerService.instance.tags()) {
@@ -689,12 +856,64 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
 
     /** 目录右键：新建子目录 / 收录到此目录 / 移动到… / 重命名 / 删除 */
     private fun folderMenu(f: KbFolder, group: DefaultActionGroup) {
+        // 发送到输入框置顶（品牌图标对齐条目菜单）：只发目录路径+篇数纯文本（2026-11-23
+        // 用户拍板不拖文档引用，AI 用 kb_search 按目录检索）；子树无可送条目不显示
+        val sendable = subtreeOkEntries(f)
+        if (sendable.isNotEmpty()) {
+            group.add(object : AnAction(
+                ZCodeBundle.message("action.sendFileToInput.text"),
+                ZCodeBundle.message("action.sendFileToInput.text"),
+                ZCodeIcons.ZcGui,
+            ) {
+                override fun actionPerformed(e: AnActionEvent) {
+                    pushTextToInput(
+                        project,
+                        ZCodeBundle.message("kb.tw.sendKb.folder", folderDisplayPath(f.id), sendable.size),
+                    )
+                }
+            })
+        }
         group.add(action(ZCodeBundle.message("kb.tw.folder.newSub"), AllIcons.Nodes.Folder) { folderCreate(f.id) })
         group.add(action(ZCodeBundle.message("kb.tw.folder.ingestHere"), AllIcons.General.Add) { ingestFromChooser(f.id) })
         group.add(action(ZCodeBundle.message("kb.tw.btn.move"), AllIcons.Actions.MoveToTopRight) { moveFolderTo(f) })
         group.addSeparator()
         group.add(action(ZCodeBundle.message("kb.tw.folder.rename"), AllIcons.Actions.Edit) { folderRename(f) })
         group.add(action(ZCodeBundle.message("kb.tw.folder.delete"), AllIcons.Actions.GC) { folderDelete(f) })
+        // 末组：子树开合（2026-11-23 拍板）。展开=自身和所有层级全开；收起=子孙全收、自身保留展开。
+        // 置灰：叶子目录两项都灰；子树已全开「展开」灰；自身已收起或子孙全收「收起」灰
+        val subIds = subtreeIds(foldersCache, f.id) - f.id
+        val selfOpen = "F\u0001${f.id}" in expandedKeys
+        val expandedSubs = subIds.count { "F\u0001$it" in expandedKeys }
+        group.addSeparator()
+        group.add(object : AnAction(
+            ZCodeBundle.message("kb.tw.folder.expandSub"),
+            ZCodeBundle.message("kb.tw.folder.expandSub"),
+            AllIcons.Actions.Expandall,
+        ) {
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = subIds.isNotEmpty() && !(selfOpen && expandedSubs == subIds.size)
+            }
+
+            override fun actionPerformed(e: AnActionEvent) {
+                expandedKeys.add("F\u0001${f.id}")
+                subIds.forEach { expandedKeys.add("F\u0001$it") }
+                applyExpansionToTree()
+            }
+        })
+        group.add(object : AnAction(
+            ZCodeBundle.message("kb.tw.folder.collapseSub"),
+            ZCodeBundle.message("kb.tw.folder.collapseSub"),
+            AllIcons.Actions.Collapseall,
+        ) {
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = subIds.isNotEmpty() && selfOpen && expandedSubs > 0
+            }
+
+            override fun actionPerformed(e: AnActionEvent) {
+                subIds.forEach { expandedKeys.remove("F\u0001$it") }
+                applyExpansionToTree()
+            }
+        })
     }
 
     /** 空白右键：只留新建根级目录（收录在顶部有 ⊕、管理标签在顶部有入口，重复项已删） */
@@ -882,7 +1101,6 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         val dialog = KbIngestDialog(
             emptyList(),
             folderOptions(),
-            service.tags(),
             editOf = e,
             defaultFolderId = e.folderId,
         )
@@ -969,11 +1187,12 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
         }
     }
 
-    /** 拖拽/复用收录入口：弹窗确认 → 后台 ingest（service 侧广播刷新面板） */
+    /** 拖拽/复用收录入口：弹窗确认 → 后台 ingest（service 侧广播刷新面板）。
+     *  目录预选只认显式落点（拖放落点/收录到此），无显式落点默认根级（2026-11-23 拍板：
+     *  不再缓存「上次收录目录」） */
     fun ingestWithDialog(files: List<Path>, preselectFolderId: String? = null) {
         val service = KbManagerService.instance
-        val defaultFolderId = preselectFolderId?.takeIf { it.isNotEmpty() } ?: runCatching { service.lastFolderId() }.getOrDefault("")
-        val dialog = KbIngestDialog(files, folderOptions(), service.tags(), defaultFolderId = defaultFolderId)
+        val dialog = KbIngestDialog(files, folderOptions(), defaultFolderId = preselectFolderId ?: "")
         if (!KbDialogs.show(dialog)) return
         ApplicationManager.getApplication().executeOnPooledThread {
             val folderId = resolveFolderChoice(service, dialog)
@@ -1023,13 +1242,13 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 if (supported.isNotEmpty()) {
                     // 弹窗目录预选=拖入落点行（2026-11-23 反馈：拖到目录行却还预填上次收录目录）：
                     // 光标坐标转树坐标取精确行（行外取最近行兜底），目录行取该目录、条目行取其
-                    // 所属目录、树外/根行传空回落「上次收录目录」
+                    // 所属目录、「全部」行取根目录、树外传空回落「上次收录目录」
                     val preselectFolder = dropTargetFolderId(dtde.location)
                     SwingUtilities.invokeLater { ingestWithDialog(supported, preselectFolder) }
                 }
             }
 
-            /** drop 光标 → 落点行节点 → 预选目录 id（null=树外/根行/无法解析） */
+            /** drop 光标 → 落点行节点 → 预选目录 id（null=树外/无法解析回落上次收录目录） */
             private fun dropTargetFolderId(panelPoint: java.awt.Point): String? {
                 val pt = javax.swing.SwingUtilities.convertPoint(
                     this@KnowledgeToolWindowPanel, panelPoint, tree,
@@ -1040,7 +1259,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                 return when (val d = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject) {
                     is NodeData.Folder -> d.folder.id
                     is NodeData.Entry -> d.entry.folderId
-                    else -> null // 根行 = 根级（回落上次收录目录）
+                    is NodeData.Root -> "" // 「全部」行 = 预选根目录
+                    else -> null
                 }
             }
         })
@@ -1087,15 +1307,15 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                         when (val d = node.userObject) {
                             is NodeData.Folder -> loc.childIndex <= dirCount &&
                                 d.folder.id != draggedId && !isAncestor(draggedId, d.folder.id)
-                            is String -> loc.childIndex <= dirCount // 根行边缘 = 根级插位
+                            is NodeData.Root -> loc.childIndex <= dirCount // 「全部」行边缘 = 根级插位
                             else -> false
                         }
                     } else {
-                        // ON：目录节点（非自身/子孙）或根行；条目行不算目录落点
+                        // ON：目录节点（非自身/子孙）、「全部」行或空白根；条目行不算目录落点
                         val target = node.userObject as? NodeData.Folder
                         when {
                             target != null -> target.folder.id != draggedId && !isAncestor(draggedId, target.folder.id)
-                            node.userObject is String -> true // 根行 = 根级
+                            node.userObject is NodeData.Root -> true // 「全部」行 = 根级
                             else -> false
                         }
                     }
@@ -1137,7 +1357,8 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
                     val preselectFolder = when (val d = node?.userObject) {
                         is NodeData.Folder -> d.folder.id
                         is NodeData.Entry -> d.entry.folderId
-                        else -> null // 根行 = 根级（回落上次收录目录）
+                        is NodeData.Root -> "" // 「全部」行 = 预选根目录
+                        else -> null // 树外/无法解析（回落上次收录目录）
                     }
                     ingestWithDialog(supported, preselectFolder)
                 }
@@ -1189,7 +1410,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             return when (val d = node.userObject) {
                 is NodeData.Folder -> d.folder.id to Int.MAX_VALUE
                 is NodeData.Entry -> parentFolderIdOf(node) to siblingIndexOf(node) + 1
-                else -> "" to Int.MAX_VALUE // 根行 = 根级尾部
+                else -> "" to Int.MAX_VALUE // 「全部」行 = 根级尾部（else 同时兜住空白根）
             }
         }
 
@@ -1206,7 +1427,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             }
             return when (val d = node.userObject) {
                 is NodeData.Folder -> d.folder.id to Int.MAX_VALUE
-                is String -> null to Int.MAX_VALUE // 根行 = 根级尾部
+                is NodeData.Root -> null to Int.MAX_VALUE // 「全部」行 = 根级尾部
                 else -> null
             }
         }
@@ -1310,6 +1531,11 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             ) {
                 val d = (value as? DefaultMutableTreeNode)?.userObject as? NodeData ?: return
                 when (d) {
+                    is NodeData.Root -> {
+                        icon = AllIcons.Nodes.HomeFolder
+                        append(ZCodeBundle.message("kb.tw.allRoot"), SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                        if (d.count > 0) append("  ${d.count}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    }
                     is NodeData.Folder -> {
                         icon = AllIcons.Nodes.Folder
                         append(d.folder.name, SimpleTextAttributes.REGULAR_ATTRIBUTES)
