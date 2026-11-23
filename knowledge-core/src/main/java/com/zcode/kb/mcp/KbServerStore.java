@@ -539,15 +539,42 @@ final class KbServerStore implements AutoCloseable {
     }
 
     /**
-     * 批量更新条目。title 仅单条目（批量设同标题无意义）；tags=**替换**全集合（追加场景
-     * 调用方先 kb_list 读现有 tags 自行合并）；null 参数=不改动。@return 更新条目数
+     * 批量更新条目。title/sourcePath 仅单条目（批量设同标题无意义；sourcePath=重指向，
+     * 与 IDE 侧 relink 同语义：换路径即重抽取文本，id/标题/目录/标签/备注不动，传当前
+     * 路径=仅刷新缓存文本）；tags=**替换**全集合（追加场景调用方先 kb_list 读现有 tags
+     * 自行合并）；null 参数=不改动。@return 更新条目数
      */
-    int updateEntries(List<String> ids, String title, List<String> tags, String notes) {
+    int updateEntries(List<String> ids, String title, List<String> tags, String notes, String sourcePath) {
         if (ids == null || ids.isEmpty()) {
             throw new KbOpException("ids is empty");
         }
         if (title != null && ids.size() > 1) {
             throw new KbOpException("title applies to a single entry only");
+        }
+        if (sourcePath != null && ids.size() > 1) {
+            throw new KbOpException("sourcePath applies to a single entry only");
+        }
+        // 重指向预检（写入前全部完成）：文件存在 + 不与其他条目撞路径（判重同 addEntry 口径）
+        Path relinkFile = null;
+        if (sourcePath != null) {
+            try {
+                relinkFile = Path.of(sourcePath.trim());
+            } catch (Exception e) {
+                throw new KbOpException("invalid path: " + sourcePath);
+            }
+            if (!Files.isRegularFile(relinkFile)) {
+                throw new KbOpException("source file not found: " + sourcePath);
+            }
+            String norm = normPath(relinkFile.toString().replace('\\', '/').trim());
+            for (String otherId : entryIds()) {
+                if (new java.util.LinkedHashSet<>(ids).contains(otherId)) {
+                    continue;
+                }
+                Map<String, Object> oe = readEntryMap(otherId);
+                if (oe != null && normPath(orEmpty(str(oe.get("sourcePath")))).equals(norm)) {
+                    throw new KbOpException("source path already collected by entry " + otherId);
+                }
+            }
         }
         int n = 0;
         for (String id : new java.util.LinkedHashSet<>(ids)) {
@@ -570,6 +597,17 @@ final class KbServerStore implements AutoCloseable {
             }
             if (notes != null) {
                 e.put("notes", notes);
+            }
+            if (relinkFile != null) {
+                // relink 同形（IDE KbManagerService.relink）：源路径/status/尺寸指纹刷新 + 重抽取
+                String display = relinkFile.toString().replace('\\', '/').trim();
+                e.put("sourcePath", display);
+                e.put("status", "ok");
+                long size = fileSize(relinkFile);
+                e.put("sizeBytes", (double) size);
+                e.put("indexedMtime", (double) mtime(relinkFile));
+                e.put("indexedSize", (double) size);
+                atomicWrite(textDir().resolve(id + ".txt"), extractText(relinkFile));
             }
             e.put("updatedAt", (double) System.currentTimeMillis());
             writeEntryMap(e);
@@ -1055,7 +1093,6 @@ final class KbServerStore implements AutoCloseable {
         m.put("version", 2);
         m.put("folders", new ArrayList<>());
         m.put("tags", new ArrayList<>());
-        m.put("lastFolderId", "");
         return m;
     }
 

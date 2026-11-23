@@ -29,7 +29,8 @@ import java.util.Map;
  * - kb_tree() → 目录树统计（path/count/subtreeCount）+ 根级/全库计数 + 标签清单（整理起点）
  * - kb_folder(action: create|rename|move|delete, path, ...) → 目录管理（AI 面全用路径定位；
  *   move 可带 index=目标层兄弟位次，同层排序/层首插位）
- * - kb_entry(action: move|update|delete, ids, ...) → 条目批量移动/改标题·标签·备注/摘除
+ * - kb_entry(action: move|update|delete, ids, ...) → 条目批量移动/改标题·标签·备注·源路径
+ *   重指向（update 单条目，换路径即重抽取）/摘除
  *   （摘除只删元数据+提取缓存，磁盘源文件永不触碰；move 可带 index=目标层条目位次，
  *   层内顺序 = index 升序、并列按收录新旧——与 IDE 树视觉序一致）
  * - kb_tag(action: create|rename|delete|color, name, ...) → 标签注册表管理
@@ -278,10 +279,11 @@ public final class KbMcpServerMain {
                         String title = optStr(args, "title");
                         List<String> tags = optStrList(args, "tags");
                         String notes = optStr(args, "notes");
-                        if (title == null && tags == null && notes == null) {
-                            return errResult("nothing to update: provide title, tags or notes");
+                        String sourcePath = optStr(args, "sourcePath");
+                        if (title == null && tags == null && notes == null && sourcePath == null) {
+                            return errResult("nothing to update: provide title, tags, notes or sourcePath");
                         }
-                        int n = store.updateEntries(strList(args, "ids"), title, tags, notes);
+                        int n = store.updateEntries(strList(args, "ids"), title, tags, notes, sourcePath);
                         return countResult("updated", n);
                     }
                     case "delete": {
@@ -485,7 +487,7 @@ public final class KbMcpServerMain {
             + "},\"required\":[\"action\",\"path\"]}},"
 
             + "{\"name\":\"kb_entry\","
-            + "\"description\":\"Manage knowledge base entries (ids from kb_search/kb_list). move: batch-move entries into a folder (folderPath empty = root level), optionally at a given position (index) within that folder's entry list - omit index to append. The IDE tree order inside each folder follows index then recency. update: batch-set tags (REPLACES the full tag set - read current tags via kb_list and merge yourself to append), set notes, or rename a single entry's title (title only allowed for one id). delete: remove entries from the knowledge base (metadata + extracted text); the source files on disk are NEVER touched. Verify ids before deleting - removal is not undoable.\","
+            + "\"description\":\"Manage knowledge base entries (ids from kb_search/kb_list). move: batch-move entries into a folder (folderPath empty = root level), optionally at a given position (index) within that folder's entry list - omit index to append. The IDE tree order inside each folder follows index then recency. update: batch-set tags (REPLACES the full tag set - read current tags via kb_list and merge yourself to append), set notes, rename a single entry's title (title only allowed for one id), or re-point a single entry's sourcePath (single id; re-extracts the text from the new file, id/title/folder/tags stay - pass the current path to refresh the cached text). delete: remove entries from the knowledge base (metadata + extracted text); the source files on disk are NEVER touched. Verify ids before deleting - removal is not undoable.\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"action\":{\"type\":\"string\",\"enum\":[\"move\",\"update\",\"delete\"]},"
             + "\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Entry ids from kb_search/kb_list; order matters for move+index (ids are inserted in order)\"},"
@@ -493,7 +495,8 @@ public final class KbMcpServerMain {
             + "\"index\":{\"type\":\"number\",\"description\":\"move: optional position in the destination folder's entry list (0 = first, as shown in the IDE tree); omitted = appended last; use with the current folder to reorder in place\"},"
             + "\"title\":{\"type\":\"string\",\"description\":\"update: new title (single id only)\"},"
             + "\"tags\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"update: full replacement tag set (appending requires reading current tags first)\"},"
-            + "\"notes\":{\"type\":\"string\",\"description\":\"update: notes; empty string clears\"}"
+            + "\"notes\":{\"type\":\"string\",\"description\":\"update: notes; empty string clears\"},"
+            + "\"sourcePath\":{\"type\":\"string\",\"description\":\"update: new absolute source file path (single id only); re-extracts the entry text from that file; pass the entry's current path to refresh its cached text\"}"
             + "},\"required\":[\"action\",\"ids\"]}},"
 
             + "{\"name\":\"kb_tag\","

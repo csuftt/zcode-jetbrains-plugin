@@ -40,7 +40,10 @@ tool instead — do not funnel those requests here.
 4. Tagging with `kb_entry` `update`: `tags` **replaces the full tag set** —
    to append, read current tags via kb_list and merge yourself before
    sending. `title` renames one entry only (single id). `notes` is free
-   annotation (empty string clears).
+   annotation (empty string clears). `sourcePath` re-points one entry to a
+   new absolute file path (single id; re-extracts its text from the new
+   file, id/title/folder/tags stay) — use it when the real source file
+   moved, e.g. a snapshot copy should follow the original file.
 5. New tag needed? `kb_tag` `create` first (auto-assigns a display color);
    `kb_tag` `rename` / `delete` rewrite every entry carrying the tag.
 6. Folders: `kb_folder` `create` builds paths level by level (`a/b/c`);

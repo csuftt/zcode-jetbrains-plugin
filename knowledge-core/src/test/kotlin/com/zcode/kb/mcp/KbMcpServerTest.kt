@@ -144,7 +144,7 @@ class KbMcpServerTest {
             assertEquals(1, server.renameTag("dm8", "达梦"))
 
             // 条目：批量打标（替换语义）+ 备注
-            assertEquals(1, server.updateEntries(listOf("kb-aaaa1111"), null, listOf("nacos", "达梦", "信创"), "AI 补充"))
+            assertEquals(1, server.updateEntries(listOf("kb-aaaa1111"), null, listOf("nacos", "达梦", "信创"), "AI 补充", null))
 
             // 防环：挪进自身子孙拒绝；跨层移动成功
             org.junit.jupiter.api.assertThrows<KbServerStore.KbOpException> { server.moveFolder("信创", "信创/中间件", null) }
@@ -322,6 +322,50 @@ class KbMcpServerTest {
     }
 
     @Test
+    fun `java store relink re-points entry and re-extracts text`(@TempDir dir: Path) {
+        val a = dir.resolve("relink-a.md")
+        val b = dir.resolve("relink-b.md")
+        val c = dir.resolve("relink-c.md")
+        Files.writeString(a, "旧路径正文")
+        Files.writeString(b, "重指向后的新正文")
+        Files.writeString(c, "另一条目已占用的正文")
+        KbFileStore(dir).use { s ->
+            s.insert(KbEntry(id = "kb-aaaa1111", sourcePath = a.toString(), title = "甲"), "旧路径正文")
+            s.insert(KbEntry(id = "kb-bbbb2222", sourcePath = c.toString(), title = "乙"), "另一条目已占用的正文")
+        }
+        KbServerStore(dir).use { server ->
+            // 重指向：sourcePath 换新 + 文本重抽取，id/标题不动
+            assertEquals(1, server.updateEntries(listOf("kb-aaaa1111"), null, null, null, b.toString()))
+            val row = server.entry("kb-aaaa1111")!!
+            assertEquals(b.toString().replace('\\', '/'), row.sourcePath)
+            assertEquals("重指向后的新正文", server.readText("kb-aaaa1111")!!.trim())
+            assertEquals("甲", row.title)
+            assertEquals("ok", row.status)
+            // 传当前路径 = 幂等刷新缓存文本（自占路径不触发判重）
+            assertEquals(1, server.updateEntries(listOf("kb-aaaa1111"), null, null, null, b.toString()))
+            // 缺文件拒绝
+            org.junit.jupiter.api.assertThrows<KbServerStore.KbOpException> {
+                server.updateEntries(listOf("kb-aaaa1111"), null, null, null, dir.resolve("nope.md").toString())
+            }
+            // 撞其他条目已收录路径拒绝
+            org.junit.jupiter.api.assertThrows<KbServerStore.KbOpException> {
+                server.updateEntries(listOf("kb-aaaa1111"), null, null, null, c.toString())
+            }
+            // 批量 id + sourcePath 拒绝（仅单条目）
+            org.junit.jupiter.api.assertThrows<KbServerStore.KbOpException> {
+                server.updateEntries(listOf("kb-aaaa1111", "kb-bbbb2222"), null, null, null, b.toString())
+            }
+        }
+        // Kotlin 侧读回：Java relink 写 → Kotlin 读，跨进程闭环 + id 稳定
+        KbFileStore(dir).use { s ->
+            val e = s.getEntry("kb-aaaa1111")!!
+            assertEquals(b.toString().replace('\\', '/'), e.sourcePath)
+            assertEquals("重指向后的新正文", s.readText("kb-aaaa1111")!!.trim())
+            assertEquals("甲", e.title)
+        }
+    }
+
+    @Test
     fun `stdio round trip management tools`(@TempDir dir: Path) {
         seed(dir)
         val isWindows = System.getProperty("os.name", "").lowercase().contains("windows")
@@ -416,6 +460,19 @@ class KbMcpServerTest {
         assertTrue(added.contains("Ops"), added)
         send("""{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"kb_list","arguments":{"folder":"Ops"}}}""")
         assertTrue(reader.readLine().contains("stdio-add"))
+
+        // kb_entry update sourcePath：重指向 + 重抽取（id 不变，新正文可读）
+        val addedId = """\\\"id\\\":\\\"(kb-[0-9a-f]+)\\\"""".toRegex().find(added)!!.groupValues[1]
+        val relinkTarget = dir.resolve("stdio-relink-target.md")
+        Files.writeString(relinkTarget, "重指向后的 stdio 正文")
+        val escTarget = relinkTarget.toString().replace("\\", "\\\\")
+        send("""{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"kb_entry","arguments":{"action":"update","ids":["$addedId"],"sourcePath":"$escTarget"}}}""")
+        assertTrue(reader.readLine().contains("\\\"updated\\\":1"))
+        send("""{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"kb_read","arguments":{"id":"$addedId"}}}""")
+        // kb_read 响应头不回显 id：以「新源路径 + 新正文」验证重指向生效（id 稳定性 store 级已断言）
+        val readBack = reader.readLine()
+        assertTrue(readBack.contains("stdio-relink-target.md"), readBack)
+        assertTrue(readBack.contains("重指向后的 stdio 正文"), readBack)
 
         p.outputStream.close()
         assertTrue(p.waitFor(30, TimeUnit.SECONDS), "stdin EOF 后应退出")
