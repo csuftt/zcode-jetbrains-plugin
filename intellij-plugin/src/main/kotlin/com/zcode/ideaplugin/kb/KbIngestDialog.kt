@@ -90,13 +90,15 @@ class KbIngestDialog(
 
         // 内容左起点统一 6px（真机反馈：各输入框/下拉/文本起点不齐；label 6、combo UI 内置≈6）
         titleField = JBTextField(suggestion.title).apply { margin = JBUI.insets(2, 6, 2, 6) }
-        // 预选优先级：编辑条目=原目录；heuristics 推断目录名命中；上次收录目录；根级
+        // 预选优先级：编辑条目=原目录；拖放/右键落点（defaultFolderId=用户显式意图，压过
+        // heuristics——真机实证：拖文件到「测试啊 1」目录却预选「信创适配」，heuristics 按
+        // 源文件父目录名推断抢了显式落点）；heuristics 推断目录名命中；根级
         val preselect = when {
             editOf != null -> folderOptions.firstOrNull { it.id == editOf.folderId }?.path ?: uncategorizedLabel
+            defaultFolderId.isNotEmpty() -> folderOptions.firstOrNull { it.id == defaultFolderId }?.path ?: uncategorizedLabel
             suggestion.folderName.isNotEmpty() ->
                 folderOptions.firstOrNull { opt -> opt.path == suggestion.folderName || opt.name == suggestion.folderName }?.path
-                    ?: (folderOptions.firstOrNull { it.id == defaultFolderId && defaultFolderId.isNotEmpty() }?.path ?: uncategorizedLabel)
-            defaultFolderId.isNotEmpty() -> folderOptions.firstOrNull { it.id == defaultFolderId }?.path ?: uncategorizedLabel
+                    ?: uncategorizedLabel
             else -> uncategorizedLabel
         }
         val items = arrayOf(uncategorizedLabel) + folderOptions.map { it.path }
