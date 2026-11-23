@@ -105,6 +105,7 @@
       "viewOutput": "출력",
       "hideOutput": "출력 숨기기",
       "cancel": "취소",
+      "confirmCancel": "중지?",
       "outputLoading": "출력을 읽는 중…",
       "outputEmpty": "(아직 출력 없음)",
       "outputTruncated": "출력이 마지막 8 KB로 잘렸습니다",

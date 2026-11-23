@@ -262,6 +262,10 @@
   &:hover .status-panel-agent-arrow {
     opacity: 1;
   }
+  /* 取消 × 与展开箭头同款：hover 才现身（平时常驻是误点高发位） */
+  &:hover .status-panel-agent-cancel {
+    opacity: 1;
+  }
 
   &.status-running .status-panel-agent-icon {
     color: var(--status-info);
@@ -507,6 +511,11 @@
     &--danger:hover {
       color: var(--status-error);
     }
+
+    /* 两段式确认态：常态即红，再击才真正取消 */
+    &--confirm {
+      color: var(--status-error);
+    }
   }
 }
 
@@ -554,17 +563,38 @@
   }
 }
 
-/* 子代理条目取消按钮（running 且投影匹配到 work） */
+/* 子代理条目取消按钮（running 且投影匹配到 work）：hover 现身 + 与展开箭头拉开间距
+   （× 与 > 相邻曾是误点高发位，叠加两段式确认双保险） */
 .status-panel-agent-cancel {
   flex-shrink: 0;
   font-size: 13px;
   color: var(--text-muted);
   padding: 2px;
+  margin-right: 3px;
   border-radius: 4px;
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 
   &:hover {
     color: var(--status-error);
+    background: var(--bg-hover);
+  }
+}
+
+/* × 的两段式确认态：文字按钮变宽天然与箭头拉开，常态即红（不等 hover） */
+.status-panel-agent-cancel-confirm {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--status-error);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
     background: var(--bg-hover);
   }
 }

@@ -11,6 +11,7 @@
  * 「后台任务」（bash/工作流投影条目：状态/取消/bash 输出查看，H7）与「代理任务」
  * （既有子代理列表：点击弹执行记录/报告；运行中条目加取消——经 childSessionId 匹配
  * backgroundWorks 投影的 workId，匹配不到不显示按钮，宁可不显示也不能停错）。
+ * 两处取消均为两段式确认（首击 × 变「确认停止？」，再击才发取消，鼠标离开条目还原）。
  * 数据：todos/agents/fileChanges 从消息历史解析（utils/parseStatus.ts），后台任务
  * 是 v4 帧投影（store.backgroundWorksBySession）。
  *
@@ -66,6 +67,9 @@ export function StatusPanel() {
   const statusPanelCollapsed = useStore((s) => s.statusPanelCollapsed)
   const [openTab, setOpenTab] = useState<TabType | null>(null)
   const [bgSubTab, setBgSubTab] = useState<BgSubTab>('sub')
+  // 子代理取消两段式确认（防误点：× 与展开箭头相邻且停止不可逆）：首击只进确认态
+  // （× 变「确认停止？」红色文字按钮），再击才发取消；鼠标离开条目/popover 收起即还原
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   // popover 用 fixed 定位（脱离父级 overflow:hidden 裁剪），位置由 tab 行的 rect 计算
   const [popoverPos, setPopoverPos] = useState<{ left: number; bottom: number } | null>(null)
@@ -130,6 +134,11 @@ export function StatusPanel() {
     const w = runningWorkByChild.get(a.childSessionId)
     return w && w.cancellable !== false ? w : null
   }
+
+  // popover 收起/切 tab 时还原未完成的取消确认
+  useEffect(() => {
+    setConfirmCancelId(null)
+  }, [openTab])
 
   // 点击外部 / Escape 关闭 popover
   useEffect(() => {
@@ -292,6 +301,7 @@ export function StatusPanel() {
                         className={`status-panel-agent-item status-${a.status} clickable`}
                         title={t('app.status.viewSubagentDetail')}
                         onClick={() => handleAgentClick(a)}
+                        onMouseLeave={() => setConfirmCancelId(null)}
                       >
                         <span className={`codicon ${icon} ${spin ? 'spin' : ''} status-panel-agent-icon`} />
                         <div className="status-panel-agent-body">
@@ -300,14 +310,28 @@ export function StatusPanel() {
                           {a.summary && <span className="status-panel-agent-summary" title={a.summary}>{a.summary}</span>}
                         </div>
                         {cancelWork ? (
-                          <span
-                            className="codicon codicon-close status-panel-agent-cancel"
-                            title={t('app.status.bgWorks.cancel')}
-                            onClick={(e) => {
-                              e.stopPropagation() // 不触发条目点击（详情弹窗）
-                              cancelBackgroundWork(currentSessionId!, cancelWork.workId)
-                            }}
-                          />
+                          confirmCancelId === cancelWork.workId ? (
+                            <button
+                              type="button"
+                              className="status-panel-agent-cancel-confirm"
+                              onClick={(e) => {
+                                e.stopPropagation() // 不触发条目点击（详情弹窗）
+                                setConfirmCancelId(null)
+                                cancelBackgroundWork(currentSessionId!, cancelWork.workId)
+                              }}
+                            >
+                              {t('app.status.bgWorks.confirmCancel')}
+                            </button>
+                          ) : (
+                            <span
+                              className="codicon codicon-close status-panel-agent-cancel"
+                              title={t('app.status.bgWorks.cancel')}
+                              onClick={(e) => {
+                                e.stopPropagation() // 不触发条目点击（详情弹窗）
+                                setConfirmCancelId(cancelWork.workId) // 两段式：首击只确认，不发取消
+                              }}
+                            />
+                          )
                         ) : null}
                         <span className="codicon codicon-chevron-right status-panel-agent-arrow" />
                       </div>

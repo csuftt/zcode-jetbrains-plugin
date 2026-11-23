@@ -105,6 +105,7 @@
       "viewOutput": "Output",
       "hideOutput": "Hide output",
       "cancel": "Cancel",
+      "confirmCancel": "Stop?",
       "outputLoading": "Loading output…",
       "outputEmpty": "(no output yet)",
       "outputTruncated": "Output truncated to the last 8 KB",

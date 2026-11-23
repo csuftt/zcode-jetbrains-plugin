@@ -105,6 +105,7 @@
       "viewOutput": "出力",
       "hideOutput": "出力を隠す",
       "cancel": "キャンセル",
+      "confirmCancel": "停止？",
       "outputLoading": "出力を読み込み中…",
       "outputEmpty": "（出力はまだありません）",
       "outputTruncated": "出力は末尾 8 KB のみ表示",

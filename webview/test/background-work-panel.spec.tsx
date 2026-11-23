@@ -97,11 +97,27 @@ describe('BackgroundTaskList 后台任务列表', () => {
     expect(screen.queryByText('审查代理')).toBeNull()
   })
 
-  it('running 且 cancellable 显示取消，点击发 cancelBackgroundWork op', () => {
+  it('running 且 cancellable 显示取消，两段式确认后发 cancelBackgroundWork op', () => {
     injectWorks([work({ workId: 'w_cancel' })])
     render(<BackgroundTaskList sessionId={SID} />)
+    // 首击只进确认态（变「确认停止？」），不发取消 op
     fireEvent.click(screen.getByText('取消'))
+    expect(sentRequests.some((r) => r.op === 'cancelBackgroundWork')).toBe(false)
+    expect(screen.getByText('确认停止？')).toBeTruthy()
+    // 再击确认才真正取消
+    fireEvent.click(screen.getByText('确认停止？'))
     expect(sentRequests.some((r) => r.op === 'cancelBackgroundWork' && r.workId === 'w_cancel')).toBe(true)
+  })
+
+  it('取消确认态在鼠标离开条目后还原（仍不发 op）', () => {
+    const { container } = render(<BackgroundTaskList sessionId={SID} />)
+    injectWorks([work({ workId: 'w_cancel' })])
+    fireEvent.click(screen.getByText('取消'))
+    expect(screen.getByText('确认停止？')).toBeTruthy()
+    fireEvent.mouseLeave(container.querySelector('.bgwork-item')!)
+    expect(screen.queryByText('确认停止？')).toBeNull()
+    expect(screen.getByText('取消')).toBeTruthy()
+    expect(sentRequests.some((r) => r.op === 'cancelBackgroundWork')).toBe(false)
   })
 
   it('空列表渲染空态文案', () => {
@@ -271,7 +287,13 @@ describe('StatusPanel 任务 tab 集成', () => {
     // 只有可取消代理有取消按钮（cancellable=false 与匹配不到都不显示）
     const cancelBtns = document.querySelectorAll('.status-panel-agent-cancel')
     expect(cancelBtns).toHaveLength(1)
+    // 首击只进确认态（× 变「确认停止？」文字按钮），不发取消 op
     fireEvent.click(cancelBtns[0])
+    expect(sentRequests.some((r) => r.op === 'cancelBackgroundWork')).toBe(false)
+    const confirmBtn = document.querySelector('.status-panel-agent-cancel-confirm')
+    expect(confirmBtn).toBeTruthy()
+    // 再击确认才真正取消
+    fireEvent.click(confirmBtn!)
     expect(sentRequests.some((r) => r.op === 'cancelBackgroundWork' && r.workId === 'agent_w1')).toBe(true)
   })
 })

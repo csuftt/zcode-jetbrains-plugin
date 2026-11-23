@@ -6,7 +6,7 @@
  * （子代理走「子代理」子 tab 的既有列表）。条目：图标/标题/状态/启动时间 + 取消
  * （running 且 cancellable!==false）+ bash 输出查看（backgroundBashOutput 1s 轮询
  * ≤8KB 尾窗，终态/降级形态停止）。取消走 v4/command cancelBackgroundWork（无 CAS），
- * 投影由 backgroundWorks 事件收敛，无乐观更新。
+ * 两段式确认（首击只进确认态再击才发），投影由 backgroundWorks 事件收敛，无乐观更新。
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -91,6 +91,9 @@ export function BackgroundTaskList({ sessionId }: { sessionId: string | null }) 
   const deliveredWorkStatuses = useStore((s) => s.deliveredWorkStatuses)
   const cancelBackgroundWork = useStore((s) => s.cancelBackgroundWork)
   const [expandedWorkId, setExpandedWorkId] = useState<string | null>(null)
+  // 取消两段式确认（与代理任务条目同款）：首击「取消」只进确认态（变红色「确认停止？」），
+  // 再击才发取消；鼠标离开条目还原——防误点（停止不可逆）
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null)
   // 标题截断悬浮全文（JCEF 不渲染原生 title，复用 .inline-chip-tip fixed 挂 body 方案，
   // TurnFileChangesDialog 同款：量宽收敛 + 上/下翻转）
   const [tip, setTip] = useState<{ text: string; left: number; top: number; bottom: number } | null>(null)
@@ -144,7 +147,7 @@ export function BackgroundTaskList({ sessionId }: { sessionId: string | null }) 
   const list = (
     <div className="status-panel-bgwork-list">
       {tasks.map((w) => (
-        <div key={w.workId} className={`bgwork-item status-${w.status}`}>
+        <div key={w.workId} className={`bgwork-item status-${w.status}`} onMouseLeave={() => setConfirmCancelId(null)}>
           <div className="bgwork-item__row">
             <span className={`codicon ${kindIcon(w.kind)} bgwork-item__icon`} />
             <div
@@ -169,13 +172,26 @@ export function BackgroundTaskList({ sessionId }: { sessionId: string | null }) 
                 </button>
               )}
               {w.status === 'running' && w.cancellable !== false && (
-                <button
-                  type="button"
-                  className="bgwork-item__action bgwork-item__action--danger"
-                  onClick={() => sessionId && cancelBackgroundWork(sessionId, w.workId)}
-                >
-                  {t('app.status.bgWorks.cancel')}
-                </button>
+                confirmCancelId === w.workId ? (
+                  <button
+                    type="button"
+                    className="bgwork-item__action bgwork-item__action--danger bgwork-item__action--confirm"
+                    onClick={() => {
+                      setConfirmCancelId(null)
+                      sessionId && cancelBackgroundWork(sessionId, w.workId)
+                    }}
+                  >
+                    {t('app.status.bgWorks.confirmCancel')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="bgwork-item__action bgwork-item__action--danger"
+                    onClick={() => setConfirmCancelId(w.workId)} // 首击只确认，不发取消
+                  >
+                    {t('app.status.bgWorks.cancel')}
+                  </button>
+                )
               )}
             </div>
           </div>

@@ -105,6 +105,7 @@
       "viewOutput": "輸出",
       "hideOutput": "收起輸出",
       "cancel": "取消",
+      "confirmCancel": "確認停止？",
       "outputLoading": "正在讀取輸出…",
       "outputEmpty": "（暫無輸出）",
       "outputTruncated": "輸出已截斷（僅保留最後 8 KB）",
