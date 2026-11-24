@@ -150,6 +150,31 @@ class V4FrameMapperTest {
     }
 
     @Test
+    fun `工具行失败态带失败原因与参数`() {
+        // 入参不合 schema 的调用没走到 running 就失败：行上只有 input 与 error，没有 output.text。
+        // 这两样不带过去，前端只剩一个出错标记——错误信息和「调了什么」都被藏起来。
+        mapper.mapFrame(sid, frame(appended(toolCallRow(5, "inputStreaming", "{\"action\":\"create\"}"))))
+        val out = mapper.mapFrame(sid, frame(upserted(buildJsonObject {
+            put("rowId", 5); put("kind", "toolCall"); put("toolCallId", "call_test_1")
+            put("toolName", "kb_tag"); put("status", "error")
+            put("input", buildJsonObject { put("action", "create") })
+            put("error", buildJsonObject {
+                put("code", "ToolExecutionFailed")
+                put("message", "Tool input failed inputSchema validation")
+            })
+            put("endedAt", 1788148554063L)
+        })))
+        assertEquals(1, out.size)
+        val payload = out[0].payload
+        assertEquals("result", payload["kind"]?.jsonPrimitive?.content)
+        val result = payload["result"]!!.jsonObject
+        assertEquals(false, result["success"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals("", result["content"]?.jsonPrimitive?.content)
+        assertEquals("Tool input failed inputSchema validation", result["error"]?.jsonPrimitive?.content)
+        assertEquals("create", payload["input"]?.jsonObject?.get("action")?.jsonPrimitive?.content)
+    }
+
+    @Test
     fun `空输入流与重复 start 幂等`() {
         // 首帧 inputText 为空：不产事件（等非空再 start）
         val f1 = mapper.mapFrame(sid, frame(appended(toolCallRow(5, "inputStreaming", ""))))

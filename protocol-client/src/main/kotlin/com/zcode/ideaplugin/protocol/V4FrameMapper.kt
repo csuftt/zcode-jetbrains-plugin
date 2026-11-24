@@ -28,7 +28,8 @@ import kotlinx.serialization.json.*
  * - toolCall(inputStreaming, 首次)     → model.streaming {kind:tool_input_start, toolCallId, toolName}
  * - toolCall(inputStreaming, inputText 增长) → model.streaming {kind:tool_input_delta, toolCallId, delta=增量}
  * - toolCall(running, 带 input 对象)   → tool.updated {kind:started, toolCallId, toolName, input, startedAt}
- * - toolCall(success/error)           → tool.updated {kind:result, toolCallId, result:{success, content}}
+ * - toolCall(success/error)           → tool.updated {kind:result, toolCallId, result:{success, content, error?}}；
+ *   出错的另带行上的 input（没走到 running 的调用，started 没发过）
  *
  * 已知限制：订阅落在回合中途时，未见 turnHeader 的 row.delta 按行类型未知丢弃
  * （回合结束 turn.completed 触发前端权威重拉自愈）。
@@ -417,10 +418,15 @@ class V4FrameMapper {
                     put("result", buildJsonObject {
                         put("success", isSuccess)
                         put("content", row["output"]?.jsonObject?.get("text")?.jsonPrimitive?.jsonStringOrNull ?: "")
+                        // 失败原因（行的 error:{code,message}）。入参不合 schema 的调用没有 output、
+                        // 只有它——不带过去，前端就只剩一个出错标记
+                        row["error"]?.jsonObject?.get("message")?.jsonPrimitive?.jsonStringOrNull?.let { put("error", it) }
                         // 工具结果展示投影（如 CUA 工具的 display.media 截图）：
                         // v4 行 output 原生字段，工具卡渲染图的数据源（快照/实时同构）
                         row["output"]?.jsonObject?.get("display")?.jsonObject?.let { put("display", it) }
                     })
+                    // 没走到 running 就出错的调用（started 没发过）：参数只在这一行上，随结果带给前端
+                    if (!isSuccess) row["input"]?.jsonObject?.let { put("input", it) }
                     row["startedAt"]?.jsonPrimitive?.longOrNull?.let { put("startedAt", it) }
                     row["endedAt"]?.jsonPrimitive?.longOrNull?.let { put("endedAt", it) }
                 }

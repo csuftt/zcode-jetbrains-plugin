@@ -614,6 +614,9 @@ function handleToolUpdated(
           ...tool.state,
           status: isError ? 'error' : 'completed',
           output,
+          // 没走到 started 就出结果的调用（入参不合 schema 被拒）：参数只随结果事件来，补上；
+          // 已有参数（started 带来过）则不覆盖
+          ...(p.input && !tool.state.input ? { input: p.input, inputRaw: undefined } : {}),
           ...(media && media.length > 0 ? { media } : {}),
           ...(p.result?.error ? { error: { message: p.result.error } } : {}),
           // 服务端时间戳权威（v4 行自带 startedAt/endedAt，毫秒）：实时流里 prevTime
