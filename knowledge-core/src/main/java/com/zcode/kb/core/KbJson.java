@@ -1,4 +1,4 @@
-package com.zcode.kb.mcp;
+package com.zcode.kb.core;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -6,18 +6,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 极简 JSON 解析（RFC 8259 子集）与转义写出（CuaMiniJson 同款拷贝，包名换 kb）。
+ * 极简 JSON 解析（RFC 8259 子集）与转义写出（CuaMiniJson 同款，包名换 kb）。
  *
- * KB MCP server 进程为纯 Java 零依赖设计（-cp 插件 lib\*，fork JVM 无 kotlin-stdlib，
- * 故 server 主体与 JSON 层整体 Java）。parse 返回 Map/List/String/Double/Boolean/null，
- * 数字统一 Double。
+ * knowledge-core 的纯 Java 部分与 MCP server 进程都用它（fork JVM 无 kotlin-stdlib）。
+ * parse 返回 Map/List/String/Double/Boolean/null，数字统一 Double；同一个键出现多次取最后一个。
+ * 知识库自己的文件（条目、配置）不直接用 stringify 落盘——排版由 [KbMetaStore] 统一，
+ * 这里只负责解析与字符串转义。
  */
-final class KbMiniJson {
+public final class KbJson {
 
-    private KbMiniJson() {
+    private KbJson() {
     }
 
-    static Object parse(String text) {
+    public static Object parse(String text) {
         Parser p = new Parser(text);
         p.skipWs();
         Object v = p.parseValue();
@@ -176,7 +177,7 @@ final class KbMiniJson {
         }
     }
 
-    static String escape(String s) {
+    public static String escape(String s) {
         StringBuilder sb = new StringBuilder(s.length() + 8);
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
@@ -199,12 +200,12 @@ final class KbMiniJson {
         return sb.toString();
     }
 
-    static String str(String s) {
+    public static String str(String s) {
         return "\"" + escape(s) + "\"";
     }
 
-    /** stringify：Map/List/String/Double/Boolean/null → JSON 文本（parse 的逆，管理写路径用）。Double 整值输出无小数点——config version/entry 时间戳经 parse 变 Double 后写回须还原整数形态 */
-    static String stringify(Object v) {
+    /** stringify：Map/List/String/Number/Boolean/null → 紧凑 JSON 文本。Double 整值输出无小数点 */
+    public static String stringify(Object v) {
         StringBuilder sb = new StringBuilder();
         writeValue(sb, v);
         return sb.toString();
@@ -250,11 +251,5 @@ final class KbMiniJson {
         } else {
             sb.append(str(String.valueOf(v)));
         }
-    }
-
-    /** 文本 result 信封 */
-    static String textResult(String jsonText, boolean isError) {
-        return "{\"content\":[{\"type\":\"text\",\"text\":" + str(jsonText)
-            + "}],\"isError\":" + isError + "}";
     }
 }

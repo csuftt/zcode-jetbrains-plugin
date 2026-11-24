@@ -1,5 +1,6 @@
 package com.zcode.kb.mcp;
 
+import com.zcode.kb.core.KbJson;
 import java.io.BufferedReader;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
@@ -18,8 +19,9 @@ import java.util.Map;
  *
  * 生命周期同 CUA：由 app-server 按 session/create 顶层 mcpServers 注入配置拉起，
  * stdin EOF 即退出（管道断 → readLine null → halt）。读库文件（root/entries 下的条目 +
- * root/text 检索缓存 + root/snapshots 文档快照 + root/config.json）；管理写与 IDE 侧同手法
- * （临时文件 + ATOMIC_MOVE，读侧无撕裂，跨进程最坏丢一次更新）。库根环境变量 ZCODE_KB_ROOT
+ * root/text 检索缓存 + root/snapshots 文档快照 + root/config.json）；管理写与 IDE 侧是同一份
+ * 实现（KbMetaStore，临时文件 + ATOMIC_MOVE，读侧无撕裂，跨进程最坏丢一次更新），落盘的文件
+ * 与 IDE 里做同样操作写出的逐字节相同。库根环境变量 ZCODE_KB_ROOT
  * （IDE 注入时带上，固定入口路径；库位置自定义后入口是指向库目录的联接），缺省
  * ~/.zcgui/knowledge。
  *
@@ -108,7 +110,7 @@ public final class KbMcpServerMain {
     static String dispatch(String line, KbServerStore store) {
         Object parsed;
         try {
-            parsed = KbMiniJson.parse(line);
+            parsed = KbJson.parse(line);
         } catch (Exception e) {
             return errorResponse(null, -32700, "parse error");
         }
@@ -153,11 +155,11 @@ public final class KbMcpServerMain {
                 } catch (KbServerStore.KbOpException e) {
                     // 业务性拒绝（路径不存在/防环/条目缺失）—— isError 结果回给模型自行纠正
                     err("tool " + name + " rejected: " + e.getMessage());
-                    result = KbMiniJson.textResult("{\"error\":" + KbMiniJson.str(e.getMessage()) + "}", true);
+                    result = textResult("{\"error\":" + KbJson.str(e.getMessage()) + "}", true);
                 } catch (Exception e) {
                     err("tool " + name + " crashed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                    result = KbMiniJson.textResult(
-                        "{\"error\":\"internal: " + KbMiniJson.escape(msg(e)) + "\"}", true);
+                    result = textResult(
+                        "{\"error\":\"internal: " + KbJson.escape(msg(e)) + "\"}", true);
                 }
                 err("tool " + name + " " + (System.currentTimeMillis() - started) + "ms");
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + idJson(id) + ",\"result\":" + result + "}";
@@ -182,20 +184,20 @@ public final class KbMcpServerMain {
                     sb.append(rowJson(rows.get(i), true));
                 }
                 sb.append(']');
-                return KbMiniJson.textResult(sb.toString(), false);
+                return textResult(sb.toString(), false);
             }
             case "kb_read": {
                 String id = strArg(args, "id", "");
                 KbServerStore.Row row = store.entry(id);
                 if (row == null) {
-                    return KbMiniJson.textResult("{\"error\":\"entry not found: " + KbMiniJson.escape(id) + "\"}", true);
+                    return textResult("{\"error\":\"entry not found: " + KbJson.escape(id) + "\"}", true);
                 }
                 String text = store.readText(id);
                 if (text == null) {
                     String why = "missing".equals(row.status)
                         ? "entry has no content on this machine: the source file is missing and no document snapshot was kept"
                         : "entry text could not be rebuilt right now; try again shortly";
-                    return KbMiniJson.textResult("{\"error\":\"" + why + ": " + KbMiniJson.escape(id) + "\"}", true);
+                    return textResult("{\"error\":\"" + why + ": " + KbJson.escape(id) + "\"}", true);
                 }
                 String note = "";
                 if (text.length() > MAX_READ_CHARS) {
@@ -212,7 +214,9 @@ public final class KbMcpServerMain {
                     + " | project: " + safe(row.project) + " | status: " + safe(row.status) + "\n"
                     + "- source: " + safe(row.sourcePath) + "\n"
                     + snapshotNote + "\n";
-                return KbMiniJson.textResult(KbMiniJson.escape(header + text + note), false);
+                // 传原文：textResult 会整体做一次 JSON 字符串转义，这里再转一次的话模型与工具卡
+                // 拿到的换行就是字面的 \n，头信息与正文分不开
+                return textResult(header + text + note, false);
             }
             case "kb_list": {
                 String folder = optStr(args, "folder");
@@ -226,7 +230,7 @@ public final class KbMcpServerMain {
                     sb.append(rowJson(rows.get(i), false));
                 }
                 sb.append(']');
-                return KbMiniJson.textResult(sb.toString(), false);
+                return textResult(sb.toString(), false);
             }
             case "kb_tree": {
                 StringBuilder sb = new StringBuilder("{\"folders\":[");
@@ -236,8 +240,8 @@ public final class KbMcpServerMain {
                         sb.append(',');
                     }
                     KbServerStore.FolderStat s = stats.get(i);
-                    sb.append("{\"id\":").append(KbMiniJson.str(s.id))
-                        .append(",\"path\":").append(KbMiniJson.str(s.path))
+                    sb.append("{\"id\":").append(KbJson.str(s.id))
+                        .append(",\"path\":").append(KbJson.str(s.path))
                         .append(",\"count\":").append(s.directCount)
                         .append(",\"subtreeCount\":").append(s.subtreeCount).append('}');
                 }
@@ -250,12 +254,12 @@ public final class KbMcpServerMain {
                         sb.append(',');
                     }
                     KbServerStore.TagStat t = tags.get(i);
-                    sb.append("{\"name\":").append(KbMiniJson.str(t.name))
-                        .append(",\"color\":").append(KbMiniJson.str(t.color))
+                    sb.append("{\"name\":").append(KbJson.str(t.name))
+                        .append(",\"color\":").append(KbJson.str(t.color))
                         .append(",\"count\":").append(t.count).append('}');
                 }
                 sb.append("]}");
-                return KbMiniJson.textResult(sb.toString(), false);
+                return textResult(sb.toString(), false);
             }
             case "kb_folder": {
                 String action = strArg(args, "action", "");
@@ -263,8 +267,8 @@ public final class KbMcpServerMain {
                     case "create": {
                         String path = strArg(args, "path", "");
                         String id = store.createFolderPath(path);
-                        return KbMiniJson.textResult(
-                            "{\"id\":" + KbMiniJson.str(id) + ",\"path\":" + KbMiniJson.str(path) + "}", false);
+                        return textResult(
+                            "{\"id\":" + KbJson.str(id) + ",\"path\":" + KbJson.str(path) + "}", false);
                     }
                     case "rename":
                         store.renameFolder(strArg(args, "path", ""), strArg(args, "newName", ""));
@@ -274,7 +278,7 @@ public final class KbMcpServerMain {
                         return okResult("moved");
                     case "delete": {
                         int moved = store.deleteFolder(strArg(args, "path", ""));
-                        return KbMiniJson.textResult("{\"movedToRoot\":" + moved + "}", false);
+                        return textResult("{\"movedToRoot\":" + moved + "}", false);
                     }
                     default:
                         return errResult("unknown action: " + action + " (create|rename|move|delete)");
@@ -313,8 +317,8 @@ public final class KbMcpServerMain {
                     case "create": {
                         String tagName = strArg(args, "name", "");
                         String color = store.ensureTag(tagName, optStr(args, "color"));
-                        return KbMiniJson.textResult(
-                            "{\"name\":" + KbMiniJson.str(tagName) + ",\"color\":" + KbMiniJson.str(color) + "}", false);
+                        return textResult(
+                            "{\"name\":" + KbJson.str(tagName) + ",\"color\":" + KbJson.str(color) + "}", false);
                     }
                     case "rename": {
                         int n = store.renameTag(strArg(args, "name", ""), strArg(args, "newName", ""));
@@ -345,29 +349,35 @@ public final class KbMcpServerMain {
                     optStr(args, "notes")
                 );
                 boolean existed = Boolean.TRUE.equals(added.get("existed"));
-                return KbMiniJson.textResult(
-                    "{\"id\":" + KbMiniJson.str(safe((String) added.get("id")))
-                        + ",\"title\":" + KbMiniJson.str(safe((String) added.get("title")))
-                        + ",\"folder\":" + KbMiniJson.str(safe((String) added.get("folder")))
+                return textResult(
+                    "{\"id\":" + KbJson.str(safe((String) added.get("id")))
+                        + ",\"title\":" + KbJson.str(safe((String) added.get("title")))
+                        + ",\"folder\":" + KbJson.str(safe((String) added.get("folder")))
                         + ",\"existed\":" + existed
                         + (existed ? ",\"note\":\"entry already existed; metadata updated\"" : "")
                         + "}", false);
             }
             default:
-                return KbMiniJson.textResult("{\"error\":\"unknown tool: " + KbMiniJson.escape(name) + "\"}", true);
+                return textResult("{\"error\":\"unknown tool: " + KbJson.escape(name) + "\"}", true);
         }
     }
 
+    /** 文本 result 信封 */
+    private static String textResult(String jsonText, boolean isError) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + KbJson.str(jsonText)
+            + "}],\"isError\":" + isError + "}";
+    }
+
     private static String okResult(String what) {
-        return KbMiniJson.textResult("{\"ok\":\"" + what + "\"}", false);
+        return textResult("{\"ok\":\"" + what + "\"}", false);
     }
 
     private static String countResult(String key, int n) {
-        return KbMiniJson.textResult("{\"" + key + "\":" + n + "}", false);
+        return textResult("{\"" + key + "\":" + n + "}", false);
     }
 
     private static String errResult(String message) {
-        return KbMiniJson.textResult("{\"error\":" + KbMiniJson.str(message) + "}", true);
+        return textResult("{\"error\":" + KbJson.str(message) + "}", true);
     }
 
     /** ids 数组参数（过滤非字符串与空项；缺失=空表） */
@@ -399,16 +409,16 @@ public final class KbMcpServerMain {
 
     /** 行 JSON：contentPath 是现在实际该读的文件（源文件或文档快照；失效为空串） */
     private static String rowJson(KbServerStore.Row r, boolean withSnippet) {
-        StringBuilder sb = new StringBuilder("{\"id\":").append(KbMiniJson.str(safe(r.id)))
-            .append(",\"title\":").append(KbMiniJson.str(safe(r.title)))
-            .append(",\"folder\":").append(KbMiniJson.str(safe(r.folder)))
+        StringBuilder sb = new StringBuilder("{\"id\":").append(KbJson.str(safe(r.id)))
+            .append(",\"title\":").append(KbJson.str(safe(r.title)))
+            .append(",\"folder\":").append(KbJson.str(safe(r.folder)))
             .append(",\"tags\":").append(r.tagsJson == null || r.tagsJson.isEmpty() ? "[]" : r.tagsJson)
-            .append(",\"project\":").append(KbMiniJson.str(safe(r.project)))
-            .append(",\"status\":").append(KbMiniJson.str(safe(r.status)))
-            .append(",\"sourcePath\":").append(KbMiniJson.str(safe(r.sourcePath)))
-            .append(",\"contentPath\":").append(KbMiniJson.str(safe(r.contentPath)));
+            .append(",\"project\":").append(KbJson.str(safe(r.project)))
+            .append(",\"status\":").append(KbJson.str(safe(r.status)))
+            .append(",\"sourcePath\":").append(KbJson.str(safe(r.sourcePath)))
+            .append(",\"contentPath\":").append(KbJson.str(safe(r.contentPath)));
         if (withSnippet) {
-            sb.append(",\"snippet\":").append(KbMiniJson.str(r.snippet));
+            sb.append(",\"snippet\":").append(KbJson.str(r.snippet));
         }
         return sb.append('}').toString();
     }
@@ -451,12 +461,12 @@ public final class KbMcpServerMain {
             double d = (Double) id;
             return d == Math.floor(d) && !Double.isInfinite(d) ? String.valueOf((long) d) : String.valueOf(d);
         }
-        return KbMiniJson.str(String.valueOf(id));
+        return KbJson.str(String.valueOf(id));
     }
 
     private static String errorResponse(Object id, int code, String message) {
         return "{\"jsonrpc\":\"2.0\",\"id\":" + idJson(id) + ",\"error\":{\"code\":" + code
-            + ",\"message\":" + KbMiniJson.str(message) + "}}";
+            + ",\"message\":" + KbJson.str(message) + "}}";
     }
 
     // ───────────────────────── 工具声明 ─────────────────────────
@@ -488,7 +498,7 @@ public final class KbMcpServerMain {
             + "}}},"
 
             + "{\"name\":\"kb_tree\","
-            + "\"description\":\"Show the knowledge base structure: all folders (path + entry counts, subtree counts included), root-level count, total, and the tag registry (name/color/count). Start here when organizing or tidying the knowledge base, then use kb_list to inspect entries and kb_folder/kb_entry/kb_tag to reorganize.\","
+            + "\"description\":\"Show the knowledge base structure: all folders (path + entry counts, subtree counts included; listed in IDE panel order - each level by its position, a folder right before its sub-folders - so the index positions of kb_folder/kb_entry moves can be read off it), root-level count, total, and the tag registry (name/color/count). Start here when organizing or tidying the knowledge base, then use kb_list to inspect entries and kb_folder/kb_entry/kb_tag to reorganize.\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
 
             + "{\"name\":\"kb_folder\","

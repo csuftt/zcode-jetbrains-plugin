@@ -100,12 +100,8 @@ class KbManagerService : Disposable {
         val instance: KbManagerService
             get() = ApplicationManager.getApplication().getService(KbManagerService::class.java)
 
-        /** 收录时的标签清洗：去逗号/引号/首尾空白，去重，丢空 */
-        fun sanitizeTags(tags: List<String>): List<String> = tags
-            .map { it.trim().replace(',', ' ').replace('"', ' ').replace('，', ' ').trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .take(20)
+        /** 收录时的标签清洗：去逗号/引号/首尾空白，去重，丢空（规则在公共实现 KbMetaStore） */
+        fun sanitizeTags(tags: List<String>): List<String> = KbFileStore.sanitizeTags(tags)
 
         /** IDE 侧的文本提取（对账、重建检索缓存用），与收录同一个提取器 */
         private val EXTRACTOR = KbContent.TextExtractor { KbExtractor.extract(it) }
@@ -141,52 +137,22 @@ class KbManagerService : Disposable {
     ): KbEntry? {
         if (!Files.isRegularFile(file)) return null
         val s = store()
-        val display = KbFileStore.displayPath(file.toString())
-        s.findBySource(display)?.let { existing ->
-            // 重复收录 = 更新元数据（title/folder/tags/notes）+ 重新确认内容
-            updateMeta(existing.id, title.ifBlank { existing.title }, folderId, tags, notes)
-            captureQuietly(s, existing.id, file)?.let { s.confirmContent(existing.id, it.hash, it.size) }
-            return s.getEntry(existing.id)
+        // 落库规则与 MCP 的 kb_add 是同一份实现（KbMetaStore.ingest）：重复收录 = 更新元数据 + 重新确认内容
+        val r = s.ingest(file, title, folderId, tags, notes, EXTRACTOR, resolveGitExe(project)) { e ->
+            log.warn("Knowledge Base: ingest step failed ($file): ${e.message}")
         }
-        val text = KbExtractor.extract(file)
-        val projectName = KbGitCli(gitExe = resolveGitExe(project)).repoRoot(file)?.fileName?.toString()
-            ?: file.parent?.fileName?.toString() ?: ""
-        val now = System.currentTimeMillis()
-        // 确定性 id=路径指纹：摘除重加 id 恒定，外部引用稳定；taken=防 2^-40 碰撞的确定性派生
-        val id = KbFileStore.newId(display, taken = s.allEntries().map { it.id }.toSet())
-        // 收录即落文档快照；写不成不拦收录（contentHash 留空，对账首轮补齐）
-        val captured = captureQuietly(s, id, file)
-        val entry = KbEntry(
-            id = id,
-            sourcePath = display,
-            title = title.ifBlank { file.fileName.toString() },
-            folderId = folderId,
-            tags = sanitizeTags(tags),
-            notes = notes,
-            project = projectName,
-            fileExt = fileExtOf(file),
-            sizeBytes = captured?.size ?: runCatching { Files.size(file) }.getOrDefault(0),
-            contentHash = captured?.hash ?: "",
-            ingestedAt = now,
-            updatedAt = now,
+        val entry = r.entry
+        log.info(
+            "Knowledge Base: ${if (r.existed) "re-ingested" else "ingested"} ${entry.id} <- ${entry.sourcePath} " +
+                "(extract=${r.textExtracted}, snapshot=${r.snapshotCaptured})",
         )
-        s.insert(entry, text ?: "")
-        log.info("Knowledge Base: ingested ${entry.id} <- $display (extract=${text != null}, snapshot=${captured != null})")
         KbTopics.publish(project)
-        return entry
+        return KbFileStore.toEntry(entry)
     }
 
-    /** 元数据更新（title/folder/tags/notes） */
+    /** 元数据更新（title/folder/tags/notes）；落库规则与 MCP 的 kb_entry update 是同一份实现 */
     fun updateMeta(id: String, title: String, folderId: String, tags: List<String>, notes: String): Boolean {
-        val updated = store().transformEntry(id) { e ->
-            e.copy(
-                title = title.ifBlank { e.title },
-                folderId = folderId,
-                tags = sanitizeTags(tags),
-                notes = notes,
-                updatedAt = System.currentTimeMillis(),
-            )
-        }
+        val updated = store().edit(id, title, folderId, tags, notes)
         if (updated != null) KbTopics.publish(null)
         return updated != null
     }
@@ -217,18 +183,7 @@ class KbManagerService : Disposable {
     /** 条目改指新路径（重新链接）：以新源文件为准——重提取、重新落文档快照（随之改名）；id 不变 */
     fun relink(id: String, newPath: Path): KbEntry? {
         if (!Files.isRegularFile(newPath)) return null
-        val s = store()
-        val text = KbExtractor.extract(newPath)
-        val captured = captureQuietly(s, id, newPath)
-        val updated = s.transformEntry(id, text ?: "") { e ->
-            e.copy(
-                sourcePath = KbFileStore.displayPath(newPath.toString()),
-                sizeBytes = captured?.size ?: runCatching { Files.size(newPath) }.getOrDefault(0),
-                contentHash = captured?.hash ?: "",
-                fileExt = fileExtOf(newPath),
-                updatedAt = System.currentTimeMillis(),
-            )
-        }
+        val updated = store().relink(id, newPath, KbExtractor.extract(newPath))
         if (updated != null) KbTopics.publish(null)
         return updated
     }
@@ -675,14 +630,6 @@ class KbManagerService : Disposable {
     }
 
     // ───────────────────────── 内部 ─────────────────────────
-
-    /** 落文档快照（收录、重新链接、再次收录共用）；失败返回 null 并记日志，不拦业务 */
-    private fun captureQuietly(s: KbFileStore, id: String, file: Path): KbContent.Captured? =
-        runCatching { KbContent.capture(s.root(), id, KbFileStore.displayPath(file.toString())) }
-            .onFailure { log.warn("Knowledge Base: snapshot capture failed ($id, $file): ${it.message}") }
-            .getOrNull()
-
-    private fun fileExtOf(file: Path): String = "." + file.fileName.toString().substringAfterLast('.', "").lowercase()
 
     /** 解析项目里的 git 路径（项目配了自定义 git 时与「Git 提交」行取同一个），并记住供无项目上下文的调用沿用 */
     private fun resolveGitExe(project: Project?): String {

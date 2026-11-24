@@ -2,6 +2,7 @@ package com.zcode.kb.mcp
 
 import com.zcode.kb.core.KbContent
 import com.zcode.kb.core.KbEntry
+import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFileStore
 import com.zcode.kb.core.KbFilter
 import java.io.BufferedReader
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -207,6 +209,60 @@ class KbMcpServerTest {
     }
 
     @Test
+    fun `recoloring an unknown tag is rejected instead of registering it`(@TempDir dir: Path) {
+        seed(dir) // 条目带着 nacos / dm8 两个标签
+        KbServerStore(dir).use { server ->
+            // 名字打错：报业务错误，不能顺手建出一个没有条目在用的空标签
+            val miss = org.junit.jupiter.api.assertThrows<KbServerStore.KbOpException> {
+                server.setTagColor("naocs", "#123456")
+            }
+            assertTrue(miss.message!!.contains("tag not found"), miss.message)
+            // 只挂在条目上、还没进注册表的标签算存在：改色即补注册（IDE 标签弹窗走的同一条路）
+            server.setTagColor("dm8", "#ABCDEF")
+            assertEquals("#ABCDEF", server.tagStats().single { it.name == "dm8" }.color)
+        }
+        KbFileStore(dir).use { s ->
+            assertTrue(s.tagMetas().none { it.name == "naocs" }, s.tagMetas().toString())
+        }
+    }
+
+    @Test
+    fun `folder stats follow the order of the IDE tree`(@TempDir dir: Path) {
+        // 建目录的先后与名字的码点顺序故意相反：按路径排序会得到另一个结果
+        KbFileStore(dir).use { s ->
+            val a = s.createFolder(null, "甲")
+            s.createFolder(null, "乙")
+            s.createFolder(a, "子")
+            s.createFolder(null, "A")
+            s.createFolder(null, "A-b")
+            s.createFolder(s.folders().single { it.name == "A" }.id, "x")
+        }
+        KbServerStore(dir).use { server ->
+            // 工具窗的目录树：每层按拖出来的先后，父目录后紧跟其子目录
+            assertEquals(
+                listOf("甲", "甲/子", "乙", "A", "A/x", "A-b"),
+                server.folderStats().map { it.path },
+            )
+        }
+    }
+
+    @Test
+    fun `folder stats keep a folder whose parent is gone`(@TempDir dir: Path) {
+        val config = dir.resolve("config.json")
+        val top = KbFileStore(dir).use { s ->
+            val root = s.createFolder(null, "甲")
+            s.createFolder(root, "乙")
+            root
+        }
+        // 父目录的 id 被改掉，子目录就成了断链目录（界面与 MCP 都造不出来，只有手改文件或同步冲突才会出现）
+        Files.writeString(config, Files.readString(config).replace("\"id\": \"$top\"", "\"id\": \"f-0ddba11\""))
+        KbServerStore(dir).use { server ->
+            // 断链的排在最后，但不能从全景里消失
+            assertEquals(listOf("甲", "乙"), server.folderStats().map { it.path })
+        }
+    }
+
+    @Test
     fun `java store move with index reorders layers like IDE`(@TempDir dir: Path) {
         // 自建确定性数据：ingestedAt 递增 → order 全 0 时视觉序 = 收录倒序（新在前）
         KbFileStore(dir).use { s ->
@@ -252,6 +308,83 @@ class KbMcpServerTest {
             // 目录视觉序：Plugins 拖尾后 = Ops, Plugins
             assertEquals(listOf("Ops", "Plugins"), s.folders().sortedBy { it.order }.map { it.name })
         }
+    }
+
+    @Test
+    fun `management writes keep every line they do not change`(@TempDir dir: Path) {
+        seed(dir)
+        val entryA = dir.resolve("entries/kb-aaaa1111.json")
+        val entryB = dir.resolve("entries/kb-bbbb2222.json")
+        val config = dir.resolve("config.json")
+        val before = listOf(entryA, entryB, config).associate { it to Files.readAllLines(it) }
+
+        KbServerStore(dir).use { server ->
+            server.ensureTag("ops", null) // config：只多出一个标签
+            server.updateEntries(listOf("kb-aaaa1111"), null, listOf("nacos", "dm8", "ops"), null, null) // 条目：只有 tags 变
+            server.renameFolder("信创", "信创适配") // config：只有一个目录名变
+        }
+
+        // 没被改的条目逐字节不变；被改的文件只有涉及的那几行变，其余行原样（git 历史里看得出到底改了什么）
+        assertEquals(before[entryB], Files.readAllLines(entryB))
+        for (f in listOf(entryA, config)) {
+            val after = Files.readAllLines(f)
+            val removed = before.getValue(f).filterNot { it in after }
+            assertTrue(removed.size <= 4, "$f 有 ${removed.size} 行被改写：$removed")
+            assertTrue(after.first() == "{" && after.last() == "}" && after[1].startsWith("    \""), "$f 不是逐字段一行的排版")
+        }
+        assertEquals(listOf("nacos", "dm8", "ops"), KbFileStore(dir).use { it.getEntry("kb-aaaa1111")!!.tags })
+    }
+
+    @Test
+    fun `folder dragged inside its own layer lands where the IDE drops it`(@TempDir dir: Path) {
+        KbFileStore(dir).use { s ->
+            for (name in listOf("Ops", "Plugins", "Vcs", "Ai")) s.createFolder(null, name)
+        }
+        KbServerStore(dir).use { server ->
+            // Ops 原在首位；拖到摘出前的第 3 个位置（Vcs 与 Ai 之间）
+            server.moveFolder("Ops", "", 3)
+        }
+        // IDE 拖拽语义（KbFileStore.moveFolder，真机验证过的落位）
+        KbFileStore(dir).use { s ->
+            assertEquals(listOf("Plugins", "Vcs", "Ops", "Ai"), s.folders().sortedBy { it.order }.map { it.name })
+        }
+        // 反过来：IDE 先拖，MCP 在 IDE 写过的次序上再拖，落位仍按同一套规则
+        KbFileStore(dir).use { s -> s.moveFolder(s.folders().single { it.name == "Vcs" }.id, null, 3) }
+        KbServerStore(dir).use { server -> server.moveFolder("Ai", "", 0) }
+        KbFileStore(dir).use { s ->
+            assertEquals(listOf("Ai", "Plugins", "Ops", "Vcs"), s.folders().sortedBy { it.order }.map { it.name })
+        }
+    }
+
+    @Test
+    fun `kb_add and IDE ingest write the same files for the same document`(@TempDir dir: Path) {
+        val src = dir.resolve("docs/指南.md")
+        Files.createDirectories(src.parent)
+        Files.writeString(src, "# 指南\n正文")
+        val tags = listOf("ZooKeeper", "ZooKeeper", "a,b")
+        val viaMcp = dir.resolve("via-mcp")
+        val viaIde = dir.resolve("via-ide")
+
+        val id = KbServerStore(viaMcp).use { it.addEntry(src.toString(), "运维指南", "信创/中间件", tags, "备注")["id"] as String }
+        val r = KbFileStore(viaIde).use {
+            val folderId = it.ensureFolderPath("信创/中间件")
+            it.ingest(src, "运维指南", folderId, tags, "备注", KbContent.TextExtractor { KbExtractor.extract(it) }, "git")
+        }
+        assertFalse(r.existed)
+
+        // 条目：除收录时间两行外逐行相同；目录 id 是随机生成的，比较时抹掉
+        val folderIds = Regex("\"f-[0-9a-f]+\"")
+        fun entryLines(lib: Path) = Files.readAllLines(lib.resolve("entries/$id.json"))
+            .filterNot { it.contains("\"ingestedAt\"") || it.contains("\"updatedAt\"") }
+            .map { it.replace(folderIds, "\"f-\"") }
+        assertEquals(id, r.entry.id)
+        assertEquals(entryLines(viaMcp), entryLines(viaIde))
+        assertEquals(Files.readString(viaMcp.resolve("text/$id.txt")), Files.readString(viaIde.resolve("text/$id.txt")))
+        assertContentEquals(Files.readAllBytes(src), Files.readAllBytes(viaIde.resolve("snapshots/$id/指南.md")))
+        assertEquals(
+            Files.readAllLines(viaMcp.resolve("config.json")).map { it.replace(folderIds, "\"f-\"") },
+            Files.readAllLines(viaIde.resolve("config.json")).map { it.replace(folderIds, "\"f-\"") },
+        )
     }
 
     @Test
@@ -313,6 +446,13 @@ class KbMcpServerTest {
         val read = reader.readLine()
         assertTrue(read.contains("信创适配部署实践"), read)
         assertTrue(read.contains("folder: 信创/中间件"), read)
+        // 正文按原文返回：换行是真换行而不是字面的 \n，模型与工具卡才分得开头信息和正文（只转义一次）
+        val readText = Json.parseToJsonElement(read)
+            .jsonObject["result"]!!.jsonObject["content"]!!.jsonArray[0]
+            .jsonObject["text"]!!.jsonPrimitive.content
+        assertTrue(readText.startsWith("### 部署手册\n- folder: 信创/中间件"), readText)
+        assertTrue(readText.endsWith("\n\n信创适配部署实践：DM8 数据库与 Nacos 集群部署步骤"), readText)
+        assertFalse("\\n" in readText, readText)
 
         // folder 过滤（子树前缀）+ 标签检索渠道
         send("""{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"kb_search","arguments":{"query":"部署","folder":"信创"}}}""")
@@ -505,6 +645,12 @@ class KbMcpServerTest {
         // 不存在路径：业务 error
         send("""{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"kb_folder","arguments":{"action":"delete","path":"不存在"}}}""")
         assertTrue(reader.readLine().contains("folder not found"))
+
+        // 给不存在的标签改色：业务 error（不会顺手建出一个空标签）
+        send("""{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"kb_tag","arguments":{"action":"color","name":"没有的标签","color":"#123456"}}}""")
+        val unknownTag = reader.readLine()
+        assertTrue(unknownTag.contains("tag not found"), unknownTag)
+        assertTrue(!unknownTag.contains("color set"), unknownTag)
 
         // 删条目：元数据+缓存删除，kb_read 随即 not found（磁盘源文件永不触碰——指针模型）
         send("""{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"kb_entry","arguments":{"action":"delete","ids":["kb-bbbb2222"]}}}""")
