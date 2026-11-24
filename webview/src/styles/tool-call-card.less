@@ -1255,3 +1255,411 @@
     opacity: 0.9;
   }
 }
+
+/* ===== 知识库工具卡（单卡展开区与批量组卡的成员行共用，KbToolBody）=====
+   参数 = 中文字段名 + 值；结果按工具解析成条目列表 / 目录树 / 正文 / 一句回执，
+   替代裸 JSON。解析不出来时渲染层回退上面的 tool-card__code 原文。 */
+
+/* 头部/成员行里的结果数量（命中 3 条 · 42 条 · 10 个目录）：收起即可见 */
+.tool-card__kb-hint,
+.kb-group__hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+
+  &--err {
+    background: transparent;
+    color: var(--status-error-text);
+  }
+}
+
+/* 工具窗那本书的图标（内联 SVG，颜色跟随文字）*/
+.tool-card__kb-icon,
+.bash-group__kb-icon {
+  display: block;
+  color: var(--text-primary);
+}
+
+.kb-body {
+  // 组卡成员行展开时外层已经有一层内边距，收紧一档
+  &--compact .tool-card__section:first-child {
+    margin-top: 4px;
+  }
+}
+
+/* 参数：横向排开、自动换行；值用等宽字体（路径、id 居多）*/
+.kb-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.kb-param {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+
+  &__label {
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+
+  &__value {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* 色块（标签颜色）*/
+.kb-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  /* 背景透明度无法用变量表达，保留 rgba */
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.55);
+}
+
+.kb-caption {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &--tags {
+    margin-top: 10px;
+  }
+}
+
+.kb-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+
+  &__spin {
+    font-size: 12px;
+    animation: tool-spin 1s linear infinite;
+  }
+}
+
+/* 展开区限高：结果再长也在卡片里滚，不把消息区拉长（全文走 📖 弹窗或「原始数据」）*/
+@kb-body-max: 240px;
+
+.kb-scroll {
+  max-height: @kb-body-max;
+  // 纵向出滚动条，横向裁掉（长路径不该把卡片撑宽）。两轴都在这里定：列表自身不要再写
+  // overflow 简写，同特异度下后写的规则会把这里的纵向滚动盖回去
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    // 比全局滚动条的滑块亮一档：滚动区嵌在卡片里，要让人一眼看出这里能滚
+    background: var(--scrollbar-thumb-hover);
+    border-radius: 3px;
+
+    &:hover {
+      background: var(--text-tertiary);
+    }
+  }
+}
+
+/* 条目列表（检索 / 浏览）。圆角裁切由同元素的 .kb-scroll 的 overflow 负责 */
+.kb-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+}
+
+.kb-row {
+  padding: 5px 8px;
+  font-size: 12px;
+  min-width: 0;
+
+  & + & {
+    border-top: 1px solid var(--border-secondary);
+  }
+
+  &__line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  &__title {
+    color: var(--text-primary);
+    flex-shrink: 0;
+    max-width: 62%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__folder {
+    color: var(--text-tertiary);
+    font-size: 11px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 3px;
+  }
+
+  &__tag {
+    font-size: 10px;
+    line-height: 15px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+  }
+
+  /* 状态标注（源文件不在本机：快照 / 已失效），与工具窗树里的标识同一个词 */
+  &__state {
+    font-size: 10px;
+    line-height: 13px;
+    padding: 0 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border-hover);
+    color: var(--text-tertiary);
+
+    &--err {
+      color: var(--status-error-text);
+      /* error 半透明边框，无对应半透明变量，保留 rgba */
+      border-color: rgba(244, 67, 54, 0.4);
+    }
+  }
+
+  /* 命中片段：最多两行，全文在悬浮提示里 */
+  &__snippet {
+    margin-top: 3px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    line-height: 16px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* 目录结构（kb_tree）：按路径深度缩进，右侧条数 */
+.kb-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 20px;
+    padding-right: 6px;
+    border-radius: 3px;
+
+    &:hover {
+      background: var(--bg-hover);
+    }
+  }
+
+  &__name {
+    color: var(--text-primary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__count {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-tertiary);
+
+    // 含下级的总数（直接挂载数在悬浮提示里）
+    &--sum {
+      color: var(--text-secondary);
+    }
+  }
+}
+
+.kb-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.kb-tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+
+  /* 没配颜色的标签画一个空心点占位 */
+  &__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--text-tertiary);
+  }
+
+  &__count {
+    font-size: 10px;
+    color: var(--text-tertiary);
+  }
+}
+
+/* 读全文：标题 + 目录/标签/项目/状态 + 源路径 + 正文（长了在卡片内滚动，全文走 📖 弹窗）*/
+.kb-read {
+  &__title {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  &__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  &__project {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  &__source {
+    margin: 4px 0 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__text {
+    margin-top: 4px;
+    max-height: @kb-body-max;
+  }
+}
+
+/* 整理类工具的回执：一行说清做了什么 */
+.kb-receipt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+
+  .codicon {
+    font-size: 12px;
+    color: var(--status-success);
+    flex-shrink: 0;
+  }
+
+  &--err {
+    color: var(--status-error-text);
+
+    .codicon {
+      color: var(--status-error-text);
+    }
+  }
+
+  &__text {
+    overflow-wrap: anywhere;
+  }
+
+  &__detail {
+    margin-top: 6px;
+    color: var(--status-error-text);
+    /* error 半透明边框，无对应半透明变量，保留 rgba */
+    border-color: rgba(244, 67, 54, 0.3);
+  }
+}
+
+/* 标签行右端的动作区：「查看完整结果」「原始数据」并排，与区块标签同一行 */
+.kb-label-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 「原始数据 / 友好视图」切换（挂在展开区第一个区块标签行的右端，不单独占一行）*/
+.kb-raw__btn {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+
+  &:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
+  }
+}
+
+/* 批量组卡的成员行：可点击展开（看参数与结果），行尾带结果数量 */
+.kb-group__row {
+  cursor: pointer;
+  user-select: none;
+}
+
+.kb-group__chevron {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.kb-group__summary {
+  cursor: inherit;
+}
+
+.kb-group__detail {
+  margin: 0 4px 4px 26px;
+  padding: 2px 10px 8px;
+  border-left: 2px solid var(--border-hover);
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-elevated);
+}

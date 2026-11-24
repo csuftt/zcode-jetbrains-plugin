@@ -31,9 +31,11 @@ import { useTick } from '@/hooks/useTick'
 import { extractTodoItems, diffTodos, findPrevTodoWriteTodos } from '@/utils/todoDiff'
 import { isAgentMessageTool, shortAgentId, parseAgentMessageReceipt } from '@/utils/agentMessage'
 import { isCuaTool, cuaToolShortName, cuaIconKeyFromOutput, parseCuaAppList, parseCuaWindows } from '@/utils/cuaTools'
-import { isKbTool, kbToolLabel, kbActionSummary } from '@/utils/kbTools'
+import { isKbTool, kbToolLabel, kbActionSummary, kbResultHint } from '@/utils/kbTools'
 import { FileIcon } from './FileIcon'
 import { CuaAppIcon } from './CuaAppIcon'
+import { KbIcon } from './KbIcon'
+import { KbToolBody } from './KbToolBody'
 import '../styles/tool-call-card.less'
 
 interface Props {
@@ -72,8 +74,7 @@ function toolIcon(tool: string): string {
     SendMessage: 'codicon-mail',
     RespondToCoordinator: 'codicon-reply',
   }
-  // mcp__ 前缀的工具统一用 package 图标；知识库工具族用 database
-  if (isKbTool(tool)) return 'codicon-database'
+  // mcp__ 前缀的工具统一用 package 图标（知识库工具族不用 codicon：头部直接画工具窗那本书，见 KbIcon）
   if (tool.startsWith('mcp__')) return 'codicon-package'
   return map[tool] || 'codicon-tools'
 }
@@ -212,6 +213,12 @@ export function ToolCallCard({ part, cuaIconKey }: Props) {
   // 自带 app 行的 key 优先（get_app_state/list_windows/list_apps），动作类工具退
   // 调用方顺扫的会话级最近 key；非 CUA 工具恒 null（渲染 codicon 兜底）
   const isCuaToolCard = isCuaTool(tool)
+  // 知识库工具族：图标用工具窗那本书（内联 SVG）；检索/浏览/目录结构的条数在头部收起即可见
+  const isKbCard = isKbTool(tool)
+  const kbHint = useMemo(
+    () => (isKbCard ? kbResultHint(tool, state.output) : null),
+    [isKbCard, tool, state.output],
+  )
   const appIconKey = !isCuaToolCard
     ? null
     : cuaIconKeyFromOutput(state.output) ?? cuaIconKey ?? null
@@ -470,7 +477,13 @@ export function ToolCallCard({ part, cuaIconKey }: Props) {
           <CuaAppIcon
             iconKey={appIconKey}
             className="tool-card__app-icon"
-            fallback={<span className={`codicon ${isCuaToolCard ? 'codicon-device-desktop' : toolIcon(tool)}`} />}
+            fallback={
+              isKbCard ? (
+                <KbIcon className="tool-card__kb-icon" />
+              ) : (
+                <span className={`codicon ${isCuaToolCard ? 'codicon-device-desktop' : toolIcon(tool)}`} />
+              )
+            }
           />
         </span>
         <span className="tool-card__name">{toolDisplayName(tool, t)}</span>
@@ -487,6 +500,12 @@ export function ToolCallCard({ part, cuaIconKey }: Props) {
           ) : (
             <span className="tool-card__summary" title={headerSummary}>{headerSummary}</span>
           )
+        )}
+        {/* 知识库检索/浏览/目录结构的结果数量（收起即可见）；出错时标「未成功」 */}
+        {kbHint && (
+          <span className={`tool-card__kb-hint${kbHint.error ? ' tool-card__kb-hint--err' : ''}`}>
+            {kbHint.text}
+          </span>
         )}
         {/* 行数徽标（Write/Edit）：流式期间累计跳动（"已写入 N 行"进度），完成态定格 */}
         {lineStats && (
@@ -992,8 +1011,10 @@ export function ToolCallCard({ part, cuaIconKey }: Props) {
               定时任务家族走上方 cron 分支（触发时刻/标题/提示词 + message/任务列表）；
               代理间消息族走上方消息分支（收件人/正文/回执）；
               TodoWrite 走上方任务列表分支（diff 标注），仅流式未解析时落到 rawInput 原文；
-              CUA 列表类已解析走上方应用列表分支，未解析（流式半截/形状变更）仍回这里 */}
-          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && tool !== 'ExitPlanMode' && !isWebTool && !isCron && !isTodoTool && !isMsgTool && !cuaApps && !cuaWins && (
+              CUA 列表类已解析走上方应用列表分支，未解析（流式半截/形状变更）仍回这里；
+              知识库工具族走上方 KbToolBody（参数 + 条目列表/目录树/正文/回执，解析不了回退原文） */}
+          {isKbCard && <KbToolBody part={part} />}
+          {tool !== 'Bash' && tool !== 'Write' && tool !== 'Edit' && tool !== 'Skill' && tool !== 'ExitPlanMode' && !isWebTool && !isCron && !isTodoTool && !isMsgTool && !cuaApps && !cuaWins && !isKbCard && (
             <>
               {state.input && Object.keys(state.input).length > 0 && (
                 <div className="tool-card__section">
@@ -1015,7 +1036,7 @@ export function ToolCallCard({ part, cuaIconKey }: Props) {
               )}
             </>
           )}
-          {state.error && tool !== 'Bash' && (
+          {state.error && tool !== 'Bash' && !isKbCard && (
             <div className="tool-card__section tool-card__section--err">
               <div className="tool-card__label">{t('tool.error')}</div>
               <pre className="tool-card__code">{toolErrorText(state.error)}</pre>

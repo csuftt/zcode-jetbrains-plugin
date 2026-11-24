@@ -25,6 +25,7 @@ import { ModelListView } from './ModelListView'
 import { BrowserSettingsView } from './BrowserSettingsView'
 import { ComputerSettingsView } from './ComputerSettingsView'
 import { KbSettingsView } from './KbSettingsView'
+import { KbIcon } from './KbIcon'
 import { AgentListView } from './AgentListView'
 import { HookListView } from './HookListView'
 import { ProcessSettingsView } from './ProcessSettingsView'
@@ -71,8 +72,9 @@ export function SettingsView({ onBack }: Props) {
     }
   }, [pendingSection, setPendingSection])
 
-  // glyph = Unicode 字形（codicon 字体无锚形；不用官方图标素材，避免版权问题）
-  const navItems: { key: SettingsTab; icon?: string; glyph?: string }[] = [
+  // glyph = Unicode 字形（codicon 字体无锚形；不用官方图标素材，避免版权问题）；
+  // kbIcon = 内联 SVG 的知识库图标（与工具窗标题栏、聊天里的知识库工具卡同一本书）
+  const navItems: { key: SettingsTab; icon?: string; glyph?: string; kbIcon?: boolean }[] = [
     { key: 'basic', icon: 'codicon-paintcan' },
     { key: 'models', icon: 'codicon-server-process' },
     { key: 'usage', icon: 'codicon-graph' },
@@ -84,7 +86,7 @@ export function SettingsView({ onBack }: Props) {
     { key: 'hooks', glyph: '⚓\uFE0E' },
     { key: 'browser', icon: 'codicon-globe' },
     { key: 'computer', icon: 'codicon-device-desktop' },
-    { key: 'kb', icon: 'codicon-book' },
+    { key: 'kb', kbIcon: true },
     { key: 'processes', icon: 'codicon-pulse' },
     { key: 'other', icon: 'codicon-ellipsis' },
   ]
@@ -115,9 +117,11 @@ export function SettingsView({ onBack }: Props) {
                   : t(`settings.tabs.${it.key}`)
               }
             >
-              {it.glyph
-                ? <span className="settings-view__nav-glyph">{it.glyph}</span>
-                : <span className={cx('codicon', it.icon)} />}
+              {it.kbIcon
+                ? <KbIcon className="settings-view__nav-kb" />
+                : it.glyph
+                  ? <span className="settings-view__nav-glyph">{it.glyph}</span>
+                  : <span className={cx('codicon', it.icon)} />}
             </button>
           ))}
         </aside>
