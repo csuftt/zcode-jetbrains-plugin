@@ -1291,7 +1291,6 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
             folderOptions(),
             editOf = e,
             defaultFolderId = e.folderId,
-            project = project,
         )
         if (!KbDialogs.show(dialog)) return
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -1368,7 +1367,7 @@ class KnowledgeToolWindowPanel(private val project: Project) : JPanel(BorderLayo
      *  不再缓存「上次收录目录」） */
     fun ingestWithDialog(files: List<Path>, preselectFolderId: String? = null) {
         val service = KbManagerService.instance
-        val dialog = KbIngestDialog(files, folderOptions(), defaultFolderId = preselectFolderId ?: "", project = project)
+        val dialog = KbIngestDialog(files, folderOptions(), defaultFolderId = preselectFolderId ?: "")
         if (!KbDialogs.show(dialog)) return
         ApplicationManager.getApplication().executeOnPooledThread {
             val folderId = resolveFolderChoice(service, dialog)

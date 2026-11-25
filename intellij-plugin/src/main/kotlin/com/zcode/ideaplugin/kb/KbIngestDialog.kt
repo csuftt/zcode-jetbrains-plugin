@@ -16,7 +16,6 @@ import com.zcode.kb.core.KbContent
 import com.zcode.kb.core.KbEntry
 import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFileStore
-import com.zcode.kb.core.KbGitCli
 import com.zcode.kb.core.KbHeuristics
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
@@ -50,11 +49,10 @@ import javax.swing.JPanel
  *   preferred 高（选/未选同高，不挤备注行）；框线对齐靠离屏试画标定原生 border 的
  *   真实绘制偏移/色号再补偿（原生 border 带组件类型门控不可复用），框线与标题/
  *   目录/备注左右同列（缺陷HX）；
- * - 源文件下方一行（2026-11-23 用户要求）：源文件在时显示该文件自己的最近提交（哈希/日期/
- *   标题，仅 git 管理的文件出现；未提交的新文件、被 .gitignore 忽略、有未提交修改各有
- *   文案）。源文件不在时这一行改为显示文档快照的信息（知识库里的存档副本；没有快照则
- *   明示没有内容），源文件行同步标注「源文件在本机不存在」。git 子进程与解析都在后台
- *   线程做——行先隐藏，查到再显示并重排弹窗。多文件收录不查（清单里每行一个提交既挤又慢）。
+ * - 源文件下方一行：仅源文件不在时显示文档快照的信息（知识库里的存档副本；没有快照则
+ *   明示没有内容），源文件行同步标注「源文件在本机不存在」；源文件在时这一行不显示
+ *   （2026-11-25 用户拍板：Git 提交状态展示移除）。查证在后台线程做——行先隐藏，
+ *   查到再显示并重排弹窗。多文件收录不查。
  *
  * [titleValue]/[folderPathValue]/[tagsValue]/[notesValue] 在 doValidate 前（即 OK 后）读取。
  */
@@ -63,8 +61,6 @@ class KbIngestDialog(
     folderOptions: List<FolderOption>,
     editOf: KbEntry? = null,
     defaultFolderId: String = "",
-    /** 只用于解析 git 可执行路径（项目里配了自定义 git 时取项目里那个）；null = PATH 上的 git */
-    private val project: com.intellij.openapi.project.Project? = null,
 ) : DialogWrapper(true) {
 
     /** 目录下拉项：id + 派生展示路径（"" = 根级，恒为首项） */
@@ -80,15 +76,12 @@ class KbIngestDialog(
     /** 源文件只读行（源文件不在时追加灰色标注） */
     private val sourceLabel = JBLabel()
 
-    /** 源文件下方那一行（Git 提交，或源文件不在时的文档快照信息）：初值隐藏，后台查到才显示；左内边距与源文件行同值（文字起点对齐） */
-    private val commitCaption = JBLabel(ZCodeBundle.message("kb.dialog.commitLabel")).apply { isVisible = false }
-    private val commitLabel = JBLabel().apply {
+    /** 源文件下方那一行（仅源文件不在时的文档快照信息）：初值隐藏，后台查到才显示；左内边距与源文件行同值（文字起点对齐） */
+    private val snapshotCaption = JBLabel(ZCodeBundle.message("kb.dialog.snapshotLabel")).apply { isVisible = false }
+    private val snapshotLabel = JBLabel().apply {
         isVisible = false
         border = JBUI.Borders.empty(0, 8)
     }
-
-    /** 「Git 提交」行要查的文件（仅单文件收录/编辑有源文件行；多文件收录不查） */
-    private var gitSource: Path? = null
 
     /** 已选标签（保序；初值=编辑条目现有标签；收录默认空，用户自选） */
     private val selectedTags = linkedSetOf<String>()
@@ -196,14 +189,14 @@ class KbIngestDialog(
                 }, c)
                 c.weightx = 0.0
                 row++
-                // Git 提交行紧随源文件下方；隐藏行在 GridBag 里不占位（JDK 17 实测），非 git 文件不留空隙
+                // 文档快照行紧随源文件下方；隐藏行在 GridBag 里不占位（JDK 17 实测），源文件在时不留空隙
                 c.gridx = 0; c.gridy = row
-                add(commitCaption, c)
+                add(snapshotCaption, c)
                 c.gridx = 1; c.fill = GridBagConstraints.HORIZONTAL; c.weightx = 1.0
-                add(commitLabel, c)
+                add(snapshotLabel, c)
                 c.weightx = 0.0
                 row++
-                gitSource = runCatching { Path.of(src.toString()) }.getOrNull()
+                runCatching { Path.of(src.toString()) }.getOrNull()?.let { loadContentRow(it, editOf) }
             }
             if (files.size == 1 || editOf != null) {
                 c.gridx = 0; c.gridy = row
@@ -234,7 +227,6 @@ class KbIngestDialog(
         }
 
         init()
-        gitSource?.let { loadContentRow(it, editOf) }
     }
 
     val titleValue: String get() = titleField.text.trim()
@@ -356,20 +348,14 @@ class KbIngestDialog(
     }
 
     /**
-     * 后台填源文件下方那一行：源文件在 = 它自己的提交状态（不在 git 仓内或查询失败 = 行保持
-     * 隐藏）；源文件不在 = 文档快照的信息（没有快照则明示没有内容），源文件行同步标注。
-     * 回填须 ModalityState.any()——默认 modality 的 invokeLater 在模态弹窗开着时不执行，
-     * 不加的话行要等弹窗关了才冒出来。
+     * 后台填源文件下方那一行（仅编辑条目且源文件不在时有内容）：显示文档快照的信息
+     * （没有快照则明示没有内容），源文件行同步标注；源文件在（SOURCE 态）这一行保持
+     * 隐藏。回填须 ModalityState.any()——默认 modality 的 invokeLater 在模态弹窗开着时
+     * 不执行，不加的话行要等弹窗关了才冒出来。
      */
     private fun loadContentRow(file: Path, entry: KbEntry?) {
         ApplicationManager.getApplication().executeOnPooledThread {
-            val service = KbManagerService.instance
-            val resolved = entry?.let { runCatching { service.resolve(it) }.getOrNull() }
-            val history = if (resolved == null || resolved.state == KbContent.State.SOURCE) {
-                service.fileHistory(file, project)
-            } else {
-                null
-            }
+            val resolved = entry?.let { runCatching { KbManagerService.instance.resolve(it) }.getOrNull() }
             ApplicationManager.getApplication().invokeLater({
                 if (isDisposed) return@invokeLater
                 val state = resolved?.state
@@ -378,18 +364,14 @@ class KbIngestDialog(
                         " <span style='color:${noteColor()}'>" +
                         escapeHtml(ZCodeBundle.message("kb.dialog.sourceMissingNote")) + "</span>"
                 }
-                val text = when {
-                    history != null -> commitHtml(history)
-                    state == KbContent.State.SNAPSHOT -> snapshotHtml(resolved!!.path)
-                    state == KbContent.State.MISSING -> "<html><body style='width:400px'>" +
+                snapshotLabel.text = when (state) {
+                    KbContent.State.SNAPSHOT -> snapshotHtml(resolved!!.path)
+                    KbContent.State.MISSING -> "<html><body style='width:400px'>" +
                         gray(escapeHtml(ZCodeBundle.message("kb.dialog.noContent"))) + "</body></html>"
-                    else -> return@invokeLater // 非 git 文件：这一行不显示
+                    else -> return@invokeLater // 源文件在（或非编辑弹窗）：这一行不显示
                 }
-                commitCaption.text = if (history != null) ZCodeBundle.message("kb.dialog.commitLabel")
-                else ZCodeBundle.message("kb.dialog.snapshotLabel")
-                commitLabel.text = text
-                commitCaption.isVisible = true
-                commitLabel.isVisible = true
+                snapshotCaption.isVisible = true
+                snapshotLabel.isVisible = true
                 centerPanel.revalidate()
                 pack() // 弹窗已按「无此行」定好尺寸：按新内容重排（左上角不动，向下长高）
             }, ModalityState.any())
@@ -409,21 +391,6 @@ class KbIngestDialog(
         n >= 1024L * 1024 -> "%.1f MB".format(n / 1024.0 / 1024)
         n >= 1024L -> "%.1f KB".format(n / 1024.0)
         else -> "$n B"
-    }
-
-    /** 提交行 HTML：`a1b2c3d  2026-11-20  标题`，日期与各种标注用灰字 */
-    private fun commitHtml(h: KbGitCli.FileHistory): String {
-        val body = when {
-            h.commit == null && h.ignored -> gray(ZCodeBundle.message("kb.dialog.commit.ignored"))
-            h.commit == null -> gray(ZCodeBundle.message("kb.dialog.commit.uncommitted"))
-            else -> {
-                val c = h.commit!!
-                val subject = c.subject.let { if (it.length > COMMIT_SUBJECT_MAX) it.take(COMMIT_SUBJECT_MAX - 1) + "…" else it }
-                escapeHtml(c.hash) + "  " + gray(escapeHtml(c.date)) + "  " + escapeHtml(subject) +
-                    (if (h.dirty) "  " + gray(ZCodeBundle.message("kb.dialog.commit.dirty")) else "")
-            }
-        }
-        return "<html><body style='width:400px'>$body</body></html>"
     }
 
     /** 次要信息灰（跟随主题深浅，与树行的路径灰同色系） */
@@ -519,11 +486,6 @@ class KbIngestDialog(
 
     override fun createCenterPanel(): JComponent = JPanel(BorderLayout()).apply {
         add(centerPanel, BorderLayout.CENTER)
-    }
-
-    companion object {
-        /** 提交标题行展示上限（字符）：超长截断防把弹窗撑高 */
-        private const val COMMIT_SUBJECT_MAX = 200
     }
 }
 

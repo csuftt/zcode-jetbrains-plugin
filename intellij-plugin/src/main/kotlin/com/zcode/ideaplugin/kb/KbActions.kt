@@ -57,7 +57,6 @@ class KbAddFilesAction : AnAction(
         val dialog = KbIngestDialog(
             files,
             folderOptions,
-            project = project,
         )
         if (!dialog.showAndGet()) return
         val title = dialog.titleValue

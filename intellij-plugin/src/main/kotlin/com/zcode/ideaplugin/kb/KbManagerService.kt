@@ -15,7 +15,6 @@ import com.zcode.kb.core.KbExtractor
 import com.zcode.kb.core.KbFolder
 import com.zcode.kb.core.KbTagMeta
 import com.zcode.kb.core.KbFilter
-import com.zcode.kb.core.KbGitCli
 import com.zcode.kb.core.KbHit
 import com.zcode.kb.core.KbPaths
 import com.zcode.kb.core.KbFileStore
@@ -167,10 +166,6 @@ class KbManagerService : Disposable {
         if (changed) KbTopics.publish(null)
         return changed
     }
-
-    /** 源文件自己的提交状态（收录弹窗「Git 提交」行；后台线程调用——git 子进程不进 EDT）；文件不在返回 null */
-    fun fileHistory(file: Path, project: Project? = null): KbGitCli.FileHistory? =
-        runCatching { KbGitCli(gitExe = resolveGitExe(project)).historyOf(file) }.getOrNull()
 
     /** 摘除：删登记、检索缓存与文档快照，绝不动源文件 */
     fun remove(id: String): Boolean {
@@ -631,7 +626,7 @@ class KbManagerService : Disposable {
 
     // ───────────────────────── 内部 ─────────────────────────
 
-    /** 解析项目里的 git 路径（项目配了自定义 git 时与「Git 提交」行取同一个），并记住供无项目上下文的调用沿用 */
+    /** 解析项目里的 git 路径（项目配了自定义 git 时优先取项目里那个），并记住供无项目上下文的调用沿用 */
     private fun resolveGitExe(project: Project?): String {
         if (project != null) {
             runCatching { GitExecutableManager.getInstance().getPathToGit(project) }
