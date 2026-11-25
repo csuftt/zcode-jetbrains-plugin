@@ -6,6 +6,48 @@
 
 最新版本块的中文段会被 `patchPluginXml` 提取为插件 change-notes（展示在 Marketplace 与 IDE 插件详情页，行内 Markdown 转换为 HTML），保持格式：`## [版本] - 日期` + `### 节` + `- ` 列表。
 
+## [0.4.7] - 2026-11-25
+
+中文:
+
+### 适配
+
+- **未捆绑 JCEF 的 IDE（Android Studio 2026.2 起等）**（issue #55）：2026.2 起 JCEF 拆成独立捆绑插件、Android Studio 不再自带，此前这类 IDE 里聊天面板会直接报错；现在显示引导页并提供「打开插件市场搜索安装」按钮，装好 JCEF 插件重启即可正常使用。
+
+### 新增
+
+- **知识库**（issue #54）：工具窗新增「知识库」——把项目文件与文档收录进库（项目视图 / 编辑器 / 变更视图右键、直接拖入、选择器三种入口，支持 md / 文本 / Word / PDF / Excel / HTML 等），自建多级目录整理，标签体系（8 色调色板、按标签过滤、批量管理），条目与目录可拖拽排序，按标题 / 标签 / 正文检索并高亮命中；条目可右键发送到 ZC GUI 输入框（带来源尾注），也可在资源管理器中定位源文件。库目录被外部（AI 或另一个 IDE）改动秒级同步到面板。
+- **知识库文档快照与多机同步**（issue #56）：收录时同时保存文档快照，源文件被移动、删除后条目仍能打开、检索与发送（标记为快照来源）；库目录即 git 仓库，工具条「同步」一键暂存 → 提交 → 变基拉取 → 推送，两台电脑指向同一远端即可互相同步，换电脑填同一地址点同步即取回整个库；库位置与快照存储位置可在设置页修改或恢复默认。
+- **AI 直接使用知识库**：随开关同步安装 zcgui-knowledge 技能并提供 8 个 MCP 工具，AI 可检索、浏览目录、读全文、收录、移动、改标签与整理；聊天里的知识库工具卡按中文字段展示参数与结果（命中列表、目录树、正文预览），批量调用的组卡可逐行展开，也可切换原始数据。
+- **子智能体配置实时生效，内置子代理可选模型与思考深度**：设置页修改子代理定义、或给内置子代理（general-purpose / Explore）指定模型和思考深度后，从下一回合开始生效，无需重开会话；内置覆盖与 ZCode 客户端共用 agents-state.json，模型按供应商分组、「继承默认」固定在末尾，思考深度候选随所选模型；子代理详情与最终报告弹窗显示实际执行的模型。设置页会按当前 CLI 能力标明生效时机（旧版退回新会话生效）。
+- **工具参数流停滞提示**：模型生成某个工具调用的参数连续 60 秒仍未结束时，输入框上方出现提示条（含工具名与已持续秒数）和「停止本轮」按钮，参数流结束或回合停止即消失；只提示不自动停，停不停由你判断。
+
+### 修复
+
+- 修复账号渠道的模型顺序与客户端不一致：新内置模型（如 GLM-5.4）被排到列表末尾，现按官方三段语义对齐（未排序内置成员前置 + 用户序 + 未排序个人成员）。
+- 修复工具执行失败时卡片只显示失败标记、看不到失败原因：现在展示服务端返回的错误信息，入参不合 schema 的工具调用也会带上参数。
+- 修复后台任务「取消」按钮紧邻展开箭头容易误点：代理任务与后台任务列表的取消都改为两段式确认（先点出「确认停止？」，再点才停，鼠标移开即还原）。
+
+English:
+
+### Adapted
+
+- **IDEs without bundled JCEF (Android Studio 2026.2 and later)**: starting with 2026.2 JCEF ships as a separately bundled plugin and Android Studio no longer includes it; previously the chat panel failed with an error in such IDEs. It now shows a guidance page with an "open the plugin marketplace" button — install the JCEF plugin, restart, and everything works.
+
+### Added
+
+- **Knowledge base** (issue #54): a new "Knowledge Base" tool window — collect project files and documents into the library (right-click in the project view / editor / changes view, drag them in, or use the picker; md / text / Word / PDF / Excel / HTML and more), organize with self-built multi-level folders, a tag system (8-color palette, filter by tag, bulk management), drag entries and folders to reorder, and search by title / tag / body with highlighted hits; send entries to the ZC GUI input box with a source footnote, or reveal the source file in the file manager. External changes to the library folder (by the AI or another IDE) appear in the panel within seconds.
+- **Knowledge base document snapshots and multi-machine sync** (issue #56): ingesting also stores a snapshot of the source document, so entries can still be opened, searched and sent after the source file is moved or deleted (badged as snapshot); the library directory is a git repository — the toolbar "Sync" button stages, commits, rebases, pulls and pushes in one go; two machines pointing at the same remote sync with each other, and on a new machine entering the same remote and hitting sync brings back the whole library; the library and snapshot locations are configurable (and resettable) in settings.
+- **AI uses the knowledge base directly**: the zcgui-knowledge skill is installed and removed together with the toggle, and 8 MCP tools are provided, so the AI can search, browse folders, read full text, ingest, move, retag and tidy up; knowledge-base tool cards in chat render parameters and results with friendly fields (hit list, folder tree, text preview), grouped batch calls expand row by row, and a raw-data view is one click away.
+- **Subagent configuration takes effect immediately; built-in subagents get model and thought depth**: changes to subagent definitions, or assigning a model / thought depth to the built-in subagents (general-purpose / Explore), take effect from the next turn without reopening the session; built-in overrides share agents-state.json with the ZCode client, models are grouped by provider with "inherit default" pinned last, and thought-depth options follow the selected model; the subagent detail and final report dialogs show the model actually used. The settings page states the effective timing according to the current CLI capability (older CLIs fall back to new-session-only).
+- **Tool parameter stream stall hint**: if the model has been generating a tool call's arguments for 60 seconds without finishing, a hint bar appears above the input box (tool name and elapsed seconds) with a "stop this turn" button; it disappears when the stream finishes or the turn stops. It only hints and never stops automatically — writing a large file can legitimately take a long stream, so the decision is yours.
+
+### Fixed
+
+- Fixed account-channel model ordering not matching the client: newly added built-in models (e.g. GLM-5.4) were pushed to the end of the list; now aligned with the official three-segment semantics (unranked built-in members first, then user order, then unranked personal members).
+- Fixed tool cards showing only a failure marker without the reason: the error message returned by the server is now displayed, and calls whose arguments fail the schema also carry their arguments.
+- Fixed the "cancel" button for background tasks sitting too close to the expand arrow and being easy to mis-click: cancellation in the agent-task and background-task lists now uses a two-step confirmation (the first click shows "Confirm stop?", a second click stops; moving the mouse away resets).
+
 ## [0.4.6] - 2026-11-20
 
 中文:
