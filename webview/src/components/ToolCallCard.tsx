@@ -79,8 +79,9 @@ function toolIcon(tool: string): string {
   return map[tool] || 'codicon-tools'
 }
 
-/** 工具 → 显示名（对齐 cc-gui zh.json tools.*；文案经 i18n，未收录工具回退原名）*/
-function toolDisplayName(tool: string, t: TFunction): string {
+/** 工具 → 显示名（对齐 cc-gui zh.json tools.*；文案经 i18n，未收录工具回退原名）。
+ *  工具参数流停不下来的提示条（ToolInputStallBanner）也用它，和卡上叫同一个名字 */
+export function toolDisplayName(tool: string, t: TFunction): string {
   // 知识库工具族用中文友好名（MCP.zcgui-knowledge_kb_search 双前缀形态一并识别）
   if (isKbTool(tool)) return kbToolLabel(tool)
   if (tool.startsWith('mcp__')) {

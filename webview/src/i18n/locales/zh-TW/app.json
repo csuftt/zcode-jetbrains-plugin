@@ -72,6 +72,10 @@
     "goReview": "去審核",
     "ignore": "忽略"
   },
+  "toolInputStall": {
+    "banner": "模型產生「{{tool}}」的工具參數已經 {{seconds}} 秒還沒結束，可能是模型側卡住了（寫很大的檔案時也可能這樣）：可以停止本輪後重送",
+    "stop": "停止本輪"
+  },
   "notification": {
     "subagent": "子代理",
     "bashTask": "後臺命令",

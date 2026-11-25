@@ -72,6 +72,10 @@
     "goReview": "검토하기",
     "ignore": "무시"
   },
+  "toolInputStall": {
+    "banner": "모델이 {{tool}} 도구 인자를 {{seconds}}초째 생성하고 있습니다. 모델 쪽에서 멈추지 못하는 상태일 수 있습니다(아주 큰 파일을 쓸 때도 발생할 수 있음): 턴을 중지하고 다시 보내세요",
+    "stop": "턴 중지"
+  },
   "notification": {
     "subagent": "서브에이전트",
     "bashTask": "백그라운드 명령",

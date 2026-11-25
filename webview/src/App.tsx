@@ -23,6 +23,7 @@ import { SettingsView } from '@/components/SettingsView'
 import { InputBox } from '@/components/InputBox'
 import { AskUserDialog } from '@/components/AskUserDialog'
 import { WorkspaceHookAdmissionBanner } from '@/components/WorkspaceHookAdmissionBanner'
+import { ToolInputStallBanner } from '@/components/ToolInputStallBanner'
 import { PlanApprovalDialog } from '@/components/PlanApprovalDialog'
 import { PermissionApprovalDialog } from '@/components/PermissionApprovalDialog'
 import { SubagentDetailDialog } from '@/components/SubagentDetailDialog'
@@ -439,6 +440,9 @@ export default function App() {
           {/* 会话额度横幅（耗尽/并发/服务商边界/限频/低额提醒）：错误触发 + 60s 额度轮询派生，
               窗口恢复或用户关闭后消失；只占 chat 列，错误详情仍在底部 lastError 条 */}
           <QuotaBanner />
+          {/* 工具参数流停不下来的提示条：模型生成工具参数时陷入循环，参数流满 60 秒出现并带停止入口，
+              参数流结束或回合停止即消失（判定见 utils/toolInputStall）*/}
+          <ToolInputStallBanner onStop={stopStreaming} />
           <InputBox
             onSend={(text, _filePaths, attachments) => sendMessage(text, attachments)}
             isStreaming={streaming}

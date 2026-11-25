@@ -72,6 +72,10 @@
     "goReview": "Review",
     "ignore": "Ignore"
   },
+  "toolInputStall": {
+    "banner": "The model has spent {{seconds}}s generating the arguments for \"{{tool}}\" without finishing. It may be stuck on the model side (this can also happen with very large file writes): stop the turn and resend.",
+    "stop": "Stop turn"
+  },
   "notification": {
     "subagent": "Subagent",
     "bashTask": "Background Command",

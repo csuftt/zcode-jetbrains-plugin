@@ -1,0 +1,45 @@
+/**
+ * 工具参数流停不下来的提示条：会话输入区上方细条（与钩子准入横幅同色系），
+ * 「模型生成某工具的参数已 N 秒还没结束」+ 停止本轮。
+ */
+
+.tool-input-stall-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 7px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+  background: rgba(232, 163, 61, 0.1);
+  border: 1px solid rgba(232, 163, 61, 0.35);
+  border-radius: 8px;
+  flex-shrink: 0;
+
+  &__icon {
+    font-size: 14px;
+    color: #e8a33d;
+    flex-shrink: 0;
+  }
+
+  &__text {
+    flex: 1;
+    min-width: 0;
+    // 工具名可能很长（mcp__插件__工具），窄窗口下允许任意处折行，不把按钮挤出视口
+    overflow-wrap: anywhere;
+  }
+
+  &__stop-btn {
+    flex-shrink: 0;
+    padding: 3px 12px;
+    font-size: var(--fs-body);
+    color: var(--text-primary);
+    background: var(--bg-active);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    &:hover { border-color: var(--accent-primary); }
+  }
+}
