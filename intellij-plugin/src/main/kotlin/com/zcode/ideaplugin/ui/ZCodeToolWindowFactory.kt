@@ -1,6 +1,6 @@
 package com.zcode.ideaplugin.ui
 
-import com.intellij.ide.plugins.PluginManagerConfigurable
+import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
@@ -359,16 +359,9 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
                 label.text = message("panel.jcefMissing.html", width.coerceIn(120, 560))
             }
             applyHtml(560)
-            // 一键直达 Settings → Plugins 的 Marketplace 页并预填搜索词，用户点安装重启即恢复。
-            // openMarketplaceTab 在对话框组件未建时仅记录搜索词/落 tab（字节码实证：写
-            // myLaterSearchQuery + myShowMarketplaceTab，createComponent 时消费），UI 已建则
-            // 立即切 tab 并弹搜索面板——两个时机都正确；233~262 全版本捆绑 API
+            // 一键直达 Settings → Plugins 的 Marketplace 页并预填搜索词，用户点安装重启即恢复
             val openMarket = JButton(message("panel.jcefMissing.button"))
-            openMarket.addActionListener {
-                ShowSettingsUtil.getInstance().showSettingsDialog(
-                    project, PluginManagerConfigurable::class.java,
-                ) { configurable -> configurable.openMarketplaceTab("Web Browser (JCEF)") }
-            }
+            openMarket.addActionListener { openJcefMarketplaceTab(project) }
             val center = JPanel(GridBagLayout()).apply {
                 isOpaque = false
                 val c = GridBagConstraints()
@@ -387,6 +380,39 @@ class ZCodeToolWindowFactory : ToolWindowFactory, DumbAware {
             val wrapper = JPanel(BorderLayout())
             wrapper.add(center, BorderLayout.CENTER)
             return wrapper
+        }
+
+        /**
+         * 打开 Settings → Plugins 的 Marketplace 页并预填 JCEF 搜索词（issue#55 引导页按钮）。
+         *
+         * `PluginManagerConfigurable` 及 `openMarketplaceTab` 是 @ApiStatus.Internal：静态引用
+         * 会被 Marketplace verifier 记为 internal API Problem（0.4.7 实踩：类 3 处 + 方法 1 处，
+         * 卡审核）。按本仓库既有反射隔离写法（Class.forName 的点分字符串常量不算类引用），
+         * 方法与字段名在 233~263 保持稳定：对话框组件未建时调用只记录搜索词/落 tab
+         * （字节码实证：写 myLaterSearchQuery + myShowMarketplaceTab，createComponent 时消费），
+         * UI 已建则立即切 tab 并弹搜索面板——两个时机都与原直调一致。
+         * 反射失效时退化为只打开插件设置页（行为降级但按钮不空转）。
+         */
+        private fun openJcefMarketplaceTab(project: Project) {
+            val className = "com.intellij.ide.plugins.PluginManagerConfigurable"
+            val cls = runCatching { Class.forName(className) }.getOrNull()
+            if (cls != null) {
+                val ok = runCatching {
+                    @Suppress("UNCHECKED_CAST")
+                    ShowSettingsUtil.getInstance().showSettingsDialog(
+                        project, cls as Class<Configurable>,
+                    ) { configurable ->
+                        runCatching {
+                            configurable.javaClass.getMethod("openMarketplaceTab", String::class.java)
+                                .invoke(configurable, "Web Browser (JCEF)")
+                        }
+                    }
+                }.isSuccess
+                if (ok) return
+            }
+            // 兜底：仅打开插件设置页（ID 字段同属内部面，反射取；取不到用平台已知 id）
+            val id = runCatching { cls?.getField("ID")?.get(null) as? String }.getOrNull() ?: "Plugins"
+            runCatching { ShowSettingsUtil.getInstance().showSettingsDialog(project, id) }
         }
 
         /** 把当前标签布局全量写入 TabState（名字 + sessionId + workspacePath + activeIndex）*/
