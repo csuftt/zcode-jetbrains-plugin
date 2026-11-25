@@ -1,6 +1,8 @@
 {
   "title": "서브 에이전트",
-  "desc": "정의 파일은 ZCode 클라이언트와 공유됩니다(사용자: ~/.zcode/agents, 프로젝트: .zcode/agents). 입력창에서 선택하면 메시지가 해당 서브 에이전트로 위임됩니다. 정의 변경은 기존 세션에 적용되지 않습니다.",
+  "desc": "정의 파일은 ZCode 클라이언트와 공유됩니다(사용자: ~/.zcode/agents, 프로젝트: .zcode/agents). 입력창에서 선택하면 메시지가 해당 서브 에이전트로 위임됩니다.",
+  "effectHint": "정의 변경은 기존 세션에 적용되지 않습니다.",
+  "effectHintLive": "정의 변경은 다음 턴부터 적용됩니다.",
   "new": "새로 만들기",
   "empty": "서브 에이전트가 없습니다. 오른쪽 위 \"새로 만들기\"를 눌러 생성하세요",
   "searchPlaceholder": "이름 / 설명 / 프롬프트 검색",
@@ -42,5 +44,15 @@
     "title": "서브 에이전트 삭제",
     "message": "\"{{name}}\"을(를) 삭제할까요? 정의 파일은 복구할 수 없습니다.",
     "confirm": "삭제"
+  },
+  "builtin": {
+    "title": "내장 서브 에이전트",
+    "badge": "내장",
+    "inheritDefault": "기본값 상속",
+    "staleModel": "{{model}}(현재 모델 목록에 없음)",
+    "effectiveHint": "변경은 새 세션부터 적용됩니다(기존 세션은 바뀌지 않음)",
+    "levelLabel": "사고 깊이",
+    "levelUnset": "선택 안 됨",
+    "effectiveHintLive": "변경은 다음 턴부터 적용됩니다(세션을 다시 열 필요 없음)"
   }
 }

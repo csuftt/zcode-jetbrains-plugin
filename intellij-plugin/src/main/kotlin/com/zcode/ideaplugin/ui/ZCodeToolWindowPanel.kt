@@ -1412,6 +1412,8 @@ if (!window.__ZCODE_LOG_HOOK__) {
                         "listAgents" -> handleListAgents(msg)
                         "saveAgent" -> handleSaveAgent(msg)
                         "deleteAgent" -> handleDeleteAgent(msg)
+                        "setBuiltInAgentModel" -> handleSetBuiltInAgentModel(msg)
+                        "modelReasoningLevels" -> handleModelReasoningLevels(msg)
                         "listMcpServers" -> handleListMcpServers(msg)
                         "mcpServerTools" -> handleMcpServerTools(msg)
                         "mcpAddServer" -> handleMcpAddServer(msg)
@@ -9844,13 +9846,73 @@ if (!window.__ZCODE_LOG_HOOK__) {
 
     // ============ 子智能体（数据打通 ZCode 客户端） ============
 
-    /** op=listAgents — 子智能体清单（user + project 作用域，disabled 已过滤） */
+    /** op=listAgents — 子代理清单（user + project 作用域，disabled 已过滤；附内置子代理及其模型覆盖） */
     private fun handleListAgents(msg: JsonObject): JsonObject {
         val agents = AgentScanner.scan(project.basePath)
-        log.info("Agent scan completed, ${agents.size} item(s)")
+        val builtinSelections = AgentScanner.builtinModelSelections()
+        // 子代理配置是否对运行时实时供给（subagents/readRuntimeConfig 通道）：当代 cjs 认这个能力时
+        // 宿主必挂供给器、运行时每回合开始重取——设置页据此切换「生效时机」文案。纯 cjs 内容
+        // 探测，不经 getClient（那会为了读一个标志位把 app-server 拉起来）
+        val runtimeConfigLive = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()
+            ?.let { com.zcode.ideaplugin.protocol.ProtocolGenerations.probeSubagentRuntimeConfig(it) } == true
+        log.info("Agent scan completed, ${agents.size} item(s), ${builtinSelections.size} builtin override(s)")
         return buildJsonObject {
             put("op", "agents")
             put("agents", JsonArray(agents.map { a -> agentDefJson(a) }))
+            put("builtIn", JsonArray(AgentScanner.BUILTIN_AGENTS.map { b ->
+                buildJsonObject {
+                    put("name", b.name)
+                    put("description", b.description)
+                    put("color", b.color)
+                    put("tools", JsonArray(b.tools.map { JsonPrimitive(it) }))
+                }
+            }))
+            put("builtInSelections", buildJsonObject {
+                builtinSelections.forEach { (name, sel) -> put(name, sel.toJson()) }
+            })
+            put("runtimeConfigLive", runtimeConfigLive)
+        }
+    }
+
+    /**
+     * op=setBuiltInAgentModel — 设置/清除内置子代理模型覆盖（直写 agents-state.json，
+     * 与 ZCode 客户端共用；改完对下一回合生效，见 AgentScanner 类注释）。selection 缺省或
+     * 为 null = 恢复继承默认。selection 带模型不带档位 = 选了新模型：补该模型档位集的末位
+     * （最高档）再落盘，同桌面端选模型时的做法。
+     */
+    private fun handleSetBuiltInAgentModel(msg: JsonObject): JsonObject {
+        val name = msg["name"]?.jsonPrimitive?.content ?: return errorResponse("缺少 name")
+        val selection = AgentScanner.BuiltinModelSelection.fromRequest(msg["selection"])
+            .getOrElse { return errorResponse(it.message ?: "selection 无效") }
+        val zcodePath = com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps()
+        val err = AgentScanner.setBuiltInModelSelection(name, selection) { modelId ->
+            com.zcode.ideaplugin.protocol.BuiltinModelCatalog.highestReasoningLevel(modelId, zcodePath)
+        }
+        if (err != null) return errorResponse(err)
+        log.info("Built-in agent model set: $name -> ${selection?.let { "${it.providerId}/${it.modelId}" } ?: "inherit"}")
+        return buildJsonObject {
+            put("op", "builtInAgentModelSet")
+            put("name", name)
+        }
+    }
+
+    /**
+     * op=modelReasoningLevels — 某模型的思考档位集（内置子代理「思考深度」下拉的候选）。
+     * 与主会话发送链路同一份目录（BuiltinModelCatalog.reasoningValues）：档位集因模型而异，
+     * 不可硬编码。levels=null = 目录里查不到该模型，下拉不展示。
+     */
+    private fun handleModelReasoningLevels(msg: JsonObject): JsonObject {
+        val providerId = msg["providerId"]?.jsonPrimitive?.content ?: return errorResponse("缺少 providerId")
+        val modelId = msg["modelId"]?.jsonPrimitive?.content ?: return errorResponse("缺少 modelId")
+        val levels = com.zcode.ideaplugin.protocol.BuiltinModelCatalog.reasoningValues(
+            modelId,
+            com.zcode.ideaplugin.env.ZCodeEnvChecker.resolveCliPathForOps(),
+        )
+        return buildJsonObject {
+            put("op", "modelReasoningLevels")
+            put("providerId", providerId)
+            put("modelId", modelId)
+            put("levels", levels?.let { ls -> JsonArray(ls.map { l -> JsonPrimitive(l) }) } ?: JsonNull)
         }
     }
 

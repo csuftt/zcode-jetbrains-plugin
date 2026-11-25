@@ -1,6 +1,8 @@
 {
   "title": "Subagents",
-  "desc": "Definition files are shared with the ZCode client (user: ~/.zcode/agents, project: .zcode/agents). Select one in the input box to route your message to that subagent; changes don't affect existing sessions.",
+  "desc": "Definition files are shared with the ZCode client (user: ~/.zcode/agents, project: .zcode/agents). Select one in the input box to route your message to that subagent.",
+  "effectHint": "Changes don't affect existing sessions.",
+  "effectHintLive": "Changes take effect from the next turn.",
   "new": "New",
   "empty": "No subagents found. Click \"New\" to create one",
   "searchPlaceholder": "Search name / description / prompt",
@@ -42,5 +44,15 @@
     "title": "Delete Subagent",
     "message": "Delete \"{{name}}\"? Its definition file will be removed and cannot be recovered.",
     "confirm": "Delete"
+  },
+  "builtin": {
+    "title": "Built-in Subagents",
+    "badge": "Built-in",
+    "inheritDefault": "Inherit default",
+    "staleModel": "{{model}} (not in the current model list)",
+    "effectiveHint": "Takes effect in new sessions; existing sessions are unchanged",
+    "levelLabel": "Thought depth",
+    "levelUnset": "Not set",
+    "effectiveHintLive": "Takes effect from the next turn; no need to reopen the session"
   }
 }

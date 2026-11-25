@@ -16,7 +16,7 @@ import { create } from 'zustand'
 import { onMessage, onStreamEvent, onStreamBatch, sendToJava, initBridge, isInJcef, getWorkspacePath, getInitialSessionId, getTabWorkspacePath } from '@/ipc/bridge'
 import { parseGoalCommand } from '@/utils/goalCommand'
 import { extractTitleExcerpt } from '@/utils/titleExcerpt'
-import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, QuotaHistorySample, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary, WorktreeMeta } from '@/types/messages'
+import type { JavaResponse, SessionInfo, OpenTabInfo, ZCodeMessage, StreamEvent, ModelOption, ModelManageProvider, ProviderSaveDraft, TodoItem, AgentItem, FileChangeItem, QuotaData, QuotaHistorySample, ModelUsageData, ToolUsageData, UsageRange, AppUsageData, AppUsageRange, ContextBreakdownItem, ContextSource, SessionDebugSummary, ThoughtLevelInfo, SubagentActivity, SubagentInfo, ToolUpdatedPayload, MemoryFileInfo, MemoryDirInfo, MemorySearchHitInfo, SkillInfo, McpServerInfo, McpToolsState, McpLogEntry, TrajectoryRecord, EnvStatus, BrowserClearedSite, BrowserDataOverview, AgentDef, AgentDefInput, BuiltinAgentInfo, AgentModelSelection, ImageAttachmentInput, CurrentFileAttachmentInput, SendAttachmentInput, GoalState, AutoArchiveRecord, ToolPart, SlashCommand, MessagePart, TurnFileChangesMap, TurnFileChangeSummary, WorktreeMeta } from '@/types/messages'
 import { applyStreamEvent, isSubagentToolEvent, applySubagentToolEvent, markActivityOutcome, finalizeActivitiesFromNotifications, asSubagentLifecycle, asGoalTargetPayload, looksLikeQuotaError, asSteerDrainedInputs, appendSteerUserMessages, appendMidTurnNotification } from '@/utils/streamReducer'
 import type { TurnErrorInfo, SubagentLifecyclePayload } from '@/utils/streamReducer'
 import { classifyQuotaError, bannerTriggerKey, providerLimitedMessage } from '@/utils/quotaWindows'
@@ -1578,6 +1578,14 @@ interface StoreState {
   selectedAgent: AgentDef | null
   /** 保存成功信号（写盘回包才置；AgentEditDialog 监听后关弹窗，覆盖 3s 超时提示）*/
   agentSavedSignal: { name: string; scope: string; at: number } | null
+  /** 内置子代理（general-purpose/Explore，Kotlin BUILTIN_AGENTS 镜像；随 agents 消息回填）*/
+  builtInAgents: BuiltinAgentInfo[]
+  /** 内置子代理模型覆盖（agents-state.json builtInModelSelectionOverrides 镜像；改完对下一回合生效）*/
+  builtInSelections: Record<string, AgentModelSelection>
+  /** 子代理配置是否对运行时实时供给（当代 CLI 认 subagents/readRuntimeConfig 通道）；设置页据此切换「生效时机」文案 */
+  builtInRuntimeConfigLive: boolean
+  /** 模型 → 思考档位集（键 providerId|modelId；null = 目录里查不到，思考深度下拉不展示）*/
+  modelReasoningLevels: Record<string, string[] | null>
 
   // MCP 服务器清单（设置视图「MCP」条目 = 磁盘配置 + mcp/list 状态合并）
   mcpServers: McpServerInfo[] | null
@@ -1919,6 +1927,10 @@ interface StoreState {
   saveAgent: (scope: 'user' | 'project', agent: AgentDefInput, originalName?: string) => void
   /** 删除子智能体定义文件 */
   deleteAgent: (scope: 'user' | 'project', name: string) => void
+  /** 设置/清除内置子代理模型覆盖（selection=null=继承默认；直写 agents-state.json，改完对下一回合生效）*/
+  setBuiltInAgentModel: (name: string, selection: AgentModelSelection | null) => void
+  /** 拉取某模型的思考档位集（已取过不重拉）*/
+  loadModelReasoningLevels: (providerId: string, modelId: string) => void
   /** 拉取 MCP 服务器清单（mode=connect 时真实连接各服务器，慢；path 显式传=切浏览目录）*/
   loadMcpServers: (mode?: 'status' | 'connect', path?: string) => void
   /** 拉单台服务器的工具清单（有缓存且非 force 直接跳过；loading 中防重入）*/
@@ -2279,6 +2291,10 @@ export const useStore = create<StoreState>((set, get) => ({
   subagentDefs: null,
   selectedAgent: null,
   agentSavedSignal: null,
+  builtInAgents: [],
+  builtInSelections: {},
+  builtInRuntimeConfigLive: false,
+  modelReasoningLevels: {},
   skillsLoading: false,
   skillsWorkspace: '',
   skillTogglingPath: null,
@@ -3938,6 +3954,16 @@ export const useStore = create<StoreState>((set, get) => ({
 
   deleteAgent: (scope, name) => {
     sendToJava({ op: 'deleteAgent', scope, name })
+  },
+
+  setBuiltInAgentModel: (name, selection) => {
+    sendToJava({ op: 'setBuiltInAgentModel', name, selection })
+  },
+
+  loadModelReasoningLevels: (providerId, modelId) => {
+    const key = `${providerId}|${modelId}`
+    if (get().modelReasoningLevels[key] !== undefined) return
+    sendToJava({ op: 'modelReasoningLevels', providerId, modelId })
   },
 
   toggleSkill: (path, enabled) => {
@@ -6730,8 +6756,25 @@ export function handleResponse(
       break
 
     case 'agents':
-      set({ subagentDefs: msg.agents })
+      set({
+        subagentDefs: msg.agents,
+        builtInAgents: msg.builtIn ?? [],
+        builtInSelections: msg.builtInSelections ?? {},
+        builtInRuntimeConfigLive: msg.runtimeConfigLive ?? false,
+      })
       break
+
+    case 'builtInAgentModelSet':
+      // 写盘成功才回包：重拉清单回填（下拉显示 = 文件里的实际内容）。运行时每回合开始
+      // 重取子代理配置（当代 CLI），所以不用重开会话
+      get().loadAgents()
+      break
+
+    case 'modelReasoningLevels': {
+      const key = `${msg.providerId}|${msg.modelId}`
+      set({ modelReasoningLevels: { ...get().modelReasoningLevels, [key]: msg.levels ?? null } })
+      break
+    }
 
     case 'agentSaved':
       // 写盘成功才回包：置保存完成信号（AgentEditDialog 监听后关弹窗）+ 重扫清单

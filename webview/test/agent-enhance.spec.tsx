@@ -6,6 +6,8 @@
  * 2. PromptEnhancerDialog：loading/错误/结果三态渲染、Enter=使用、Esc=关闭
  * 3. 子智能体：agents 响应落地、agentDeleted 清选中、AgentSelect 下拉选择/取消
  * 4. InputBox 发送拼装：选中子智能体时消息前置 @<name>（协议实测格式）
+ * 5. 内置子代理模型覆盖：AgentListView 内置分区的模型下拉、请求形态（二元组 / 显式 null）、
+ *    存量覆盖不在清单时的显示
  */
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -30,9 +32,10 @@ import '@/i18n/config'
 import { useStore, handleResponse } from '@/store/useStore'
 import { PromptEnhancerDialog } from '@/components/PromptEnhancerDialog'
 import { AgentSelect } from '@/components/AgentSelect'
+import { AgentListView } from '@/components/AgentListView'
 import { InputBox } from '@/components/InputBox'
 import { writeEnhanceConfig } from '@/utils/enhanceConfig'
-import type { AgentDef } from '@/types/messages'
+import type { AgentDef, BuiltinAgentInfo, ModelOption } from '@/types/messages'
 
 // jsdom 29 的 window.localStorage 是空壳（setItem 等方法缺失）：Map 实现替换，
 // 供润色开关（persist kv）读写（breakdown-cache.spec 同款手法）
@@ -403,6 +406,174 @@ describe('子智能体（store + AgentSelect）', () => {
     fireEvent.click(container.querySelector('.agent-select-button')!)
     fireEvent.click(container.querySelector('.agent-select-manage')!)
     expect(onManage).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('内置子代理模型覆盖（AgentListView + store）', () => {
+  const builtIn: BuiltinAgentInfo[] = [
+    { name: 'general-purpose', description: 'General-purpose agent.', color: 'blue', tools: [] },
+    {
+      name: 'Explore',
+      description: 'Read-only search agent for broad fan-out searches.',
+      color: 'cyan',
+      tools: ['Bash', 'Glob', 'Grep', 'Read', 'WebFetch', 'WebSearch', 'TodoWrite'],
+    },
+  ]
+  // providerId / modelId 故意带 :: 与冒号：模型引用不能靠拆拼接串还原
+  const models: ModelOption[] = [
+    { providerId: 'account:bigmodel-individual-coding-plan', providerName: 'BigModel', modelId: 'GLM-5.4', modelName: 'GLM-5.4' },
+    { providerId: 'custom::acme', providerName: 'Acme', modelId: 'm::1', modelName: 'acme-model' },
+  ]
+  /** 两行下拉（行序：general-purpose、Explore）*/
+  const selects = (c: HTMLElement) => Array.from(c.querySelectorAll<HTMLSelectElement>('select.agent-builtin-card__model'))
+  /** 各下拉当前显示的选项文字 */
+  const shown = (c: HTMLElement) => selects(c).map((s) => s.options[s.selectedIndex]?.textContent)
+  const pick = (s: HTMLSelectElement, text: string) => {
+    const opt = Array.from(s.options).find((o) => o.textContent === text)
+    expect(opt, `下拉里应有选项「${text}」`).toBeTruthy()
+    fireEvent.change(s, { target: { value: opt!.value } })
+  }
+  const setRequests = () => sentRequests.filter((r) => r.op === 'setBuiltInAgentModel')
+  /** 各行的思考深度下拉（仅选了模型、且档位集已到时渲染）*/
+  const levelSelects = (c: HTMLElement) => Array.from(c.querySelectorAll<HTMLSelectElement>('select.agent-builtin-card__level'))
+  const levelRequests = () => sentRequests.filter((r) => r.op === 'modelReasoningLevels')
+  const respondLevels = (providerId: string, modelId: string, levels: string[] | null) =>
+    act(() => messageHandler!({ op: 'modelReasoningLevels', providerId, modelId, levels }))
+
+  beforeEach(() => {
+    useStore.setState({ models, builtInAgents: builtIn, builtInSelections: {}, modelReasoningLevels: {}, builtInRuntimeConfigLive: false, lastNotice: null })
+  })
+
+  it('agents 响应落地内置清单与模型覆盖', () => {
+    messageHandler!({
+      op: 'agents',
+      agents: [],
+      builtIn,
+      builtInSelections: { Explore: { providerId: 'custom::acme', modelId: 'm::1' } },
+    })
+    expect(useStore.getState().builtInAgents.map((b) => b.name)).toEqual(['general-purpose', 'Explore'])
+    expect(useStore.getState().builtInSelections).toEqual({ Explore: { providerId: 'custom::acme', modelId: 'm::1' } })
+  })
+
+  it('渲染内置分区：无覆盖显示「继承默认」，有覆盖显示所选模型；「继承默认」固定在末尾', () => {
+    useStore.setState({ builtInSelections: { Explore: { providerId: 'custom::acme', modelId: 'm::1' } } })
+    const { container } = render(<AgentListView />)
+    expect(container.querySelectorAll('.agent-builtin-card')).toHaveLength(2)
+    expect(shown(container)).toEqual(['继承默认', 'acme-model'])
+    for (const s of selects(container)) {
+      expect(s.options[s.options.length - 1].textContent).toBe('继承默认')
+    }
+  })
+
+  it('选模型：请求带 (providerId, modelId) 二元组，含 :: 也不被拆坏', () => {
+    const { container } = render(<AgentListView />)
+    pick(selects(container)[0], 'acme-model')
+    expect(setRequests()).toEqual([
+      { op: 'setBuiltInAgentModel', name: 'general-purpose', selection: { providerId: 'custom::acme', modelId: 'm::1' } },
+    ])
+  })
+
+  it('选「继承默认」：请求里的 selection 是显式 null（Kotlin 侧须容忍 JsonNull）', () => {
+    useStore.setState({ builtInSelections: { 'general-purpose': { providerId: 'custom::acme', modelId: 'm::1' } } })
+    const { container } = render(<AgentListView />)
+    pick(selects(container)[0], '继承默认')
+    // 线上形态：序列化后保留 "selection":null，而不是把键丢掉
+    expect(JSON.parse(JSON.stringify(setRequests()))).toEqual([
+      { op: 'setBuiltInAgentModel', name: 'general-purpose', selection: null },
+    ])
+  })
+
+  it('存量覆盖指向的模型不在清单：如实显示该模型，且能切回继承默认', () => {
+    useStore.setState({ builtInSelections: { Explore: { providerId: 'gone', modelId: 'old-model' } } })
+    const { container } = render(<AgentListView />)
+    expect(shown(container)[1]).toBe('old-model（不在当前模型列表）')
+    pick(selects(container)[1], '继承默认')
+    expect(setRequests()).toEqual([{ op: 'setBuiltInAgentModel', name: 'Explore', selection: null }])
+  })
+
+  it('builtInAgentModelSet 回包只重拉清单，不弹通知条', () => {
+    messageHandler!({ op: 'builtInAgentModelSet', name: 'Explore' })
+    expect(sentRequests.some((r) => r.op === 'listAgents')).toBe(true)
+    expect(useStore.getState().lastNotice).toBeNull()
+  })
+
+  it('思考深度：按所选模型拉档位集，到达后才渲染下拉，标签走主聊天同款本地化并高亮当前档位', () => {
+    useStore.setState({
+      builtInSelections: { 'general-purpose': { providerId: 'custom::acme', modelId: 'm::1', options: { reasoningLevel: 'high' } } },
+    })
+    const { container } = render(<AgentListView />)
+    expect(levelRequests()).toEqual([{ op: 'modelReasoningLevels', providerId: 'custom::acme', modelId: 'm::1' }])
+    expect(levelSelects(container)).toHaveLength(0) // 档位集未到不渲染
+    respondLevels('custom::acme', 'm::1', ['low', 'high', 'max'])
+    const level = levelSelects(container)[0]
+    expect(Array.from(level.options).map((o) => o.textContent)).toEqual(['低', '高', '最高'])
+    expect(level.value).toBe('high')
+    // 已取过的模型不重复拉（新挂载一份设置页也不发）
+    const again = render(<AgentListView />)
+    expect(levelRequests()).toHaveLength(1)
+    again.unmount()
+  })
+
+  it('改思考深度：请求带模型 + options.reasoningLevel，不动模型', () => {
+    useStore.setState({
+      builtInSelections: { 'general-purpose': { providerId: 'custom::acme', modelId: 'm::1', options: { reasoningLevel: 'high' } } },
+    })
+    const { container } = render(<AgentListView />)
+    respondLevels('custom::acme', 'm::1', ['low', 'high', 'max'])
+    pick(levelSelects(container)[0], '最高')
+    expect(setRequests()).toEqual([
+      { op: 'setBuiltInAgentModel', name: 'general-purpose', selection: { providerId: 'custom::acme', modelId: 'm::1', options: { reasoningLevel: 'max' } } },
+    ])
+  })
+
+  it('「继承默认」没有档位下拉；切回继承默认（清单回填后）下拉消失', () => {
+    useStore.setState({ builtInSelections: { Explore: { providerId: 'custom::acme', modelId: 'm::1' } } })
+    const { container } = render(<AgentListView />)
+    respondLevels('custom::acme', 'm::1', ['low', 'max'])
+    expect(levelSelects(container)).toHaveLength(1) // 只有 Explore 行有
+    pick(selects(container)[1], '继承默认')
+    expect(setRequests()).toEqual([{ op: 'setBuiltInAgentModel', name: 'Explore', selection: null }])
+    act(() => messageHandler!({ op: 'agents', agents: [], builtIn, builtInSelections: {} }))
+    expect(levelSelects(container)).toHaveLength(0)
+  })
+
+  it('存量条目档位不在该模型档位集里：显示「未选择」不替用户猜；目录查不到档位集则不渲染下拉', () => {
+    useStore.setState({
+      builtInSelections: { Explore: { providerId: 'custom::acme', modelId: 'm::1', options: { reasoningLevel: 'medium' } } },
+    })
+    const { container } = render(<AgentListView />)
+    respondLevels('custom::acme', 'm::1', ['low', 'max'])
+    const level = levelSelects(container)[0]
+    expect(level.options[level.selectedIndex]?.textContent).toBe('未选择')
+    // 换成目录里没有档位集的模型
+    useStore.setState({
+      builtInSelections: { Explore: { providerId: 'account:bigmodel-individual-coding-plan', modelId: 'GLM-5.4' } },
+    })
+    respondLevels('account:bigmodel-individual-coding-plan', 'GLM-5.4', null)
+    expect(levelSelects(container)).toHaveLength(0)
+  })
+
+  it('生效时机文案随 runtimeConfigLive 切换：实时供给=下一回合生效，旧版 CLI=新会话生效', () => {
+    const legacy = render(<AgentListView />)
+    expect(legacy.container.textContent).toContain('新会话生效')
+    expect(legacy.container.textContent).toContain('对已创建的会话不生效')
+    legacy.unmount()
+    useStore.setState({ builtInRuntimeConfigLive: true })
+    const live = render(<AgentListView />)
+    expect(live.container.textContent).toContain('下一回合')
+    expect(live.container.textContent).not.toContain('新会话生效')
+  })
+
+  it('模型与思考深度下拉同属控件组（窄面板整组换行，不互相挤掉）', () => {
+    useStore.setState({ builtInSelections: { Explore: { providerId: 'custom::acme', modelId: 'm::1' } } })
+    const { container } = render(<AgentListView />)
+    respondLevels('custom::acme', 'm::1', ['low', 'max'])
+    // Explore 行的两个下拉在同一个 controls 组里
+    const card = container.querySelectorAll('.agent-builtin-card')[1]
+    const controls = card.querySelector('.agent-builtin-card__controls')!
+    expect(controls.querySelectorAll('select')).toHaveLength(2)
+    expect(controls.querySelector('select.agent-builtin-card__model')).toBeTruthy()
+    expect(controls.querySelector('select.agent-builtin-card__level')).toBeTruthy()
   })
 })
 

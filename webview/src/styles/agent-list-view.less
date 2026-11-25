@@ -60,6 +60,15 @@
   }
 }
 
+/* 描述等文本行按词换行：skill-card__row-value 的 break-all 是给技能卡里长路径/
+   命令用的，子智能体描述是自然语言——break-all 会把英文单词从中间劈开
+   （"com/plex"、"exe/cuting"），改回按词断、单词过长才硬断 */
+.agent-card .skill-card__row-value,
+.agent-builtin-card .skill-card__row-value {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
 /* 卡片头部 tools 摘要（skill-card__path 之后的补充段）*/
 .agent-card__tools-hint {
   font-size: var(--fs-hint);
@@ -93,6 +102,103 @@
   &:hover {
     background: rgba(244, 67, 54, 0.12);
   }
+}
+
+/* ===== 内置子代理分区（general-purpose/Explore；对齐 ZCode 客户端「内置子智能体」）===== */
+.agent-builtin {
+  margin-top: 14px;
+
+  .agent-builtin__heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 4px;
+    font-size: var(--fs-body);
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .agent-builtin__count {
+    font-size: var(--fs-hint);
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  .agent-builtin__hint {
+    margin: 0 0 8px;
+    font-size: var(--fs-hint);
+    color: var(--text-muted);
+  }
+}
+
+/* 内置卡：一行布局（无展开），模型与思考深度两个下拉靠右；形态同一套。
+   头部允许换行：窄面板时控件组整组落到第二行，identity 段（名字/徽标/工具数）
+   留在第一行，两个下拉不再被溢出裁掉（卡片 overflow:hidden） */
+.agent-builtin-card__header {
+  cursor: default;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+/* 模型 + 思考深度成组：宽面板右对齐同一行，窄面板整组换行；组内只让模型下拉
+   收缩（min-width:0），思考深度下拉始终可见 */
+.agent-builtin-card__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.agent-builtin-card__badge {
+  padding: 1px 6px;
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  font-size: var(--fs-hint);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.agent-builtin-card__model,
+.agent-builtin-card__level {
+  padding: 3px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+
+  option,
+  optgroup {
+    background: var(--bg-elevated, var(--bg-secondary));
+    color: var(--text-primary);
+  }
+}
+
+.agent-builtin-card__model {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 240px;
+  text-overflow: ellipsis;
+}
+
+/* 思考深度下拉不参与收缩：宁可模型名截断，档位入口必须在场 */
+.agent-builtin-card__level {
+  flex-shrink: 0;
+}
+
+/* 生效时机说明：接在 desc 后面的独立一句，靠间距断句（西文不能靠空格、中文不用空格）*/
+.agent-list-view__effect {
+  margin-left: 6px;
 }
 
 /* ===== 编辑弹窗（modal 壳 + 双类提特异性，同 prompt-enhancer 方案）===== */

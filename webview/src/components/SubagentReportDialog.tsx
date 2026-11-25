@@ -25,11 +25,14 @@ export function SubagentReportDialog() {
   const agents = useStore((s) => s.agents)
   const subagents = useStore((s) => s.subagents)
   const subagentDefs = useStore((s) => s.subagentDefs)
+  // 内置子代理的模型覆盖（与详情弹窗同一条取值链，两个窗口显示必须一致）
+  const builtInSelections = useStore((s) => s.builtInSelections)
+  const loadAgents = useStore((s) => s.loadAgents)
   const childMessages = useStore((s) => s.childMessages)
 
   // 头部 meta（与详情弹窗同款三源）：报告只在完成后可开，耗时取权威 span
-  // （无 live 计时）；模型取转录末条 assistant（从主聊天工具卡直接打开时转录
-  // 可能未拉过——回退子代理定义值，比空着好）
+  // （无 live 计时）；模型取转录末条 assistant，回退内置子代理的模型覆盖，再回退
+  // 子代理定义值（从主聊天工具卡直接打开时转录可能未拉过，比空着好）
   const key = report?.callID
   const item = key ? agents.find((a) => a.callID === key) : undefined
   const info = key ? subagents.find((s) => s.toolCallId === key) : undefined
@@ -37,10 +40,17 @@ export function SubagentReportDialog() {
   const span = validSpan(item?.startedAt, item?.endedAt) ?? validSpan(info?.startedAt, info?.endedAt)
   const startTime = (item?.startedAt ?? info?.startedAt) ? clockTime(item?.startedAt ?? info?.startedAt!) : ''
   const duration = span ? formatToolDurationCompact(span.endedAt - span.startedAt) : ''
+  const agentType = item?.subagentType ?? info?.subagentType
   const model = transcriptModel(csid ? childMessages[csid] : undefined)
-    ?? subagentDefs?.find((d) => d.name === (item?.subagentType ?? info?.subagentType))?.model
+    ?? (agentType ? builtInSelections[agentType]?.modelId : undefined)
+    ?? subagentDefs?.find((d) => d.name === agentType)?.model
 
   const bodyRef = useRef<HTMLDivElement>(null)
+
+  // 打开报告即重拉子代理清单（内置覆盖只随这份清单下发；详情弹窗同款）
+  useEffect(() => {
+    if (report) loadAgents()
+  }, [report, loadAgents])
 
   // 转录缺失时静默补拉（底部栏点已完成子代理直接开报告——childMessages 尚未
   // 拉过，模型第一时间显示不出，须等详情弹窗才触发的缺陷）：已完成子会话的

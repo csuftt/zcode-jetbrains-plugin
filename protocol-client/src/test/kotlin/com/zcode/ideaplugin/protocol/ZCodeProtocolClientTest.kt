@@ -2,8 +2,11 @@ package com.zcode.ideaplugin.protocol
 
 import com.zcode.ideaplugin.protocol.model.*
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
@@ -181,6 +184,72 @@ class ZCodeProtocolClientTest {
         println("   result keys: ${result.keys}")
         // resume 应该返回带 messages 的结果
         assertTrue(result.containsKey("messages") || result.isNotEmpty(), "resume 应该返回历史")
+    }
+
+    /** 子代理运行时配置通道（subagents/readRuntimeConfig）的宿主侧快照样例：一条用户级 profile */
+    private fun hostSubagentSnapshot() = buildJsonObject {
+        put("kind", "ready")
+        put("profiles", buildJsonArray {
+            add(buildJsonObject {
+                put("name", "golden-reviewer")
+                put("description", "Review")
+                put("source", "user")
+                put("systemPrompt", "Review carefully.")
+            })
+        })
+        put("builtInModelSelectionOverrides", buildJsonObject { })
+        put("pluginAgentModelSelectionOverrides", buildJsonObject { })
+    }
+
+    @Test
+    @Order(20)
+    fun `subagents_readRuntimeConfig：声明开关后运行时在建会话时回调宿主一次并接受快照`() {
+        assumeTrue(
+            ProtocolGenerations.probeSubagentRuntimeConfig(ZCodeLocator.detect()) == true,
+            "当代 CLI 才有子代理运行时配置通道，跳过",
+        )
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val dirs = ConcurrentLinkedQueue<String?>()
+        client.subagentRuntimeConfigProvider = { dir ->
+            calls.incrementAndGet()
+            dirs.add(dir)
+            hostSubagentSnapshot()
+        }
+        client.subagentDefaultWorkingDirectory = { "G:\\default-workspace" }
+        var sid: String? = null
+        try {
+            sid = client.createSession(workspace, PermissionMode.YOLO)
+            println("✅ 建会话成功，运行时回调宿主 ${calls.get()} 次，工作目录=$dirs")
+            assertTrue(sid.startsWith("sess_"))
+            // 运行时要等宿主应答才能建完会话：应答在回调之后发出，所以此刻回调必已发生
+            assertEquals(1, calls.get(), "建会话时运行时应回调宿主一次（官方：创建时读 1 次，之后每回合开始再读）")
+            // create 应答早于 sessionId 登记，首个请求落兜底目录
+            assertEquals(listOf("G:\\default-workspace"), dirs.toList())
+        } finally {
+            client.subagentRuntimeConfigProvider = null
+            client.subagentDefaultWorkingDirectory = null
+            sid?.let { runCatching { client.unloadSession(it) } }
+        }
+    }
+
+    @Test
+    @Order(21)
+    fun `subagents_readRuntimeConfig：供给器抛异常时回内置回退，建会话不受影响`() {
+        assumeTrue(
+            ProtocolGenerations.probeSubagentRuntimeConfig(ZCodeLocator.detect()) == true,
+            "当代 CLI 才有子代理运行时配置通道，跳过",
+        )
+        client.subagentRuntimeConfigProvider = { throw IllegalStateException("host unavailable") }
+        var sid: String? = null
+        try {
+            // 运行时对错误应答的处理是让建会话直接失败——宿主必须吞掉异常回 built-in-fallback
+            sid = client.createSession(workspace, PermissionMode.YOLO)
+            println("✅ 供给器异常下建会话仍成功: $sid")
+            assertTrue(sid.startsWith("sess_"))
+        } finally {
+            client.subagentRuntimeConfigProvider = null
+            sid?.let { runCatching { client.unloadSession(it) } }
+        }
     }
 
     @Test

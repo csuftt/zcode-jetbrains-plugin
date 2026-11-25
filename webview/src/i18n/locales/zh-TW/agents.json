@@ -1,6 +1,8 @@
 {
   "title": "子智慧體",
-  "desc": "與 ZCode 客戶端共用定義檔（使用者級 ~/.zcode/agents、專案級 .zcode/agents）。輸入框選擇後，傳送的訊息會交給該子智慧體處理；修改定義對已建立的會話不生效。",
+  "desc": "與 ZCode 客戶端共用定義檔（使用者級 ~/.zcode/agents、專案級 .zcode/agents）。輸入框選擇後，傳送的訊息會交給該子智慧體處理。",
+  "effectHint": "修改定義對已建立的會話不生效。",
+  "effectHintLive": "修改定義從下一回合開始生效。",
   "new": "新建",
   "empty": "未發現任何子智慧體，點擊右上角「新建」建立",
   "searchPlaceholder": "搜尋名稱 / 描述 / 提示詞",
@@ -42,5 +44,15 @@
     "title": "刪除子智慧體",
     "message": "確定刪除「{{name}}」？將刪除其定義檔，不可復原。",
     "confirm": "刪除"
+  },
+  "builtin": {
+    "title": "內建子智慧體",
+    "badge": "內建",
+    "inheritDefault": "繼承預設",
+    "staleModel": "{{model}}（不在目前模型清單中）",
+    "effectiveHint": "修改對新會話生效，已建立的會話不變",
+    "levelLabel": "思考深度",
+    "levelUnset": "未選擇",
+    "effectiveHintLive": "修改從下一回合開始生效，無需重開會話"
   }
 }

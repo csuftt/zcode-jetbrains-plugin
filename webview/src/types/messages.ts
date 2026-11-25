@@ -718,6 +718,11 @@ export type JavaRequest =  | { op: 'askUserPendingState' }
   /** 新建/更新/改名子智能体（originalName 非空且 ≠ name = 改名）*/
   | { op: 'saveAgent'; scope: 'user' | 'project'; agent: AgentDefInput; originalName?: string }
   | { op: 'deleteAgent'; scope: 'user' | 'project'; name: string }
+  /** 设置/清除内置子代理模型覆盖（selection=null=继承默认；直写 agents-state.json，改完对下一回合生效）。
+   *  带模型不带档位 = 选了新模型，Kotlin 补该模型最高档再落盘（同桌面端）*/
+  | { op: 'setBuiltInAgentModel'; name: string; selection: AgentModelSelection | null }
+  /** 某模型的思考档位集（内置子代理「思考深度」下拉候选；档位集因模型而异）*/
+  | { op: 'modelReasoningLevels'; providerId: string; modelId: string }
   /** mode：status=状态快照（默认）| connect=真实连接（慢）；workspacePath=浏览目录（多目录下拉，缺省=项目根）*/
   | { op: 'listMcpServers'; mode?: 'status' | 'connect'; workspacePath?: string }
   /** 单台服务器工具清单（force=true 前端绕过缓存强制重拉）；workspacePath 与列表页同源 */
@@ -1140,6 +1145,25 @@ export interface AgentDef {
 
 /** saveAgent 的写载荷（path/scope 由后端推导，无需前端携带）*/
 export type AgentDefInput = Omit<AgentDef, 'path' | 'scope'>
+
+/** 内置子代理（general-purpose/Explore，不落 .md；模型覆盖见 AgentModelSelection）*/
+export interface BuiltinAgentInfo {
+  name: string
+  /** 桌面端「子智能体」页的展示文案（英文原文，不翻译） */
+  description: string
+  color: string
+  /** 空 = 全部工具 */
+  tools: string[]
+}
+
+/** 内置子代理的模型覆盖（agents-state.json builtInModelSelectionOverrides 单条）*/
+export interface AgentModelSelection {
+  providerId: string
+  modelId: string
+  /** 思考档位（官方 options.reasoningLevel）。派生子代理时必填——选模型时由 Kotlin 补该模型
+   *  的最高档落盘；存量或外部写入的条目可能缺，照实显示为未选 */
+  options?: { reasoningLevel?: string }
+}
 
 /** 清除浏览器数据的单站点明细（cache 模式只填缓存两项；-1=页面不支持该 API）*/
 export interface BrowserClearedSite {
@@ -1648,7 +1672,10 @@ export type JavaResponse =
   | { op: 'enhanceCancelResult'; seq?: number }
   /** op=regenerateSessionTitle 的响应（title 非空 = 成功并已应用；error = 失败提示）*/
   | { op: 'sessionTitleRegenerated'; sessionId: string; title?: string; error?: string }
-  | { op: 'agents'; agents: AgentDef[] }
+  | { op: 'agents'; agents: AgentDef[]; builtIn?: BuiltinAgentInfo[]; builtInSelections?: Record<string, AgentModelSelection>; runtimeConfigLive?: boolean }
+  | { op: 'builtInAgentModelSet'; name: string }
+  /** levels=null = 目录里查不到该模型（思考深度下拉不展示）*/
+  | { op: 'modelReasoningLevels'; providerId: string; modelId: string; levels: string[] | null }
   | { op: 'agentSaved'; name: string; scope: string }
   | { op: 'agentDeleted'; name: string; scope: string }
   /** rpcError 存在 = mcp/list RPC 失败，servers 为磁盘配置降级清单 */

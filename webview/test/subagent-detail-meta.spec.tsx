@@ -4,7 +4,8 @@
  * 数据源（对齐主界面 msg__footer：time + model + ⏱）：
  *   - 开始时刻：三源 startedAt 之最先非空 → clockTime（当天 HH:mm，跨天带日期）
  *   - 模型：权威转录最后一条 assistant 的 info.modelID（实际执行模型）；
- *     运行中 live 归约不产此字段 → 回退子代理定义的 model；定义缺省（跟随
+ *     运行中 live 归约不产此字段 → 回退内置子代理的模型覆盖（设置页写入的
+ *     agents-state.json 条目）→ 再回退子代理定义的 model；定义缺省（跟随
  *     主会话）不猜当前值，宁缺勿错——结束后权威重拉自然补上
  */
 // @vitest-environment jsdom
@@ -50,6 +51,7 @@ beforeEach(() => {
     subagentActivities: [],
     subagents: [],
     subagentDefs: null,
+    builtInSelections: {},
     childMessages: {},
     childLiveMessages: {},
     childMessagesLoading: false,
@@ -105,6 +107,48 @@ describe('子代理弹窗 meta：执行时刻与模型', () => {
     })
     render(<SubagentDetailDialog />)
     expect(screen.queryByText(/GLM/)).toBeNull()
+  })
+
+  it('运行中 live 无 modelID、定义未指定：回退内置子代理的模型覆盖（设置页写入的条目）', () => {
+    useStore.setState({
+      agents: [{ callID: 'call_meta', childSessionId: CHILD_SID, status: 'running', description: 'd', startedAt: Date.now() - 5_000, subagentType: 'general-purpose' }],
+      childLiveMessages: { [CHILD_SID]: msgs() },
+      subagentDefs: [],
+      builtInSelections: { 'general-purpose': { providerId: 'p', modelId: 'GLM-5.3-Flash', options: { reasoningLevel: 'max' } } },
+    })
+    render(<SubagentDetailDialog />)
+    expect(screen.getByText('GLM-5.3-Flash')).toBeTruthy()
+  })
+
+  it('转录里的实际模型优先于模型覆盖（覆盖事后被改，不改写已完成子代理的显示）', () => {
+    useStore.setState({
+      agents: [{ callID: 'call_meta', childSessionId: CHILD_SID, status: 'completed', description: 'd', subagentType: 'general-purpose' }],
+      childMessages: { [CHILD_SID]: msgs('GLM-5.2') },
+      builtInSelections: { 'general-purpose': { providerId: 'p', modelId: 'GLM-5.3-Flash' } },
+    })
+    render(<SubagentDetailDialog />)
+    expect(screen.getByText('GLM-5.2')).toBeTruthy()
+    expect(screen.queryByText('GLM-5.3-Flash')).toBeNull()
+  })
+
+  it('打开弹窗即重拉子代理清单（内置覆盖只随这份清单下发）', () => {
+    useStore.setState({
+      agents: [{ callID: 'call_meta', childSessionId: CHILD_SID, status: 'running', description: 'd', startedAt: Date.now() - 5_000 }],
+      childLiveMessages: { [CHILD_SID]: msgs() },
+    })
+    render(<SubagentDetailDialog />)
+    expect(sendMock).toHaveBeenCalledWith({ op: 'listAgents' })
+  })
+
+  it('最终报告弹窗：转录未拉过时同样回退内置子代理的模型覆盖（两个窗口显示一致）', () => {
+    useStore.setState({
+      subagentReport: { callID: 'call_meta', title: '报告', markdown: '# done' },
+      agents: [{ callID: 'call_meta', childSessionId: CHILD_SID, status: 'completed', description: 'd', subagentType: 'Explore' }],
+      subagentDefs: [],
+      builtInSelections: { Explore: { providerId: 'p', modelId: 'GLM-5.3-Flash' } },
+    })
+    render(<SubagentReportDialog />)
+    expect(screen.getByText('GLM-5.3-Flash')).toBeTruthy()
   })
 
   it('无 startedAt 数据源：时刻不显示（与耗时同现同隐）', () => {

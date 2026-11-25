@@ -2210,18 +2210,35 @@ flowchart LR
         text: `【润色】${req.text}\n\n（mock 结果：请补充目标产物的具体要求，例如输出格式、篇幅与读者对象。）`,
       }
     case 'listAgents':
-      // mock：user/project 两作用域 + 颜色/工具/模型各形态
+      // mock：user/project 两作用域 + 颜色/工具/模型各形态 + 内置子代理（覆盖/继承各一；
+      // 覆盖指向 mock listModels 清单里有的模型，下拉才显示为已选中而不是「不在清单」）
       return {
         op: 'agents',
         agents: [
           { name: 'code-explorer', description: '只读探索代码库结构并输出调研报告', color: 'cyan', tools: [], disallowedTools: [], injectAgentsMd: false, mcpServers: [], systemPrompt: '你是代码库调研专家，只读不改。', path: 'C:\\Users\\mock\\.zcode\\agents\\code-explorer.md', scope: 'user' },
           { name: 'deploy-guard', description: '检查部署清单与端口占用（mock 项目级）', color: 'orange', model: 'GLM-5-Turbo', tools: ['Bash', 'Read'], disallowedTools: [], injectAgentsMd: true, mcpServers: [], systemPrompt: '你是部署检查员。', path: 'G:\\mock\\project\\.zcode\\agents\\deploy-guard.md', scope: 'project' },
         ],
+        builtIn: [
+          { name: 'general-purpose', description: 'General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.', color: 'blue', tools: [] },
+          { name: 'Explore', description: 'Read-only search agent for broad fan-out searches.', color: 'cyan', tools: ['Bash', 'Glob', 'Grep', 'Read', 'WebFetch', 'WebSearch', 'TodoWrite'] },
+        ],
+        builtInSelections: { Explore: { providerId: 'builtin:bigmodel-coding-plan', modelId: 'GLM-5.3', options: { reasoningLevel: 'enabled' } } },
+        runtimeConfigLive: true,
       }
     case 'saveAgent':
       return { op: 'agentSaved', name: req.agent.name, scope: req.scope }
     case 'deleteAgent':
       return { op: 'agentDeleted', name: req.name, scope: req.scope }
+    case 'setBuiltInAgentModel':
+      return { op: 'builtInAgentModelSet', name: req.name }
+    case 'modelReasoningLevels':
+      // mock：按模型给不同档位集（体现「档位集因模型而异」），未知模型回 null（下拉不展示）
+      return {
+        op: 'modelReasoningLevels',
+        providerId: req.providerId,
+        modelId: req.modelId,
+        levels: req.modelId.includes('GLM-5.3') ? ['low', 'high', 'max'] : null,
+      }
     case 'listMcpServers':
       // mock：stdio/http、connected/failed/disconnected/disabled、runtime 来源各形态；
       // dev 内新增的自定义服务器合并进清单（mockCustomMcpServers 模块级有状态）

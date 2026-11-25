@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '@/store/useStore'
 import { fmtTokens } from '@/utils/format'
+import { groupModelsByProvider } from '@/utils/modelGroups'
 import type { ModelOption } from '@/types/messages'
 import { ModelIcon } from './ModelIcon'
 import { PlanBadge, VisionBadge } from './PlanBadge'
@@ -49,15 +50,7 @@ export function ModelSelect({ currentModel, onSelect, disabled = false, onManage
   }, [currentModel, messages])
 
   // 按 provider 分组（保持 config.json 顺序）
-  const groups = useMemo(() => {
-    const map = new Map<string, ModelOption[]>()
-    for (const m of models) {
-      const list = map.get(m.providerId) ?? []
-      list.push(m)
-      map.set(m.providerId, list)
-    }
-    return [...map.entries()]
-  }, [models])
+  const groups = useMemo(() => groupModelsByProvider(models), [models])
 
   // 外部点击关闭
   useEffect(() => {

@@ -589,6 +589,13 @@ class ZCodeServiceImpl(private val project: Project) : ZCodeService, com.intelli
             c.browserExecuteHandler = { params -> executor.execute(params) }
             browserHandlerRegistered = true
             log.info("[browser-use] host handlers bound (interaction/browserList + browserExecute)")
+            // 子代理运行时配置供给（subagents/readRuntimeConfig）：运行时每个回合开始重取一次，
+            // 子代理定义/模型覆盖改完即对下一回合生效（此前走文件 fallback、只有新会话才生效）。
+            // 项目级定义按请求会话的工作目录取；子会话等未登记的 id 落 IDE 项目根
+            c.subagentRuntimeConfigProvider = { workingDirectory ->
+                com.zcode.ideaplugin.ui.SubagentRuntimeConfig.snapshot(workingDirectory)
+            }
+            c.subagentDefaultWorkingDirectory = { project.basePath }
             // automation/* 宿主化：模型的 Cron* 工具经 app-server 反向请求落到插件，
             // 任务存储/调度由 ZCodeScheduledMessageService 承载（与官方客户端的
             // tasks-index.sqlite 互不共写，双端并行不会双重执行）

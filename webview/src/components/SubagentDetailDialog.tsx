@@ -124,6 +124,9 @@ export function SubagentDetailDialog() {
   const activities = useStore((s) => s.subagentActivities)
   const subagents = useStore((s) => s.subagents)
   const subagentDefs = useStore((s) => s.subagentDefs)
+  // 内置子代理（general-purpose/Explore）的模型覆盖：设置页之外不会自动加载，弹窗打开时现拉
+  const builtInSelections = useStore((s) => s.builtInSelections)
+  const loadAgents = useStore((s) => s.loadAgents)
   const childMessages = useStore((s) => s.childMessages)
   const childLiveMessages = useStore((s) => s.childLiveMessages)
   const loading = useStore((s) => s.childMessagesLoading)
@@ -197,6 +200,12 @@ export function SubagentDetailDialog() {
     if (!el || userScrolledUp.current) return
     el.scrollTop = el.scrollHeight
   }, [contentFingerprint])
+
+  // 打开/切换子代理详情 → 重拉子代理清单：内置子代理的模型覆盖只随这份清单下发，且桌面端
+  // 也能改同一份 agents-state.json，每次现拉才与文件一致（小目录扫描，毫秒级）
+  useEffect(() => {
+    if (key) loadAgents()
+  }, [key, loadAgents])
 
   // 已结束且有 childSessionId 但未加载 → 自动拉完整过程
   useEffect(() => {
@@ -272,13 +281,18 @@ export function SubagentDetailDialog() {
   // 三源之最先非空——与耗时同源，时刻不存在时耗时也不存在，二者同现同隐
   const startTs = item?.startedAt ?? info?.startedAt ?? activity?.startedAt
   const startTime = startTs ? clockTime(startTs) : ''
+  // 代理类型（徽标显示 + title 全称 + 模型覆盖查找，三处同源）
+  const agentType = item?.subagentType || activity?.agentType || info?.subagentType
   // 模型（主界面 msg__footer-model 同款显示实际执行模型）：权威转录里最后一条
   // assistant 的 modelID 最准（多 turn 取末条，见 transcriptModel）；运行中 live
-  // 归约不产此字段，回退子代理定义的 model（缺省=跟随主会话——不猜当前值，
-  // 宁缺勿错，结束后权威重拉自然补上）
+  // 归约不产此字段，回退内置子代理的模型覆盖（settings 写入的 agents-state.json 条目，
+  // 运行时派生时即按它选模型——转录未到场的完成态同样兜得住）；再回退子代理定义的
+  // model（缺省=跟随主会话——不猜当前值，宁缺勿错，结束后权威重拉自然补上）
+  const overrideModel = agentType ? builtInSelections[agentType]?.modelId : undefined
   const model = transcriptModel(display)
+    ?? overrideModel
     ?? (running
-      ? subagentDefs?.find((d) => d.name === (item?.subagentType ?? activity?.agentType ?? info?.subagentType))?.model
+      ? subagentDefs?.find((d) => d.name === agentType)?.model
       : undefined)
   const badge = statusText(item?.status, t)
   // 工具数：流式聚合（subagentActivities，纯内存态）优先；重启/重开历史会话后
@@ -317,8 +331,6 @@ export function SubagentDetailDialog() {
     || (!!agentOutput && !failErrorText && !agentOutput.startsWith('Agent failed'))
   const failed = !running && (finalStatus === 'error' || finalStatus === 'failed') && !successEvidence
   const reportReady = finalStatus === 'completed' && !!agentOutput
-  // 代理类型（徽标显示 + title 全称，两处同源）
-  const agentType = item?.subagentType || activity?.agentType || info?.subagentType
 
   return (
     <div className="subagent-detail-overlay" onClick={closeDetail}>

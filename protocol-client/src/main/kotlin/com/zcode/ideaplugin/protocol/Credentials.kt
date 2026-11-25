@@ -282,14 +282,15 @@ fun builtinResolution(configPath: Path = defaultConfigPath()): BuiltinResolution
     }
 
     /**
-     * ZCode 用户级数据根（dataBaseDir 感知）：`~/.zcode` 或 `<dataBaseDir>/.zcode`。
-     * agents/ 等顶层资源目录的父路径，与 zcode.cjs 的 storageRoot 同语义。
+     * 插件自己的会话进程眼中的用户级数据根：恒为 `~/.zcode`。
+     *
+     * 主 app-server 与 CLI --resume 通道不下发数据根（[CliSpawnEnv] 使用面之外，ADR-0011），
+     * 而命令行运行时解析数据根只认 env、不读 setting.json 的 dataBaseDir，所以始终落在
+     * home 入口。凡由插件直读直写、消费方是这些会话进程的文件（用户级子代理定义目录、
+     * 子代理状态文件）都以它为基准——跟随 dataBaseDir 会读写到重定向副本，与会话进程
+     * 看到的不是同一份。桌面端是写方、插件只求互通的文件（如 [taskIndexPath]）不走这里。
      */
-    fun storageRoot(): Path {
-        val home = System.getProperty("user.home") ?: return Path.of(".zcode")
-        val dir = readDataBaseDir(home)
-        return if (dir != null) Path.of(dir, ".zcode") else Path.of(home, ".zcode")
-    }
+    fun storageRoot(): Path = Path.of(System.getProperty("user.home") ?: ".", ".zcode")
 
     /**
      * 当前生效的数据根基目录（setting.json 的 `dataBaseDir`）：未配置/空白/相对路径

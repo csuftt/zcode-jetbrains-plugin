@@ -170,6 +170,33 @@ class ZCodeProtocolClient private constructor(
     var runtimePreferencesResponder: (sessionId: String, scope: String) -> RuntimePreferences =
         { _, _ -> RuntimePreferences.SAFE_DEFAULT }
 
+    /**
+     * 宿主子代理运行时配置供给（subagents/readRuntimeConfig；zcode.cjs 实挖 + 开源 v4.0.0
+     * bootstrap/src/zcode-protocol/server-operations.ts 对照）。挂上后本客户端在运行时偏好
+     * 应答里声明 subagentRuntimeConfigEnabled，运行时随即在**每个会话运行时创建时、以及
+     * 每个回合开始**（prepareAgentDefinitions）反向请求一次，应答 = 宿主已解析的完整快照
+     * {kind:"ready", profiles, builtInModelSelectionOverrides, pluginAgentModelSelectionOverrides}
+     * （strict）或 {kind:"built-in-fallback"}。改完子代理定义/模型覆盖，下一回合即生效；
+     * 不挂则运行时走文件 fallback（建会话读一次，存量会话不热更）。
+     *
+     * 入参 = 请求会话的工作目录（取项目级定义用），解析顺序：请求自带的 workspace →
+     * 本客户端登记过的 sessionId（create/resume）→ [subagentDefaultWorkingDirectory]。
+     * 子会话（sess_subagent_*，运行时内部创建、id 反推不出父会话）走最后一级。
+     *
+     * 在独立线程调用，可安全阻塞，但须在 15s 内应答。抛异常或返回 null 一律回落
+     * built-in-fallback——运行时对错误应答的处理是让建会话/回合直接失败（官方测试
+     * "propagates an initialization read failure"），这里绝不回 JSON-RPC error。
+     */
+    @Volatile
+    var subagentRuntimeConfigProvider: ((workingDirectory: String?) -> JsonObject)? = null
+
+    /** 未登记 sessionId（子会话/服务端派生的会话）的工作目录兜底，宿主注入（通常 = IDE 项目根） */
+    @Volatile
+    var subagentDefaultWorkingDirectory: (() -> String?)? = null
+
+    /** 会话 → 工作目录（create/resume 时登记；子代理运行时配置按它取项目级定义） */
+    private val sessionWorkspaces = ConcurrentHashMap<String, String>()
+
     // 用户输入请求处理器（AskUserQuestion 等需要用户交互的工具）
     // 返回应答 result（JsonObject），由调用方决定怎么拿到用户输入
     @Volatile
@@ -220,6 +247,20 @@ class ZCodeProtocolClient private constructor(
     // -32031 恢复用的 runtimeModel 构造器（默认读 config.json 的 enabled provider；测试可注入）
     @Volatile
     var runtimeModelFactory: () -> JsonObject? = { RuntimeModels.defaultRuntimeModel() }
+
+    /**
+     * 当代 cjs 是否认 subagentRuntimeConfigEnabled（见 [ProtocolGenerations.probeSubagentRuntimeConfig]）。
+     * 探不动按不支持：不声明只是回到文件 fallback，声明错会让建会话全线失败。
+     */
+    private val subagentRuntimeConfigSupported: Boolean =
+        ProtocolGenerations.probeSubagentRuntimeConfig(zcodePath) == true
+
+    /**
+     * 是否向运行时声明子代理运行时配置通道：宿主挂了供给器（[subagentRuntimeConfigProvider]）
+     * 且当代 cjs 认这个键。UI 据此切换「生效时机」文案（true = 下一回合生效）。
+     */
+    val subagentRuntimeConfigEnabled: Boolean
+        get() = subagentRuntimeConfigSupported && subagentRuntimeConfigProvider != null
 
     // ============ 模型参数按代际分支（2026-09-17 定稿，替代试错降级）============
     // 新版 CLI（zod strict）移除 runtimeModel：setModel 收模型引用 + options.reasoningLevel
@@ -395,6 +436,13 @@ class ZCodeProtocolClient private constructor(
     // ============ 启动方式 ============
 
     companion object {
+        /**
+         * subagents/readRuntimeConfig 的内置回退应答（官方 {kind:"built-in-fallback"}）：
+         * 运行时只用内置子代理，自定义/插件 profile 与覆盖表全空。供给器缺席/出错的统一出口。
+         */
+        internal val SUBAGENT_RUNTIME_CONFIG_FALLBACK: JsonObject =
+            buildJsonObject { put("kind", "built-in-fallback") }
+
         /**
          * 启动 ZCode app-server 子进程并连接
          *
@@ -775,7 +823,31 @@ class ZCodeProtocolClient private constructor(
                 put("nativeSearchEnhancementsEnabled", prefs.nativeSearchEnhancementsEnabled)
                 put("memoryEnabled", prefs.memoryEnabled)
                 put("askUserQuestionAutoResolutionEnabled", prefs.askUserQuestionAutoResolutionEnabled)
+                // 子代理运行时配置通道开关：应答 schema 是 strict，只在当代 cjs 确认认这个键、
+                // 且宿主确实挂了供给器时才带（两者缺一都不声明，见 subagentRuntimeConfigEnabled）
+                if (subagentRuntimeConfigEnabled) put("subagentRuntimeConfigEnabled", true)
             })
+        }
+        // 子代理运行时配置快照（subagents/readRuntimeConfig）：读盘解析放独立线程（禁止卡
+        // reader）。无论成败都回合法应答——供给器未挂/抛异常/返回 null 一律 built-in-fallback，
+        // 绝不回 error（运行时收到 error 会让会话创建或整个回合直接失败）
+        else if (method == "subagents/readRuntimeConfig") {
+            val provider = subagentRuntimeConfigProvider
+            // 新建会话的首个请求早于 create 应答（sessionId 此刻还没登记），落兜底目录；
+            // 无妨——该会话第一个回合开始时会带着已登记的 sessionId 再取一次
+            val workingDirectory = (params["workspace"] as? JsonObject)?.get("workspacePath")
+                ?.let { (it as? JsonPrimitive)?.jsonStringOrNull }
+                ?: params["sessionId"]?.jsonPrimitive?.jsonStringOrNull?.let { sessionWorkspaces[it] }
+                ?: subagentDefaultWorkingDirectory?.invoke()
+            reverseRequestExecutor.execute {
+                val snapshot = try {
+                    provider?.invoke(workingDirectory)
+                } catch (e: Exception) {
+                    println("[ZCodeProtocolClient] subagentRuntimeConfig provider error (${e.javaClass.simpleName}): ${LogRedactor.redact(e.message ?: "")}, using built-in fallback")
+                    null
+                }
+                respondToServer(id, snapshot ?: SUBAGENT_RUNTIME_CONFIG_FALLBACK)
+            }
         }
         else if (method == "interaction/requestUserInput") {
             // AskUserQuestion：需要用户交互，交给 handler 处理
@@ -2080,6 +2152,9 @@ class ZCodeProtocolClient private constructor(
         val sessionObj = result["session"]?.jsonObject ?: result
         val sessionId = sessionObj["sessionId"]?.jsonPrimitive?.content
             ?: throw ZCodeProtocolException("create 响应缺 sessionId")
+        // 登记会话归属的工作目录：运行时随后（及每个回合开始）会带着这个 sessionId 反向请求
+        // 子代理配置，项目级定义按它取（见 subagentRuntimeConfigProvider）
+        sessionWorkspaces[sessionId] = workspace.workspacePath
         // 记录注入面：冷恢复 resume 时沿用（源码注释——不沿用会绕过 create 的工具面约束，
         // 尤其 CUA 会话）；同步落盘档案，进程重启后内存记录清零仍可回灌
         // （sess_03b9a979 实锤：内存态记录过不了 IDE 重启，resume 丢 CUA 工具面）
@@ -3609,6 +3684,8 @@ class ZCodeProtocolClient private constructor(
     fun resume(sessionId: String, workspace: Workspace, timeoutMs: Long = 15000): JsonObject {
         // 归一原生分隔符（同 createSession：防 0.16.5 原样落库造成同项目双形态行）
         val nativePath = workspace.workspacePath.replace('/', File.separatorChar)
+        // 冷恢复会重建运行时 → 运行时会反向请求子代理配置，先登记归属的工作目录
+        sessionWorkspaces[sessionId] = workspace.workspacePath
         // 冷恢复重建 runtime 时必须沿用 create 的工具面（源码 zcodeSessionResumeParamsSchema
         // 注释：否则会绕过 create 的 allow/deny 约束，尤其 CUA 会话）；热订阅复挂无影响。
         // 内存未命中（IDE 重启后新 client 实例）回灌磁盘档案——注入记录不得因重启丢失

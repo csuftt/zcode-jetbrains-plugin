@@ -110,6 +110,42 @@ object ProtocolGenerations {
         return false
     }
 
+    /**
+     * 子代理运行时配置反向通道的标记：宿主在 session/requestRuntimePreferences 应答里
+     * 声明的开关键名（与 subagents/readRuntimeConfig 同批进 schema，zcode.cjs 实挖、
+     * 开源 v4.0.0 packages/shared/src/zcode-protocol/index.ts 对照）。
+     */
+    private val SUBAGENT_RUNTIME_CONFIG_MARKER = "subagentRuntimeConfigEnabled".toByteArray(Charsets.US_ASCII)
+
+    /** zcode.cjs → 通道有无，同 [cache] 的 (mtime, size) 缓存口径 */
+    private val subagentRuntimeConfigCache = ConcurrentHashMap<Path, Pair<Pair<Long, Long>, Boolean>>()
+
+    /**
+     * 当代 cjs 是否支持子代理运行时配置反向通道（subagentRuntimeConfigEnabled +
+     * subagents/readRuntimeConfig，运行时每个回合开始向宿主重取子代理配置）。
+     *
+     * 运行时偏好应答的 schema 是 strict：不认这个键的旧版会把带键应答判为非法，而
+     * 应答非法不是降级是**建会话失败**（wLi 只对 -32601/-32020 回退默认值，其余抛出）。
+     * 所以与 [probeMcpServerKeys] 的「探不动乐观放行」相反，这里探不动一律按不支持——
+     * 两个方向的代价不对称：不声明只是回到文件 fallback（行为同旧版），声明错是全线下不可用。
+     *
+     * @return true/false = 有无；null = cjs 不可读不可判
+     */
+    fun probeSubagentRuntimeConfig(zcodePath: Path?): Boolean? {
+        if (zcodePath == null) return null
+        return try {
+            if (!Files.isRegularFile(zcodePath)) return null
+            val attrs = Files.readAttributes(zcodePath, java.nio.file.attribute.BasicFileAttributes::class.java)
+            val key = attrs.lastModifiedTime().toMillis() to attrs.size()
+            subagentRuntimeConfigCache[zcodePath]?.let { (k, v) -> if (k == key) return v }
+            val has = containsBytes(zcodePath, SUBAGENT_RUNTIME_CONFIG_MARKER)
+            subagentRuntimeConfigCache[zcodePath] = key to has
+            has
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun indexOf(buf: java.nio.ByteBuffer, marker: ByteArray): Boolean {
         val limit = buf.limit() - marker.size
         outer@ for (i in 0..limit) {
@@ -193,6 +229,16 @@ object BuiltinModelCatalog {
             ?: values.firstOrNull { it == "enabled" }
             ?: values.first()
     }
+
+    /**
+     * 官方在「用户主动选模型」时给新选择配的档位：该模型档位集的**末位**（开源 v4.0.0
+     * provider/src/model-selection-config.ts completeNewModelSelection 取 values.at(-1)，
+     * 桌面端子智能体设置页选模型即落这一档）。多数模型与 [defaultReasoningLevel] 同值，
+     * 但不是一回事：那个是插件主会话的 max>high>enabled 优先序，遇到
+     * low/medium/xhigh 这类没有 max 也没有 high 的档位集两者会分叉。无目录/无命中 null。
+     */
+    fun highestReasoningLevel(modelId: String, zcodePath: Path?, home: String = System.getProperty("user.home") ?: "."): String? =
+        reasoningValues(modelId, zcodePath, home)?.lastOrNull()
 
     /** modelId 的 maxOutputTokens 档位上限（modelRules 正则链合并，后者覆盖前者）；无目录/无命中 null */
     fun maxOutputTokensMax(modelId: String, zcodePath: Path?, home: String = System.getProperty("user.home") ?: "."): Long? {

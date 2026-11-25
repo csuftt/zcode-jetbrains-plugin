@@ -60,6 +60,11 @@ function levelLabel(value: string, t: TFunction): string {
   return key ? t(key) : value
 }
 
+/** 级别 value → 本地化标签（未知值原样显示）；设置页内置子代理的「思考深度」下拉共用 */
+export function thoughtLevelLabel(value: string, t: TFunction): string {
+  return levelLabel(value, t)
+}
+
 export function ThoughtLevelSelect() {
   const { t } = useTranslation()
   const thoughtLevel = useStore((s) => s.thoughtLevel)
