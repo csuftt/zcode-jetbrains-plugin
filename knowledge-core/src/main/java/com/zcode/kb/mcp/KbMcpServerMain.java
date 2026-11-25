@@ -349,12 +349,17 @@ public final class KbMcpServerMain {
                     optStr(args, "notes")
                 );
                 boolean existed = Boolean.TRUE.equals(added.get("existed"));
+                boolean reExtracted = Boolean.TRUE.equals(added.get("textExtracted"));
                 return textResult(
                     "{\"id\":" + KbJson.str(safe((String) added.get("id")))
                         + ",\"title\":" + KbJson.str(safe((String) added.get("title")))
                         + ",\"folder\":" + KbJson.str(safe((String) added.get("folder")))
                         + ",\"existed\":" + existed
-                        + (existed ? ",\"note\":\"entry already existed; metadata updated\"" : "")
+                        + (existed
+                            ? (reExtracted
+                                ? ",\"note\":\"entry already existed; source content changed, text re-extracted\""
+                                : ",\"note\":\"entry already existed; metadata updated (content unchanged)\"")
+                            : "")
                         + "}", false);
             }
             default:
@@ -534,7 +539,7 @@ public final class KbMcpServerMain {
             + "},\"required\":[\"action\",\"name\"]}},"
 
             + "{\"name\":\"kb_add\","
-            + "\"description\":\"Collect a document into the knowledge base (the source file stays on disk; the entry stores its path plus the extracted full text, and a byte-exact snapshot copy of the file is kept inside the knowledge base so the content survives even if the source is later deleted or not yet committed). Use it when the user asks to add/collect a file into the knowledge base. Re-adding an existing source path updates its metadata instead of duplicating. Extraction supports md/text/code/html/word/excel/pdf like the IDE plugin; files without an extractable text layer are stored title-only. The source must be an absolute path to a regular file.\","
+            + "\"description\":\"Collect a document into the knowledge base (the source file stays on disk; the entry stores its path plus the extracted full text, and a byte-exact snapshot copy of the file is kept inside the knowledge base so the content survives even if the source is later deleted or not yet committed). Use it when the user asks to add/collect a file into the knowledge base. Re-adding an existing source path updates its metadata instead of duplicating; if the file content changed since collection, its text is re-extracted so search and read return the new content (unchanged content is not re-extracted). Extraction supports md/text/code/html/word/excel/pdf like the IDE plugin; files without an extractable text layer are stored title-only. The source must be an absolute path to a regular file.\","
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{"
             + "\"path\":{\"type\":\"string\",\"description\":\"Absolute path of the source file to collect\"},"
             + "\"title\":{\"type\":\"string\",\"description\":\"Entry title; defaults to the file name without extension\"},"

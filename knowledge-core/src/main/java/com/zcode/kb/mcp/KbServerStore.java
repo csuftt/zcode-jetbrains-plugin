@@ -504,9 +504,9 @@ final class KbServerStore implements AutoCloseable {
 
     /**
      * 收录（kb_add），落库规则与 IDE 收录是同一份实现（KbMetaStore.ingest）：sourcePath 归一判重，
-     * 命中=更新元数据（传了才覆盖）并重新确认内容；新收录建目录（folderPath 逐级确保）+ 提取正文
-     * + 全字段落库。提取优先 IDE 同款 KbExtractor（反射调用——fork classpath 含
-     * kotlin-stdlib/jsoup/pdfbox，反射免编译期耦合；加载失败降级纯文本直读）。
+     * 命中=更新元数据（传了才覆盖）并重新确认内容（内容变了连检索缓存一起重提取）；新收录建目录
+     * （folderPath 逐级确保）+ 提取正文 + 全字段落库。提取优先 IDE 同款 KbExtractor（反射调用——
+     * fork classpath 含 kotlin-stdlib/jsoup/pdfbox，反射免编译期耦合；加载失败降级纯文本直读）。
      *
      * @return id / title / folderId / folder（展示路径）/ existed
      */
@@ -530,6 +530,7 @@ final class KbServerStore implements AutoCloseable {
         out.put("folderId", r.entry.folderId);
         out.put("folder", r.entry.folderId.isEmpty() ? "" : io(() -> core.folderPath(r.entry.folderId)));
         out.put("existed", r.existed);
+        out.put("textExtracted", r.textExtracted);
         return out;
     }
 

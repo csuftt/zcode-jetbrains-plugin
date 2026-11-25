@@ -197,7 +197,7 @@ public final class KbMetaStore implements AutoCloseable {
         public final Entry entry;
         /** true = 同一源文件此前已收录，这次是更新 */
         public final boolean existed;
-        /** 新收录时是否提取出了正文（false = 仅标题参与检索） */
+        /** 本次是否提取出了正文（新收录、或已收录且内容变了才重提取；false = 仅标题参与检索） */
         public final boolean textExtracted;
         /** 文档快照是否落盘（false = 条目的内容哈希留空，对账首轮补齐） */
         public final boolean snapshotCaptured;
@@ -476,7 +476,8 @@ public final class KbMetaStore implements AutoCloseable {
 
     /**
      * 收录：源文件此前没收录过就新建条目，收录过就更新（同一源路径只会有一个条目）。
-     * 两种情况都重新落文档快照、刷新内容哈希。
+     * 两种情况都重新落文档快照、刷新内容哈希；已收录且内容变了还重提取检索缓存（内容没变
+     * 不重提取，元数据编辑不清缓存）。
      *
      * @param title    新收录时为空取默认标题（文件名去扩展名）；已收录时为空保留原标题
      * @param folderId 新收录时 null = 根级；已收录时 null = 保留原目录
@@ -512,13 +513,26 @@ public final class KbMetaStore implements AutoCloseable {
                     e.notes = notes;
                 }
                 e.updatedAt = now;
+                String previousHash = e.contentHash;
                 KbContent.Captured captured = captureQuietly(e.id, file, onError);
+                boolean[] extracted = {false};
+                String text = null;
                 if (captured != null) {
                     e.sizeBytes = captured.size;
                     e.contentHash = captured.hash;
+                    if (!captured.hash.equals(previousHash)) {
+                        // 内容版本变了：检索缓存必须跟着重提取。capture 已把本机缓存按新版本记账
+                        // （textVersion=新 hash），不重提取就会留下与版本不符的旧正文，且对账据此
+                        // 跳过、永远修不回来——重新收录即内容刷新
+                        extracted[0] = true; // extractQuietly 只在失败时置 false（同新收录分支）
+                        text = extractQuietly(extractor, file, extracted, onError);
+                    }
                 }
                 writeEntry(e);
-                return new Ingested(e, true, false, captured != null);
+                if (text != null) {
+                    writeText(e.id, text);
+                }
+                return new Ingested(e, true, extracted[0], captured != null);
             }
 
             boolean[] extracted = {true};

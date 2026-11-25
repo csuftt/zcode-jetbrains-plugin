@@ -488,6 +488,12 @@ class KbMcpServerTest {
             val again = server.addEntry(src.toString(), "新标题", null, null, null)
             assertEquals(true, again["existed"])
             assertEquals("新标题", again["title"])
+            // 内容改过之后再收：正文随内容重提取（重复收录不再是仅元数据更新）
+            Files.writeString(src, "# AI 收录\n第二版正文。")
+            val third = server.addEntry(src.toString(), null, null, null, null)
+            assertEquals(true, third["existed"])
+            assertEquals(id, third["id"])
+            assertEquals(true, third["textExtracted"])
             // Kotlin 读回：字段落库口径与 IDE ingest 一致 + 检索缓存就位 + 文档快照落盘
             val bytes = Files.readAllBytes(src)
             val id2 = id
@@ -499,7 +505,7 @@ class KbMcpServerTest {
                 assertEquals(src.parent.fileName.toString(), e.project) // 不在 git 仓内：父目录名
                 assertEquals(sha256(bytes), e.contentHash) // 上次确认的内容版本
                 assertEquals(bytes.size.toLong(), e.sizeBytes)
-                assertEquals("# AI 收录\n正文段落，含中文。", s.readText(id2)!!.trim())
+                assertEquals("# AI 收录\n第二版正文。", s.readText(id2)!!.trim())
                 // 文档快照：逐字节副本，路径按条目 id、文件名取源文件名
                 val snap = dir.resolve("snapshots").resolve(id2).resolve("ai-sample.md")
                 assertTrue(Files.isRegularFile(snap), snap.toString())

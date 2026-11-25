@@ -236,6 +236,29 @@ class KbMetaStoreTest {
     }
 
     @Test
+    fun `re-ingesting an edited file refreshes the search text`() {
+        val src = dir.resolve("notes/环境.md")
+        Files.createDirectories(src.parent)
+        Files.writeString(src, "旧正文")
+        val store = KbFileStore(dir)
+        val first = store.ingest(src, null, null, null, null, plainText, null)
+        assertEquals("旧正文", store.readText(first.entry.id))
+
+        // 源文件改过再收录：正文随内容重提取（重复收录不是仅元数据更新）
+        Files.writeString(src, "新正文")
+        val again = store.ingest(src, null, null, null, null, plainText, null)
+        assertTrue(again.existed)
+        assertTrue(again.textExtracted)
+        assertEquals("新正文", store.readText(again.entry.id))
+
+        // 内容没变再收录：不重提取，正文照旧
+        val same = store.ingest(src, null, null, null, null, plainText, null)
+        assertTrue(same.existed)
+        assertFalse(same.textExtracted)
+        assertEquals("新正文", store.readText(same.entry.id))
+    }
+
+    @Test
     fun `edit changes only the fields it is given and relink re-points the entry`() {
         val a = dir.resolve("a.md")
         val b = dir.resolve("sub/b.txt")

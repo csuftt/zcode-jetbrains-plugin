@@ -28,7 +28,9 @@ tool instead — do not funnel those requests here.
   Open files via `contentPath` (the file to actually read now), not `sourcePath`.
 - Retrieval covers titles, tags and body text (CJK and latin mixed supported).
 - `kb_add` collects a document the same way the IDE does: the source stays where
-  it is, and a snapshot copy is stored inside the knowledge base.
+  it is, and a snapshot copy is stored inside the knowledge base. Re-collecting
+  an already collected file updates its metadata and, when the file content
+  changed, re-extracts the searchable text (unchanged files are not re-read).
 
 ## Search flow
 
